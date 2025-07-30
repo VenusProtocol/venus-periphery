@@ -104,11 +104,11 @@ export const preconfiguredAddresses = {
     AccessControlManager: governanceZkSyncMainnet.AccessControlManager.address,
   },
   opsepolia: {
-    NormalTimelock: governanceOpsepolia.NormalTimelock.address, 
+    NormalTimelock: governanceOpsepolia.NormalTimelock.address,
     AccessControlManager: governanceOpsepolia.AccessControlManager.address,
   },
   opmainnet: {
-    NormalTimelock: governanceOpmainnet.NormalTimelock.address, 
+    NormalTimelock: governanceOpmainnet.NormalTimelock.address,
     AccessControlManager: governanceOpmainnet.AccessControlManager.address,
   },
   basesepolia: {
