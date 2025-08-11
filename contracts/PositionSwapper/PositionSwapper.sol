@@ -3,7 +3,7 @@ pragma solidity 0.8.25;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
-import { IVToken, IComptroller } from "../Interfaces.sol";
+import { IVToken, IComptroller, IVBNB } from "../Interfaces.sol";
 import { ISwapHelper } from "./ISwapHelper.sol";
 
 contract PositionSwapper is Ownable2StepUpgradeable {
@@ -18,6 +18,9 @@ contract PositionSwapper is Ownable2StepUpgradeable {
     /// @notice Emitted after a successful swap and mint.
     event CollateralSwapped(address indexed user, address marketFrom, address marketTo, uint256 amountOut);
 
+    /// @notice Emitted when a user swaps their debt from one market to another.
+    event DebtSwapped(address indexed user, address marketFrom, address marketTo, uint256 amountOut);
+
     /// @notice Emitted when the owner sweeps leftover ERC-20 tokens.
     event SweepToken(address indexed token, address indexed receiver, uint256 amount);
 
@@ -30,11 +33,20 @@ contract PositionSwapper is Ownable2StepUpgradeable {
     /// @custom:error RedeemFailed
     error RedeemFailed();
 
+    /// @custom:error BorrowFailed
+    error BorrowFailed();
+
     /// @custom:error MintFailed
     error MintFailed();
 
+    /// @custom:error RepayFailed
+    error RepayFailed();
+
     /// @custom:error NoVTokenBalance
     error NoVTokenBalance();
+
+    /// @custom:error NoBorrowBalance
+    error NoBorrowBalance();
 
     /// @custom:error ZeroAmount
     error ZeroAmount();
@@ -99,6 +111,26 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         if (amountToSwap > marketFrom.balanceOf(user)) revert NoVTokenBalance();
         _swapCollateral(user, marketFrom, marketTo, amountToSwap, helper);
         emit CollateralSwapped(user, address(marketFrom), address(marketTo), amountToSwap);
+    }
+
+    function swapFullDebt(address user, IVToken marketFrom, IVToken marketTo, ISwapHelper helper) external payable {
+        uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
+        if (borrowBalance == 0) revert NoBorrowBalance();
+        _swapDebt(user, marketFrom, marketTo, borrowBalance, helper);
+        emit DebtSwapped(user, address(marketFrom), address(marketTo), borrowBalance);
+    }
+
+    function swapDebtWithAmount(
+        address user,
+        IVToken marketFrom,
+        IVToken marketTo,
+        uint256 amountToSwap,
+        ISwapHelper helper
+    ) external payable {
+        if (amountToSwap == 0) revert ZeroAmount();
+        if (amountToSwap > marketFrom.borrowBalanceCurrent(user)) revert NoBorrowBalance();
+        _swapDebt(user, marketFrom, marketTo, amountToSwap, helper);
+        emit DebtSwapped(user, address(marketFrom), address(marketTo), amountToSwap);
     }
 
     /**
@@ -169,6 +201,51 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         toUnderlying.safeApprove(address(marketTo), 0);
         toUnderlying.safeApprove(address(marketTo), toUnderlyingReceived);
         if (marketTo.mintBehalf(user, toUnderlyingReceived) != 0) revert MintFailed();
+
+        _checkAccountSafe(user);
+    }
+
+    function _swapDebt(
+        address user,
+        IVToken marketFrom,
+        IVToken marketTo,
+        uint256 amountToBorrow,
+        ISwapHelper swapHelper
+    ) internal {
+        if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
+            revert Unauthorized();
+        }
+        _checkAccountSafe(user);
+
+        address toUnderlyingAddress = marketTo.underlying();
+        IERC20Upgradeable toUnderlying = IERC20Upgradeable(toUnderlyingAddress);
+        uint256 toUnderlyingBalanceBefore = toUnderlying.balanceOf(address(this));
+
+        if (marketTo.borrowBehalf(user, amountToBorrow) != 0) revert BorrowFailed();
+
+        uint256 toUnderlyingBalanceAfter = toUnderlying.balanceOf(address(this));
+        uint256 receivedToUnderlying = toUnderlyingBalanceAfter - toUnderlyingBalanceBefore;
+
+        toUnderlying.safeApprove(address(swapHelper), 0);
+        toUnderlying.safeApprove(address(swapHelper), receivedToUnderlying);
+
+        if (address(marketFrom) == NATIVE_MARKET) {
+            uint256 fromUnderlyingBalanceBefore = address(this).balance;
+            swapHelper.swapInternal(toUnderlyingAddress, address(0), receivedToUnderlying);
+            uint256 receivedFromNative = address(this).balance - fromUnderlyingBalanceBefore;
+            IVBNB(address(marketFrom)).repayBorrowBehalf{ value: receivedFromNative }(user);
+        } else {
+            address fromUnderlyingAddress = marketFrom.underlying();
+            IERC20Upgradeable fromUnderlying = IERC20Upgradeable(fromUnderlyingAddress);
+            uint256 fromUnderlyingBalanceBefore = fromUnderlying.balanceOf(address(this));
+            swapHelper.swapInternal(toUnderlyingAddress, fromUnderlyingAddress, receivedToUnderlying);
+            uint256 receivedFromToken = fromUnderlying.balanceOf(address(this)) - fromUnderlyingBalanceBefore;
+
+            fromUnderlying.safeApprove(address(marketFrom), 0);
+            fromUnderlying.safeApprove(address(marketFrom), receivedFromToken);
+
+            if (marketFrom.repayBorrowBehalf(user, receivedFromToken) != 0) revert RepayFailed();
+        }
 
         _checkAccountSafe(user);
     }
