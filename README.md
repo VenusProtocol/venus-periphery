@@ -4,7 +4,7 @@ Venus Periphery is an extension of the Venus Protocol ecosystem that contains au
 
 # Contracts
 
-The first major addition in this repository is the CollateralSwapper, a flexible module that enables users to swap their supplied collateral from one market to another directly within the Venus ecosystem.
+The first major addition in this repository is the PositionSwapper, a flexible module that enables users to swap their collateral or debt from one market to another directly within the Venus ecosystem.
 
 # Development
 

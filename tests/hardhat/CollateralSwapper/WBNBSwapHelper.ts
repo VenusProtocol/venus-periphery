@@ -7,31 +7,31 @@ import { WBNB, WBNBSwapHelper } from "../../../typechain";
 
 describe("WBNBSwapHelper", () => {
   let user1: Signer;
-  let collateralSwapper: Signer;
+  let positionSwapper: Signer;
   let wbnbSwapHelper: WBNBSwapHelper;
   let WBNB: WBNB;
 
   beforeEach(async () => {
-    [user1, collateralSwapper] = await ethers.getSigners();
+    [user1, positionSwapper] = await ethers.getSigners();
 
     const WBNBFactory = await ethers.getContractFactory("WBNB");
     WBNB = await WBNBFactory.deploy();
 
     const WBNBSwapHelperFactory = await ethers.getContractFactory("WBNBSwapHelper");
-    wbnbSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB.address, await collateralSwapper.getAddress());
+    wbnbSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB.address, await positionSwapper.getAddress());
   });
 
-  it("should wrap native BNB into WBNB and transfer to CollateralSwapper", async () => {
+  it("should wrap native BNB into WBNB and transfer to PositionSwapper", async () => {
     const amount = parseUnits("1", 18);
-    await expect(await WBNB.balanceOf(await collateralSwapper.getAddress())).to.equals(0);
+    await expect(await WBNB.balanceOf(await positionSwapper.getAddress())).to.equals(0);
     await expect(
       wbnbSwapHelper
-        .connect(collateralSwapper)
+        .connect(positionSwapper)
         .swapInternal(ethers.constants.AddressZero, ethers.constants.AddressZero, amount, { value: amount }),
     )
       .to.emit(wbnbSwapHelper, "SwappedToWBNB")
       .withArgs(amount);
-    await expect(await WBNB.balanceOf(await collateralSwapper.getAddress())).to.equals(amount);
+    await expect(await WBNB.balanceOf(await positionSwapper.getAddress())).to.equals(amount);
   });
 
   it("should revert if sent value does not match amount", async () => {
@@ -40,7 +40,7 @@ describe("WBNBSwapHelper", () => {
 
     await expect(
       wbnbSwapHelper
-        .connect(collateralSwapper)
+        .connect(positionSwapper)
         .swapInternal(ethers.constants.AddressZero, ethers.constants.AddressZero, amount, { value: mismatchedValue }),
     ).to.be.revertedWithCustomError(wbnbSwapHelper, "ValueMismatch");
   });
@@ -51,12 +51,12 @@ describe("WBNBSwapHelper", () => {
 
     await expect(
       wbnbSwapHelper
-        .connect(collateralSwapper)
+        .connect(positionSwapper)
         .swapInternal(fakeToken, ethers.constants.AddressZero, amount, { value: amount }),
     ).to.be.revertedWithCustomError(wbnbSwapHelper, "OnlyNativeSupported");
   });
 
-  it("should revert if caller is not CollateralSwapper", async () => {
+  it("should revert if caller is not PositionSwapper", async () => {
     const amount = parseUnits("1", 18);
 
     await expect(

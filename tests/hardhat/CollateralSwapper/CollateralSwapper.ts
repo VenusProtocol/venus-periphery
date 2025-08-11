@@ -6,7 +6,7 @@ import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
 import {
-  CollateralSwapper,
+  PositionSwapper,
   ComptrollerMock,
   IAccessControlManagerV8,
   InterestRateModelHarness,
@@ -23,7 +23,7 @@ type SetupMarketFixture = {
   vBNB: MockVBNB;
   WBNB: MockContract<WBNB>;
   vWBNB: MockContract<VBep20Harness>;
-  collateralSwapper: CollateralSwapper;
+  positionSwapper: PositionSwapper;
   wBNBSwapHelper: WBNBSwapHelper;
 };
 
@@ -75,38 +75,38 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   );
   await vWBNB.deployed();
 
-  const CollateralSwapperFactory = await ethers.getContractFactory("CollateralSwapper");
-  const collateralSwapper = await upgrades.deployProxy(CollateralSwapperFactory, [], {
+  const PositionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
+  const positionSwapper = await upgrades.deployProxy(PositionSwapperFactory, [], {
     constructorArgs: [comptroller.address, vBNB.address],
     initializer: "initialize",
     unsafeAllow: ["state-variable-immutable"],
   });
   const WBNBSwapHelperFactory = await ethers.getContractFactory("WBNBSwapHelper");
-  const wBNBSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB.address, collateralSwapper.address);
+  const wBNBSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB.address, positionSwapper.address);
 
   return {
     comptroller,
     vBNB,
     WBNB,
     vWBNB,
-    collateralSwapper,
+    positionSwapper,
     wBNBSwapHelper,
   };
 };
 
-describe("CollateralSwapper", () => {
+describe("PositionSwapper", () => {
   let vBNB: MockVBNB;
   let WBNB: MockContract<WBNB>;
   let vWBNB: MockContract<VBep20Harness>;
   let admin: Signer;
   let user1: Signer;
   let comptroller: FakeContract<ComptrollerMock>;
-  let collateralSwapper: CollateralSwapper;
+  let positionSwapper: PositionSwapper;
   let wBNBSwapHelper: WBNBSwapHelper;
 
   beforeEach(async () => {
     [admin, user1] = await ethers.getSigners();
-    ({ comptroller, vBNB, WBNB, vWBNB, collateralSwapper, wBNBSwapHelper } = await loadFixture(setupMarketFixture));
+    ({ comptroller, vBNB, WBNB, vWBNB, positionSwapper, wBNBSwapHelper } = await loadFixture(setupMarketFixture));
     expect(await vWBNB.underlying()).equals(WBNB.address);
 
     // Get some vBNB
@@ -118,7 +118,7 @@ describe("CollateralSwapper", () => {
     it("should swapFullCollateral from vBNB to vWBNB", async () => {
       const balanceBeforeSupplying = await vWBNB.balanceOf(await user1.getAddress());
       await expect(balanceBeforeSupplying.toString()).to.eq(parseUnits("0", 8));
-      await collateralSwapper
+      await positionSwapper
         .connect(user1)
         .swapFullCollateral(await user1.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address);
       const balanceAfterSupplying = await vWBNB.balanceOf(await user1.getAddress());
@@ -129,7 +129,7 @@ describe("CollateralSwapper", () => {
       const vBNBBalance = await vBNB.balanceOf(await user1.getAddress());
       const amountToSeize = vBNBBalance.div(2); // 50% partial
 
-      await collateralSwapper
+      await positionSwapper
         .connect(user1)
         .swapCollateralWithAmount(
           await user1.getAddress(),
@@ -145,18 +145,18 @@ describe("CollateralSwapper", () => {
 
   describe("SweepToken", () => {
     it("should revert when called by non owner", async () => {
-      await expect(collateralSwapper.connect(user1).sweepToken(WBNB.address)).to.be.rejectedWith(
+      await expect(positionSwapper.connect(user1).sweepToken(WBNB.address)).to.be.rejectedWith(
         "Ownable: caller is not the owner",
       );
     });
 
     it("should sweep all tokens", async () => {
       await WBNB.deposit({ value: parseUnits("2", 18) });
-      await WBNB.transfer(collateralSwapper.address, parseUnits("2", 18));
+      await WBNB.transfer(positionSwapper.address, parseUnits("2", 18));
       const ownerPreviousBalance = await WBNB.balanceOf(await admin.getAddress());
-      await collateralSwapper.connect(admin).sweepToken(WBNB.address);
+      await positionSwapper.connect(admin).sweepToken(WBNB.address);
 
-      expect(await WBNB.balanceOf(collateralSwapper.address)).to.be.eq(0);
+      expect(await WBNB.balanceOf(positionSwapper.address)).to.be.eq(0);
       expect(await WBNB.balanceOf(await admin.getAddress())).to.be.greaterThan(ownerPreviousBalance);
     });
   });
@@ -166,26 +166,26 @@ describe("CollateralSwapper", () => {
       comptroller.approvedDelegates.returns(false);
 
       await expect(
-        collateralSwapper
+        positionSwapper
           .connect(admin)
           .swapFullCollateral(await user1.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address),
-      ).to.be.revertedWithCustomError(collateralSwapper, "Unauthorized");
+      ).to.be.revertedWithCustomError(positionSwapper, "Unauthorized");
     });
 
     it("should revert on swapCollateralWithAmount with zero amount", async () => {
       await expect(
-        collateralSwapper
+        positionSwapper
           .connect(user1)
           .swapCollateralWithAmount(await user1.getAddress(), vBNB.address, vWBNB.address, 0, wBNBSwapHelper.address),
-      ).to.be.revertedWithCustomError(collateralSwapper, "ZeroAmount");
+      ).to.be.revertedWithCustomError(positionSwapper, "ZeroAmount");
     });
 
     it("should revert if user balance is zero", async () => {
       await expect(
-        collateralSwapper
+        positionSwapper
           .connect(admin)
           .swapFullCollateral(await admin.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address),
-      ).to.be.revertedWithCustomError(collateralSwapper, "NoVTokenBalance");
+      ).to.be.revertedWithCustomError(positionSwapper, "NoVTokenBalance");
     });
 
     it("should revert if swapCollateralWithAmount is greater than user's balance", async () => {
@@ -193,7 +193,7 @@ describe("CollateralSwapper", () => {
       const moreThanBalance = userBalance.add(1);
 
       await expect(
-        collateralSwapper
+        positionSwapper
           .connect(user1)
           .swapCollateralWithAmount(
             await user1.getAddress(),
@@ -202,17 +202,17 @@ describe("CollateralSwapper", () => {
             moreThanBalance,
             wBNBSwapHelper.address,
           ),
-      ).to.be.revertedWithCustomError(collateralSwapper, "NoVTokenBalance");
+      ).to.be.revertedWithCustomError(positionSwapper, "NoVTokenBalance");
     });
 
     it("should revert if user becomes unsafe after swap", async () => {
       comptroller.getAccountLiquidity.returns([0, 0, 1]); // shortfall > 0
 
       await expect(
-        collateralSwapper
+        positionSwapper
           .connect(user1)
           .swapFullCollateral(await user1.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address),
-      ).to.be.revertedWithCustomError(collateralSwapper, "SwapCausesLiquidation");
+      ).to.be.revertedWithCustomError(positionSwapper, "SwapCausesLiquidation");
       comptroller.getAccountLiquidity.reset();
     });
 
@@ -220,10 +220,10 @@ describe("CollateralSwapper", () => {
       comptroller.seizeAllowed.returns(1); // simulate failure
 
       await expect(
-        collateralSwapper
+        positionSwapper
           .connect(user1)
           .swapFullCollateral(await user1.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address),
-      ).to.be.revertedWithCustomError(collateralSwapper, "SeizeFailed");
+      ).to.be.revertedWithCustomError(positionSwapper, "SeizeFailed");
       comptroller.seizeAllowed.reset();
     });
 
@@ -231,7 +231,7 @@ describe("CollateralSwapper", () => {
       comptroller.redeemAllowed.returns(1); // simulate redeem failure
 
       await expect(
-        collateralSwapper
+        positionSwapper
           .connect(user1)
           .swapFullCollateral(await user1.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address),
       ).to.be.reverted;
@@ -242,10 +242,10 @@ describe("CollateralSwapper", () => {
       comptroller.mintAllowed.returns(1); // simulate failure
 
       await expect(
-        collateralSwapper
+        positionSwapper
           .connect(user1)
           .swapFullCollateral(await user1.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address),
-      ).to.be.revertedWithCustomError(collateralSwapper, "MintFailed");
+      ).to.be.revertedWithCustomError(positionSwapper, "MintFailed");
       comptroller.mintAllowed.reset();
     });
   });

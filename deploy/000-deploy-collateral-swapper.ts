@@ -18,7 +18,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
   );
 
-  await deploy("CollateralSwapper", {
+  await deploy("PositionSwapper", {
     from: deployer,
     log: true,
     args: [comptrollerDeployment.address, vBNBDeployment.address],
@@ -36,24 +36,24 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     },
   });
 
-  const collateralSwapper = await ethers.getContract("CollateralSwapper");
+  const positionSwapper = await ethers.getContract("PositionSwapper");
 
   await deploy("WBNBSwapHelper", {
     from: deployer,
-    args: [collateralSwapper.address, WBNB_ADDRESS],
+    args: [positionSwapper.address, WBNB_ADDRESS],
     log: true,
     skipIfAlreadyDeployed: true,
   });
 
-  if ((await collateralSwapper.owner) === deployer) {
+  if ((await positionSwapper.owner) === deployer) {
     console.log("Transferring ownership to Normal Timelock ....");
-    const tx = await collateralSwapper.transferOwnership(timelock.address);
+    const tx = await positionSwapper.transferOwnership(timelock.address);
     await tx.wait();
     console.log("Ownership transferred to Normal Timelock");
   }
 };
 
-func.tags = ["CollateralSwapper"];
+func.tags = ["PositionSwapper"];
 func.skip = async hre => hre.network.name === "hardhat";
 
 export default func;

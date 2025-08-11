@@ -6,7 +6,7 @@ import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts
 import { IVToken, IComptroller } from "../Interfaces.sol";
 import { ISwapHelper } from "./ISwapHelper.sol";
 
-contract CollateralSwapper is Ownable2StepUpgradeable {
+contract PositionSwapper is Ownable2StepUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @notice The Comptroller used for permission and liquidity checks.

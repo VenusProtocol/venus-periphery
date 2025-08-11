@@ -4,7 +4,7 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
 import {
-  CollateralSwapper,
+  PositionSwapper,
   ComptrollerMock,
   ComptrollerMock__factory,
   Diamond,
@@ -16,7 +16,7 @@ import {
 } from "../../../typechain";
 import { forking, initMainnetUser } from "./utils";
 
-// To fix failing tests either remove the (dummy address collateralSwapper) check at seizeAllowed, or deploy and set original
+// To fix failing tests either remove the (dummy address positionSwapper) check at seizeAllowed, or deploy and set original
 const COMPTROLLER_ADDRESS = "0xfd36e2c2a6789db23113685031d7f16329158384";
 const vBNB_ADDRESS = "0xA07c5b74C9B40447a954e1466938b865b6BBea36";
 const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
@@ -27,7 +27,7 @@ const SUPPLIER_ADDRESSES = ["0xf50453F0C5F8B46190a4833B136282b50c7343BE", "0xd14
 const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 
 let timelock: SignerWithAddress;
-let collateralSwapper: CollateralSwapper;
+let positionSwapper: PositionSwapper;
 let coreComptroller: ComptrollerMock;
 let unitroller: Diamond;
 let vBNB: VBNB;
@@ -78,21 +78,21 @@ export async function deployFreshVWBNB(
 if (FORK_MAINNET) {
   const blockNumber = 55239594;
   forking(blockNumber, () => {
-    describe("CollateralSwapper Upgrade + Swap Flow", () => {
+    describe("PositionSwapper Upgrade + Swap Flow", () => {
       before(async () => {
         timelock = await initMainnetUser(NORMAL_TIMELOCK, ethers.utils.parseUnits("2"));
         unitroller = Diamond__factory.connect(COMPTROLLER_ADDRESS, timelock);
         vBNB = VBNB__factory.connect(vBNB_ADDRESS, timelock);
         ({ vWBNB, coreComptroller } = await deployFreshVWBNB(timelock));
 
-        const CollateralSwapperFactory = await ethers.getContractFactory("CollateralSwapper");
-        collateralSwapper = await upgrades.deployProxy(CollateralSwapperFactory, [], {
+        const PositionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
+        positionSwapper = await upgrades.deployProxy(PositionSwapperFactory, [], {
           constructorArgs: [COMPTROLLER_ADDRESS, vBNB_ADDRESS],
           initializer: "initialize",
           unsafeAllow: ["state-variable-immutable"],
         });
         const WBNBSwapHelperFactory = await ethers.getContractFactory("WBNBSwapHelper");
-        wBNBSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB_ADDRESS, collateralSwapper.address);
+        wBNBSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB_ADDRESS, positionSwapper.address);
       });
 
       // ---------- VIP-1: Enable Swapping ----------
@@ -118,13 +118,13 @@ if (FORK_MAINNET) {
           const vBNBBalance = await vBNB.balanceOf(LOW_BALANCE_USER);
           expect(vBNBBalance).equals(0);
           await expect(
-            collateralSwapper
+            positionSwapper
               .connect(lowBalanceUserSigner)
               .swapFullCollateral(LOW_BALANCE_USER, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address),
-          ).to.be.revertedWithCustomError(collateralSwapper, "NoVTokenBalance");
+          ).to.be.revertedWithCustomError(positionSwapper, "NoVTokenBalance");
 
           await expect(
-            collateralSwapper
+            positionSwapper
               .connect(lowBalanceUserSigner)
               .swapCollateralWithAmount(
                 LOW_BALANCE_USER,
@@ -133,17 +133,17 @@ if (FORK_MAINNET) {
                 ethers.utils.parseEther("0.1"),
                 wBNBSwapHelper.address,
               ),
-          ).to.be.revertedWithCustomError(collateralSwapper, "NoVTokenBalance");
+          ).to.be.revertedWithCustomError(positionSwapper, "NoVTokenBalance");
         });
 
         it("should revert if user can be liquidated on swapping the collateral", async () => {
           for (const address of SUPPLIER_ADDRESSES) {
             const supplier = await initMainnetUser(address, ethers.utils.parseUnits("2"));
             await expect(
-              collateralSwapper
+              positionSwapper
                 .connect(supplier)
                 .swapFullCollateral(address, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address),
-            ).to.be.revertedWithCustomError(collateralSwapper, "SwapCausesLiquidation");
+            ).to.be.revertedWithCustomError(positionSwapper, "SwapCausesLiquidation");
           }
         });
 
@@ -159,7 +159,7 @@ if (FORK_MAINNET) {
           const beforeVBNB = await vBNB.balanceOf(address);
           const beforeVWBNB = await vWBNB.balanceOf(address);
 
-          await collateralSwapper
+          await positionSwapper
             .connect(supplier)
             .swapCollateralWithAmount(address, vBNB_ADDRESS, vWBNB.address, amountToSeize, wBNBSwapHelper.address);
 
@@ -177,7 +177,7 @@ if (FORK_MAINNET) {
             const beforeVWbnb = await vWBNB.balanceOf(address);
             // to avoid liquidations
             await coreComptroller.connect(supplier).enterMarkets([vWBNB.address]);
-            await collateralSwapper
+            await positionSwapper
               .connect(supplier)
               .swapFullCollateral(address, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address);
 
@@ -201,7 +201,7 @@ if (FORK_MAINNET) {
           // TODO first add check at comptroller
           // await expect(vBNB.seize(liquidator.address, address, vBNBBalance)).to.be.rejectedWith("market not listed");
 
-          const swapper = await initMainnetUser(collateralSwapper.address, ethers.utils.parseUnits("2"));
+          const swapper = await initMainnetUser(positionSwapper.address, ethers.utils.parseUnits("2"));
           await expect(
             vUSDC.connect(swapper).seize(liquidator.address, SUPPLIER_ADDRESS, vBNBBalance),
           ).to.be.rejectedWith("market not listed");
@@ -227,7 +227,7 @@ if (FORK_MAINNET) {
           const SUPPLIER_ADDRESS = "0x927d81b91c41D1961e3A7d24847b95484e60C626";
           const supplier = await initMainnetUser(SUPPLIER_ADDRESS, ethers.utils.parseUnits("2"));
           await expect(
-            collateralSwapper
+            positionSwapper
               .connect(supplier)
               .swapFullCollateral(SUPPLIER_ADDRESS, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address),
           ).to.be.rejectedWith("market not listed"); // msg.sender is expected to be a market.
