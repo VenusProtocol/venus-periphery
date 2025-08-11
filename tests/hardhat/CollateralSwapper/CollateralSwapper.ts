@@ -6,11 +6,11 @@ import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
 import {
-  PositionSwapper,
   ComptrollerMock,
   IAccessControlManagerV8,
   InterestRateModelHarness,
   MockVBNB,
+  PositionSwapper,
   VBep20Harness,
   WBNB,
   WBNBSwapHelper,

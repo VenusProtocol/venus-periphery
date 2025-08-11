@@ -4,11 +4,11 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
 import {
-  PositionSwapper,
   ComptrollerMock,
   ComptrollerMock__factory,
   Diamond,
   Diamond__factory,
+  PositionSwapper,
   VBNB,
   VBNB__factory,
   VToken,

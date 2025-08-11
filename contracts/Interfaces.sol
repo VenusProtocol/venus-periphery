@@ -70,4 +70,6 @@ interface IComptroller {
 
 interface IWBNB is IERC20Upgradeable {
     function deposit() external payable;
+
+    function withdraw(uint256 amount) external;
 }

@@ -34,6 +34,23 @@ describe("WBNBSwapHelper", () => {
     await expect(await WBNB.balanceOf(await positionSwapper.getAddress())).to.equals(amount);
   });
 
+  it("should unwrap WBNB into native BNB and transfer to PositionSwapper", async () => {
+    const amount = parseUnits("1", 18);
+    await WBNB.connect(positionSwapper).deposit({ value: amount });
+    await WBNB.connect(positionSwapper).approve(wbnbSwapHelper.address, amount);
+
+    await expect(await WBNB.balanceOf(await positionSwapper.getAddress())).to.equals(amount);
+    const prevBNBBalance = await ethers.provider.getBalance(await positionSwapper.getAddress());
+    await expect(
+      wbnbSwapHelper.connect(positionSwapper).swapInternal(WBNB.address, ethers.constants.AddressZero, amount),
+    )
+      .to.emit(wbnbSwapHelper, "SwappedToBNB")
+      .withArgs(amount);
+    const newBNBBalance = await ethers.provider.getBalance(await positionSwapper.getAddress());
+    expect(newBNBBalance.sub(prevBNBBalance)).to.be.closeTo(amount, parseUnits("0.0001", 18)); // Allow for minor gas cost variations
+    await expect(await WBNB.balanceOf(await positionSwapper.getAddress())).to.equals(0);
+  });
+
   it("should revert if sent value does not match amount", async () => {
     const amount = parseUnits("1", 18);
     const mismatchedValue = parseUnits("0.5", 18);
@@ -43,17 +60,6 @@ describe("WBNBSwapHelper", () => {
         .connect(positionSwapper)
         .swapInternal(ethers.constants.AddressZero, ethers.constants.AddressZero, amount, { value: mismatchedValue }),
     ).to.be.revertedWithCustomError(wbnbSwapHelper, "ValueMismatch");
-  });
-
-  it("should revert if non-zero tokenFrom is passed", async () => {
-    const amount = parseUnits("1", 18);
-    const fakeToken = await user1.getAddress();
-
-    await expect(
-      wbnbSwapHelper
-        .connect(positionSwapper)
-        .swapInternal(fakeToken, ethers.constants.AddressZero, amount, { value: amount }),
-    ).to.be.revertedWithCustomError(wbnbSwapHelper, "OnlyNativeSupported");
   });
 
   it("should revert if caller is not PositionSwapper", async () => {
