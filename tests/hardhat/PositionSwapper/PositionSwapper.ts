@@ -5,9 +5,9 @@ import { BigNumber, Signer } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
-import { ComptrollerLens, ComptrollerLens__factory } from "../../../../venus-protocol/typechain";
 import { convertToUnit } from "../../../helpers/utils";
 import {
+  ComptrollerLens__factory,
   ComptrollerMock,
   ComptrollerMock__factory,
   IAccessControlManagerV8,
@@ -39,9 +39,8 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   const ComptrollerFactory = await smock.mock<ComptrollerMock__factory>("ComptrollerMock");
   const comptroller = await ComptrollerFactory.deploy();
 
-  const factory = new ethers.ContractFactory(ComptrollerLens__factory.abi, ComptrollerLens__factory.bytecode, admin);
-  const comptrollerLens = (await factory.deploy()) as ComptrollerLens;
-  await comptrollerLens.deployed();
+  const ComptrollerLensFactory = await smock.mock<ComptrollerLens__factory>("ComptrollerLens");
+  const comptrollerLens = await ComptrollerLensFactory.deploy();
 
   await comptroller._setAccessControl(accessControl.address);
   await comptroller._setComptrollerLens(comptrollerLens.address);
