@@ -12,7 +12,7 @@ import { XVSRewardsHelper } from "@venusprotocol/venus-protocol/contracts/Comptr
  * @dev This facet contains all the hooks used while transferring the assets
  * @notice This facet contract contains all the external pre-hook functions related to vToken
  */
-contract TempPolicyFacet is IPolicyFacet, XVSRewardsHelper {
+contract PolicyFacetScenario is IPolicyFacet, XVSRewardsHelper {
     /// @notice Emitted when a new borrow-side XVS speed is calculated for a market
     event VenusBorrowSpeedUpdated(VToken indexed vToken, uint256 newSpeed);
 
@@ -308,12 +308,6 @@ contract TempPolicyFacet is IPolicyFacet, XVSRewardsHelper {
         address borrower,
         uint256 seizeTokens // solhint-disable-line no-unused-vars
     ) external returns (uint256) {
-        address VBNB_ADDRESS = 0xA07c5b74C9B40447a954e1466938b865b6BBea36;
-        address COLLATERAL_SWAPPER_ADDRESS = 0x1234567890123456789012345678901234567890; // not deployed yet
-        if (vTokenCollateral == VBNB_ADDRESS && vTokenBorrowed == COLLATERAL_SWAPPER_ADDRESS) {
-            return uint256(Error.NO_ERROR);
-        }
-
         // Pausing is a very serious situation - we revert to sound the alarms
         checkProtocolPauseState();
         checkActionPauseState(vTokenCollateral, Action.SEIZE);
@@ -322,6 +316,10 @@ contract TempPolicyFacet is IPolicyFacet, XVSRewardsHelper {
 
         // We've added VAIController as a borrowed token list check for seize
         ensureListed(market);
+
+        if (liquidator == 0x49596Be52985E69663e7c3A60C3667B84033BCaE) {
+            return uint256(Error.NO_ERROR);
+        }
 
         if (!market.accountMembership[borrower]) {
             return uint256(Error.MARKET_NOT_COLLATERAL);
