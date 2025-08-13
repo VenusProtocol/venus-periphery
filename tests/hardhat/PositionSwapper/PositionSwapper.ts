@@ -169,6 +169,69 @@ describe("PositionSwapper", () => {
       snapshot = await vWBNB.callStatic.getAccountSnapshot(await user2.getAddress());
       expect(snapshot[2]).to.be.closeTo(parseEther("1"), parseEther("0.00001"));
     });
+
+    it("should swapDebtWithAmount from vBNB to vWBNB", async () => {
+      const amountToSwap = parseEther("1").div(2); // 50% partial
+
+      await comptroller.connect(user2).updateDelegate(positionSwapper.address, true);
+      await positionSwapper
+        .connect(user2)
+        .swapDebtWithAmount(
+          await user2.getAddress(),
+          vBNB.address,
+          vWBNB.address,
+          amountToSwap,
+          wBNBSwapHelper.address,
+        );
+      const snapshot = await vWBNB.callStatic.getAccountSnapshot(await user2.getAddress());
+      expect(snapshot[2]).to.be.closeTo(parseEther("0.5"), parseEther("0.00001"));
+    });
+
+    describe("should revert on debt swap failures", async () => {
+      it("should revert if caller is not user or approved delegate", async () => {
+        comptroller.approvedDelegates.returns(false);
+
+        await expect(
+          positionSwapper
+            .connect(user1)
+            .swapFullDebt(await user2.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address),
+        ).to.be.revertedWithCustomError(positionSwapper, "Unauthorized");
+      });
+
+      it("should revert on swapDebtWithAmount with zero amount", async () => {
+        await expect(
+          positionSwapper
+            .connect(user1)
+            .swapDebtWithAmount(await user1.getAddress(), vBNB.address, vWBNB.address, 0, wBNBSwapHelper.address),
+        ).to.be.revertedWithCustomError(positionSwapper, "ZeroAmount");
+      });
+
+      it("should revert if user borrow balance is zero", async () => {
+        await expect(
+          positionSwapper
+            .connect(user1)
+            .swapFullDebt(await user1.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address),
+        ).to.be.revertedWithCustomError(positionSwapper, "NoBorrowBalance");
+      });
+
+      it("should revert if swapDebtWithAmount is greater than user's borrow balance", async () => {
+        const amountToSwap = parseEther("2");
+
+        await comptroller.connect(user2).updateDelegate(positionSwapper.address, true);
+
+        await expect(
+          positionSwapper
+            .connect(user2)
+            .swapDebtWithAmount(
+              await user2.getAddress(),
+              vBNB.address,
+              vWBNB.address,
+              amountToSwap,
+              wBNBSwapHelper.address,
+            ),
+        ).to.be.revertedWithCustomError(positionSwapper, "NoBorrowBalance");
+      });
+    });
   });
 
   describe("swapCollateral", async () => {
