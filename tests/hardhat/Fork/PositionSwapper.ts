@@ -13,6 +13,8 @@ import {
   PositionSwapper,
   VBNB,
   VBNB__factory,
+  VBep20Delegate__factory,
+  VBep20Delegator,
   VToken,
   WBNBSwapHelper,
 } from "../../../typechain";
@@ -32,7 +34,7 @@ let positionSwapper: PositionSwapper;
 let coreComptroller: ComptrollerMock;
 let unitroller: Diamond;
 let vBNB: VBNB;
-let vWBNB: VToken;
+let vWBNB: VBep20Delegator;
 let wBNBSwapHelper: WBNBSwapHelper;
 
 // ---------- deploy vWBNB ----------
@@ -98,20 +100,29 @@ if (FORK_MAINNET) {
         const PolicyFacet = await ethers.getContractFactory("PolicyFacet");
         const policyFacet = await PolicyFacet.deploy();
 
-        let selectors = [PolicyFacet.interface.getSighash("seizeAllowed(address,address,address,address,uint256)")];
+        const selectorsReplace = [
+          PolicyFacet.interface.getSighash("seizeAllowed(address,address,address,address,uint256)"),
+        ];
+
+        const selectorsAdd = [PolicyFacet.interface.getSighash("borrowAllowed(address,address,address,uint256)")];
 
         await unitroller.connect(timelock).diamondCut([
           {
             facetAddress: policyFacet.address,
             action: 1,
-            functionSelectors: selectors,
+            functionSelectors: selectorsReplace,
+          },
+          {
+            facetAddress: policyFacet.address,
+            action: 0,
+            functionSelectors: selectorsAdd,
           },
         ]);
 
         const SetterFacet = await ethers.getContractFactory("SetterFacet");
         const setterFacet = await SetterFacet.deploy();
 
-        selectors = [SetterFacet.interface.getSighash("_setWhitelistedExecutor(address,bool)")];
+        const selectors = [SetterFacet.interface.getSighash("_setWhitelistedExecutor(address,bool)")];
 
         await unitroller.connect(timelock).diamondCut([
           {
@@ -126,101 +137,108 @@ if (FORK_MAINNET) {
           .connect(timelock)
           .giveCallPermission(coreComptroller.address, "_setWhitelistedExecutor(address,bool)", timelock.address);
         await coreComptroller.connect(timelock)._setWhitelistedExecutor(positionSwapper.address, true);
+
+        const VBep20Delegate = await ethers.getContractFactory("VBep20Delegate");
+        const vBep20Delegate = await VBep20Delegate.deploy();
+
+        await vWBNB.connect(timelock)._setImplementation(vBep20Delegate.address, false, "0x");
       });
 
-      it("should revert when user has insufficient or zero vBNB balance", async () => {
-        const LOW_BALANCE_USER = "0xc20A9dc2Ef57b02D97d9A41F179686887C85c71b";
-        const lowBalanceUserSigner = await initMainnetUser(LOW_BALANCE_USER, ethers.utils.parseUnits("2"));
-        const vBNBBalance = await vBNB.balanceOf(LOW_BALANCE_USER);
-        expect(vBNBBalance).equals(0);
-        await expect(
-          positionSwapper
-            .connect(lowBalanceUserSigner)
-            .swapFullCollateral(LOW_BALANCE_USER, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address),
-        ).to.be.revertedWithCustomError(positionSwapper, "NoVTokenBalance");
-
-        await expect(
-          positionSwapper
-            .connect(lowBalanceUserSigner)
-            .swapCollateralWithAmount(
-              LOW_BALANCE_USER,
-              vBNB_ADDRESS,
-              vWBNB.address,
-              ethers.utils.parseEther("0.1"),
-              wBNBSwapHelper.address,
-            ),
-        ).to.be.revertedWithCustomError(positionSwapper, "NoVTokenBalance");
-      });
-
-      it("should revert if user can be liquidated on swapping the collateral", async () => {
-        for (const address of SUPPLIER_ADDRESSES) {
-          const supplier = await initMainnetUser(address, ethers.utils.parseUnits("2"));
+      describe("Collateral Swapping", () => {
+        it("should revert when user has insufficient or zero vBNB balance", async () => {
+          const LOW_BALANCE_USER = "0xc20A9dc2Ef57b02D97d9A41F179686887C85c71b";
+          const lowBalanceUserSigner = await initMainnetUser(LOW_BALANCE_USER, ethers.utils.parseUnits("2"));
+          const vBNBBalance = await vBNB.balanceOf(LOW_BALANCE_USER);
+          expect(vBNBBalance).equals(0);
           await expect(
             positionSwapper
-              .connect(supplier)
-              .swapFullCollateral(address, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address),
-          ).to.be.revertedWithCustomError(positionSwapper, "SwapCausesLiquidation");
-        }
-      });
+              .connect(lowBalanceUserSigner)
+              .swapFullCollateral(LOW_BALANCE_USER, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address),
+          ).to.be.revertedWithCustomError(positionSwapper, "NoVTokenBalance");
 
-      it("should partially swap vBNB to vWBNB for a user", async () => {
-        const address = SUPPLIER_ADDRESSES[0];
-        const supplier = await initMainnetUser(address, ethers.utils.parseUnits("2"));
+          await expect(
+            positionSwapper
+              .connect(lowBalanceUserSigner)
+              .swapCollateralWithAmount(
+                LOW_BALANCE_USER,
+                vBNB_ADDRESS,
+                vWBNB.address,
+                ethers.utils.parseEther("0.1"),
+                wBNBSwapHelper.address,
+              ),
+          ).to.be.revertedWithCustomError(positionSwapper, "NoVTokenBalance");
+        });
 
-        const fullBalance = await vBNB.balanceOf(address);
-        const amountToSeize = fullBalance.div(10); // 10% partial
+        it("should revert if user can be liquidated on swapping the collateral", async () => {
+          for (const address of SUPPLIER_ADDRESSES) {
+            const supplier = await initMainnetUser(address, ethers.utils.parseUnits("2"));
+            await expect(
+              positionSwapper
+                .connect(supplier)
+                .swapFullCollateral(address, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address),
+            ).to.be.revertedWithCustomError(positionSwapper, "SwapCausesLiquidation");
+          }
+        });
 
-        expect(amountToSeize).to.be.gt(0);
-
-        const beforeVBNB = await vBNB.balanceOf(address);
-        const beforeVWBNB = await vWBNB.balanceOf(address);
-
-        await positionSwapper
-          .connect(supplier)
-          .swapCollateralWithAmount(address, vBNB_ADDRESS, vWBNB.address, amountToSeize, wBNBSwapHelper.address);
-
-        const afterVBNB = await vBNB.balanceOf(address);
-        const afterVWBNB = await vWBNB.balanceOf(address);
-
-        // Assertions
-        expect(afterVBNB).to.equal(beforeVBNB.sub(amountToSeize));
-        expect(afterVWBNB).to.be.gt(beforeVWBNB);
-      });
-
-      it("should swap full vBNB to vWBNB for multiple suppliers", async () => {
-        for (const address of SUPPLIER_ADDRESSES) {
+        it("should partially swap vBNB to vWBNB for a user", async () => {
+          const address = SUPPLIER_ADDRESSES[0];
           const supplier = await initMainnetUser(address, ethers.utils.parseUnits("2"));
-          const beforeVWbnb = await vWBNB.balanceOf(address);
-          // to avoid liquidations
-          await coreComptroller.connect(supplier).enterMarkets([vWBNB.address]);
+
+          const fullBalance = await vBNB.balanceOf(address);
+          const amountToSeize = fullBalance.div(10); // 10% partial
+
+          expect(amountToSeize).to.be.gt(0);
+
+          const beforeVBNB = await vBNB.balanceOf(address);
+          const beforeVWBNB = await vWBNB.balanceOf(address);
+
           await positionSwapper
             .connect(supplier)
-            .swapFullCollateral(address, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address);
+            .swapCollateralWithAmount(address, vBNB_ADDRESS, vWBNB.address, amountToSeize, wBNBSwapHelper.address);
 
-          const afterVBnb = await vBNB.balanceOf(address);
-          const afterVWbnb = await vWBNB.balanceOf(address);
+          const afterVBNB = await vBNB.balanceOf(address);
+          const afterVWBNB = await vWBNB.balanceOf(address);
 
-          expect(afterVBnb).to.equal(0);
-          expect(afterVWbnb).to.be.gt(beforeVWbnb);
-        }
-      });
+          // Assertions
+          expect(afterVBNB).to.equal(beforeVBNB.sub(amountToSeize));
+          expect(afterVWBNB).to.be.gt(beforeVWBNB);
+        });
 
-      it("should revert if non-swapper tries to seize or wrong token is seized", async () => {
-        const vUSDC_ADDRESS = "0xf508fCD89b8bd15579dc79A6827cB4686A3592c8";
-        const vUSDC = VBNB__factory.connect(vUSDC_ADDRESS, timelock);
+        it("should swap full vBNB to vWBNB for multiple suppliers", async () => {
+          for (const address of SUPPLIER_ADDRESSES) {
+            const supplier = await initMainnetUser(address, ethers.utils.parseUnits("2"));
+            const beforeVWbnb = await vWBNB.balanceOf(address);
+            // to avoid liquidations
+            await coreComptroller.connect(supplier).enterMarkets([vWBNB.address]);
+            await positionSwapper
+              .connect(supplier)
+              .swapFullCollateral(address, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address);
 
-        const SUPPLIER_ADDRESS = "0xf50453F0C5F8B46190a4833B136282b50c7343BE";
-        const vBNBBalance = await vUSDC.balanceOf(SUPPLIER_ADDRESS);
-        const [liquidator] = await ethers.getSigners();
-        expect(vBNBBalance.toNumber()).to.gt(0);
+            const afterVBnb = await vBNB.balanceOf(address);
+            const afterVWbnb = await vWBNB.balanceOf(address);
 
-        // TODO first add check at comptroller
-        // await expect(vBNB.seize(liquidator.address, address, vBNBBalance)).to.be.rejectedWith("market not listed");
+            expect(afterVBnb).to.equal(0);
+            expect(afterVWbnb).to.be.gt(beforeVWbnb);
+          }
+        });
 
-        const swapper = await initMainnetUser(positionSwapper.address, ethers.utils.parseUnits("2"));
-        await expect(
-          vUSDC.connect(swapper).seize(liquidator.address, SUPPLIER_ADDRESS, vBNBBalance),
-        ).to.be.rejectedWith("market not listed");
+        it("should revert if non-swapper tries to seize or wrong token is seized", async () => {
+          const vUSDC_ADDRESS = "0xf508fCD89b8bd15579dc79A6827cB4686A3592c8";
+          const vUSDC = VBNB__factory.connect(vUSDC_ADDRESS, timelock);
+
+          const SUPPLIER_ADDRESS = "0xf50453F0C5F8B46190a4833B136282b50c7343BE";
+          const vBNBBalance = await vUSDC.balanceOf(SUPPLIER_ADDRESS);
+          const [liquidator] = await ethers.getSigners();
+          expect(vBNBBalance.toNumber()).to.gt(0);
+
+          // TODO first add check at comptroller
+          // await expect(vBNB.seize(liquidator.address, address, vBNBBalance)).to.be.rejectedWith("market not listed");
+
+          const swapper = await initMainnetUser(positionSwapper.address, ethers.utils.parseUnits("2"));
+          await expect(
+            vUSDC.connect(swapper).seize(liquidator.address, SUPPLIER_ADDRESS, vBNBBalance),
+          ).to.be.rejectedWith("market not listed");
+        });
       });
     });
   });
