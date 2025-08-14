@@ -8,6 +8,8 @@ import {
   ComptrollerMock__factory,
   Diamond,
   Diamond__factory,
+  IAccessControlManagerV5,
+  IAccessControlManagerV5__factory,
   PositionSwapper,
   VBNB,
   VBNB__factory,
@@ -21,6 +23,7 @@ const vBNB_ADDRESS = "0xA07c5b74C9B40447a954e1466938b865b6BBea36";
 const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
 const NORMAL_TIMELOCK = "0x939bD8d64c0A9583A7Dcea9933f7b21697ab6396";
 const SUPPLIER_ADDRESSES = ["0xf50453F0C5F8B46190a4833B136282b50c7343BE", "0xd14D59ddb9Cdaa0C20a9C31369bF2fc4eeAF56CB"];
+const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
 
 const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 
@@ -92,18 +95,37 @@ if (FORK_MAINNET) {
         const WBNBSwapHelperFactory = await ethers.getContractFactory("WBNBSwapHelper");
         wBNBSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB_ADDRESS, positionSwapper.address);
 
-        const PolicyFacet = await ethers.getContractFactory("PolicyFacetScenario");
-        const policyFacetScenario = await PolicyFacet.deploy();
+        const PolicyFacet = await ethers.getContractFactory("PolicyFacet");
+        const policyFacet = await PolicyFacet.deploy();
 
-        const selectors = [PolicyFacet.interface.getSighash("seizeAllowed(address,address,address,address,uint256)")];
+        let selectors = [PolicyFacet.interface.getSighash("seizeAllowed(address,address,address,address,uint256)")];
 
         await unitroller.connect(timelock).diamondCut([
           {
-            facetAddress: policyFacetScenario.address,
+            facetAddress: policyFacet.address,
             action: 1,
             functionSelectors: selectors,
           },
         ]);
+
+        const SetterFacet = await ethers.getContractFactory("SetterFacet");
+        const setterFacet = await SetterFacet.deploy();
+
+        selectors = [SetterFacet.interface.getSighash("_setWhitelistedExecutor(address,bool)")];
+
+        await unitroller.connect(timelock).diamondCut([
+          {
+            facetAddress: setterFacet.address,
+            action: 0,
+            functionSelectors: selectors,
+          },
+        ]);
+
+        const acm = IAccessControlManagerV5__factory.connect(ACM, timelock) as IAccessControlManagerV5;
+        await acm
+          .connect(timelock)
+          .giveCallPermission(coreComptroller.address, "_setWhitelistedExecutor(address,bool)", timelock.address);
+        await coreComptroller.connect(timelock)._setWhitelistedExecutor(positionSwapper.address, true);
       });
 
       it("should revert when user has insufficient or zero vBNB balance", async () => {
