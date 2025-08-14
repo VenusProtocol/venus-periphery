@@ -70,6 +70,7 @@ contract WBNBSwapHelper is ISwapHelper {
             emit SwappedToWBNB(amount);
         } else {
             IERC20Upgradeable(WBNB).safeTransferFrom(msg.sender, address(this), amount);
+            IERC20Upgradeable(address(WBNB)).safeApprove(address(WBNB), 0);
             IERC20Upgradeable(address(WBNB)).safeApprove(address(WBNB), amount);
             WBNB.withdraw(amount);
             payable(msg.sender).transfer(amount);

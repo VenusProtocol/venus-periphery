@@ -1,6 +1,6 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
-import { parseUnits } from "ethers/lib/utils";
+import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
 import {
@@ -13,10 +13,10 @@ import {
   PositionSwapper,
   VBNB,
   VBNB__factory,
-  VBep20Delegate__factory,
   VBep20Delegator,
   VToken,
   WBNBSwapHelper,
+  WBNB__factory,
 } from "../../../typechain";
 import { forking, initMainnetUser } from "./utils";
 
@@ -25,6 +25,8 @@ const vBNB_ADDRESS = "0xA07c5b74C9B40447a954e1466938b865b6BBea36";
 const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
 const NORMAL_TIMELOCK = "0x939bD8d64c0A9583A7Dcea9933f7b21697ab6396";
 const SUPPLIER_ADDRESSES = ["0xf50453F0C5F8B46190a4833B136282b50c7343BE", "0xd14D59ddb9Cdaa0C20a9C31369bF2fc4eeAF56CB"];
+const vWBNB_HOLDER = "0x6DF9aDc1837Bf37E0B1b943d59A7E50D9678c81B";
+const BORROWER_ADDRESSES = "0xF322942f644A996A617BD29c16bd7d231d9F35E9";
 const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
 
 const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
@@ -142,6 +144,12 @@ if (FORK_MAINNET) {
         const vBep20Delegate = await VBep20Delegate.deploy();
 
         await vWBNB.connect(timelock)._setImplementation(vBep20Delegate.address, false, "0x");
+
+        const wBNBHolder = await initMainnetUser(vWBNB_HOLDER, ethers.utils.parseEther("100"));
+        const wBNB = WBNB__factory.connect(WBNB_ADDRESS, wBNBHolder);
+        await wBNB.approve(vWBNB.address, ethers.utils.parseEther("0"));
+        await wBNB.approve(vWBNB.address, ethers.utils.parseEther("100"));
+        await vWBNB.connect(wBNBHolder).mint(ethers.utils.parseEther("100"));
       });
 
       describe("Collateral Swapping", () => {
@@ -238,6 +246,51 @@ if (FORK_MAINNET) {
           await expect(
             vUSDC.connect(swapper).seize(liquidator.address, SUPPLIER_ADDRESS, vBNBBalance),
           ).to.be.rejectedWith("market not listed");
+        });
+      });
+
+      describe("Debt Swapping", () => {
+        it("should partially swap vBNB to vWBNB for a user", async () => {
+          const borrower = await initMainnetUser(BORROWER_ADDRESSES, ethers.utils.parseUnits("2"));
+          const amountOfBorrow = parseEther("1");
+
+          await vBNB.connect(borrower).borrow(amountOfBorrow);
+
+          const borrowedBalanceBefore = await vWBNB.callStatic.borrowBalanceCurrent(await borrower.getAddress());
+          expect(borrowedBalanceBefore).to.be.eq(0);
+
+          await coreComptroller.connect(borrower).updateDelegate(positionSwapper.address, true);
+
+          const amountOfBorrowToSwap = amountOfBorrow.div(2); // 50% partial
+
+          await positionSwapper
+            .connect(borrower)
+            .swapDebtWithAmount(
+              await borrower.getAddress(),
+              vBNB.address,
+              vWBNB.address,
+              amountOfBorrowToSwap,
+              wBNBSwapHelper.address,
+            );
+
+          const borrowedBalanceAfter = await vWBNB.callStatic.borrowBalanceCurrent(await borrower.getAddress());
+          expect(borrowedBalanceAfter).to.be.eq(amountOfBorrowToSwap);
+        });
+
+        it("should swap full vBNB to vWBNB for a user", async () => {
+          const borrower = await initMainnetUser(BORROWER_ADDRESSES, ethers.utils.parseUnits("2"));
+          const amountOfBorrow = parseEther("1");
+
+          await vBNB.connect(borrower).borrow(amountOfBorrow);
+
+          const borrowedBalanceBefore = await vWBNB.callStatic.borrowBalanceCurrent(await borrower.getAddress());
+
+          await positionSwapper
+            .connect(borrower)
+            .swapFullDebt(await borrower.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address);
+
+          const borrowedBalanceAfter = await vWBNB.callStatic.borrowBalanceCurrent(await borrower.getAddress());
+          expect(borrowedBalanceAfter).to.be.gt(borrowedBalanceBefore);
         });
       });
     });
