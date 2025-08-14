@@ -155,7 +155,7 @@ describe("PositionSwapper", () => {
 
       await vBNB.connect(user2).borrow(parseEther("1"));
 
-      comptroller.borrowAllowed.returns(0);
+      comptroller["borrowAllowed(address,address,address,uint256)"].returns(0);
     });
 
     it("should swapFullDebt from vBNB to vWBNB", async () => {
