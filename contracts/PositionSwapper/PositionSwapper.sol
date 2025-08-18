@@ -111,8 +111,15 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         if (amountToSwap > marketFrom.balanceOf(user)) revert NoVTokenBalance();
         _swapCollateral(user, marketFrom, marketTo, amountToSwap, helper);
         emit CollateralSwapped(user, address(marketFrom), address(marketTo), amountToSwap);
-    }
+    } 
 
+    /**
+     * @notice Swaps the full debt of a user from one market to another.
+     * @param user The address whose debt is being swapped.
+     * @param marketFrom The vToken market from which debt is swapped.
+     * @param marketTo The vToken market into which the new debt is borrowed.
+     * @param helper The ISwapHelper contract for performing the token swap.
+     */
     function swapFullDebt(address user, IVToken marketFrom, IVToken marketTo, ISwapHelper helper) external payable {
         uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
         if (borrowBalance == 0) revert NoBorrowBalance();
@@ -120,6 +127,14 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         emit DebtSwapped(user, address(marketFrom), address(marketTo), borrowBalance);
     }
 
+    /**
+     * @notice Swaps a specific amount of debt from one market to another.
+     * @param user The address whose debt is being swapped.
+     * @param marketFrom The vToken market from which debt is swapped.
+     * @param marketTo The vToken market into which the new debt is borrowed.
+     * @param amountToSwap The amount of debt to swap.
+     * @param helper The ISwapHelper contract for performing the token swap.
+     */
     function swapDebtWithAmount(
         address user,
         IVToken marketFrom,
@@ -188,8 +203,7 @@ contract PositionSwapper is Ownable2StepUpgradeable {
             uint256 receivedFromToken = fromUnderlying.balanceOf(address(this)) - fromUnderlyingBalanceBefore;
             if (receivedFromToken == 0) revert NoUnderlyingReceived();
 
-            fromUnderlying.safeApprove(address(swapHelper), 0);
-            fromUnderlying.safeApprove(address(swapHelper), receivedFromToken);
+            fromUnderlying.forceApprove(address(swapHelper), receivedFromToken);
 
             swapHelper.swapInternal(address(fromUnderlying), toUnderlyingAddress, receivedFromToken);
         }
@@ -198,13 +212,20 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         uint256 toUnderlyingReceived = toUnderlyingBalanceAfter - toUnderlyingBalanceBefore;
         if (toUnderlyingReceived == 0) revert NoUnderlyingReceived();
 
-        toUnderlying.safeApprove(address(marketTo), 0);
-        toUnderlying.safeApprove(address(marketTo), toUnderlyingReceived);
+        toUnderlying.forceApprove(address(marketTo), toUnderlyingReceived);
         if (marketTo.mintBehalf(user, toUnderlyingReceived) != 0) revert MintFailed();
 
         _checkAccountSafe(user);
     }
 
+    /**
+     * @notice Internal function that performs the full debt swap process.
+     * @param user The address whose debt is being swapped.
+     * @param marketFrom The vToken market to which debt is repaid.
+     * @param marketTo The vToken market into which the new debt is borrowed.
+     * @param amountToBorrow The amount of new debt to borrow.
+     * @param swapHelper The swap helper contract used to perform the token conversion.
+     */
     function _swapDebt(
         address user,
         IVToken marketFrom,
@@ -226,8 +247,7 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         uint256 toUnderlyingBalanceAfter = toUnderlying.balanceOf(address(this));
         uint256 receivedToUnderlying = toUnderlyingBalanceAfter - toUnderlyingBalanceBefore;
 
-        toUnderlying.safeApprove(address(swapHelper), 0);
-        toUnderlying.safeApprove(address(swapHelper), receivedToUnderlying);
+        toUnderlying.forceApprove(address(swapHelper), receivedToUnderlying);
 
         if (address(marketFrom) == NATIVE_MARKET) {
             uint256 fromUnderlyingBalanceBefore = address(this).balance;
@@ -240,8 +260,7 @@ contract PositionSwapper is Ownable2StepUpgradeable {
             swapHelper.swapInternal(toUnderlyingAddress, marketFrom.underlying(), receivedToUnderlying);
             uint256 receivedFromToken = fromUnderlying.balanceOf(address(this)) - fromUnderlyingBalanceBefore;
 
-            fromUnderlying.safeApprove(address(marketFrom), 0);
-            fromUnderlying.safeApprove(address(marketFrom), receivedFromToken);
+            fromUnderlying.forceApprove(address(marketFrom), receivedFromToken);
 
             if (marketFrom.repayBorrowBehalf(user, receivedFromToken) != 0) revert RepayFailed();
         }
