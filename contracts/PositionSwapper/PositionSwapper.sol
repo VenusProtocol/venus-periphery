@@ -111,7 +111,7 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         if (amountToSwap > marketFrom.balanceOf(user)) revert NoVTokenBalance();
         _swapCollateral(user, marketFrom, marketTo, amountToSwap, helper);
         emit CollateralSwapped(user, address(marketFrom), address(marketTo), amountToSwap);
-    } 
+    }
 
     /**
      * @notice Swaps the full debt of a user from one market to another.
