@@ -63,6 +63,7 @@ contract WBNBSwapHelper is ISwapHelper {
     function swapInternal(address tokenFrom, address, uint256 amount) external payable override onlySwapper {
         if (tokenFrom != address(0) && tokenFrom != address(WBNB)) revert TokenNotSupported();
         if (tokenFrom == address(0) && msg.value != amount) revert ValueMismatch();
+        if (tokenFrom != address(0) && msg.value != 0) revert ValueMismatch();
 
         if (tokenFrom == address(0)) {
             WBNB.deposit{ value: amount }();

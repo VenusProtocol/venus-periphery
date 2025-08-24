@@ -15,6 +15,9 @@ contract PositionSwapper is Ownable2StepUpgradeable {
     /// @notice The vToken representing the native asset (e.g., vBNB).
     address public immutable NATIVE_MARKET;
 
+    /// @notice Mapping of approved swap pairs. (marketFrom => marketTo => helper => status)
+    mapping(address => mapping(address => mapping(address => bool))) public approvedPairs;
+
     /// @notice Emitted after a successful swap and mint.
     event CollateralSwapped(address indexed user, address marketFrom, address marketTo, uint256 amountOut);
 
@@ -23,6 +26,9 @@ contract PositionSwapper is Ownable2StepUpgradeable {
 
     /// @notice Emitted when the owner sweeps leftover ERC-20 tokens.
     event SweepToken(address indexed token, address indexed receiver, uint256 amount);
+
+    /// @notice Emitted when an approved pair is updated.
+    event ApprovedPairUpdated(address marketFrom, address marketTo, address helper, bool oldStatus, bool newStatus);
 
     /// @custom:error Unauthorized Caller is neither the user nor an approved delegate.
     error Unauthorized();
@@ -56,6 +62,9 @@ contract PositionSwapper is Ownable2StepUpgradeable {
 
     /// @custom:error SwapCausesLiquidation
     error SwapCausesLiquidation();
+
+    /// @custom:error MarketNotListed
+    error MarketNotListed();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _comptroller, address _nativeMarket) {
@@ -161,6 +170,18 @@ contract PositionSwapper is Ownable2StepUpgradeable {
     }
 
     /**
+     * @notice Sets the approval status for a specific swap pair and helper.
+     * @param marketFrom The vToken market to swap from.
+     * @param marketTo The vToken market to swap to.
+     * @param helper The ISwapHelper contract used for the swap.
+     * @param status The approval status to set (true = approved, false = not approved).
+     */
+    function setApprovedPair(address marketFrom, address marketTo, address helper, bool status) external onlyOwner {
+        emit ApprovedPairUpdated(marketFrom, marketTo, helper, approvedPairs[marketFrom][marketTo][helper], status);
+        approvedPairs[marketFrom][marketTo][helper] = status;
+    }
+
+    /**
      * @notice Internal function that performs the full collateral swap process.
      * @param user The address whose collateral is being swapped.
      * @param marketFrom The vToken market from which collateral is seized.
@@ -175,9 +196,16 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         uint256 amountToSeize,
         ISwapHelper swapHelper
     ) internal {
+        (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
+        if (!isMarketListed) revert MarketNotListed();
+
+        (isMarketListed, , ) = COMPTROLLER.markets(address(marketTo));
+        if (!isMarketListed) revert MarketNotListed();
+
         if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
             revert Unauthorized();
         }
+
         _checkAccountSafe(user);
 
         if (marketFrom.seize(address(this), user, amountToSeize) != 0) revert SeizeFailed();
@@ -233,6 +261,16 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         uint256 amountToBorrow,
         ISwapHelper swapHelper
     ) internal {
+        (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
+        if (!isMarketListed) revert MarketNotListed();
+
+        (isMarketListed, , ) = COMPTROLLER.markets(address(marketTo));
+        if (!isMarketListed) revert MarketNotListed();
+
+        if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
+            revert Unauthorized();
+        }
+
         if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
             revert Unauthorized();
         }

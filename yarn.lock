@@ -4252,7 +4252,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@venusprotocol/governance-contracts@npm:^2.12.0, @venusprotocol/governance-contracts@npm:^2.9.0":
+"@venusprotocol/governance-contracts@npm:^2.11.0, @venusprotocol/governance-contracts@npm:^2.12.0, @venusprotocol/governance-contracts@npm:^2.9.0":
   version: 2.12.0
   resolution: "@venusprotocol/governance-contracts@npm:2.12.0"
   dependencies:
@@ -4382,7 +4382,7 @@ __metadata:
     "@venusprotocol/oracle": ^2.13.0
     "@venusprotocol/protocol-reserve": ^3.3.0
     "@venusprotocol/solidity-utilities": 2.0.3
-    "@venusprotocol/venus-protocol": ^9.7.0
+    "@venusprotocol/venus-protocol": "file:../venus-protocol/venusprotocol-venus-protocol-9.8.0-dev.19.tgz"
     bignumber.js: 9.0.0
     chai: ^4.3.6
     dotenv: ^10.0.0
@@ -4414,6 +4414,24 @@ __metadata:
     zksync-ethers: ^5.9.1
   languageName: unknown
   linkType: soft
+
+"@venusprotocol/venus-protocol@file:../venus-protocol/venusprotocol-venus-protocol-9.8.0-dev.19.tgz::locator=%40venusprotocol%2Fvenus-periphery%40workspace%3A.":
+  version: 9.8.0-dev.19
+  resolution: "@venusprotocol/venus-protocol@file:../venus-protocol/venusprotocol-venus-protocol-9.8.0-dev.19.tgz::locator=%40venusprotocol%2Fvenus-periphery%40workspace%3A."
+  dependencies:
+    "@nomicfoundation/hardhat-ethers": ^3.0.0
+    "@openzeppelin/contracts": 4.9.3
+    "@openzeppelin/contracts-upgradeable": ^4.8.0
+    "@venusprotocol/governance-contracts": ^2.11.0
+    "@venusprotocol/protocol-reserve": ^3.2.0
+    "@venusprotocol/solidity-utilities": ^2.1.0
+    "@venusprotocol/token-bridge": ^2.6.0
+    bignumber.js: ^9.1.2
+    dotenv: ^16.0.1
+    module-alias: ^2.2.2
+  checksum: 73e215a8f96f64bef75d2e06ab55d4e00fadab3f6a26f1f920b5e0119a03daf94e00f593d0fe274a0ca17109d9c65f4e627f6cce46508adf4fc328c992e7fe9d
+  languageName: node
+  linkType: hard
 
 "@venusprotocol/venus-protocol@npm:^9.7.0":
   version: 9.7.0

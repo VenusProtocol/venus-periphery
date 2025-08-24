@@ -99,6 +99,8 @@ if (FORK_MAINNET) {
         const WBNBSwapHelperFactory = await ethers.getContractFactory("WBNBSwapHelper");
         wBNBSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB_ADDRESS, positionSwapper.address);
 
+        await positionSwapper.setApprovedPair(vBNB.address, vWBNB.address, wBNBSwapHelper.address, true);
+
         const PolicyFacet = await ethers.getContractFactory("PolicyFacet");
         const policyFacet = await PolicyFacet.deploy();
 
