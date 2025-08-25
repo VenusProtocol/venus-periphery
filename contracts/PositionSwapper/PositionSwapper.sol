@@ -367,7 +367,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
             uint256 fromUnderlyingBalanceBefore = address(this).balance;
             swapHelper.swapInternal(toUnderlyingAddress, address(0), receivedToUnderlying);
             uint256 receivedFromNative = address(this).balance - fromUnderlyingBalanceBefore;
-            IVBNB(address(marketFrom)).repayBorrowBehalf{ value: receivedFromNative }(user);
+            IVBNB(NATIVE_MARKET).repayBorrowBehalf{ value: receivedFromNative }(user);
         } else {
             IERC20Upgradeable fromUnderlying = IERC20Upgradeable(marketFrom.underlying());
             uint256 fromUnderlyingBalanceBefore = fromUnderlying.balanceOf(address(this));
