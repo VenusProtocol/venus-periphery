@@ -3,7 +3,7 @@ pragma solidity 0.8.25;
 
 import { IWBNB } from "../Interfaces.sol";
 import { ISwapHelper } from "./ISwapHelper.sol";
-import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import { IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 /**
  * @title WBNBSwapHelper
@@ -11,8 +11,6 @@ import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts
  * @dev Only supports native token (BNB) wrapping into WBNB and unwrapping WBNB into BNB. Meant to be used only by the PositionSwapper.
  */
 contract WBNBSwapHelper is ISwapHelper {
-    using SafeERC20Upgradeable for IERC20Upgradeable;
-
     /// @notice Address of the authorized PositionSwapper contract
     address public immutable POSITION_SWAPPER;
 
@@ -82,7 +80,7 @@ contract WBNBSwapHelper is ISwapHelper {
             WBNB.transfer(msg.sender, amount);
             emit SwappedToWBNB(amount);
         } else {
-            IERC20Upgradeable(WBNB).safeTransferFrom(msg.sender, address(this), amount);
+            IERC20Upgradeable(WBNB).transferFrom(msg.sender, address(this), amount);
             WBNB.withdraw(amount);
 
             (bool success, ) = payable(msg.sender).call{ value: amount }("");
