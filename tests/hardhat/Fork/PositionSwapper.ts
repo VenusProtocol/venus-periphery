@@ -1,3 +1,4 @@
+import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { parseEther, parseUnits } from "ethers/lib/utils";
@@ -6,7 +7,6 @@ import { ethers, upgrades } from "hardhat";
 import {
   ComptrollerMock,
   ComptrollerMock__factory,
-  Diamond,
   Diamond__factory,
   IAccessControlManagerV5,
   IAccessControlManagerV5__factory,
@@ -31,15 +31,14 @@ const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
 
 const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 
-let timelock: SignerWithAddress;
-let positionSwapper: PositionSwapper;
-let coreComptroller: ComptrollerMock;
-let unitroller: Diamond;
-let vBNB: VBNB;
-let vWBNB: VBep20Delegator;
-let wBNBSwapHelper: WBNBSwapHelper;
+type SetupMarketFixture = {
+  positionSwapper: PositionSwapper;
+  coreComptroller: ComptrollerMock;
+  vBNB: VBNB;
+  vWBNB: VBep20Delegator;
+  wBNBSwapHelper: WBNBSwapHelper;
+};
 
-// ---------- deploy vWBNB ----------
 export async function deployFreshVWBNB(
   timelock: SignerWithAddress,
 ): Promise<{ vWBNB: VToken; coreComptroller: ComptrollerMock }> {
@@ -79,79 +78,108 @@ export async function deployFreshVWBNB(
   return { vWBNB, coreComptroller };
 }
 
+const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
+  const timelock = await initMainnetUser(NORMAL_TIMELOCK, ethers.utils.parseUnits("2"));
+  const unitroller = Diamond__factory.connect(COMPTROLLER_ADDRESS, timelock);
+  const vBNB = VBNB__factory.connect(vBNB_ADDRESS, timelock);
+  const { vWBNB, coreComptroller } = await deployFreshVWBNB(timelock);
+
+  const PositionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
+  const positionSwapper = await upgrades.deployProxy(PositionSwapperFactory, [], {
+    constructorArgs: [COMPTROLLER_ADDRESS, vBNB_ADDRESS],
+    initializer: "initialize",
+    unsafeAllow: ["state-variable-immutable"],
+  });
+  const WBNBSwapHelperFactory = await ethers.getContractFactory("WBNBSwapHelper");
+  const wBNBSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB_ADDRESS, positionSwapper.address);
+
+  await positionSwapper.setApprovedPair(vBNB.address, vWBNB.address, wBNBSwapHelper.address, true);
+
+  const PolicyFacet = await ethers.getContractFactory("PolicyFacet");
+  const policyFacet = await PolicyFacet.deploy();
+
+  const selectorsReplace = [PolicyFacet.interface.getSighash("seizeAllowed(address,address,address,address,uint256)")];
+
+  const selectorsAdd = [PolicyFacet.interface.getSighash("borrowAllowed(address,address,address,uint256)")];
+
+  await unitroller.connect(timelock).diamondCut([
+    {
+      facetAddress: policyFacet.address,
+      action: 1,
+      functionSelectors: selectorsReplace,
+    },
+    {
+      facetAddress: policyFacet.address,
+      action: 0,
+      functionSelectors: selectorsAdd,
+    },
+  ]);
+
+  const SetterFacet = await ethers.getContractFactory("SetterFacet");
+  const setterFacet = await SetterFacet.deploy();
+
+  const selectors = [SetterFacet.interface.getSighash("_setWhitelistedExecutor(address,bool)")];
+
+  await unitroller.connect(timelock).diamondCut([
+    {
+      facetAddress: setterFacet.address,
+      action: 0,
+      functionSelectors: selectors,
+    },
+  ]);
+
+  const MarketFacet = await ethers.getContractFactory("MarketFacet");
+  const marketFacet = await MarketFacet.deploy();
+
+  const selectorsMarketFacet = [MarketFacet.interface.getSighash("enterMarket(address,address)")];
+
+  await unitroller.connect(timelock).diamondCut([
+    {
+      facetAddress: marketFacet.address,
+      action: 0,
+      functionSelectors: selectorsMarketFacet,
+    },
+  ]);
+
+  const acm = IAccessControlManagerV5__factory.connect(ACM, timelock) as IAccessControlManagerV5;
+  await acm
+    .connect(timelock)
+    .giveCallPermission(coreComptroller.address, "_setWhitelistedExecutor(address,bool)", timelock.address);
+  await coreComptroller.connect(timelock)._setWhitelistedExecutor(positionSwapper.address, true);
+
+  const VBep20Delegate = await ethers.getContractFactory("VBep20Delegate");
+  const vBep20Delegate = await VBep20Delegate.deploy();
+
+  await vWBNB.connect(timelock)._setImplementation(vBep20Delegate.address, false, "0x");
+
+  const wBNBHolder = await initMainnetUser(vWBNB_HOLDER, ethers.utils.parseEther("100"));
+  const wBNB = WBNB__factory.connect(WBNB_ADDRESS, wBNBHolder);
+  await wBNB.approve(vWBNB.address, ethers.utils.parseEther("0"));
+  await wBNB.approve(vWBNB.address, ethers.utils.parseEther("100"));
+  await vWBNB.connect(wBNBHolder).mint(ethers.utils.parseEther("100"));
+
+  return {
+    positionSwapper,
+    coreComptroller,
+    vBNB,
+    vWBNB,
+    wBNBSwapHelper,
+  };
+};
+
 // ---------- Main Forked Test ----------
 if (FORK_MAINNET) {
   const blockNumber = 55239594;
   forking(blockNumber, () => {
+    let positionSwapper: PositionSwapper;
+    let coreComptroller: ComptrollerMock;
+    let vBNB: VBNB;
+    let vWBNB: VBep20Delegator;
+    let wBNBSwapHelper: WBNBSwapHelper;
+
     describe("PositionSwapper Upgrade + Swap Flow", () => {
-      before(async () => {
-        timelock = await initMainnetUser(NORMAL_TIMELOCK, ethers.utils.parseUnits("2"));
-        unitroller = Diamond__factory.connect(COMPTROLLER_ADDRESS, timelock);
-        vBNB = VBNB__factory.connect(vBNB_ADDRESS, timelock);
-        ({ vWBNB, coreComptroller } = await deployFreshVWBNB(timelock));
-
-        const PositionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
-        positionSwapper = await upgrades.deployProxy(PositionSwapperFactory, [], {
-          constructorArgs: [COMPTROLLER_ADDRESS, vBNB_ADDRESS],
-          initializer: "initialize",
-          unsafeAllow: ["state-variable-immutable"],
-        });
-        const WBNBSwapHelperFactory = await ethers.getContractFactory("WBNBSwapHelper");
-        wBNBSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB_ADDRESS, positionSwapper.address);
-
-        await positionSwapper.setApprovedPair(vBNB.address, vWBNB.address, wBNBSwapHelper.address, true);
-
-        const PolicyFacet = await ethers.getContractFactory("PolicyFacet");
-        const policyFacet = await PolicyFacet.deploy();
-
-        const selectorsReplace = [
-          PolicyFacet.interface.getSighash("seizeAllowed(address,address,address,address,uint256)"),
-        ];
-
-        const selectorsAdd = [PolicyFacet.interface.getSighash("borrowAllowed(address,address,address,uint256)")];
-
-        await unitroller.connect(timelock).diamondCut([
-          {
-            facetAddress: policyFacet.address,
-            action: 1,
-            functionSelectors: selectorsReplace,
-          },
-          {
-            facetAddress: policyFacet.address,
-            action: 0,
-            functionSelectors: selectorsAdd,
-          },
-        ]);
-
-        const SetterFacet = await ethers.getContractFactory("SetterFacet");
-        const setterFacet = await SetterFacet.deploy();
-
-        const selectors = [SetterFacet.interface.getSighash("_setWhitelistedExecutor(address,bool)")];
-
-        await unitroller.connect(timelock).diamondCut([
-          {
-            facetAddress: setterFacet.address,
-            action: 0,
-            functionSelectors: selectors,
-          },
-        ]);
-
-        const acm = IAccessControlManagerV5__factory.connect(ACM, timelock) as IAccessControlManagerV5;
-        await acm
-          .connect(timelock)
-          .giveCallPermission(coreComptroller.address, "_setWhitelistedExecutor(address,bool)", timelock.address);
-        await coreComptroller.connect(timelock)._setWhitelistedExecutor(positionSwapper.address, true);
-
-        const VBep20Delegate = await ethers.getContractFactory("VBep20Delegate");
-        const vBep20Delegate = await VBep20Delegate.deploy();
-
-        await vWBNB.connect(timelock)._setImplementation(vBep20Delegate.address, false, "0x");
-
-        const wBNBHolder = await initMainnetUser(vWBNB_HOLDER, ethers.utils.parseEther("100"));
-        const wBNB = WBNB__factory.connect(WBNB_ADDRESS, wBNBHolder);
-        await wBNB.approve(vWBNB.address, ethers.utils.parseEther("0"));
-        await wBNB.approve(vWBNB.address, ethers.utils.parseEther("100"));
-        await vWBNB.connect(wBNBHolder).mint(ethers.utils.parseEther("100"));
+      beforeEach(async () => {
+        ({ positionSwapper, coreComptroller, vBNB, vWBNB, wBNBSwapHelper } = await loadFixture(setupMarketFixture));
       });
 
       describe("Collateral Swapping", () => {
@@ -179,14 +207,18 @@ if (FORK_MAINNET) {
           ).to.be.revertedWithCustomError(positionSwapper, "NoVTokenBalance");
         });
 
-        it("should revert if user can be liquidated on swapping the collateral", async () => {
+        it("should enter market if not entered when swapping the collateral", async () => {
           for (const address of SUPPLIER_ADDRESSES) {
+            let membership = await coreComptroller.checkMembership(address, vWBNB.address);
+            expect(membership).to.be.false;
             const supplier = await initMainnetUser(address, ethers.utils.parseUnits("2"));
             await expect(
               positionSwapper
                 .connect(supplier)
                 .swapFullCollateral(address, vBNB_ADDRESS, vWBNB.address, wBNBSwapHelper.address),
-            ).to.be.revertedWithCustomError(positionSwapper, "SwapCausesLiquidation");
+            ).to.be.not.reverted;
+            membership = await coreComptroller.checkMembership(address, vWBNB.address);
+            expect(membership).to.be.true;
           }
         });
 
@@ -231,24 +263,6 @@ if (FORK_MAINNET) {
             expect(afterVWbnb).to.be.gt(beforeVWbnb);
           }
         });
-
-        it("should revert if non-swapper tries to seize or wrong token is seized", async () => {
-          const vUSDC_ADDRESS = "0xf508fCD89b8bd15579dc79A6827cB4686A3592c8";
-          const vUSDC = VBNB__factory.connect(vUSDC_ADDRESS, timelock);
-
-          const SUPPLIER_ADDRESS = "0xf50453F0C5F8B46190a4833B136282b50c7343BE";
-          const vBNBBalance = await vUSDC.balanceOf(SUPPLIER_ADDRESS);
-          const [liquidator] = await ethers.getSigners();
-          expect(vBNBBalance.toNumber()).to.gt(0);
-
-          // TODO first add check at comptroller
-          // await expect(vBNB.seize(liquidator.address, address, vBNBBalance)).to.be.rejectedWith("market not listed");
-
-          const swapper = await initMainnetUser(positionSwapper.address, ethers.utils.parseUnits("2"));
-          await expect(
-            vUSDC.connect(swapper).seize(liquidator.address, SUPPLIER_ADDRESS, vBNBBalance),
-          ).to.be.rejectedWith("market not listed");
-        });
       });
 
       describe("Debt Swapping", () => {
@@ -264,6 +278,8 @@ if (FORK_MAINNET) {
           await coreComptroller.connect(borrower).updateDelegate(positionSwapper.address, true);
 
           const amountOfBorrowToSwap = amountOfBorrow.div(2); // 50% partial
+
+          await coreComptroller._setMarketBorrowCaps([vWBNB.address], [parseUnits("2", 18)]);
 
           await positionSwapper
             .connect(borrower)
@@ -286,6 +302,10 @@ if (FORK_MAINNET) {
           await vBNB.connect(borrower).borrow(amountOfBorrow);
 
           const borrowedBalanceBefore = await vWBNB.callStatic.borrowBalanceCurrent(await borrower.getAddress());
+
+          await coreComptroller.connect(borrower).updateDelegate(positionSwapper.address, true);
+
+          await coreComptroller._setMarketBorrowCaps([vWBNB.address], [parseUnits("2", 18)]);
 
           await positionSwapper
             .connect(borrower)

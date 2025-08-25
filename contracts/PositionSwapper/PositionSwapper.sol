@@ -243,6 +243,10 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         toUnderlying.forceApprove(address(marketTo), toUnderlyingReceived);
         if (marketTo.mintBehalf(user, toUnderlyingReceived) != 0) revert MintFailed();
 
+        if (COMPTROLLER.checkMembership(user, marketFrom) && !COMPTROLLER.checkMembership(user, marketTo)) {
+            COMPTROLLER.enterMarket(user, address(marketTo));
+        }
+
         _checkAccountSafe(user);
     }
 
