@@ -41,19 +41,19 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     error Unauthorized();
 
     /// @custom:error SeizeFailed
-    error SeizeFailed();
+    error SeizeFailed(uint256 err);
 
     /// @custom:error RedeemFailed
-    error RedeemFailed();
+    error RedeemFailed(uint256 err);
 
     /// @custom:error BorrowFailed
-    error BorrowFailed();
+    error BorrowFailed(uint256 err);
 
     /// @custom:error MintFailed
-    error MintFailed();
+    error MintFailed(uint256 err);
 
     /// @custom:error RepayFailed
-    error RepayFailed();
+    error RepayFailed(uint256 err);
 
     /// @custom:error NoVTokenBalance
     error NoVTokenBalance();
@@ -68,7 +68,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     error NoUnderlyingReceived();
 
     /// @custom:error SwapCausesLiquidation
-    error SwapCausesLiquidation();
+    error SwapCausesLiquidation(uint256 err);
 
     /// @custom:error MarketNotListed
     error MarketNotListed();
@@ -78,6 +78,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
 
     /// @custom:error TransferFailed
     error TransferFailed();
+
+    /// @custom:error EnterMarketFailed
+    error EnterMarketFailed(uint256 err);
 
     /**
      * @notice Constructor to set immutable variables.
@@ -267,7 +270,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
 
         _checkAccountSafe(user);
 
-        if (marketFrom.seize(address(this), user, amountToSeize) != 0) revert SeizeFailed();
+        uint256 err = marketFrom.seize(address(this), user, amountToSeize);
+        if (err != 0) revert SeizeFailed(err);
 
         address toUnderlyingAddress = marketTo.underlying();
         IERC20Upgradeable toUnderlying = IERC20Upgradeable(toUnderlyingAddress);
@@ -275,7 +279,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
 
         if (address(marketFrom) == NATIVE_MARKET) {
             uint256 nativeBalanceBefore = address(this).balance;
-            if (marketFrom.redeem(amountToSeize) != 0) revert RedeemFailed();
+            err = marketFrom.redeem(amountToSeize);
+            if (err != 0) revert RedeemFailed(err);
 
             uint256 receivedNative = address(this).balance - nativeBalanceBefore;
             if (receivedNative == 0) revert NoUnderlyingReceived();
@@ -285,7 +290,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
             IERC20Upgradeable fromUnderlying = IERC20Upgradeable(marketFrom.underlying());
             uint256 fromUnderlyingBalanceBefore = fromUnderlying.balanceOf(address(this));
 
-            if (marketFrom.redeem(amountToSeize) != 0) revert RedeemFailed();
+            err = marketFrom.redeem(amountToSeize);
+            if (err != 0) revert RedeemFailed(err);
 
             uint256 receivedFromToken = fromUnderlying.balanceOf(address(this)) - fromUnderlyingBalanceBefore;
             if (receivedFromToken == 0) revert NoUnderlyingReceived();
@@ -295,15 +301,17 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
             swapHelper.swapInternal(address(fromUnderlying), toUnderlyingAddress, receivedFromToken);
         }
 
-        uint256 toUnderlyingBalanceAfter = toUnderlying.balanceOf(address(this));
-        uint256 toUnderlyingReceived = toUnderlyingBalanceAfter - toUnderlyingBalanceBefore;
+        uint256 toUnderlyingReceived = toUnderlying.balanceOf(address(this)) - toUnderlyingBalanceBefore;
         if (toUnderlyingReceived == 0) revert NoUnderlyingReceived();
 
         toUnderlying.forceApprove(address(marketTo), toUnderlyingReceived);
-        if (marketTo.mintBehalf(user, toUnderlyingReceived) != 0) revert MintFailed();
+
+        err = marketTo.mintBehalf(user, toUnderlyingReceived);
+        if (err != 0) revert MintFailed(err);
 
         if (COMPTROLLER.checkMembership(user, marketFrom) && !COMPTROLLER.checkMembership(user, marketTo)) {
-            COMPTROLLER.enterMarket(user, address(marketTo));
+            err = COMPTROLLER.enterMarket(user, address(marketTo));
+            if (err != 0) revert EnterMarketFailed(err);
         }
 
         _checkAccountSafe(user);
@@ -348,10 +356,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         IERC20Upgradeable toUnderlying = IERC20Upgradeable(toUnderlyingAddress);
         uint256 toUnderlyingBalanceBefore = toUnderlying.balanceOf(address(this));
 
-        if (marketTo.borrowBehalf(user, amountToBorrow) != 0) revert BorrowFailed();
+        uint256 err = marketTo.borrowBehalf(user, amountToBorrow);
+        if (err != 0) revert BorrowFailed(err);
 
-        uint256 toUnderlyingBalanceAfter = toUnderlying.balanceOf(address(this));
-        uint256 receivedToUnderlying = toUnderlyingBalanceAfter - toUnderlyingBalanceBefore;
+        uint256 receivedToUnderlying = toUnderlying.balanceOf(address(this)) - toUnderlyingBalanceBefore;
 
         toUnderlying.forceApprove(address(swapHelper), receivedToUnderlying);
 
@@ -368,7 +376,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
 
             fromUnderlying.forceApprove(address(marketFrom), receivedFromToken);
 
-            if (marketFrom.repayBorrowBehalf(user, receivedFromToken) != 0) revert RepayFailed();
+            err = marketFrom.repayBorrowBehalf(user, receivedFromToken);
+            if (err != 0) revert RepayFailed(err);
         }
 
         _checkAccountSafe(user);
@@ -381,6 +390,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      */
     function _checkAccountSafe(address user) internal view {
         (uint256 err, , uint256 shortfall) = COMPTROLLER.getAccountLiquidity(user);
-        if (err != 0 || shortfall > 0) revert SwapCausesLiquidation();
+        if (err != 0 || shortfall > 0) revert SwapCausesLiquidation(err);
     }
 }
