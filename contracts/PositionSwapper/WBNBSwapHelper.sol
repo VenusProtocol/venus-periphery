@@ -40,6 +40,9 @@ contract WBNBSwapHelper is ISwapHelper {
     /// @notice Error thrown when the `msg.value` does not match the specified amount
     error ValueMismatch();
 
+    /// @notice Error thrown when a transfer of BNB fails
+    error TransferFailed();
+
     /// @notice Restricts function access to only the authorized PositionSwapper
     modifier onlySwapper() {
         if (msg.sender != POSITION_SWAPPER) revert Unauthorized();
@@ -73,7 +76,10 @@ contract WBNBSwapHelper is ISwapHelper {
             IERC20Upgradeable(WBNB).safeTransferFrom(msg.sender, address(this), amount);
             IERC20Upgradeable(address(WBNB)).forceApprove(address(WBNB), amount);
             WBNB.withdraw(amount);
-            payable(msg.sender).transfer(amount);
+
+            (bool success, ) = payable(msg.sender).call{ value: amount }("");
+            if (!success) revert TransferFailed();
+
             emit SwappedToBNB(amount);
         }
     }
