@@ -3,10 +3,11 @@ pragma solidity 0.8.25;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { IVToken, IComptroller, IVBNB } from "../Interfaces.sol";
 import { ISwapHelper } from "./ISwapHelper.sol";
 
-contract PositionSwapper is Ownable2StepUpgradeable {
+contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @notice The Comptroller used for permission and liquidity checks.
@@ -83,6 +84,7 @@ contract PositionSwapper is Ownable2StepUpgradeable {
 
     function initialize() external initializer {
         __Ownable2Step_init();
+        __ReentrancyGuard_init();
     }
 
     /**
@@ -102,7 +104,7 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         IVToken marketFrom,
         IVToken marketTo,
         ISwapHelper helper
-    ) external payable {
+    ) external payable nonReentrant {
         uint256 userBalance = marketFrom.balanceOf(user);
         if (userBalance == 0) revert NoVTokenBalance();
         _swapCollateral(user, marketFrom, marketTo, userBalance, helper);
@@ -123,7 +125,7 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         IVToken marketTo,
         uint256 amountToSwap,
         ISwapHelper helper
-    ) external payable {
+    ) external payable nonReentrant {
         if (amountToSwap == 0) revert ZeroAmount();
         if (amountToSwap > marketFrom.balanceOf(user)) revert NoVTokenBalance();
         _swapCollateral(user, marketFrom, marketTo, amountToSwap, helper);
@@ -137,7 +139,12 @@ contract PositionSwapper is Ownable2StepUpgradeable {
      * @param marketTo The vToken market into which the new debt is borrowed.
      * @param helper The ISwapHelper contract for performing the token swap.
      */
-    function swapFullDebt(address user, IVToken marketFrom, IVToken marketTo, ISwapHelper helper) external payable {
+    function swapFullDebt(
+        address user,
+        IVToken marketFrom,
+        IVToken marketTo,
+        ISwapHelper helper
+    ) external payable nonReentrant {
         uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
         if (borrowBalance == 0) revert NoBorrowBalance();
         _swapDebt(user, marketFrom, marketTo, borrowBalance, helper);
@@ -158,7 +165,7 @@ contract PositionSwapper is Ownable2StepUpgradeable {
         IVToken marketTo,
         uint256 amountToSwap,
         ISwapHelper helper
-    ) external payable {
+    ) external payable nonReentrant {
         if (amountToSwap == 0) revert ZeroAmount();
         if (amountToSwap > marketFrom.borrowBalanceCurrent(user)) revert NoBorrowBalance();
         _swapDebt(user, marketFrom, marketTo, amountToSwap, helper);
