@@ -7,6 +7,12 @@ import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/
 import { IVToken, IComptroller, IVBNB } from "../Interfaces.sol";
 import { ISwapHelper } from "./ISwapHelper.sol";
 
+/**
+ * @title PositionSwapper
+ * @author Venus
+ * @notice A contract to facilitate swapping collateral and debt positions between different vToken markets.
+ * @custom:security-contact https://github.com/VenusProtocol/venus-periphery
+ */
 contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
@@ -73,6 +79,12 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @custom:error TransferFailed
     error TransferFailed();
 
+    /**
+     * @notice Constructor to set immutable variables.
+     * @param _comptroller The address of the Comptroller contract.
+     * @param _nativeMarket The address of the native market (e.g., vBNB).
+     * @custom:error Throw ZeroAddress if comptroller address is zero.
+     */
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _comptroller, address _nativeMarket) {
         if (_comptroller == address(0)) revert ZeroAddress();
@@ -82,6 +94,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         _disableInitializers();
     }
 
+    /**
+     * @notice Initializes the contract, setting the deployer as the initial owner.
+     */
     function initialize() external initializer {
         __Ownable2Step_init();
         __ReentrancyGuard_init();
@@ -98,6 +113,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketFrom The vToken market to seize from.
      * @param marketTo The vToken market to mint into.
      * @param helper The ISwapHelper contract for performing the token swap.
+     * @custom:error Throw NoVTokenBalance The user has no vToken balance in the marketFrom.
+     * @custom:event Emits CollateralSwapped event.
      */
     function swapFullCollateral(
         address user,
@@ -118,6 +135,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketTo The vToken market to mint into.
      * @param amountToSwap The amount of vTokens to seize and swap.
      * @param helper The ISwapHelper contract for performing the token swap.
+     * @custom:error Throw NoVTokenBalance The user has insufficient vToken balance in the marketFrom.
+     * @custom:error Throw ZeroAmount The amountToSwap is zero.
+     * @custom:event Emits CollateralSwapped event.
      */
     function swapCollateralWithAmount(
         address user,
@@ -138,6 +158,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketFrom The vToken market from which debt is swapped.
      * @param marketTo The vToken market into which the new debt is borrowed.
      * @param helper The ISwapHelper contract for performing the token swap.
+     * @custom:error Throw NoBorrowBalance The user has no borrow balance in the marketFrom.
+     * @custom:event Emits DebtSwapped event.
      */
     function swapFullDebt(
         address user,
@@ -158,6 +180,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketTo The vToken market into which the new debt is borrowed.
      * @param amountToSwap The amount of debt to swap.
      * @param helper The ISwapHelper contract for performing the token swap.
+     * @custom:error Throw NoBorrowBalance The user has insufficient borrow balance in the marketFrom.
+     * @custom:error Throw ZeroAmount The amountToSwap is zero.
+     * @custom:event Emits DebtSwapped event.
      */
     function swapDebtWithAmount(
         address user,
@@ -175,6 +200,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /**
      * @notice Allows the owner to sweep leftover ERC-20 tokens from the contract.
      * @param token The token to sweep.
+     * @custom:event Emits SweepToken event.
      */
     function sweepToken(IERC20Upgradeable token) external onlyOwner {
         uint256 balance = token.balanceOf(address(this));
@@ -186,6 +212,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
 
     /**
      * @notice Allows the owner to sweep leftover native tokens (e.g., BNB) from the contract.
+     * @custom:event Emits SweepToken event.
      */
     function sweepNative() external onlyOwner {
         uint256 balance = address(this).balance;
@@ -200,6 +227,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketTo The vToken market to swap to.
      * @param helper The ISwapHelper contract used for the swap.
      * @param status The approval status to set (true = approved, false = not approved).
+     * @custom:event Emits ApprovedPairUpdated event.
      */
     function setApprovedPair(address marketFrom, address marketTo, address helper, bool status) external onlyOwner {
         emit ApprovedPairUpdated(marketFrom, marketTo, helper, approvedPairs[marketFrom][marketTo][helper], status);
@@ -213,6 +241,12 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketTo The vToken market into which the swapped collateral is minted.
      * @param amountToSeize The amount of vTokens to seize and convert.
      * @param swapHelper The swap helper contract used to perform the token conversion.
+     * @custom:error Throw MarketNotListed if one of the specified markets is not listed in the Comptroller.
+     * @custom:error Throw Unauthorized if the caller is neither the user nor an approved delegate.
+     * @custom:error Throw SeizeFailed if the seize operation fails.
+     * @custom:error Throw RedeemFailed if the redeem operation fails.
+     * @custom:error Throw NoUnderlyingReceived if no underlying tokens are received from the swap.
+     * @custom:error Throw MintFailed if the mint operation fails.
      */
     function _swapCollateral(
         address user,
@@ -282,6 +316,11 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketTo The vToken market into which the new debt is borrowed.
      * @param amountToBorrow The amount of new debt to borrow.
      * @param swapHelper The swap helper contract used to perform the token conversion.
+     * @custom:error Throw MarketNotListed if one of the specified markets is not listed in the Comptroller.
+     * @custom:error Throw Unauthorized if the caller is neither the user nor an approved delegate.
+     * @custom:error Throw BorrowFailed if the borrow operation fails.
+     * @custom:error Throw NoUnderlyingReceived if no underlying tokens are received from the swap.
+     * @custom:error Throw RepayFailed if the repay operation fails.
      */
     function _swapDebt(
         address user,
@@ -338,6 +377,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /**
      * @dev Checks if a user's account is safe post-swap.
      * @param user The address to check.
+     * @custom:error Throw SwapCausesLiquidation if the user's account is undercollateralized.
      */
     function _checkAccountSafe(address user) internal view {
         (uint256 err, , uint256 shortfall) = COMPTROLLER.getAccountLiquidity(user);

@@ -67,6 +67,10 @@ contract WBNBSwapHelper is ISwapHelper {
      * @dev Only callable by PositionSwapper.
      * @param tokenFrom Address of the input token (must be zero for native BNB)
      * @param amount Amount to swap (must match `msg.value` for native BNB)
+     * @custom:error TokenNotSupported if `tokenFrom` is neither zero (native BNB) nor WBNB address.
+     * @custom:error ValueMismatch if `msg.value` does not match `amount` when `tokenFrom` is zero,
+     *  or if `msg.value` is non-zero when `tokenFrom` is WBNB address.
+     * @custom:error TransferFailed if the transfer of unwrapped BNB to the swapper fails.
      */
     function swapInternal(address tokenFrom, address, uint256 amount) external payable override onlySwapper {
         if (tokenFrom != address(0) && tokenFrom != address(WBNB)) revert TokenNotSupported();
