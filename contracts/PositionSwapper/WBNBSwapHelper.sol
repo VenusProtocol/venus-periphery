@@ -43,6 +43,9 @@ contract WBNBSwapHelper is ISwapHelper {
     /// @notice Error thrown when a transfer of BNB fails
     error TransferFailed();
 
+    /// @notice Error thrown when a zero address is provided where it is not allowed
+    error ZeroAddress();
+
     /// @notice Restricts function access to only the authorized PositionSwapper
     modifier onlySwapper() {
         if (msg.sender != POSITION_SWAPPER) revert Unauthorized();
@@ -50,6 +53,8 @@ contract WBNBSwapHelper is ISwapHelper {
     }
 
     constructor(address _wbnb, address _swapper) {
+        if (_wbnb == address(0) || _swapper == address(0)) revert ZeroAddress();
+
         WBNB = IWBNB(_wbnb);
         POSITION_SWAPPER = _swapper;
     }

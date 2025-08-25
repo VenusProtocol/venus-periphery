@@ -66,8 +66,13 @@ contract PositionSwapper is Ownable2StepUpgradeable {
     /// @custom:error MarketNotListed
     error MarketNotListed();
 
+    /// @custom:error ZeroAddress
+    error ZeroAddress();
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _comptroller, address _nativeMarket) {
+        if (_comptroller == address(0)) revert ZeroAddress();
+
         COMPTROLLER = IComptroller(_comptroller);
         NATIVE_MARKET = _nativeMarket;
         _disableInitializers();
