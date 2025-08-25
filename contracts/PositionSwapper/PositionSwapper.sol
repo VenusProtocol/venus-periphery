@@ -69,6 +69,9 @@ contract PositionSwapper is Ownable2StepUpgradeable {
     /// @custom:error ZeroAddress
     error ZeroAddress();
 
+    /// @custom:error TransferFailed
+    error TransferFailed();
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _comptroller, address _nativeMarket) {
         if (_comptroller == address(0)) revert ZeroAddress();
@@ -172,6 +175,16 @@ contract PositionSwapper is Ownable2StepUpgradeable {
             token.safeTransfer(owner(), balance);
             emit SweepToken(address(token), owner(), balance);
         }
+    }
+
+    /**
+     * @notice Allows the owner to sweep leftover native tokens (e.g., BNB) from the contract.
+     */
+    function sweepNative() external onlyOwner {
+        uint256 balance = address(this).balance;
+        (bool success, ) = payable(owner()).call{ value: balance }("");
+        if (!success) revert TransferFailed();
+        emit SweepToken(address(0), owner(), balance);
     }
 
     /**
