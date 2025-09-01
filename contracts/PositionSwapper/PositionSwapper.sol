@@ -34,6 +34,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @notice Emitted when the owner sweeps leftover ERC-20 tokens.
     event SweepToken(address indexed token, address indexed receiver, uint256 amount);
 
+    /// @notice Emitted when the owner sweeps leftover native tokens (e.g., BNB).
+    event SweepNative(address indexed receiver, uint256 amount);
+
     /// @notice Emitted when an approved pair is updated.
     event ApprovedPairUpdated(address marketFrom, address marketTo, address helper, bool oldStatus, bool newStatus);
 
@@ -222,9 +225,11 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      */
     function sweepNative() external onlyOwner {
         uint256 balance = address(this).balance;
-        (bool success, ) = payable(owner()).call{ value: balance }("");
-        if (!success) revert TransferFailed();
-        emit SweepToken(address(0), owner(), balance);
+        if (balance > 0) {
+            (bool success, ) = payable(owner()).call{ value: balance }("");
+            if (!success) revert TransferFailed();
+            emit SweepNative(owner(), balance);
+        }
     }
 
     /**
