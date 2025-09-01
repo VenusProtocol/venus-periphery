@@ -82,6 +82,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @custom:error EnterMarketFailed
     error EnterMarketFailed(uint256 err);
 
+    /// @custom:error NotApprovedHelper
+    error NotApprovedHelper();
+
     /**
      * @notice Constructor to set immutable variables.
      * @param _comptroller The address of the Comptroller contract.
@@ -244,6 +247,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketTo The vToken market into which the swapped collateral is minted.
      * @param amountToSeize The amount of vTokens to seize and convert.
      * @param swapHelper The swap helper contract used to perform the token conversion.
+     * @custom:error Throw NotApprovedHelper if the specified swap pair and helper are not approved.
      * @custom:error Throw MarketNotListed if one of the specified markets is not listed in the Comptroller.
      * @custom:error Throw Unauthorized if the caller is neither the user nor an approved delegate.
      * @custom:error Throw SeizeFailed if the seize operation fails.
@@ -258,6 +262,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         uint256 amountToSeize,
         ISwapHelper swapHelper
     ) internal {
+        if (!approvedPairs[address(marketFrom)][address(marketTo)][address(swapHelper)]) {
+            revert NotApprovedHelper();
+        }
+
         (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
         if (!isMarketListed) revert MarketNotListed();
 
@@ -324,6 +332,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketTo The vToken market into which the new debt is borrowed.
      * @param amountToBorrow The amount of new debt to borrow.
      * @param swapHelper The swap helper contract used to perform the token conversion.
+     * @custom:error Throw NotApprovedHelper if the swap helper is not approved for the given markets.
      * @custom:error Throw MarketNotListed if one of the specified markets is not listed in the Comptroller.
      * @custom:error Throw Unauthorized if the caller is neither the user nor an approved delegate.
      * @custom:error Throw BorrowFailed if the borrow operation fails.
@@ -337,6 +346,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         uint256 amountToBorrow,
         ISwapHelper swapHelper
     ) internal {
+        if (!approvedPairs[address(marketFrom)][address(marketTo)][address(swapHelper)]) {
+            revert NotApprovedHelper();
+        }
+
         (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
         if (!isMarketListed) revert MarketNotListed();
 
