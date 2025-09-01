@@ -360,9 +360,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
             revert Unauthorized();
         }
 
-        if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
-            revert Unauthorized();
-        }
         _checkAccountSafe(user);
 
         address toUnderlyingAddress = marketTo.underlying();
