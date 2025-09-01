@@ -3,7 +3,7 @@ pragma solidity 0.8.25;
 
 import { IWBNB } from "../Interfaces.sol";
 import { ISwapHelper } from "./ISwapHelper.sol";
-import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import { IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 /**
  * @title WBNBSwapHelper
@@ -11,8 +11,6 @@ import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts
  * @dev Only supports native token (BNB) wrapping into WBNB and unwrapping WBNB into BNB. Meant to be used only by the PositionSwapper.
  */
 contract WBNBSwapHelper is ISwapHelper {
-    using SafeERC20Upgradeable for IERC20Upgradeable;
-
     /// @notice Address of the authorized PositionSwapper contract
     address public immutable POSITION_SWAPPER;
 
@@ -40,6 +38,12 @@ contract WBNBSwapHelper is ISwapHelper {
     /// @notice Error thrown when the `msg.value` does not match the specified amount
     error ValueMismatch();
 
+    /// @notice Error thrown when a transfer of BNB fails
+    error TransferFailed();
+
+    /// @notice Error thrown when a zero address is provided where it is not allowed
+    error ZeroAddress();
+
     /// @notice Restricts function access to only the authorized PositionSwapper
     modifier onlySwapper() {
         if (msg.sender != POSITION_SWAPPER) revert Unauthorized();
@@ -47,6 +51,8 @@ contract WBNBSwapHelper is ISwapHelper {
     }
 
     constructor(address _wbnb, address _swapper) {
+        if (_wbnb == address(0) || _swapper == address(0)) revert ZeroAddress();
+
         WBNB = IWBNB(_wbnb);
         POSITION_SWAPPER = _swapper;
     }
@@ -59,20 +65,27 @@ contract WBNBSwapHelper is ISwapHelper {
      * @dev Only callable by PositionSwapper.
      * @param tokenFrom Address of the input token (must be zero for native BNB)
      * @param amount Amount to swap (must match `msg.value` for native BNB)
+     * @custom:error TokenNotSupported if `tokenFrom` is neither zero (native BNB) nor WBNB address.
+     * @custom:error ValueMismatch if `msg.value` does not match `amount` when `tokenFrom` is zero,
+     *  or if `msg.value` is non-zero when `tokenFrom` is WBNB address.
+     * @custom:error TransferFailed if the transfer of unwrapped BNB to the swapper fails.
      */
     function swapInternal(address tokenFrom, address, uint256 amount) external payable override onlySwapper {
         if (tokenFrom != address(0) && tokenFrom != address(WBNB)) revert TokenNotSupported();
         if (tokenFrom == address(0) && msg.value != amount) revert ValueMismatch();
+        if (tokenFrom != address(0) && msg.value != 0) revert ValueMismatch();
 
         if (tokenFrom == address(0)) {
             WBNB.deposit{ value: amount }();
             WBNB.transfer(msg.sender, amount);
             emit SwappedToWBNB(amount);
         } else {
-            IERC20Upgradeable(WBNB).safeTransferFrom(msg.sender, address(this), amount);
-            IERC20Upgradeable(address(WBNB)).forceApprove(address(WBNB), amount);
+            IERC20Upgradeable(WBNB).transferFrom(msg.sender, address(this), amount);
             WBNB.withdraw(amount);
-            payable(msg.sender).transfer(amount);
+
+            (bool success, ) = payable(msg.sender).call{ value: amount }("");
+            if (!success) revert TransferFailed();
+
             emit SwappedToBNB(amount);
         }
     }
