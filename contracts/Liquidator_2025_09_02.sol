@@ -10,9 +10,6 @@ import { IVToken, ILiquidator, IResilientOracle, IComptroller } from "./Interfac
 contract Liquidator_2025_09_02 {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
-    uint256 constant MAX_ROUNDS = 20;
-    uint256 constant MIN_REPAYMENT_AMOUNT = 1e12;
-
     address constant GUARDIAN = 0x3a3284dC0FaFfb0b5F0d074c4C704D14326C98cF;
     address constant RECEIVER = 0xC753FB97Ed8E1c6081699570b57115D28F2232FA;
 
@@ -40,18 +37,14 @@ contract Liquidator_2025_09_02 {
         _;
     }
 
-    function runLiquidation() external onlyGuardian {
+    function runLiquidation(IVToken vTokenCollateral, uint256 rounds) external onlyGuardian {
         BTCB.forceApprove(address(LIQUIDATOR), 0);
         BTCB.forceApprove(address(LIQUIDATOR), type(uint256).max);
 
-        _fetchPrices();
-
-        _liquidate(VUSDC);
-        _liquidate(VUSDT);
-        _liquidate(VWBETH);
-        _liquidate(VFDUSD);
-
-        _transferCollateral();
+        _fetchPrice(VBTC);
+        _fetchPrice(vTokenCollateral);
+        _liquidate(vTokenCollateral, rounds);
+        _transferAll(vTokenCollateral);
     }
 
     function borrowOnBehalfAndRepay() external onlyGuardian {
@@ -62,6 +55,10 @@ contract Liquidator_2025_09_02 {
         BTCB.forceApprove(address(VBTC), 0);
         BTCB.forceApprove(address(VBTC), type(uint256).max);
         VBTC.repayBorrowBehalf(EXPLOITER, exploiterShortfallBtc);
+    }
+
+    function sweepBtc(address refundReceiver) external onlyGuardian {
+        BTCB.safeTransfer(refundReceiver, BTCB.balanceOf(address(this)));
     }
 
     function _fetchPrices() internal {
@@ -77,12 +74,9 @@ contract Liquidator_2025_09_02 {
         prices[vToken] = ORACLE.getUnderlyingPrice(address(vToken));
     }
 
-    function _liquidate(IVToken vTokenCollateral) internal {
-        for (uint256 i; i < MAX_ROUNDS; ++i) {
+    function _liquidate(IVToken vTokenCollateral, uint256 rounds) internal {
+        for (uint256 i; i < rounds; ++i) {
             uint256 repayAmountBtc = _computeRepayAmount(vTokenCollateral);
-            if (repayAmountBtc < MIN_REPAYMENT_AMOUNT) {
-                break;
-            }
             LIQUIDATOR.liquidateBorrow(address(VBTC), EXPLOITER, repayAmountBtc, vTokenCollateral);
         }
     }

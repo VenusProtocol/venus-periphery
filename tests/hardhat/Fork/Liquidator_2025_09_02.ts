@@ -26,19 +26,18 @@ const RESILIENT_ORACLE = "0x6592b5DE802159F3E74B2486b091D11a8256ab8A";
 const GUARDIAN_2 = "0x1C2CAc6ec528c20800B2fe734820D87b581eAA6B";
 const GUARDIAN_3 = "0x3a3284dC0FaFfb0b5F0d074c4C704D14326C98cF";
 const RECEIVER = "0xC753FB97Ed8E1c6081699570b57115D28F2232FA";
+const EXPLOITER = "0x7fd8f825e905c771285f510d8e428a2b69a6202a";
+const BTCB_HOLDER = "0xF977814e90dA44bFA03b6295A0616a897441aceC";
 
 const VUSDC = "0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8";
 const VUSDT = "0xfD5840Cd36d94D7229439859C0112a4185BC0255";
 const VBTC = "0x882C173bC7Ff3b7786CA16dfeD3DFFfb9Ee7847B";
 const VWBETH = "0x6CFdEc747f37DAf3b87a35a1D9c8AD3063A1A8A0";
 const VFDUSD = "0xC4eF4229FEc74Ccfe17B2bdeF7715fAC740BA0ba";
-
-const EXPLOITER = "0x7fd8f825e905c771285f510d8e428a2b69a6202a";
-//const LIQUIDATOR = "0x0870793286aada55d39ce7f82fb2766e8004cf43";
 const BTCB = "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c";
-const TEMPORARY_BTCB_PRICE = parseUnits("10000000000", 18); // 10 trilion
 
-const BTCB_HOLDER = "0xF977814e90dA44bFA03b6295A0616a897441aceC";
+const INITIAL_BTC = parseUnits("1", 18);
+const TEMPORARY_BTCB_PRICE = parseUnits("1000000000000", 18); // 1000 trillion
 
 const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 
@@ -95,15 +94,34 @@ if (FORK_MAINNET) {
           expect(await oracle.getPrice(BTCB)).to.equal(TEMPORARY_BTCB_PRICE);
         });
 
+        it("sends BTC to the contract", async () => {
+          await btcb.transfer(liquidator.address, INITIAL_BTC);
+        });
+
         it("unpauses the protocol", async () => {
           await comptroller._setProtocolPaused(false);
         });
+      });
 
-        it("liquidates the account", async () => {
-          await btcb.transfer(liquidator.address, parseUnits("1", 18));
-          await liquidator.runLiquidation();
+      describe("Liquidation", () => {
+        it("liquidates the account VUSDC", async () => {
+          await liquidator.runLiquidation(VUSDC, 20);
         });
 
+        it("liquidates the account VUSDT", async () => {
+          await liquidator.runLiquidation(VUSDT, 20);
+        });
+
+        it("liquidates the account VWBETH", async () => {
+          await liquidator.runLiquidation(VWBETH, 20);
+        });
+
+        it("liquidates the account VFDUSD", async () => {
+          await liquidator.runLiquidation(VFDUSD, 16);
+        });
+      });
+
+      describe("Repayment", () => {
         it("restores the price for BTC", async () => {
           await chainlinkOracle.setDirectPrice(BTCB, 0);
           await redStoneOracle.setDirectPrice(BTCB, 0);
@@ -113,59 +131,101 @@ if (FORK_MAINNET) {
         it("borrows on behalf and repays", async () => {
           await liquidator.borrowOnBehalfAndRepay();
         });
+      });
 
-        it("has expected EXPLOITER position", async () => {
-          // Collateral
+      describe("Resulting state", () => {
+        it("has expected Exploiter vUSDC position", async () => {
           expect(await vUSDC.callStatic.balanceOfUnderlying(EXPLOITER)).to.equal(
-            parseUnits("13968.949100260402882842", 18),
-          );
-          expect(await vUSDT.callStatic.balanceOfUnderlying(EXPLOITER)).to.equal(
-            parseUnits("19362.237841899435875077", 18),
-          );
-          expect(await vWBETH.callStatic.balanceOfUnderlying(EXPLOITER)).to.equal(
-            parseUnits("3.656252356647592627", 18),
-          );
-          expect(await vFDUSD.callStatic.balanceOfUnderlying(EXPLOITER)).to.equal(
-            parseUnits("19480.400091676583240617", 18),
-          );
-
-          // Debt
-          expect(await vBTC.callStatic.borrowBalanceCurrent(EXPLOITER)).to.equal(
-            parseUnits("0.496893295423017260", 18),
+            parseUnits("6.820777802687069676", 18),
           );
         });
 
-        it("has expected EXPLOITER account liquidity", async () => {
+        it("has expected Exploiter vUSDT position", async () => {
+          expect(await vUSDT.callStatic.balanceOfUnderlying(EXPLOITER)).to.equal(
+            parseUnits("18.908436068543799005", 18),
+          );
+        });
+
+        it("has expected Exploiter vWBETH position", async () => {
+          expect(await vWBETH.callStatic.balanceOfUnderlying(EXPLOITER)).to.equal(
+            parseUnits("0.003570586068155202", 18),
+          );
+        });
+
+        it("has expected Exploiter vFDUSD position", async () => {
+          expect(await vFDUSD.callStatic.balanceOfUnderlying(EXPLOITER)).to.equal(
+            parseUnits("4.755958113852844495", 18),
+          );
+        });
+
+        it("has expected Exploiter vBTC debt", async () => {
+          expect(await vBTC.callStatic.borrowBalanceCurrent(EXPLOITER)).to.equal(
+            parseUnits("0.000339152869062238", 18),
+          );
+        });
+
+        it("has expected Exploiter account liquidity", async () => {
           const [, liquidity, shortfall] = await comptroller.getAccountLiquidity(EXPLOITER);
           expect(liquidity).to.equal(0);
-          expect(shortfall).to.equal(parseUnits("0.028525794110053206", 18));
+          expect(shortfall).to.equal(parseUnits("0.028526303037458189", 18));
         });
 
-        it("has expected RECEIVER position", async () => {
-          // Collateral
+        it("has expected Receiver vUSDC position", async () => {
           expect(await vUSDC.callStatic.balanceOfUnderlying(RECEIVER)).to.equal(
-            parseUnits("6813672.399757996530648070", 18),
-          );
-          expect(await vUSDT.callStatic.balanceOfUnderlying(RECEIVER)).to.equal(
-            parseUnits("18907225.252604659342784745", 18),
-          );
-          expect(await vWBETH.callStatic.balanceOfUnderlying(RECEIVER)).to.equal(
-            parseUnits("3570.330404710996684065", 18),
-          );
-          expect(await vFDUSD.callStatic.balanceOfUnderlying(RECEIVER)).to.equal(
-            parseUnits("278923.910403187432503802", 18),
-          );
-
-          // Debt
-          expect(await vBTC.callStatic.borrowBalanceCurrent(RECEIVER)).to.equal(
-            parseUnits("285.221144281425248393", 18),
+            parseUnits("6826999.907515237717892909", 18),
           );
         });
 
-        it("has expected RECEIVER account liquidity", async () => {
+        it("has expected Receiver vUSDT position", async () => {
+          expect(await vUSDT.callStatic.balanceOfUnderlying(RECEIVER)).to.equal(
+            parseUnits("18925689.407083094150852367", 18),
+          );
+        });
+
+        it("has expected Receiver vWBETH position", async () => {
+          expect(await vWBETH.callStatic.balanceOfUnderlying(RECEIVER)).to.equal(
+            parseUnits("3573.817055542577247926", 18),
+          );
+        });
+
+        it("has expected Receiver vFDUSD position", async () => {
+          expect(await vFDUSD.callStatic.balanceOfUnderlying(RECEIVER)).to.equal(
+            parseUnits("297514.312620078699045314", 18),
+          );
+        });
+
+        it("has expected Receiver vBTC debt", async () => {
+          expect(await vBTC.callStatic.borrowBalanceCurrent(RECEIVER)).to.equal(
+            parseUnits("285.721734327266357527", 18),
+          );
+        });
+
+        it("has expected Receiver account liquidity", async () => {
           const [, liquidity, shortfall] = await comptroller.getAccountLiquidity(RECEIVER);
-          expect(liquidity).to.equal(parseUnits("2621415.543746073244517505", 18));
+          expect(liquidity).to.equal(parseUnits("2618451.254599103153302749", 18));
           expect(shortfall).to.equal(0);
+        });
+
+        it("spends 0.000040828330133855 BTC", async () => {
+          const balanceAfter = await btcb.balanceOf(liquidator.address);
+          expect(INITIAL_BTC.sub(balanceAfter)).to.equal(parseUnits("0.000040828330133855", 18));
+        });
+
+        it("has no vTokens", async () => {
+          expect(await vBTC.balanceOf(liquidator.address)).to.equal(0);
+          expect(await vFDUSD.balanceOf(liquidator.address)).to.equal(0);
+          expect(await vUSDC.balanceOf(liquidator.address)).to.equal(0);
+          expect(await vUSDT.balanceOf(liquidator.address)).to.equal(0);
+          expect(await vWBETH.balanceOf(liquidator.address)).to.equal(0);
+        });
+      });
+
+      describe("Sweep", () => {
+        it("sweeps the remaining BTC to a specified address", async () => {
+          const spent = parseUnits("0.000040828330133855", 18);
+          await liquidator.sweepBtc(RECEIVER);
+          expect(await btcb.balanceOf(liquidator.address)).to.equal(0);
+          expect(await btcb.balanceOf(RECEIVER)).to.equal(INITIAL_BTC.sub(spent));
         });
       });
     });
