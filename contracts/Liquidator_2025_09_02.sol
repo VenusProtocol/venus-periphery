@@ -37,14 +37,16 @@ contract Liquidator_2025_09_02 {
         _;
     }
 
-    function runLiquidation(IVToken vTokenCollateral, uint256 rounds) external onlyGuardian {
+    function runLiquidation() external onlyGuardian {
         BTCB.forceApprove(address(LIQUIDATOR), 0);
         BTCB.forceApprove(address(LIQUIDATOR), type(uint256).max);
 
-        _fetchPrice(VBTC);
-        _fetchPrice(vTokenCollateral);
-        _liquidate(vTokenCollateral, rounds);
-        _transferAll(vTokenCollateral);
+        _fetchPrices();
+        _liquidate(VUSDC);
+        _liquidate(VUSDT);
+        _liquidate(VWBETH);
+        _liquidate(VFDUSD);
+        _transferCollateral();
     }
 
     function borrowOnBehalfAndRepay() external onlyGuardian {
@@ -66,11 +68,17 @@ contract Liquidator_2025_09_02 {
         prices[vToken] = ORACLE.getUnderlyingPrice(address(vToken));
     }
 
-    function _liquidate(IVToken vTokenCollateral, uint256 rounds) internal {
-        for (uint256 i; i < rounds; ++i) {
-            uint256 repayAmountBtc = _computeRepayAmount(vTokenCollateral);
-            LIQUIDATOR.liquidateBorrow(address(VBTC), EXPLOITER, repayAmountBtc, vTokenCollateral);
-        }
+    function _fetchPrices() internal {
+        _fetchPrice(VUSDC);
+        _fetchPrice(VUSDT);
+        _fetchPrice(VWBETH);
+        _fetchPrice(VFDUSD);
+        _fetchPrice(VBTC);
+    }
+
+    function _liquidate(IVToken vTokenCollateral) internal {
+        uint256 repayAmountBtc = _computeRepayAmount(vTokenCollateral);
+        LIQUIDATOR.liquidateBorrow(address(VBTC), EXPLOITER, repayAmountBtc, vTokenCollateral);
     }
 
     function _computeRepayAmount(IVToken vTokenCollateral) internal returns (uint256) {
@@ -80,11 +88,17 @@ contract Liquidator_2025_09_02 {
         uint256 btcPrice = prices[VBTC];
         uint256 liquidationIncentive = 1.1e18;
 
-        uint256 vTokensToSeize = vTokenBalance / 2; // adjust for the close factor
-        uint256 underlyingToSeize = (vTokensToSeize * exchangeRate) / 1e18;
+        uint256 underlyingToSeize = (vTokenBalance * exchangeRate) / 1e18;
         uint256 usdToSeize = (underlyingToSeize * collateralPrice) / 1e18;
         uint256 usdToRepay = (usdToSeize * 1e18) / liquidationIncentive;
         return (usdToRepay * 1e18) / btcPrice;
+    }
+
+    function _transferCollateral() internal {
+        _transferAll(VUSDC);
+        _transferAll(VUSDT);
+        _transferAll(VWBETH);
+        _transferAll(VFDUSD);
     }
 
     function _transferAll(IVToken vToken) internal {
