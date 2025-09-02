@@ -119,6 +119,13 @@ const config: HardhatUserConfig = {
             blockNumber: process.env.HARDHAT_FORK_NUMBER ? parseInt(process.env.HARDHAT_FORK_NUMBER) : undefined,
           }
         : undefined,
+      chains: {
+        56: {
+          hardforkHistory: {
+            cancun: 0,
+          },
+        }
+      }
     },
     development: {
       url: "http://127.0.0.1:8545/",
