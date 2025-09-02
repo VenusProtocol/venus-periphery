@@ -23,6 +23,8 @@ interface IVToken is IERC20Upgradeable {
 
     function repayBorrowBehalf(address borrower, uint repayAmount) external returns (uint256);
 
+    function exchangeRateCurrent() external returns (uint256);
+
     function comptroller() external view returns (IComptroller);
 
     function borrowBalanceStored(address account) external view returns (uint256);
@@ -76,4 +78,23 @@ interface IWBNB is IERC20Upgradeable {
     function deposit() external payable;
 
     function withdraw(uint256 amount) external;
+}
+
+interface ILiquidator {
+    function liquidateBorrow(
+        address vToken,
+        address borrower,
+        uint256 repayAmount,
+        IVToken vTokenCollateral
+    ) external payable;
+}
+
+interface IResilientOracle {
+    function getPrice(address asset) external view returns (uint256);
+
+    function updatePrice(address vToken) external;
+
+    function updateAssetPrice(address asset) external;
+
+    function getUnderlyingPrice(address vToken) external view returns (uint256);
 }
