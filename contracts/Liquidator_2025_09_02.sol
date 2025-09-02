@@ -61,14 +61,6 @@ contract Liquidator_2025_09_02 {
         BTCB.safeTransfer(refundReceiver, BTCB.balanceOf(address(this)));
     }
 
-    function _fetchPrices() internal {
-        _fetchPrice(VUSDC);
-        _fetchPrice(VUSDT);
-        _fetchPrice(VWBETH);
-        _fetchPrice(VFDUSD);
-        _fetchPrice(VBTC);
-    }
-
     function _fetchPrice(IVToken vToken) internal {
         ORACLE.updatePrice(address(vToken));
         prices[vToken] = ORACLE.getUnderlyingPrice(address(vToken));
@@ -93,13 +85,6 @@ contract Liquidator_2025_09_02 {
         uint256 usdToSeize = (underlyingToSeize * collateralPrice) / 1e18;
         uint256 usdToRepay = (usdToSeize * 1e18) / liquidationIncentive;
         return (usdToRepay * 1e18) / btcPrice;
-    }
-
-    function _transferCollateral() internal {
-        _transferAll(VUSDC);
-        _transferAll(VUSDT);
-        _transferAll(VWBETH);
-        _transferAll(VFDUSD);
     }
 
     function _transferAll(IVToken vToken) internal {
