@@ -29,7 +29,7 @@ contract MarketConfigurationAggregator {
         bool borrowAllowed;
     }
 
-    /// @notice The Comptroller contract 
+    /// @notice The Comptroller contract
     IComptroller public immutable COMPTROLLER;
 
     /**
