@@ -124,7 +124,7 @@ contract WBNBSwapHelper is Ownable2Step, ISwapHelper {
             WBNB.transfer(msg.sender, amount);
             emit SwappedToWBNB(amount);
         } else {
-            IERC20Upgradeable(WBNB).transferFrom(msg.sender, address(this), amount);
+            WBNB.transferFrom(msg.sender, address(this), amount);
             WBNB.withdraw(amount);
 
             (bool success, ) = payable(msg.sender).call{ value: amount }("");
