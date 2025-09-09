@@ -97,6 +97,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _comptroller, address _nativeMarket) {
         if (_comptroller == address(0)) revert ZeroAddress();
+        if (_nativeMarket == address(0)) revert ZeroAddress();
 
         COMPTROLLER = IComptroller(_comptroller);
         NATIVE_MARKET = _nativeMarket;
