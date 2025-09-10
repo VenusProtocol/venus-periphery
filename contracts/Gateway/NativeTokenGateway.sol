@@ -27,6 +27,18 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
      */
     IVToken public immutable vWNativeToken;
 
+    /// @custom:error RedeemFailed
+    error RedeemFailed(uint256 err);
+
+    /// @custom:error BorrowFailed
+    error BorrowFailed(uint256 err);
+
+    /// @custom:error MintFailed
+    error MintFailed(uint256 err);
+
+    /// @custom:error RepayFailed
+    error RepayFailed(uint256 err);
+
     /**
      * @notice Constructor for NativeTokenGateway
      * @param vWrappedNativeToken Address of wrapped native token market
@@ -53,6 +65,7 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
      * @param minter The address on behalf of whom the supply is performed.
      * @custom:error ZeroAddressNotAllowed is thrown if address of minter is zero address
      * @custom:error ZeroValueNotAllowed is thrown if mintAmount is zero
+     * @custom:error MintFailed is thrown if the mint operation fails
      * @custom:event TokensWrappedAndSupplied is emitted when assets are supplied to the market
      */
     function wrapAndSupply(address minter) external payable nonReentrant {
@@ -64,7 +77,8 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
         wNativeToken.deposit{ value: mintAmount }();
         IERC20(address(wNativeToken)).forceApprove(address(vWNativeToken), mintAmount);
 
-        vWNativeToken.mintBehalf(minter, mintAmount);
+        uint256 err = vWNativeToken.mintBehalf(minter, mintAmount);
+        if (err != 0) revert MintFailed(err);
 
         IERC20(address(wNativeToken)).forceApprove(address(vWNativeToken), 0);
         emit TokensWrappedAndSupplied(minter, address(vWNativeToken), mintAmount);
@@ -94,12 +108,14 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
      * @dev Borrow wNativeToken, unwrap to Native, and send to the user
      * @param borrowAmount The amount of underlying tokens to borrow
      * @custom:error ZeroValueNotAllowed is thrown if borrowAmount is zero
+     * @custom:error BorrowFailed is thrown if the borrow operation fails
      * @custom:event TokensBorrowedAndUnwrapped is emitted when assets are borrowed from a market and unwrapped
      */
     function borrowAndUnwrap(uint256 borrowAmount) external nonReentrant {
         ensureNonzeroValue(borrowAmount);
 
-        vWNativeToken.borrowBehalf(msg.sender, borrowAmount);
+        uint256 err = vWNativeToken.borrowBehalf(msg.sender, borrowAmount);
+        if (err != 0) revert BorrowFailed(err);
 
         wNativeToken.withdraw(borrowAmount);
         _safeTransferNativeTokens(msg.sender, borrowAmount);
@@ -109,6 +125,7 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
     /**
      * @notice Wrap Native, repay borrow in the market, and send remaining Native to the user
      * @custom:error ZeroValueNotAllowed is thrown if repayAmount is zero
+     * @custom:error RepayFailed is thrown if the repay operation fails
      * @custom:event TokensWrappedAndRepaid is emitted when assets are repaid to a market and unwrapped
      */
     function wrapAndRepay() external payable nonReentrant {
@@ -119,7 +136,8 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
         IERC20(address(wNativeToken)).forceApprove(address(vWNativeToken), repayAmount);
 
         uint256 borrowBalanceBefore = vWNativeToken.borrowBalanceCurrent(msg.sender);
-        vWNativeToken.repayBorrowBehalf(msg.sender, repayAmount);
+        uint256 err = vWNativeToken.repayBorrowBehalf(msg.sender, repayAmount);
+        if (err != 0) revert RepayFailed(err);
         uint256 borrowBalanceAfter = vWNativeToken.borrowBalanceCurrent(msg.sender);
 
         IERC20(address(wNativeToken)).forceApprove(address(vWNativeToken), 0);
@@ -173,6 +191,7 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
      * @param redeemTokens The amount of tokens to be redeemed. This can refer to either the underlying tokens directly or their equivalent vTokens
      * @param isUnderlying A boolean flag indicating whether the redemption is for underlying tokens directly (`true`) or for their equivalent vTokens (`false`).
      * @custom:error ZeroValueNotAllowed is thrown if redeemTokens is zero
+     * @custom:error RedeemFailed is thrown if the redeem operation fails
      * @custom:event TokensRedeemedAndUnwrapped is emitted when assets are redeemed from a market and unwrapped
      */
     function _redeemAndUnwrap(uint256 redeemTokens, bool isUnderlying) internal {
@@ -181,9 +200,11 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
         uint256 balanceBefore = wNativeToken.balanceOf(address(this));
 
         if (isUnderlying) {
-            vWNativeToken.redeemUnderlyingBehalf(msg.sender, redeemTokens);
+            uint256 err = vWNativeToken.redeemUnderlyingBehalf(msg.sender, redeemTokens);
+            if (err != 0) revert RedeemFailed(err);
         } else {
-            vWNativeToken.redeemBehalf(msg.sender, redeemTokens);
+            uint256 err = vWNativeToken.redeemBehalf(msg.sender, redeemTokens);
+            if (err != 0) revert RedeemFailed(err);
         }
 
         uint256 balanceAfter = wNativeToken.balanceOf(address(this));
