@@ -3,7 +3,7 @@
   "chainId": "97",
   "contracts": {
     "NativeTokenGateway_vWBNB": {
-      "address": "0xb56DD669e2e7a658763D9aE2312aCe5EE9d71294",
+      "address": "0xF34AAfc540Adc827A84736553BD29DE87a117558",
       "abi": [
         {
           "inputs": [
