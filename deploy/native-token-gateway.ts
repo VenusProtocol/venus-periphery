@@ -2,8 +2,6 @@ import { ethers } from "hardhat";
 import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 
-import { contracts as coreBscTestnet } from "../deployments/bsctestnet.json";
-
 interface VTokenConfig {
   name: string;
   address: string;
@@ -13,7 +11,7 @@ const VWNativeInfo: { [key: string]: VTokenConfig[] } = {
   bsctestnet: [
     {
       name: "vWBNB",
-      address: coreBscTestnet.vWBNB.address,
+      address: "0x4dC902aA17230fE980A0F12e3F73f29fE0d422f9",
     },
   ],
 };
