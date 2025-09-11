@@ -91,6 +91,7 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
      * @notice Redeem vWNativeToken, unwrap to Native Token, and send to the user
      * @param redeemAmount The amount of underlying tokens to redeem
      * @custom:error ZeroValueNotAllowed is thrown if redeemAmount is zero
+     * @custom:error RedeemFailed is thrown if the redeem operation fails
      * @custom:event TokensRedeemedAndUnwrapped is emitted when assets are redeemed from a market and unwrapped
      */
     function redeemUnderlyingAndUnwrap(uint256 redeemAmount) external nonReentrant {
@@ -101,6 +102,7 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
      * @notice Redeem vWNativeToken, unwrap to Native Token, and send to the user
      * @param redeemTokens The amount of vWNative tokens to redeem
      * @custom:error ZeroValueNotAllowed is thrown if redeemTokens is zero
+     * @custom:error RedeemFailed is thrown if the redeem operation fails
      * @custom:event TokensRedeemedAndUnwrapped is emitted when assets are redeemed from a market and unwrapped
      */
     function redeemAndUnwrap(uint256 redeemTokens) external nonReentrant {
