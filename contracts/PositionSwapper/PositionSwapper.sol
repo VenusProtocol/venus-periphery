@@ -88,6 +88,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @custom:error NotApprovedHelper
     error NotApprovedHelper();
 
+    /// @custom:error InvalidMarkets
+    error InvalidMarkets();
+
     /**
      * @notice Constructor to set immutable variables.
      * @param _comptroller The address of the Comptroller contract.
@@ -239,9 +242,19 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketTo The vToken market to swap to.
      * @param helper The ISwapHelper contract used for the swap.
      * @param status The approval status to set (true = approved, false = not approved).
+     * @custom:error Throw ZeroAddress if any address parameter is zero.
+     * @custom:error Throw InvalidMarkets if marketFrom and marketTo are the same.
      * @custom:event Emits ApprovedPairUpdated event.
      */
     function setApprovedPair(address marketFrom, address marketTo, address helper, bool status) external onlyOwner {
+        if (marketFrom == address(0) || marketTo == address(0) || helper == address(0)) {
+            revert ZeroAddress();
+        }
+
+        if (marketFrom == marketTo) {
+            revert InvalidMarkets();
+        }
+
         emit ApprovedPairUpdated(marketFrom, marketTo, helper, approvedPairs[marketFrom][marketTo][helper], status);
         approvedPairs[marketFrom][marketTo][helper] = status;
     }
