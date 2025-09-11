@@ -11,7 +11,7 @@ const VWNativeInfo: { [key: string]: VTokenConfig[] } = {
   bsctestnet: [
     {
       name: "vWBNB",
-      address: "0x4dC902aA17230fE980A0F12e3F73f29fE0d422f9",
+      address: "0xd9E77847ec815E56ae2B9E69596C69b6972b0B1C",
     },
   ],
 };
@@ -39,7 +39,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
       args: [vWNativeInfo.address],
       log: true,
       autoMine: true,
-      skipIfAlreadyDeployed: true,
+      skipIfAlreadyDeployed: false,
     });
 
     const nativeTokenGateway = await ethers.getContract(`NativeTokenGateway_${vWNativeInfo.name}`);

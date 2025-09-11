@@ -8,12 +8,12 @@ import { initMainnetUser, setForkBlock } from "./utils";
 
 const ADMIN = "0xce10739590001705F7FF231611ba4A48B2820327";
 const COMPTROLLER_ADDRESS = "0x94d1820b2D1c7c7452A163983Dc888CEC546b77D";
-const VWBNB = "0x4dC902aA17230fE980A0F12e3F73f29fE0d422f9";
+const VWBNB = "0xd9E77847ec815E56ae2B9E69596C69b6972b0B1C";
 const USDT = "0xA11c8D9DC9b66E209Ef60F0C8D969D3CD988782c";
 const VUSDT = "0xb7526572FFE56AB9D7489838Bf2E18e3323b441A";
 const USER1 = "0x745bCE0D540AbE9cB639b6eACb5f6Ded3Cf947C9";
 const USER2 = "0xbEe5b9859B03FEefd5Ae3ce7C5d92f3b09a55149";
-const BLOCK_NUMBER = 64973407;
+const BLOCK_NUMBER = 64998882;
 
 async function configureTimeLock() {
   impersonatedTimeLock = await initMainnetUser(ADMIN, ethers.utils.parseUnits("2"));
@@ -89,7 +89,6 @@ if (FORK && FORKED_NETWORK === "bsctestnet") {
     describe("wrapAndSupply", () => {
       it("should wrap and supply bnb", async () => {
         const balanceBeforeSupplying = await vwbnb.balanceOf(await user1.getAddress());
-        console.log("balanceBeforeSupplying", balanceBeforeSupplying.toString());
 
         const tx = await nativeTokenGateway
           .connect(user1)
