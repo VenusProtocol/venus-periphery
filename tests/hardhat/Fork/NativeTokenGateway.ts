@@ -165,15 +165,14 @@ if (FORK && FORKED_NETWORK === "bsctestnet") {
       });
 
       it("should wrap and repay", async () => {
-        const borrowAmount = parseUnits("2", 6);
-        const repayAmount = parseUnits("1", 6);
+        const borrowAmount = parseUnits("0.2", 18);
+        const repayAmount = parseUnits("0.2", 18);
         await usdt.connect(user2).approve(vusdt.address, parseUnits("5000", 6));
         await vusdt.connect(user2).mint(parseUnits("500", 6));
 
         await vwbnb.connect(user2).borrow(borrowAmount);
         const bnbBalanceBefore = await user2.getBalance();
         await nativeTokenGateway.connect(user2).wrapAndRepay({ value: repayAmount });
-
         const bnbBalanceAfter = await user2.getBalance();
 
         expect(bnbBalanceBefore.sub(bnbBalanceAfter)).to.closeTo(borrowAmount, parseUnits("1", 18));
