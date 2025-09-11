@@ -41,7 +41,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     event ApprovedPairUpdated(address marketFrom, address marketTo, address helper, bool oldStatus, bool newStatus);
 
     /// @custom:error Unauthorized Caller is neither the user nor an approved delegate.
-    error Unauthorized();
+    error Unauthorized(address account);
 
     /// @custom:error SeizeFailed
     error SeizeFailed(uint256 err);
@@ -74,7 +74,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     error SwapCausesLiquidation(uint256 err);
 
     /// @custom:error MarketNotListed
-    error MarketNotListed();
+    error MarketNotListed(address market);
 
     /// @custom:error ZeroAddress
     error ZeroAddress();
@@ -286,13 +286,13 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         }
 
         (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
-        if (!isMarketListed) revert MarketNotListed();
+        if (!isMarketListed) revert MarketNotListed(address(marketFrom));
 
         (isMarketListed, , ) = COMPTROLLER.markets(address(marketTo));
-        if (!isMarketListed) revert MarketNotListed();
+        if (!isMarketListed) revert MarketNotListed(address(marketTo));
 
         if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
-            revert Unauthorized();
+            revert Unauthorized(msg.sender);
         }
 
         _checkAccountSafe(user);
@@ -370,13 +370,13 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         }
 
         (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
-        if (!isMarketListed) revert MarketNotListed();
+        if (!isMarketListed) revert MarketNotListed(address(marketFrom));
 
         (isMarketListed, , ) = COMPTROLLER.markets(address(marketTo));
-        if (!isMarketListed) revert MarketNotListed();
+        if (!isMarketListed) revert MarketNotListed(address(marketTo));
 
         if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
-            revert Unauthorized();
+            revert Unauthorized(msg.sender);
         }
 
         _checkAccountSafe(user);
