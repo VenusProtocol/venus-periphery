@@ -17,6 +17,9 @@ import { IVToken } from "./Interfaces/IVToken.sol";
 contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    /// @notice Error code representing no errors in Venus operations
+    uint256 internal constant NO_ERROR = 0;
+
     /**
      * @notice Address of wrapped native token contract
      */
@@ -78,7 +81,7 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
         IERC20(address(wNativeToken)).forceApprove(address(vWNativeToken), mintAmount);
 
         uint256 err = vWNativeToken.mintBehalf(minter, mintAmount);
-        if (err != 0) revert MintFailed(err);
+        if (err != NO_ERROR) revert MintFailed(err);
 
         IERC20(address(wNativeToken)).forceApprove(address(vWNativeToken), 0);
         emit TokensWrappedAndSupplied(minter, address(vWNativeToken), mintAmount);
@@ -115,7 +118,7 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
         ensureNonzeroValue(borrowAmount);
 
         uint256 err = vWNativeToken.borrowBehalf(msg.sender, borrowAmount);
-        if (err != 0) revert BorrowFailed(err);
+        if (err != NO_ERROR) revert BorrowFailed(err);
 
         wNativeToken.withdraw(borrowAmount);
         _safeTransferNativeTokens(msg.sender, borrowAmount);
@@ -137,7 +140,7 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
 
         uint256 borrowBalanceBefore = vWNativeToken.borrowBalanceCurrent(msg.sender);
         uint256 err = vWNativeToken.repayBorrowBehalf(msg.sender, repayAmount);
-        if (err != 0) revert RepayFailed(err);
+        if (err != NO_ERROR) revert RepayFailed(err);
         uint256 borrowBalanceAfter = vWNativeToken.borrowBalanceCurrent(msg.sender);
 
         IERC20(address(wNativeToken)).forceApprove(address(vWNativeToken), 0);
@@ -201,10 +204,10 @@ contract NativeTokenGateway is INativeTokenGateway, Ownable2Step, ReentrancyGuar
 
         if (isUnderlying) {
             uint256 err = vWNativeToken.redeemUnderlyingBehalf(msg.sender, redeemTokens);
-            if (err != 0) revert RedeemFailed(err);
+            if (err != NO_ERROR) revert RedeemFailed(err);
         } else {
             uint256 err = vWNativeToken.redeemBehalf(msg.sender, redeemTokens);
-            if (err != 0) revert RedeemFailed(err);
+            if (err != NO_ERROR) revert RedeemFailed(err);
         }
 
         uint256 balanceAfter = wNativeToken.balanceOf(address(this));
