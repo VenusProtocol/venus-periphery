@@ -1,3 +1,4 @@
+import { contracts as bscTestnet } from "@venusprotocol/governance-contracts/deployments/bsctestnet.json";
 import { ethers } from "hardhat";
 import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
@@ -10,7 +11,7 @@ interface VTokenConfig {
 const VWNativeInfo: { [key: string]: VTokenConfig[] } = {
   bsctestnet: [
     {
-      name: "vWBNB",
+      name: "vWBNB_Core",
       address: "0xd9E77847ec815E56ae2B9E69596C69b6972b0B1C",
     },
   ],
@@ -29,7 +30,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployments, getNamedAccounts } = hre;
   const { deploy } = deployments;
   const { deployer } = await getNamedAccounts();
-  const NormalTimelock = "0xce10739590001705F7FF231611ba4A48B2820327"; // BSC Testnet Normal Timelock
+  const timelockAddress = bscTestnet.NormalTimelock.address;
 
   const vWNativesInfo = getVWNativeTokens(hre.getNetworkName());
   for (const vWNativeInfo of vWNativesInfo) {
@@ -43,7 +44,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     });
 
     const nativeTokenGateway = await ethers.getContract(`NativeTokenGateway_${vWNativeInfo.name}`);
-    const targetOwner = NormalTimelock || deployer;
+    const targetOwner = timelockAddress || deployer;
     if (hre.network.live && (await nativeTokenGateway.owner()) !== targetOwner) {
       const tx = await nativeTokenGateway.transferOwnership(targetOwner);
       await tx.wait();
