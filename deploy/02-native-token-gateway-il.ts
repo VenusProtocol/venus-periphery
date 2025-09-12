@@ -158,7 +158,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const vWNativesInfo = getVWNativeTokens(hre.getNetworkName());
   for (const vWNativeInfo of vWNativesInfo) {
     await deploy(`NativeTokenGateway_${vWNativeInfo.name}`, {
-      contract: "NativeTokenGateway",
+      contract: "contracts/Gateway/NativeTokenGatewayIL.sol:NativeTokenGateway",
       from: deployer,
       args: [vWNativeInfo.address],
       log: true,
@@ -176,7 +176,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   }
 };
 
-func.tags = ["NativeTokenGateway"];
+func.tags = ["NativeTokenGatewayIL"];
 
 func.skip = async (hre: HardhatRuntimeEnvironment) => !hre.network.live;
 

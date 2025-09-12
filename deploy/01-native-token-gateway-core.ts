@@ -1,4 +1,4 @@
-import { contracts as bscTestnet } from "@venusprotocol/governance-contracts/deployments/bsctestnet.json";
+import { contracts as bscmainnet } from "@venusprotocol/governance-contracts/deployments/bscmainnet.json";
 import { ethers } from "hardhat";
 import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
@@ -13,6 +13,12 @@ const VWNativeInfo: { [key: string]: VTokenConfig[] } = {
     {
       name: "vWBNB_Core",
       address: "0xd9E77847ec815E56ae2B9E69596C69b6972b0B1C",
+    },
+  ],
+  bscmainnet: [
+    {
+      name: "vWBNB_Core",
+      address: "0x6bCa74586218dB34cdB402295796b79663d816e9",
     },
   ],
 };
@@ -30,12 +36,12 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployments, getNamedAccounts } = hre;
   const { deploy } = deployments;
   const { deployer } = await getNamedAccounts();
-  const timelockAddress = bscTestnet.NormalTimelock.address;
+  const timelockAddress = bscmainnet.NormalTimelock.address;
 
   const vWNativesInfo = getVWNativeTokens(hre.getNetworkName());
   for (const vWNativeInfo of vWNativesInfo) {
     await deploy(`NativeTokenGateway_${vWNativeInfo.name}`, {
-      contract: "NativeTokenGateway",
+      contract: "contracts/Gateway/NativeTokenGatewayCore.sol:NativeTokenGateway",
       from: deployer,
       args: [vWNativeInfo.address],
       log: true,
@@ -53,7 +59,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   }
 };
 
-func.tags = ["NativeTokenGateway"];
+func.tags = ["NativeTokenGatewayCore"];
 
 func.skip = async (hre: HardhatRuntimeEnvironment) => !hre.network.live;
 
