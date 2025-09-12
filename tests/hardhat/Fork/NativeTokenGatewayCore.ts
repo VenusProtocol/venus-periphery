@@ -66,7 +66,9 @@ async function setup() {
   await comptroller.connect(user1).enterMarkets([vusdt.address, vwbnb.address]);
   await comptroller.connect(user2).enterMarkets([vusdt.address, vwbnb.address]);
 
-  const nativeTokenGatewayFactory = await ethers.getContractFactory("NativeTokenGateway");
+  const nativeTokenGatewayFactory = await ethers.getContractFactory(
+    "contracts/Gateway/NativeTokenGatewayCore.sol:NativeTokenGateway",
+  );
   const nativeTokenGateway = await nativeTokenGatewayFactory.deploy(VWBNB);
 
   return {
