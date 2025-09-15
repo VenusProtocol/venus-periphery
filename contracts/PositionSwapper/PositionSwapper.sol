@@ -91,6 +91,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @custom:error InvalidMarkets
     error InvalidMarkets();
 
+    /// @custom:error AccrueInterestFailed
+    error AccrueInterestFailed(uint256 errCode);
+
     /**
      * @notice Constructor to set immutable variables.
      * @param _comptroller The address of the Comptroller contract.
@@ -273,6 +276,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @custom:error Throw RedeemFailed if the redeem operation fails.
      * @custom:error Throw NoUnderlyingReceived if no underlying tokens are received from the swap.
      * @custom:error Throw MintFailed if the mint operation fails.
+     * @custom:error Throw AccrueInterestFailed if the accrueInterest operation fails.
      */
     function _swapCollateral(
         address user,
@@ -295,6 +299,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
             revert Unauthorized(msg.sender);
         }
 
+        _accrueInterest(marketFrom);
         _checkAccountSafe(user);
 
         uint256 err = marketFrom.seize(address(this), user, amountToSeize);
@@ -410,6 +415,18 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         }
 
         _checkAccountSafe(user);
+    }
+
+    /**
+     * @dev Accrue interests on the vToken, reverting the transaction on failure
+     * @param vToken The VToken whose interests we want to accrue
+     * @custom:error Thrwo AccrueInterestFailed if accrueInterest action fails on the VToken
+     */
+    function _accrueInterest(IVToken vToken) internal {
+        uint256 err = vToken.accrueInterest();
+        if (err != 0) {
+            revert AccrueInterestFailed(err);
+        }
     }
 
     /**
