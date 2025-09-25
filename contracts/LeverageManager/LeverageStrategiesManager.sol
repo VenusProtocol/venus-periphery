@@ -66,9 +66,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
             swapCallData
         );
 
-        _transferDustToTreasury(collateralMarket);
-        _transferDustToTreasury(borrowedMarket);
-
         _checkAccountSafe(msg.sender);
     }
 
@@ -138,16 +135,15 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
     }
 
     /**
-    * @param borrowedMarket The market from which the asset is borrowed.
+    * @param borrowMarket The market from which the asset is borrowed.
     * @param borrowedAssetAmount The amount of the borrowed asset received from the flash loan.
     * @param borrowedAssetFees The fees to be paid on top of the borrowed asset amount.
     * @param swapCallData The data required for the swap borrowed asset to collateral asset to enter the leveraged position.
     * @return borrowedAssetAmountToRepay The total amount of the borrowed asset to repay
     */
-    function _executeEnterOperation(address initiator, IVToken borrowedMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
-        IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowedMarket.underlying());
+    function _executeEnterOperation(address initiator, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
+        IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
         _performSwap(borrowedAsset, borrowedAssetAmount, swapCallData);
-
 
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(transientCollateralMarket.underlying());
 
@@ -157,24 +153,30 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
 
         uint256 collateralBalance = collateralAsset.balanceOf(address(this));
 
-        uint256 mintSuccess = transientCollateralMarket.mintBehalf(address(this), collateralBalance);
+        uint256 mintSuccess = transientCollateralMarket.mintBehalf(initiator, collateralBalance);
         if (mintSuccess != 0) {
             revert EnterLeveragePositionFailed();
         }
 
         borrowedAssetAmountToRepay = borrowedAssetAmount + borrowedAssetFees;
-        borrowedAsset.safeApprove(address(borrowedMarket), borrowedAssetAmountToRepay);
+
+        uint256 borrowSuccess = borrowMarket.borrowBehalf(initiator, borrowedAssetAmountToRepay);
+        if (borrowSuccess != 0) {
+            revert EnterLeveragePositionFailed();
+        }
+
+        borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepay);
     }
 
     /**
-    * @param borrowedMarket The market from which the asset is borrowed.
+    * @param borrowMarket The market from which the asset is borrowed.
     * @param borrowedAssetAmountToRepayFromFlashLoan The amount of the borrowed asset received from the flash loan.
     * @param borrowedAssetFees The fees associated with the borrowed asset.
     * @param swapCallData The data required for the swap collateral asset to borrowed asset to repay the flash loan.
     * @return borrowedAssetAmountToRepay The total amount of the borrowed asset to repay
     */
-    function _executeExitOperation(address initiator, IVToken borrowedMarket, uint256 borrowedAssetAmountToRepayFromFlashLoan, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
-        IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowedMarket.underlying());
+    function _executeExitOperation(address initiator, IVToken borrowMarket, uint256 borrowedAssetAmountToRepayFromFlashLoan, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
+        IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
         borrowedAsset.safeApprove(address(transientCollateralMarket), borrowedAssetAmountToRepayFromFlashLoan);
 
         uint256 repaySuccess = transientCollateralMarket.repayBorrowBehalf(initiator, borrowedAssetAmountToRepayFromFlashLoan);
@@ -193,7 +195,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
         _performSwap(collateralAsset, minCollateralAmountInForSwap, swapCallData);
 
        borrowedAssetAmountToRepay = borrowedAssetAmountToRepayFromFlashLoan + borrowedAssetFees;
-       borrowedAsset.safeApprove(address(borrowedMarket), borrowedAssetAmountToRepay);
+       borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepay);
     }
 
     /**
@@ -202,7 +204,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
     * @param param The calldata required for the swap operation.
     */
     function _performSwap(IERC20Upgradeable tokenIn, uint256 amountIn, bytes calldata param) internal {
-        tokenIn.safeApprove(address(swapHelper), amountIn);
+        tokenIn.transfer(address(swapHelper), amountIn);
         (bool success,) = address(swapHelper).call(param);
         if(!success) {
             revert SwapCallFailed();
