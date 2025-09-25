@@ -9,23 +9,51 @@ import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
 
 import { ILeverageStrategiesManager } from "./ILeverageStrategiesManager.sol";
 
+/**
+ * @title LeverageStrategiesManager
+ * @author Venus Protocol
+ * @notice Contract for managing leveraged positions using flash loans and token swaps
+ * @custom:security-contact security@venusprotocol.io
+ */
 contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceiver, ILeverageStrategiesManager {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
+    /// @notice The Venus comptroller contract for market interactions and flash loans
     IComptroller public immutable COMPTROLLER;
+    
+    /// @notice The protocol share reserve where dust amounts are transferred
     IProtocolShareReserve public immutable protocolShareReserve;
+    
+    /// @notice The swap helper contract for executing token swaps
     SwapHelper public immutable swapHelper;
 
+    /**
+     * @notice Enumeration of operation types for flash loan callbacks
+     * @param ENTER Operation for entering a leveraged position
+     * @param EXIT Operation for exiting a leveraged position
+     */
     enum OperationType {
         ENTER,
         EXIT
     }
 
+    /// @dev Transient variable to track the current operation type during flash loan execution
     OperationType transient operationType;
+    
+    /// @dev Transient variable to store the collateral market during flash loan execution
     IVToken transient transientCollateralMarket;
+    
+    /// @dev Transient variable to store the collateral amount during flash loan execution
     uint256 transient transientCollateralAmount;
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
+    /**
+     * @notice Contract constructor
+     * @dev Sets immutable variables and disables initializers for the implementation contract
+     * @param _comptroller The Venus comptroller contract address
+     * @param _protocolShareReserve The protocol share reserve contract address
+     * @param _swapHelper The swap helper contract address
+     * @custom:oz-upgrades-unsafe-allow constructor
+     */
     constructor(IComptroller _comptroller,  IProtocolShareReserve _protocolShareReserve, SwapHelper _swapHelper) {
         COMPTROLLER = _comptroller;
         protocolShareReserve = _protocolShareReserve;
@@ -33,10 +61,15 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
         _disableInitializers();
     }
 
+    /**
+     * @notice Initializes the contract
+     * @dev Sets up the Ownable2Step functionality. Can only be called once.
+     */
     function initialize() external initializer {
         __Ownable2Step_init();
     }
 
+    /// @inheritdoc ILeverageStrategiesManager
     function enterLeveragedPosition(
         IVToken collateralMarket,
         uint256 collateralAmountSeed,
@@ -66,9 +99,18 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
             swapCallData
         );
 
+        emit LeveragedPositionEntered(
+            msg.sender,
+            collateralMarket,
+            collateralAmountSeed,
+            borrowedMarket,
+            borrowedAmountToFlashLoan
+        );
+
         _checkAccountSafe(msg.sender);
     }
 
+    /// @inheritdoc ILeverageStrategiesManager
     function exitLeveragedPosition(
         IVToken collateralMarket,
         uint256 collateralAmountToRedeemForSwap,
@@ -97,12 +139,33 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
             swapCallData
         );
 
+        emit LeveragedPositionExited(
+            msg.sender,
+            collateralMarket,
+            collateralAmountToRedeemForSwap,
+            borrowedMarket,
+            borrowedAmountToFlashLoan
+        );
+
         _transferDustToTreasury(collateralMarket);
         _transferDustToTreasury(borrowedMarket);
 
         _checkAccountSafe(msg.sender);
     }
 
+    /**
+     * @notice Flash loan callback function called by the comptroller
+     * @dev This function is called by the Venus Comptroller during flash loan execution.
+     *      It routes to appropriate operation handlers based on the current operation type.
+     * @param assets Array of vToken addresses for the flash loan
+     * @param amounts Array of amounts for each asset in the flash loan
+     * @param premiums Array of premium amounts (fees) for each asset
+     * @param initiator Address that initiated the flash loan (the user)
+     * @param param Additional data passed from the flash loan call (swap instructions)
+     * @return success Whether the operation completed successfully
+     * @return amountsToReturn Array of amounts to repay for each asset
+     * @custom:error FlashLoanAssetOrAmountMismatch if array lengths don't match or aren't length 1
+     */
     function executeOperation(
         IVToken[] calldata assets,
         uint256[] calldata amounts,
@@ -135,12 +198,22 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
     }
 
     /**
-    * @param borrowMarket The market from which the asset is borrowed.
-    * @param borrowedAssetAmount The amount of the borrowed asset received from the flash loan.
-    * @param borrowedAssetFees The fees to be paid on top of the borrowed asset amount.
-    * @param swapCallData The data required for the swap borrowed asset to collateral asset to enter the leveraged position.
-    * @return borrowedAssetAmountToRepay The total amount of the borrowed asset to repay
-    */
+     * @notice Executes the enter leveraged position operation during flash loan callback
+     * @dev This function performs the following steps:
+     *      1. Swaps borrowed assets for collateral assets
+     *      2. Transfers user's seed collateral (if any) to this contract
+     *      3. Supplies all collateral to the Venus market on behalf of the user
+     *      4. Borrows the repayment amount on behalf of the user
+     *      5. Approves the borrowed asset for repayment to the flash loan
+     * @param initiator The user address that initiated the leveraged position
+     * @param borrowMarket The vToken market from which assets were borrowed
+     * @param borrowedAssetAmount The amount of borrowed assets received from flash loan
+     * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
+     * @param swapCallData The encoded swap instructions for converting borrowed to collateral assets
+     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
+     * @custom:error EnterLeveragePositionFailed if mint or borrow operations fail
+     * @custom:error SwapCallFailed if token swap execution fails
+     */
     function _executeEnterOperation(address initiator, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
         _performSwap(borrowedAsset, borrowedAssetAmount, swapCallData);
@@ -169,12 +242,21 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
     }
 
     /**
-    * @param borrowMarket The market from which the asset is borrowed.
-    * @param borrowedAssetAmountToRepayFromFlashLoan The amount of the borrowed asset received from the flash loan.
-    * @param borrowedAssetFees The fees associated with the borrowed asset.
-    * @param swapCallData The data required for the swap collateral asset to borrowed asset to repay the flash loan.
-    * @return borrowedAssetAmountToRepay The total amount of the borrowed asset to repay
-    */
+     * @notice Executes the exit leveraged position operation during flash loan callback
+     * @dev This function performs the following steps:
+     *      1. Uses borrowed assets to repay user's debt in the collateral market
+     *      2. Redeems specified amount of collateral from the Venus market
+     *      3. Swaps collateral assets for borrowed assets
+     *      4. Approves the borrowed asset for repayment to the flash loan
+     * @param initiator The user address that initiated the position exit
+     * @param borrowMarket The vToken market from which assets were borrowed via flash loan
+     * @param borrowedAssetAmountToRepayFromFlashLoan The amount borrowed via flash loan for debt repayment
+     * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
+     * @param swapCallData The encoded swap instructions for converting collateral to borrowed assets
+     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
+     * @custom:error ExitLeveragePositionFailed if repay or redeem operations fail
+     * @custom:error SwapCallFailed if token swap execution fails
+     */
     function _executeExitOperation(address initiator, IVToken borrowMarket, uint256 borrowedAssetAmountToRepayFromFlashLoan, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
         borrowedAsset.safeApprove(address(transientCollateralMarket), borrowedAssetAmountToRepayFromFlashLoan);
@@ -199,10 +281,14 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
     }
 
     /**
-    * @param tokenIn The input token to be swapped.
-    * @param amountIn The amount of the input token to be swapped.
-    * @param param The calldata required for the swap operation.
-    */
+     * @notice Performs token swap via the SwapHelper contract
+     * @dev Transfers tokens to SwapHelper and executes the swap operation.
+     *      The swap operation is expected to return the output tokens to this contract.
+     * @param tokenIn The input token to be swapped
+     * @param amountIn The amount of input tokens to swap
+     * @param param The encoded swap instructions/calldata for the SwapHelper
+     * @custom:error SwapCallFailed if the swap execution fails
+     */
     function _performSwap(IERC20Upgradeable tokenIn, uint256 amountIn, bytes calldata param) internal {
         tokenIn.transfer(address(swapHelper), amountIn);
         (bool success,) = address(swapHelper).call(param);
@@ -212,9 +298,11 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
     }
 
     /**
-    * @dev Transfers any remaining dust of the specified market's underlying asset to the protocol share reserve.
-    * @param market The market whose underlying asset dust is to be transferred.
-    */
+     * @notice Transfers any remaining dust amounts to the protocol share reserve
+     * @dev This function cleans up small remaining balances after operations and
+     *      updates the protocol share reserve's asset state for proper accounting.
+     * @param market The vToken market whose underlying asset dust should be transferred
+     */
     function _transferDustToTreasury(IVToken market) internal {
         IERC20Upgradeable asset = IERC20Upgradeable(market.underlying());
 
@@ -225,9 +313,12 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
         }
     }
     /**
-    * @dev Checks if the user has delegated permission to this contract.
-    * @param user The address of the user to check.
-    */
+     * @notice Checks if a user has delegated permission to this contract
+     * @dev Verifies that the user has approved this contract as a delegate via the comptroller.
+     *      This is required for the contract to perform operations on behalf of the user.
+     * @param user The address of the user to check delegation for
+     * @custom:error Unauthorized if the user hasn't delegated permission to this contract
+     */
     function _checkIfUserDelegated(address user) internal view {
         if (!COMPTROLLER.approvedDelegates(user, address(this))) {
             revert Unauthorized();
@@ -235,8 +326,12 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
     }
 
     /**
-     * @dev Checks if a user's account is safe post-swap.
-     * @param user The address to check.
+     * @notice Checks if a user's account remains safe after leverage operations
+     * @dev Verifies that the user's account has no liquidity shortfall and the comptroller
+     *      returned no errors when calculating account liquidity. This ensures the account
+     *      won't be immediately liquidatable after the leverage operation.
+     * @param user The address to check account safety for
+     * @custom:error LeverageCausesLiquidation if the account has a liquidity shortfall or comptroller error
      */
     function _checkAccountSafe(address user) internal view {
         (uint256 err, , uint256 shortfall) = COMPTROLLER.getAccountLiquidity(user);
