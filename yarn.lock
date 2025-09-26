@@ -3395,7 +3395,7 @@ __metadata:
     eslint-plugin-prettier: 3.4.1
     eslint-plugin-promise: ^5.2.0
     ethers: ^5.7.0
-    hardhat: ^2.22.18
+    hardhat: 2.22.18
     hardhat-dependency-compiler: ^1.2.1
     hardhat-deploy: ^0.12.4
     hardhat-deploy-ethers: ^0.3.0-beta.13

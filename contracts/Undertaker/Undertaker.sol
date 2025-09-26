@@ -13,14 +13,16 @@ import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
  * @dev
  * The Undertaker contract is responsible for pausing and unlisting markets
  * in a permissionless manner, without requiring additional VIP approvals.
- *
- * Functionality includes:
- *  - Pausing markets when deposits fall below a global threshold.
- *  - Unlisting markets once they are paused and have passed an expiry timestamp.
- *  - Both pausing and unlisting can be triggered permissionlessly.
- *  - Governance (via VIP) configures thresholds and expiry values.
  */
 contract Undertaker is Ownable2Step {
+    struct Expiry {
+        uint256 toBePausedAfterTimestamp;
+        bool canUnlist;
+        uint256 toBeUnlistedMinTotalSupplyUSD;
+        uint256 pauseTimestamp;
+        uint256 unlistTimestamp;
+    }
+
     /**
      * @notice The global deposit threshold (in USD).
      * @dev If a market’s deposits fall below this threshold, it can be paused.
@@ -28,25 +30,22 @@ contract Undertaker is Ownable2Step {
     uint256 public globalDepositThreshold;
 
     /**
-     * @notice Expiry timestamp for a market to be eligible for unlisting.
-     * @dev Comptroller address => Market address => Expiry timestamp
+     * @notice Mapping to store expiry configurations for markets.
+     * @dev vToken address => expiry configuration.
      */
-    mapping(address => mapping(address => uint256)) public marketExpiry;
+    mapping(address => Expiry) public expiries;
 
     /**
      * @notice Emitted when a market is paused.
-     * @param comptroller The address of the comptroller.
      * @param market The address of the market that was paused.
      */
-    event MarketPaused(address indexed comptroller, address indexed market);
+    event MarketPaused(address indexed market);
 
     /**
      * @notice Emitted when a market is unlisted.
-     * @param comptroller The address of the comptroller.
      * @param market The address of the market that was unlisted.
-     * @param expiryTimestamp The expiry timestamp after which the market was eligible for unlisting.
      */
-    event MarketUnlisted(address indexed comptroller, address indexed market, uint256 expiryTimestamp);
+    event MarketUnlisted(address indexed market);
 
     /**
      * @notice Emitted when the global deposit threshold is updated.
@@ -56,12 +55,16 @@ contract Undertaker is Ownable2Step {
     event GlobalDepositThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
 
     /**
-     * @notice Emitted when the expiry timestamp for a market is set.
-     * @param comptroller The address of the comptroller.
+     * @notice Emitted when the expiry configuration for a market is updated.
      * @param market The address of the market.
-     * @param expiryTimestamp The new expiry timestamp for the market.
+     * @param toBePausedAfterTimestamp The timestamp after which the market can be paused.
+     * @param canUnlist If the market can be unlisted after being paused.
+     * @param toBeUnlistedMinTotalSupplyUSD The minimum total supply (in USD) required for the market to be unlisted.
      */
-    event MarketExpirySet(address indexed comptroller, address indexed market, uint256 expiryTimestamp);
+    event MarketExpiryUpdated(address indexed market, uint256 toBePausedAfterTimestamp, bool canUnlist, uint256 toBeUnlistedMinTotalSupplyUSD);
+
+    /// @notice Thrown when the expiry configuration provided is invalid.
+    error InvalidExpiryConfiguration();
 
     /// @notice Thrown when attempting to pause a market that is not eligible.
     error MarketNotEligibleForPause();
@@ -83,38 +86,43 @@ contract Undertaker is Ownable2Step {
     }
 
     /**
-     * @notice Sets the expiry timestamp for a market.
-     * @dev Restricted to governance (VIP).
-     *      The timestamp defines when the market becomes eligible for unlisting.
-     * @param comptroller The address of the comptroller.
+     * @notice Sets the expiry configuration for a market.
      * @param market The address of the market.
-     * @param expiryTimestamp The timestamp after which the market can be unlisted.
+     * @param toBePausedAfterTimestamp The timestamp after which the market can be paused.
+     * @param canUnlist If the market can be unlisted after being paused.
+     * @param toBeUnlistedMinTotalSupplyUSD The minimum total supply (in USD) required for the market to be unlisted.
      */
-    function setMarketExpiry(address comptroller, address market, uint256 expiryTimestamp) external onlyOwner {
-        marketExpiry[comptroller][market] = expiryTimestamp;
-        emit MarketExpirySet(comptroller, market, expiryTimestamp);
+    function setMarketExpiry(address market, uint256 toBePausedAfterTimestamp, bool canUnlist, uint256 toBeUnlistedMinTotalSupplyUSD) external onlyOwner {
+        if (toBePausedAfterTimestamp < block.timestamp) {
+            revert InvalidExpiryConfiguration();
+        }
+
+        if (canUnlist && toBeUnlistedMinTotalSupplyUSD == 0) {
+            revert InvalidExpiryConfiguration();
+        }
+
+        expiries[market] = Expiry({
+            toBePausedAfterTimestamp: toBePausedAfterTimestamp,
+            canUnlist: canUnlist,
+            toBeUnlistedMinTotalSupplyUSD: toBeUnlistedMinTotalSupplyUSD,
+            pauseTimestamp: 0,
+            unlistTimestamp: 0
+        });
+        emit MarketExpiryUpdated(market, toBePausedAfterTimestamp, canUnlist, toBeUnlistedMinTotalSupplyUSD);
     }
 
     /**
-     * @notice Pauses a market if its total deposits fall below the global threshold.
-     * @dev
-     *  - Permissionless: can be called by anyone.
-     *  - Sets the market’s Collateral Factor (CF) to 0.
-     *  - Disables supplying, borrowing, and using the asset as collateral.
-     *
-     * Requirements:
-     *  - Market must be eligible according to `canPauseMarket()`.
-     *
-     * @param comptroller The address of the comptroller.
+     * @notice Pauses a market if the criteria are met.
      * @param market The address of the market to pause.
      */
-    function pauseMarket(address comptroller, address market) external {
-        if (!canPauseMarket(comptroller, market)) {
+    function pauseMarket(address market) external {
+        if (!canPauseMarket(market)) {
             revert MarketNotEligibleForPause();
         }
 
         // Pause the market by setting its collateral factor to 0
-        IComptroller(comptroller).setCollateralFactor(IVToken(market), 0, 0);
+        IComptroller comptroller = IVToken(market).comptroller();
+        comptroller.setCollateralFactor(IVToken(market), 0, 0);
 
         // Pause minting, borrowing, and entering the market
         IComptroller.Action[] memory actions = new IComptroller.Action[](3);
@@ -125,19 +133,13 @@ contract Undertaker is Ownable2Step {
         address[] memory markets = new address[](1);
         markets[0] = market;
 
-        IComptroller(comptroller).setActionsPaused(markets, actions, true);
+        comptroller.setActionsPaused(markets, actions, true);
 
-        emit MarketPaused(comptroller, market);
+        emit MarketPaused(market);
     }
 
     /**
-     * @notice Unlists a market if it has been paused and its expiry timestamp has passed.
-     * @dev
-     *  - Permissionless: can be called by anyone.
-     *  - The market must already be in a paused state (whether paused via `pauseMarket()`
-     *    or through any other valid process).
-     *  - Requires that the current block timestamp is greater than `marketExpiry(comptroller, market)`.
-     *
+     * @notice Unlists a market if the criteria are met.
      * @param comptroller The address of the comptroller.
      * @param market The address of the market to unlist.
      */
@@ -169,7 +171,7 @@ contract Undertaker is Ownable2Step {
 
         IComptroller(comptroller).unlistMarket(market);
 
-        emit MarketUnlisted(comptroller, market, marketExpiry[comptroller][market]);
+        emit MarketUnlisted(market);
     }
 
     /**
@@ -179,7 +181,6 @@ contract Undertaker is Ownable2Step {
      * @return True if the market is paused
      */
     function isMarketPaused(address comptroller, address market) public view returns (bool) {
-        // A market is considered paused if its collateral factor is 0 or if minting/borrowing/entering is paused
         (, uint256 collateralFactorMantissa, ) = IComptroller(comptroller).markets(market);
 
         if (
@@ -196,31 +197,38 @@ contract Undertaker is Ownable2Step {
 
     /**
      * @notice Checks if a market can currently be paused.
-     * @param comptroller The address of the pool’s comptroller.
      * @param market The address of the market.
      * @return True if the market’s total deposits are below the global threshold and it is not already paused.
      */
-    function canPauseMarket(address comptroller, address market) public view returns (bool) {
-        // check if the deposits are below the threshold and if the market is not already paused
+    function canPauseMarket(address market) public view returns (bool) {
+        Expiry memory expiry = expiries[market];
 
-        ResilientOracleInterface oracle = IComptroller(comptroller).oracle();
-        uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
-        uint256 price = oracle.getUnderlyingPrice(market);
-        uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
-
-        if (totalDepositsUSD > globalDepositThreshold) {
+        if(expiry.toBePausedAfterTimestamp != 0 && block.timestamp < expiry.toBePausedAfterTimestamp) {
             return false;
         }
 
+        IComptroller comptroller = IVToken(market).comptroller();
+
+        if(expiry.toBePausedAfterTimestamp == 0) {
+            ResilientOracleInterface oracle = comptroller.oracle();
+            uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
+            uint256 price = oracle.getUnderlyingPrice(market);
+            uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
+
+            if (totalDepositsUSD > globalDepositThreshold) {
+                return false;
+            }
+        }
+
         if (
-            IComptroller(comptroller).actionPaused(market, IComptroller.Action.MINT) ||
-            IComptroller(comptroller).actionPaused(market, IComptroller.Action.BORROW) ||
-            IComptroller(comptroller).actionPaused(market, IComptroller.Action.ENTER_MARKET)
+            comptroller.actionPaused(market, IComptroller.Action.MINT) ||
+            comptroller.actionPaused(market, IComptroller.Action.BORROW) ||
+            comptroller.actionPaused(market, IComptroller.Action.ENTER_MARKET)
         ) {
             return false;
         }
 
-        (, uint256 collateralFactorMantissa, ) = IComptroller(comptroller).markets(market);
+        (, uint256 collateralFactorMantissa, ) = comptroller.markets(market);
         if (collateralFactorMantissa == 0) {
             return false;
         }
@@ -239,8 +247,19 @@ contract Undertaker is Ownable2Step {
             return false;
         }
 
-        uint256 expiryTimestamp = marketExpiry[comptroller][market];
-        if (expiryTimestamp == 0 || block.timestamp <= expiryTimestamp) {
+        Expiry memory expiry = expiries[market];
+
+        if (!expiry.canUnlist) {
+            return false;
+        }
+
+        IComptroller comptroller = IVToken(market).comptroller();
+        ResilientOracleInterface oracle = comptroller.oracle();
+        uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
+        uint256 price = oracle.getUnderlyingPrice(market);
+        uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
+
+        if (totalDepositsUSD > expiry.toBeUnlistedMinTotalSupplyUSD) {
             return false;
         }
 
