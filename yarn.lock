@@ -3384,7 +3384,7 @@ __metadata:
     "@venusprotocol/oracle": ^2.13.0
     "@venusprotocol/protocol-reserve": ^3.3.0
     "@venusprotocol/solidity-utilities": 2.0.3
-    "@venusprotocol/venus-protocol": 9.8.0-dev.23
+    "@venusprotocol/venus-protocol": 10.0.0-dev.1
     bignumber.js: 9.0.0
     chai: ^4.3.6
     dotenv: ^10.0.0
@@ -3395,7 +3395,7 @@ __metadata:
     eslint-plugin-prettier: 3.4.1
     eslint-plugin-promise: ^5.2.0
     ethers: ^5.7.0
-    hardhat: 2.22.18
+    hardhat: ^2.22.18
     hardhat-dependency-compiler: ^1.2.1
     hardhat-deploy: ^0.12.4
     hardhat-deploy-ethers: ^0.3.0-beta.13
@@ -3416,9 +3416,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@venusprotocol/venus-protocol@npm:9.8.0-dev.23":
-  version: 9.8.0-dev.23
-  resolution: "@venusprotocol/venus-protocol@npm:9.8.0-dev.23"
+"@venusprotocol/venus-protocol@npm:10.0.0-dev.1":
+  version: 10.0.0-dev.1
+  resolution: "@venusprotocol/venus-protocol@npm:10.0.0-dev.1"
   dependencies:
     "@nomicfoundation/hardhat-ethers": ^3.0.0
     "@openzeppelin/contracts": 4.9.3
@@ -3430,7 +3430,8 @@ __metadata:
     bignumber.js: ^9.1.2
     dotenv: ^16.0.1
     module-alias: ^2.2.2
-  checksum: a9b353ad99ca387b3490372ef502a1e6cb2ef95159dd1eca18c2550bb71a4e2a75759aa0669432966029892a6932f56a62d6f4798bcfcdbd57803d5d0a40c004
+    patch-package: ^8.0.0
+  checksum: 8cd53972cb26e36aa09c2c3693c35062b6f5e469f8f13fc4acdbbfb7c77cfd28ec215c8798ce2722fb1010b66c027283417631cb40c23e1d050e8ff3dda99df9
   languageName: node
   linkType: hard
 

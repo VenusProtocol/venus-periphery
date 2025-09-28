@@ -3,7 +3,7 @@ import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { BigNumber, Signer } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
-import { ethers, upgrades } from "hardhat";
+import { ethers } from "hardhat";
 
 import { convertToUnit } from "../../../helpers/utils";
 import {
@@ -13,9 +13,9 @@ import {
   IAccessControlManagerV8,
   InterestRateModelHarness,
   ResilientOracleInterface,
-  VBep20Harness,
   TestToken,
-  Undertaker
+  Undertaker,
+  VBep20Harness,
 } from "../../../typechain";
 
 type SetupMarketFixture = {
@@ -41,7 +41,6 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   await comptroller._setAccessControl(accessControl.address);
   await comptroller._setComptrollerLens(comptrollerLens.address);
   await comptroller._setPriceOracle(oracle.address);
-  await comptroller._setLiquidationIncentive(convertToUnit("1", 18));
 
   const interestRateModelHarnessFactory = await ethers.getContractFactory("InterestRateModelHarness");
   const InterestRateModelHarness = (await interestRateModelHarnessFactory.deploy(
@@ -83,7 +82,11 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   });
 
   await comptroller._supportMarket(vWBNB.address);
-  await comptroller._setCollateralFactor(vWBNB.address, parseEther("0.9"));
+  await comptroller["setCollateralFactor(address,uint256,uint256)"](
+    vWBNB.address,
+    parseEther("0.9"),
+    convertToUnit("1", 18),
+  );
 
   await comptroller._setMarketSupplyCaps([vWBNB.address], [parseEther("100")]);
   await comptroller._setMarketBorrowCaps([vWBNB.address], [parseEther("100")]);
@@ -124,9 +127,9 @@ describe("Undertaker", () => {
     });
 
     it("should pause market", async () => {
-      expect(await undertaker.canPauseMarket(comptroller.address, vWBNB.address)).to.be.true;
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.true;
 
-      await undertaker.pauseMarket(comptroller.address, vWBNB.address);
+      await undertaker.pauseMarket(vWBNB.address);
       expect(await undertaker.isMarketPaused(comptroller.address, vWBNB.address)).to.be.true;
     });
   });

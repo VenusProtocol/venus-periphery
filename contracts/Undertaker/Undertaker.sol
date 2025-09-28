@@ -61,7 +61,12 @@ contract Undertaker is Ownable2Step {
      * @param canUnlist If the market can be unlisted after being paused.
      * @param toBeUnlistedMinTotalSupplyUSD The minimum total supply (in USD) required for the market to be unlisted.
      */
-    event MarketExpiryUpdated(address indexed market, uint256 toBePausedAfterTimestamp, bool canUnlist, uint256 toBeUnlistedMinTotalSupplyUSD);
+    event MarketExpiryUpdated(
+        address indexed market,
+        uint256 toBePausedAfterTimestamp,
+        bool canUnlist,
+        uint256 toBeUnlistedMinTotalSupplyUSD
+    );
 
     /// @notice Thrown when the expiry configuration provided is invalid.
     error InvalidExpiryConfiguration();
@@ -92,7 +97,12 @@ contract Undertaker is Ownable2Step {
      * @param canUnlist If the market can be unlisted after being paused.
      * @param toBeUnlistedMinTotalSupplyUSD The minimum total supply (in USD) required for the market to be unlisted.
      */
-    function setMarketExpiry(address market, uint256 toBePausedAfterTimestamp, bool canUnlist, uint256 toBeUnlistedMinTotalSupplyUSD) external onlyOwner {
+    function setMarketExpiry(
+        address market,
+        uint256 toBePausedAfterTimestamp,
+        bool canUnlist,
+        uint256 toBeUnlistedMinTotalSupplyUSD
+    ) external onlyOwner {
         if (toBePausedAfterTimestamp < block.timestamp) {
             revert InvalidExpiryConfiguration();
         }
@@ -203,13 +213,13 @@ contract Undertaker is Ownable2Step {
     function canPauseMarket(address market) public view returns (bool) {
         Expiry memory expiry = expiries[market];
 
-        if(expiry.toBePausedAfterTimestamp != 0 && block.timestamp < expiry.toBePausedAfterTimestamp) {
+        if (expiry.toBePausedAfterTimestamp != 0 && block.timestamp < expiry.toBePausedAfterTimestamp) {
             return false;
         }
 
         IComptroller comptroller = IVToken(market).comptroller();
 
-        if(expiry.toBePausedAfterTimestamp == 0) {
+        if (expiry.toBePausedAfterTimestamp == 0) {
             ResilientOracleInterface oracle = comptroller.oracle();
             uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
             uint256 price = oracle.getUnderlyingPrice(market);
