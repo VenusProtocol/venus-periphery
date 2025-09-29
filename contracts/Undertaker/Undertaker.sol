@@ -130,11 +130,9 @@ contract Undertaker is Ownable2Step {
             revert MarketNotEligibleForPause();
         }
 
-        // Pause the market by setting its collateral factor to 0
         IComptroller comptroller = IVToken(market).comptroller();
         comptroller.setCollateralFactor(IVToken(market), 0, 0);
 
-        // Pause minting, borrowing, and entering the market
         IComptroller.Action[] memory actions = new IComptroller.Action[](3);
         actions[0] = IComptroller.Action.MINT;
         actions[1] = IComptroller.Action.BORROW;
@@ -159,7 +157,6 @@ contract Undertaker is Ownable2Step {
             revert MarketNotEligibleForUnlisting();
         }
 
-        // Pause rest of the actions to effectively unlist the market
         IComptroller.Action[] memory actions = new IComptroller.Action[](6);
         actions[0] = IComptroller.Action.REDEEM;
         actions[1] = IComptroller.Action.REPAY;
@@ -174,7 +171,6 @@ contract Undertaker is Ownable2Step {
         IComptroller comptroller = IVToken(market).comptroller();
         IComptroller(comptroller).setActionsPaused(markets, actions, true);
 
-        // Set caps to 0 to prevent any further supply or borrow
         uint256[] memory caps = new uint256[](1);
         caps[0] = 0;
 
@@ -182,6 +178,8 @@ contract Undertaker is Ownable2Step {
         IComptroller(comptroller).setMarketSupplyCaps(markets, caps);
 
         IComptroller(comptroller).unlistMarket(market);
+
+        expiries[market].unlistTimestamp = block.timestamp;
 
         emit MarketUnlisted(market);
     }
@@ -279,6 +277,11 @@ contract Undertaker is Ownable2Step {
         uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
 
         if (totalDepositsUSD > expiry.toBeUnlistedMinTotalSupplyUSD) {
+            return false;
+        }
+
+        (bool isListed, , ) = comptroller.markets(market);
+        if (!isListed) {
             return false;
         }
 
