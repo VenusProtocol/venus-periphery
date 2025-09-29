@@ -122,11 +122,29 @@ describe("Undertaker", () => {
       await vWBNB.connect(user1).mintBehalf(await user1.getAddress(), parseEther("5"));
 
       await comptroller.connect(user1).enterMarkets([vWBNB.address]);
-
-      await undertaker.setGlobalDepositThreshold(parseEther("100"));
     });
 
-    it("should pause market", async () => {
+    it("should pause market below global deposit threshold", async () => {
+      await undertaker.setGlobalDepositThreshold(parseEther("100"));
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.true;
+
+      await undertaker.pauseMarket(vWBNB.address);
+      expect(await undertaker.isMarketPaused(comptroller.address, vWBNB.address)).to.be.true;
+    });
+
+    it("should pause market after expiry ", async () => {
+      await undertaker.setGlobalDepositThreshold(parseEther("1"));
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.false;
+
+      await undertaker
+        .connect(admin)
+        .setMarketExpiry(vWBNB.address, (await ethers.provider.getBlock("latest")).timestamp + 10, false, 0);
+
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.false;
+
+      await ethers.provider.send("evm_increaseTime", [20]);
+      await ethers.provider.send("evm_mine", []);
+
       expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.true;
 
       await undertaker.pauseMarket(vWBNB.address);
