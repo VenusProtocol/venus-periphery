@@ -22,6 +22,7 @@ type SetupMarketFixture = {
   comptroller: FakeContract<ComptrollerMock>;
   WBNB: MockContract<TestToken>;
   vWBNB: MockContract<VBep20Harness>;
+  oracle: FakeContract<ResilientOracleInterface>;
   undertaker: Undertaker;
 };
 
@@ -98,6 +99,7 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
     comptroller,
     WBNB,
     vWBNB,
+    oracle,
     undertaker,
   };
 };
@@ -109,30 +111,29 @@ describe("Undertaker", () => {
   let user1: Signer;
   let comptroller: FakeContract<ComptrollerMock>;
   let undertaker: Undertaker;
+  let oracle: FakeContract<ResilientOracleInterface>;
 
   beforeEach(async () => {
     [admin, user1] = await ethers.getSigners();
-    ({ comptroller, WBNB, vWBNB, undertaker } = await loadFixture(setupMarketFixture));
+    ({ comptroller, WBNB, vWBNB, oracle, undertaker } = await loadFixture(setupMarketFixture));
+
+    await WBNB.connect(user1).mint(await user1.getAddress(), parseEther("10"));
+    await WBNB.connect(user1).approve(vWBNB.address, parseEther("5"));
+    await vWBNB.connect(user1).mintBehalf(await user1.getAddress(), parseEther("5"));
+
+    await comptroller.connect(user1).enterMarkets([vWBNB.address]);
   });
 
   describe("Pause Market", async () => {
-    beforeEach(async () => {
-      await WBNB.connect(user1).mint(await user1.getAddress(), parseEther("10"));
-      await WBNB.connect(user1).approve(vWBNB.address, parseEther("5"));
-      await vWBNB.connect(user1).mintBehalf(await user1.getAddress(), parseEther("5"));
-
-      await comptroller.connect(user1).enterMarkets([vWBNB.address]);
-    });
-
     it("should pause market below global deposit threshold", async () => {
       await undertaker.setGlobalDepositThreshold(parseEther("100"));
       expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.true;
 
       await undertaker.pauseMarket(vWBNB.address);
-      expect(await undertaker.isMarketPaused(comptroller.address, vWBNB.address)).to.be.true;
+      expect(await undertaker.isMarketPaused(vWBNB.address)).to.be.true;
     });
 
-    it("should pause market after expiry ", async () => {
+    it("should pause market after expiry", async () => {
       await undertaker.setGlobalDepositThreshold(parseEther("1"));
       expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.false;
 
@@ -148,7 +149,97 @@ describe("Undertaker", () => {
       expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.true;
 
       await undertaker.pauseMarket(vWBNB.address);
-      expect(await undertaker.isMarketPaused(comptroller.address, vWBNB.address)).to.be.true;
+      expect(await undertaker.isMarketPaused(vWBNB.address)).to.be.true;
+    });
+
+    it("should not pause if pause is already processed", async () => {
+      await undertaker.setGlobalDepositThreshold(parseEther("100"));
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.true;
+
+      await undertaker.pauseMarket(vWBNB.address);
+      expect(await undertaker.isMarketPaused(vWBNB.address)).to.be.true;
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.false;
+
+      await comptroller["setCollateralFactor(address,uint256,uint256)"](
+        vWBNB.address,
+        parseEther("0.9"),
+        convertToUnit("1", 18),
+      );
+      await comptroller.setActionsPaused([vWBNB.address], [0, 2, 7], false);
+
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.false;
+    });
+  });
+
+  describe("Unlist Market", async () => {
+    it("should not unlist market if paused and expiry not set", async () => {
+      await undertaker.setGlobalDepositThreshold(parseEther("100"));
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.true;
+
+      await undertaker.pauseMarket(vWBNB.address);
+      expect(await undertaker.isMarketPaused(vWBNB.address)).to.be.true;
+
+      expect(await undertaker.canUnlistMarket(vWBNB.address)).to.be.false;
+    });
+
+    it("should unlist market if paused and expiry is set", async () => {
+      await undertaker.setMarketExpiry(
+        vWBNB.address,
+        (await ethers.provider.getBlock("latest")).timestamp + 10,
+        true,
+        parseEther("100"),
+      );
+
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.false;
+      expect(await undertaker.canUnlistMarket(vWBNB.address)).to.be.false;
+
+      await ethers.provider.send("evm_increaseTime", [20]);
+      await ethers.provider.send("evm_mine", []);
+
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.true;
+      expect(await undertaker.canUnlistMarket(vWBNB.address)).to.be.false;
+
+      await undertaker.pauseMarket(vWBNB.address);
+      expect(await undertaker.isMarketPaused(vWBNB.address)).to.be.true;
+
+      expect(await undertaker.canUnlistMarket(vWBNB.address)).to.be.true;
+
+      await undertaker.unlistMarket(vWBNB.address);
+      const market = await comptroller.markets(vWBNB.address);
+      expect(market.isListed).to.be.false;
+    });
+
+    it("should not unlist market if paused and expiry is set but above threshold", async () => {
+      await undertaker.setMarketExpiry(
+        vWBNB.address,
+        (await ethers.provider.getBlock("latest")).timestamp + 10,
+        true,
+        parseEther("100"),
+      );
+
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.false;
+      expect(await undertaker.canUnlistMarket(vWBNB.address)).to.be.false;
+
+      await ethers.provider.send("evm_increaseTime", [20]);
+      await ethers.provider.send("evm_mine", []);
+
+      expect(await undertaker.canPauseMarket(vWBNB.address)).to.be.true;
+      expect(await undertaker.canUnlistMarket(vWBNB.address)).to.be.false;
+
+      await undertaker.pauseMarket(vWBNB.address);
+      expect(await undertaker.isMarketPaused(vWBNB.address)).to.be.true;
+
+      expect(await undertaker.canUnlistMarket(vWBNB.address)).to.be.true;
+
+      oracle.getUnderlyingPrice.returns(() => {
+        return parseEther("1000");
+      });
+
+      oracle.getPrice.returns(() => {
+        return parseEther("1000");
+      });
+
+      expect(await undertaker.canUnlistMarket(vWBNB.address)).to.be.false;
     });
   });
 });

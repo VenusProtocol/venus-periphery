@@ -145,16 +145,17 @@ contract Undertaker is Ownable2Step {
 
         comptroller.setActionsPaused(markets, actions, true);
 
+        expiries[market].pauseTimestamp = block.timestamp;
+
         emit MarketPaused(market);
     }
 
     /**
      * @notice Unlists a market if the criteria are met.
-     * @param comptroller The address of the comptroller.
      * @param market The address of the market to unlist.
      */
-    function unlistMarket(address comptroller, address market) external {
-        if (!canUnlistMarket(comptroller, market)) {
+    function unlistMarket(address market) external {
+        if (!canUnlistMarket(market)) {
             revert MarketNotEligibleForUnlisting();
         }
 
@@ -170,6 +171,7 @@ contract Undertaker is Ownable2Step {
         address[] memory markets = new address[](1);
         markets[0] = market;
 
+        IComptroller comptroller = IVToken(market).comptroller();
         IComptroller(comptroller).setActionsPaused(markets, actions, true);
 
         // Set caps to 0 to prevent any further supply or borrow
@@ -186,11 +188,11 @@ contract Undertaker is Ownable2Step {
 
     /**
      * @notice Checks if a market is currently paused.
-     * @param comptroller The address of the pool’s comptroller.
      * @param market The address of the market.
      * @return True if the market is paused
      */
-    function isMarketPaused(address comptroller, address market) public view returns (bool) {
+    function isMarketPaused(address market) public view returns (bool) {
+        IComptroller comptroller = IVToken(market).comptroller();
         (, uint256 collateralFactorMantissa, ) = IComptroller(comptroller).markets(market);
 
         if (
@@ -214,6 +216,10 @@ contract Undertaker is Ownable2Step {
         Expiry memory expiry = expiries[market];
 
         if (expiry.toBePausedAfterTimestamp != 0 && block.timestamp < expiry.toBePausedAfterTimestamp) {
+            return false;
+        }
+
+        if (expiry.pauseTimestamp != 0) {
             return false;
         }
 
@@ -248,18 +254,21 @@ contract Undertaker is Ownable2Step {
 
     /**
      * @notice Checks if a market can currently be unlisted.
-     * @param comptroller The address of the comptroller.
      * @param market The address of the market.
      * @return True if the market is paused and the current block timestamp is greater than `marketExpiry()`.
      */
-    function canUnlistMarket(address comptroller, address market) public view returns (bool) {
-        if (!isMarketPaused(comptroller, market)) {
+    function canUnlistMarket(address market) public view returns (bool) {
+        if (!isMarketPaused(market)) {
             return false;
         }
 
         Expiry memory expiry = expiries[market];
 
         if (!expiry.canUnlist) {
+            return false;
+        }
+
+        if (expiry.unlistTimestamp != 0) {
             return false;
         }
 
