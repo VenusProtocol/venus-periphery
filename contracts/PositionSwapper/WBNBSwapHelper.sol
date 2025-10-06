@@ -90,7 +90,7 @@ contract WBNBSwapHelper is Ownable2Step, ISwapHelper {
 
     /**
      * @notice Allows the owner to sweep leftover native tokens (e.g., BNB) from the contract.
-     * @custom:event Emits SweepToken event.
+     * @custom:event Emits SweepNative event.
      */
     function sweepNative() external onlyOwner {
         uint256 balance = address(this).balance;
