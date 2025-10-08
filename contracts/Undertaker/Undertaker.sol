@@ -241,10 +241,7 @@ contract Undertaker is Ownable2Step {
         IComptroller comptroller = IVToken(market).comptroller();
 
         if (expiry.toBePausedAfterTimestamp == 0) {
-            ResilientOracleInterface oracle = comptroller.oracle();
-            uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
-            uint256 price = oracle.getUnderlyingPrice(market);
-            uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
+            uint256 totalDepositsUSD = getTotalDeposit(market);
 
             if (totalDepositsUSD > globalDepositThreshold) {
                 return false;
@@ -273,6 +270,7 @@ contract Undertaker is Ownable2Step {
      * @return True if the market is paused and the current block timestamp is greater than `marketExpiry()`.
      */
     function canUnlistMarket(address market) public view returns (bool) {
+        IComptroller comptroller = IVToken(market).comptroller();
         (bool isListed, , ) = comptroller.markets(market);
         if (!isListed) {
             return false;
@@ -292,16 +290,26 @@ contract Undertaker is Ownable2Step {
             return false;
         }
 
-        IComptroller comptroller = IVToken(market).comptroller();
-        ResilientOracleInterface oracle = comptroller.oracle();
-        uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
-        uint256 price = oracle.getUnderlyingPrice(market);
-        uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
+        uint256 totalDepositsUSD = getTotalDeposit(market);
 
         if (totalDepositsUSD > expiry.toBeUnlistedMinTotalSupplyUSD) {
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * @notice Returns the total deposits of a market in USD.
+     * @param market The address of the market.
+     * @return The total deposits in USD.
+     */
+    function getTotalDeposit(address market) internal view returns (uint256) {
+        IComptroller comptroller = IVToken(market).comptroller();
+        ResilientOracleInterface oracle = comptroller.oracle();
+        uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
+        uint256 price = oracle.getUnderlyingPrice(market);
+        uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
+        return totalDepositsUSD;
     }
 }
