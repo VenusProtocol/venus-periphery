@@ -273,6 +273,11 @@ contract Undertaker is Ownable2Step {
      * @return True if the market is paused and the current block timestamp is greater than `marketExpiry()`.
      */
     function canUnlistMarket(address market) public view returns (bool) {
+        (bool isListed, , ) = comptroller.markets(market);
+        if (!isListed) {
+            return false;
+        }
+
         if (!isMarketPaused(market)) {
             return false;
         }
@@ -294,11 +299,6 @@ contract Undertaker is Ownable2Step {
         uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
 
         if (totalDepositsUSD > expiry.toBeUnlistedMinTotalSupplyUSD) {
-            return false;
-        }
-
-        (bool isListed, , ) = comptroller.markets(market);
-        if (!isListed) {
             return false;
         }
 
