@@ -59,7 +59,7 @@ contract Undertaker is Ownable2Step {
      * @param market The address of the market.
      * @param toBePausedAfterTimestamp The timestamp after which the market can be paused.
      * @param canUnlist If the market can be unlisted after being paused.
-     * @param toBeUnlistedMinTotalSupplyUSD The minimum total supply (in USD) required for the market to be unlisted.
+     * @param toBeUnlistedMinTotalSupplyUSD The minimum total market supply (in USD) required to keep the market listed.
      */
     event MarketExpiryUpdated(
         address indexed market,
@@ -100,7 +100,7 @@ contract Undertaker is Ownable2Step {
      * @param market The address of the market.
      * @param toBePausedAfterTimestamp The timestamp after which the market can be paused.
      * @param canUnlist If the market can be unlisted after being paused.
-     * @param toBeUnlistedMinTotalSupplyUSD The minimum total supply (in USD) required for the market to be unlisted.
+     * @param toBeUnlistedMinTotalSupplyUSD The minimum total market supply (in USD) required to keep the market listed.
      * @custom:error MarketNotListed Thrown if the market is not listed.
      * @custom:error InvalidExpiryConfiguration Thrown if the configuration is invalid.
      * @custom:event Emits MarketExpiryUpdated event.
@@ -120,7 +120,7 @@ contract Undertaker is Ownable2Step {
             revert InvalidExpiryConfiguration();
         }
 
-        if (canUnlist && toBeUnlistedMinTotalSupplyUSD == 0) {
+        if (!canUnlist && toBeUnlistedMinTotalSupplyUSD != 0) {
             revert InvalidExpiryConfiguration();
         }
 
