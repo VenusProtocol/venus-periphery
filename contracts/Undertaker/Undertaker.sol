@@ -84,6 +84,7 @@ contract Undertaker is Ownable2Step {
      * @dev Restricted to governance (VIP).
      *      Defines the minimum deposit level required to keep a market active.
      * @param newThreshold The new threshold value.
+     * @custom:event Emits GlobalDepositThresholdUpdated event.
      */
     function setGlobalDepositThreshold(uint256 newThreshold) external onlyOwner {
         emit GlobalDepositThresholdUpdated(globalDepositThreshold, newThreshold);
@@ -96,6 +97,8 @@ contract Undertaker is Ownable2Step {
      * @param toBePausedAfterTimestamp The timestamp after which the market can be paused.
      * @param canUnlist If the market can be unlisted after being paused.
      * @param toBeUnlistedMinTotalSupplyUSD The minimum total supply (in USD) required for the market to be unlisted.
+     * @custom:error InvalidExpiryConfiguration Thrown if the configuration is invalid.
+     * @custom:event Emits MarketExpiryUpdated event.
      */
     function setMarketExpiry(
         address market,
@@ -124,6 +127,8 @@ contract Undertaker is Ownable2Step {
     /**
      * @notice Pauses a market if the criteria are met.
      * @param market The address of the market to pause.
+     * @custom:error MarketNotEligibleForPause Thrown if the market is not eligible for pausing.
+     * @custom:event Emits MarketPaused event.
      */
     function pauseMarket(address market) external {
         if (!canPauseMarket(market)) {
@@ -151,6 +156,8 @@ contract Undertaker is Ownable2Step {
     /**
      * @notice Unlists a market if the criteria are met.
      * @param market The address of the market to unlist.
+     * @custom:error MarketNotEligibleForUnlisting Thrown if the market is not eligible for unlisting.
+     * @custom:event Emits MarketUnlisted event.
      */
     function unlistMarket(address market) external {
         if (!canUnlistMarket(market)) {
