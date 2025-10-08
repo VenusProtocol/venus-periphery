@@ -93,6 +93,7 @@ contract Undertaker is Ownable2Step {
 
     /**
      * @notice Sets the expiry configuration for a market.
+     * @dev Restricted to governance (VIP).
      * @param market The address of the market.
      * @param toBePausedAfterTimestamp The timestamp after which the market can be paused.
      * @param canUnlist If the market can be unlisted after being paused.
