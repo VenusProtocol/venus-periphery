@@ -278,17 +278,17 @@ contract Undertaker is Ownable2Step {
             return false;
         }
 
+        Expiry memory expiry = expiries[market];
+
+        if (expiry.unlistTimestamp != 0) {
+            return false;
+        }
+
         if (!isMarketPaused(market)) {
             return false;
         }
 
-        Expiry memory expiry = expiries[market];
-
         if (!expiry.canUnlist) {
-            return false;
-        }
-
-        if (expiry.unlistTimestamp != 0) {
             return false;
         }
 
