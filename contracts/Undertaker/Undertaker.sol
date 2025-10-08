@@ -77,6 +77,9 @@ contract Undertaker is Ownable2Step {
     /// @notice Thrown when attempting to unlist a market that is not eligible.
     error MarketNotEligibleForUnlisting();
 
+    /// @notice Thrown when the market is not listed.
+    error MarketNotListed();
+
     constructor() Ownable2Step() {}
 
     /**
@@ -98,6 +101,7 @@ contract Undertaker is Ownable2Step {
      * @param toBePausedAfterTimestamp The timestamp after which the market can be paused.
      * @param canUnlist If the market can be unlisted after being paused.
      * @param toBeUnlistedMinTotalSupplyUSD The minimum total supply (in USD) required for the market to be unlisted.
+     * @custom:error MarketNotListed Thrown if the market is not listed.
      * @custom:error InvalidExpiryConfiguration Thrown if the configuration is invalid.
      * @custom:event Emits MarketExpiryUpdated event.
      */
@@ -107,6 +111,11 @@ contract Undertaker is Ownable2Step {
         bool canUnlist,
         uint256 toBeUnlistedMinTotalSupplyUSD
     ) external onlyOwner {
+        (bool isListed, , ) = IVToken(market).comptroller().markets(market);
+        if (!isListed) {
+            revert MarketNotListed();
+        }
+
         if (toBePausedAfterTimestamp < block.timestamp) {
             revert InvalidExpiryConfiguration();
         }
