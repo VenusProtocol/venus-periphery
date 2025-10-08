@@ -230,11 +230,11 @@ contract Undertaker is Ownable2Step {
     function canPauseMarket(address market) public view returns (bool) {
         Expiry memory expiry = expiries[market];
 
-        if (expiry.toBePausedAfterTimestamp != 0 && block.timestamp < expiry.toBePausedAfterTimestamp) {
+        if (expiry.pauseTimestamp != 0) {
             return false;
         }
 
-        if (expiry.pauseTimestamp != 0) {
+        if (expiry.toBePausedAfterTimestamp != 0 && block.timestamp < expiry.toBePausedAfterTimestamp) {
             return false;
         }
 
