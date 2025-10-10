@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 import { IVToken, IComptroller, IFlashLoanReceiver, IProtocolShareReserve } from "../Interfaces.sol";
@@ -13,9 +14,8 @@ import { ILeverageStrategiesManager } from "./ILeverageStrategiesManager.sol";
  * @title LeverageStrategiesManager
  * @author Venus Protocol
  * @notice Contract for managing leveraged positions using flash loans and token swaps
- * @custom:security-contact security@venusprotocol.io
  */
-contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceiver, ILeverageStrategiesManager {
+contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, IFlashLoanReceiver, ILeverageStrategiesManager {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @notice The Venus comptroller contract for market interactions and flash loans
@@ -45,6 +45,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
     
     /// @dev Transient variable to store the collateral amount during flash loan execution
     uint256 transient transientCollateralAmount;
+    
+    /// @dev Transient variable to store the minimum amountOut expected after swap
+    uint256 transient transientMinAmountOutAfterSwap;
 
     /**
      * @notice Contract constructor
@@ -67,6 +70,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
      */
     function initialize() external initializer {
         __Ownable2Step_init();
+        __ReentrancyGuard_init();
     }
 
     /// @inheritdoc ILeverageStrategiesManager
@@ -75,6 +79,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
         uint256 collateralAmountSeed,
         IVToken borrowedMarket,
         uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
         bytes[] calldata swapData
     ) external {
         _checkIfUserDelegated(msg.sender);
@@ -82,6 +87,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
         
         transientCollateralMarket = collateralMarket;
         transientCollateralAmount = collateralAmountSeed;
+        transientMinAmountOutAfterSwap = minAmountOutAfterSwap;
         operationType = OperationType.ENTER;
 
         bytes memory swapCallData = abi.encodeWithSelector(swapHelper.multicall.selector, swapData);
@@ -116,12 +122,14 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
         uint256 collateralAmountToRedeemForSwap,
         IVToken borrowedMarket,
         uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
         bytes[] calldata swapData 
     ) external {
         _checkIfUserDelegated(msg.sender);
 
         transientCollateralMarket = collateralMarket;
         transientCollateralAmount = collateralAmountToRedeemForSwap;
+        transientMinAmountOutAfterSwap = minAmountOutAfterSwap;
         operationType = OperationType.EXIT;
 
         bytes memory swapCallData = abi.encodeWithSelector(swapHelper.multicall.selector, swapData);
@@ -153,48 +161,38 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
         _checkAccountSafe(msg.sender);
     }
 
-    /**
-     * @notice Flash loan callback function called by the comptroller
-     * @dev This function is called by the Venus Comptroller during flash loan execution.
-     *      It routes to appropriate operation handlers based on the current operation type.
-     * @param assets Array of vToken addresses for the flash loan
-     * @param amounts Array of amounts for each asset in the flash loan
-     * @param premiums Array of premium amounts (fees) for each asset
-     * @param initiator Address that initiated the flash loan (the user)
-     * @param param Additional data passed from the flash loan call (swap instructions)
-     * @return success Whether the operation completed successfully
-     * @return amountsToReturn Array of amounts to repay for each asset
-     * @custom:error FlashLoanAssetOrAmountMismatch if array lengths don't match or aren't length 1
-     */
+    /// @inheritdoc IFlashLoanReceiver
     function executeOperation(
-        IVToken[] calldata assets,
+        IVToken[] calldata vTokens,
         uint256[] calldata amounts,
         uint256[] calldata premiums,
         address initiator,
+        address /* onBehalf */,
         bytes calldata param
-    ) external override returns (bool success, uint256[] memory amountsToReturn) {
-        if (assets.length != 1 || amounts.length != 1 || premiums.length != 1) {
+    ) external override returns (bool success, uint256[] memory repayAmounts) {
+        if (msg.sender != address(COMPTROLLER)) {
+            revert ExecuteOperationNotCalledByAuthorizedContract();
+        }
+
+        if (vTokens.length != 1 || amounts.length != 1 || premiums.length != 1) {
             revert FlashLoanAssetOrAmountMismatch(); 
         }
 
         if(operationType == OperationType.ENTER) {
-            uint256 amountToRepay = _executeEnterOperation(initiator, assets[0], amounts[0], premiums[0], param);
+            uint256 amountToRepay = _executeEnterOperation(initiator, vTokens[0], amounts[0], premiums[0], param);
 
-            amountsToReturn = new uint256[](1);
-            amountsToReturn[0] = amountToRepay;
-
-            return (true, amountsToReturn);
+            repayAmounts = new uint256[](1);
+            repayAmounts[0] = amountToRepay;
         } else if(operationType == OperationType.EXIT) {
-           uint256 amountToRepay =  _executeExitOperation(initiator,assets[0], amounts[0], premiums[0], param);
+           uint256 amountToRepay =  _executeExitOperation(initiator,vTokens[0], amounts[0], premiums[0], param);
 
-            amountsToReturn = new uint256[](1);
-            amountsToReturn[0] = amountToRepay;
-
+            repayAmounts = new uint256[](1);
+            repayAmounts[0] = amountToRepay;
         } else {
             return (false, new uint256[](0));
         }
-        
-        return (true, amountsToReturn);
+
+        return (true, repayAmounts);
     }
 
     /**
@@ -216,17 +214,15 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
      */
     function _executeEnterOperation(address initiator, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
-        _performSwap(borrowedAsset, borrowedAssetAmount, swapCallData);
-
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(transientCollateralMarket.underlying());
+
+        uint256 swappedCollateraAmountOut = _performSwap(borrowedAsset, borrowedAssetAmount, collateralAsset, transientMinAmountOutAfterSwap, swapCallData);
 
         if(transientCollateralAmount > 0) {
             collateralAsset.safeTransferFrom(initiator, address(this), transientCollateralAmount);
         }
 
-        uint256 collateralBalance = collateralAsset.balanceOf(address(this));
-
-        uint256 mintSuccess = transientCollateralMarket.mintBehalf(initiator, collateralBalance);
+        uint256 mintSuccess = transientCollateralMarket.mintBehalf(initiator, swappedCollateraAmountOut + transientCollateralAmount);
         if (mintSuccess != 0) {
             revert EnterLeveragePositionFailed();
         }
@@ -238,13 +234,17 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
             revert EnterLeveragePositionFailed();
         }
 
+        if (borrowedAsset.balanceOf(address(this)) < borrowedAssetAmountToRepay) {
+            revert InsufficientFundsToRepayFlashloan();
+        }
+
         borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepay);
     }
 
     /**
      * @notice Executes the exit leveraged position operation during flash loan callback
      * @dev This function performs the following steps:
-     *      1. Uses borrowed assets to repay user's debt in the collateral market
+     *      1. Uses borrowed assets to repay user's debt in the borrowed market
      *      2. Redeems specified amount of collateral from the Venus market
      *      3. Swaps collateral assets for borrowed assets
      *      4. Approves the borrowed asset for repayment to the flash loan
@@ -256,27 +256,34 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
      * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
      * @custom:error ExitLeveragePositionFailed if repay or redeem operations fail
      * @custom:error SwapCallFailed if token swap execution fails
+     * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
      */
     function _executeExitOperation(address initiator, IVToken borrowMarket, uint256 borrowedAssetAmountToRepayFromFlashLoan, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
-        borrowedAsset.safeApprove(address(transientCollateralMarket), borrowedAssetAmountToRepayFromFlashLoan);
 
-        uint256 repaySuccess = transientCollateralMarket.repayBorrowBehalf(initiator, borrowedAssetAmountToRepayFromFlashLoan);
+        borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepayFromFlashLoan);
+        uint256 repaySuccess = borrowMarket.repayBorrowBehalf(initiator, borrowedAssetAmountToRepayFromFlashLoan);
+
         if (repaySuccess != 0) {
             revert ExitLeveragePositionFailed();
         }
 
         uint256 minCollateralAmountInForSwap = transientCollateralAmount;
 
-        uint256 redeemSuccess = transientCollateralMarket.redeemUnderlyingBehalf(msg.sender, minCollateralAmountInForSwap);
+        uint256 redeemSuccess = transientCollateralMarket.redeemUnderlyingBehalf(initiator, minCollateralAmountInForSwap);
         if (redeemSuccess != 0) {
             revert ExitLeveragePositionFailed();
         }
         
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(transientCollateralMarket.underlying());
-        _performSwap(collateralAsset, minCollateralAmountInForSwap, swapCallData);
+        uint256 swappedBorrowedAmountOut = _performSwap(collateralAsset, minCollateralAmountInForSwap, borrowedAsset, transientMinAmountOutAfterSwap, swapCallData);
 
        borrowedAssetAmountToRepay = borrowedAssetAmountToRepayFromFlashLoan + borrowedAssetFees;
+
+        if (swappedBorrowedAmountOut < borrowedAssetAmountToRepay) {
+            revert InsufficientFundsToRepayFlashloan();
+        }
+
        borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepay);
     }
 
@@ -289,12 +296,24 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, IFlashLoanReceive
      * @param param The encoded swap instructions/calldata for the SwapHelper
      * @custom:error SwapCallFailed if the swap execution fails
      */
-    function _performSwap(IERC20Upgradeable tokenIn, uint256 amountIn, bytes calldata param) internal {
-        tokenIn.transfer(address(swapHelper), amountIn);
+    function _performSwap(IERC20Upgradeable tokenIn, uint256 amountIn, IERC20Upgradeable tokenOut, uint256 minAmountOut, bytes calldata param) internal nonReentrant returns (uint256 amountOut) {
+        tokenIn.safeTransfer(address(swapHelper), amountIn);
+
+        uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
+
         (bool success,) = address(swapHelper).call(param);
         if(!success) {
             revert SwapCallFailed();
         }
+
+        uint256 tokenOutBalanceAfter = tokenOut.balanceOf(address(this));
+
+        amountOut = tokenOutBalanceAfter - tokenOutBalanceBefore;
+        if(amountOut < minAmountOut) {
+            revert InsufficientAmountOutAfterSwap();
+        }
+
+        return amountOut;
     }
 
     /**

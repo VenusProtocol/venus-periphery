@@ -30,6 +30,15 @@ interface ILeverageStrategiesManager {
     /// @custom:error FlashLoanAssetOrAmountMismatch
     error FlashLoanAssetOrAmountMismatch();
 
+    /// @custom:error ExecuteOperationNotCalledByAuthorizedContract
+    error ExecuteOperationNotCalledByAuthorizedContract();
+
+    /// @custom:error InsufficientAmountOutAfterSwap
+    error InsufficientAmountOutAfterSwap();
+
+    /// @custom:error InsufficientFundsToRepayFlashloan
+    error InsufficientFundsToRepayFlashloan();
+
     /// @notice Emitted when a user enters a leveraged position
     /// @param user The address of the user entering the position
     /// @param collateralMarket The vToken market used as collateral
@@ -67,18 +76,21 @@ interface ILeverageStrategiesManager {
      * @param collateralAmountSeed The initial amount of collateral the user provides (can be 0)
      * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan
      * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for leverage
+     * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
      * @param swapData Array of bytes containing swap instructions for converting borrowed assets to collateral
      * @custom:emits LeveragedPositionEntered
      * @custom:error Unauthorized if caller is not user or approved delegate
      * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
      * @custom:error EnterLeveragePositionFailed if mint or borrow operations fail
      * @custom:error SwapCallFailed if token swap execution fails
+     * @custom:error InsufficientCollateralAfterSwap if collateral balance after swap is below minimum
      */
     function enterLeveragedPosition(
         IVToken collateralMarket,
         uint256 collateralAmountSeed,
         IVToken borrowedMarket,
         uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
         bytes[] calldata swapData
     ) external;
 
@@ -103,6 +115,7 @@ interface ILeverageStrategiesManager {
         uint256 collateralAmountToRedeemForSwap,
         IVToken borrowedMarket,
         uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
         bytes[] calldata swapData
     ) external;
 }
