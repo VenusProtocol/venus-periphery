@@ -33,6 +33,9 @@ interface ILeverageStrategiesManager {
     /// @custom:error ExecuteOperationNotCalledByAuthorizedContract
     error ExecuteOperationNotCalledByAuthorizedContract();
 
+    /// @custom:error ExecuteOperationNotCalledCorrectly
+    error ExecuteOperationNotCalledCorrectly();
+
     /// @custom:error InsufficientAmountOutAfterSwap
     error InsufficientAmountOutAfterSwap();
 

@@ -29,11 +29,13 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
     /**
      * @notice Enumeration of operation types for flash loan callbacks
+     * @param NONE Default value indicating no operation set
      * @param ENTER_WITH_COLLATERAL Operation for entering a leveraged position with collateral seed
      * @param ENTER_WITH_BORROWED Operation for entering a leveraged position with borrowed asset seed
      * @param EXIT Operation for exiting a leveraged position
      */
     enum OperationType {
+        NONE,
         ENTER_WITH_COLLATERAL,
         ENTER_WITH_BORROWED,
         EXIT
@@ -157,7 +159,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             msg.sender,
             collateralMarket,
             borrowedMarket,
-            borrowedAmountSeed, // Use borrowed amount seed as the amount in the event
+            borrowedAmountSeed,
             borrowedAmountToFlashLoan
         );
 
@@ -242,7 +244,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             repayAmounts = new uint256[](1);
             repayAmounts[0] = amountToRepay;
         } else {
-            return (false, new uint256[](0));
+            revert ExecuteOperationNotCalledCorrectly();
         }
 
         return (true, repayAmounts);
