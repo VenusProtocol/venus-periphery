@@ -103,7 +103,7 @@ describe("LeverageStrategiesManager", () => {
   });
 
   describe("Access Control", () => {
-    it("should require user delegation for enterLeveragedPosition", async () => {
+    it("should require user delegation for enterLeveragedPositionWithCollateral", async () => {
       comptroller.approvedDelegates.returns(false);
 
       const collateralAmountSeed = parseEther("1");
@@ -111,7 +111,7 @@ describe("LeverageStrategiesManager", () => {
       const swapData: string[] = [];
 
       await expect(
-        leverageStrategiesManager.connect(alice).enterLeveragedPosition(
+        leverageStrategiesManager.connect(alice).enterLeveragedPositionWithCollateral(
           collateralMarket.address,
           collateralAmountSeed,
           borrowMarket.address,
@@ -119,7 +119,7 @@ describe("LeverageStrategiesManager", () => {
           0, // minAmountCollateralAfterSwap
           swapData,
         ),
-      ).to.be.rejectedWith("0x82b42900"); // TODO: Change to rejectedWithCustomError Unauthorized() custom error
+      ).to.be.rejectedWith("Unauthorized()");
     });
 
     it("should require user delegation for exitLeveragedPosition", async () => {
@@ -138,7 +138,7 @@ describe("LeverageStrategiesManager", () => {
           0, // minAmountCollateralAfterSwap
           swapData,
         ),
-      ).to.be.rejectedWith("0x82b42900"); // TODO: Change to rejectedWithCustomError Unauthorized() custom error
+      ).to.be.rejectedWith("Unauthorized()");
     });
 
     it("should revert when caller is not user or approved delegate", async () => {
@@ -152,7 +152,7 @@ describe("LeverageStrategiesManager", () => {
       const swapData: string[] = [];
 
       await expect(
-        leverageStrategiesManager.connect(bob).enterLeveragedPosition(
+        leverageStrategiesManager.connect(bob).enterLeveragedPositionWithCollateral(
           collateralMarket.address,
           collateralAmountSeed,
           borrowMarket.address,
@@ -160,7 +160,7 @@ describe("LeverageStrategiesManager", () => {
           0, // minAmountCollateralAfterSwap
           swapData,
         ),
-      ).to.be.rejectedWith("0x82b42900"); // TODO: Change to rejectedWithCustomError Unauthorized() custom error
+      ).to.be.rejectedWith("Unauthorized()");
 
       await expect(
         leverageStrategiesManager.connect(bob).exitLeveragedPosition(
@@ -171,10 +171,10 @@ describe("LeverageStrategiesManager", () => {
           0, // minAmountCollateralAfterSwap
           swapData,
         ),
-      ).to.be.rejectedWith("0x82b42900"); // TODO: Change to rejectedWithCustomError Unauthorized() custom error
+      ).to.be.rejectedWith("Unauthorized()");
     });
 
-    it("should allow approved delegates to call enterLeveragedPosition", async () => {
+    it("should allow approved delegates to call enterLeveragedPositionWithCollateral", async () => {
       comptroller.approvedDelegates
         .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
         .returns(true);
@@ -187,7 +187,7 @@ describe("LeverageStrategiesManager", () => {
       const borrowedAmountToFlashLoan = parseEther("1");
       const swapData: string[] = [];
 
-      await leverageStrategiesManager.connect(alice).enterLeveragedPosition(
+      await leverageStrategiesManager.connect(alice).enterLeveragedPositionWithCollateral(
         collateralMarket.address,
         collateralAmountSeed,
         borrowMarket.address,
@@ -200,7 +200,7 @@ describe("LeverageStrategiesManager", () => {
     it.skip("should allow approved delegates to call exitLeveragedPosition", async () => {});
   });
 
-  describe("enterLeveragedPosition", () => {
+  describe("enterLeveragedPositionWithCollateral", () => {
     describe("Happy Path", () => {
       it("should successfully enter leveraged position with seed collateral");
 

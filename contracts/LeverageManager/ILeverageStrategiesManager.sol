@@ -39,17 +39,31 @@ interface ILeverageStrategiesManager {
     /// @custom:error InsufficientFundsToRepayFlashloan
     error InsufficientFundsToRepayFlashloan();
 
-    /// @notice Emitted when a user enters a leveraged position
+    /// @notice Emitted when a user enters a leveraged position with collateral seed
     /// @param user The address of the user entering the position
     /// @param collateralMarket The vToken market used as collateral
     /// @param collateralAmountSeed The initial collateral amount provided by the user
     /// @param borrowedMarket The vToken market being borrowed from
     /// @param borrowedAmountToFlashLoan The amount being flash loaned
-    event LeveragedPositionEntered(
+    event LeveragedPositionEnteredWithCollateral(
         address indexed user,
         IVToken indexed collateralMarket,
         uint256 collateralAmountSeed,
         IVToken indexed borrowedMarket,
+        uint256 borrowedAmountToFlashLoan
+    );
+
+    /// @notice Emitted when a user enters a leveraged position with borrowed asset seed
+    /// @param user The address of the user entering the position
+    /// @param collateralMarket The vToken market used as collateral
+    /// @param borrowedMarket The vToken market being borrowed from
+    /// @param borrowedAmountSeed The initial borrowed asset amount provided by the user
+    /// @param borrowedAmountToFlashLoan The amount being flash loaned
+    event LeveragedPositionEnteredWithBorrowed(
+        address indexed user,
+        IVToken indexed collateralMarket,
+        IVToken indexed borrowedMarket,
+        uint256 borrowedAmountSeed,
         uint256 borrowedAmountToFlashLoan
     );
 
@@ -85,10 +99,37 @@ interface ILeverageStrategiesManager {
      * @custom:error SwapCallFailed if token swap execution fails
      * @custom:error InsufficientCollateralAfterSwap if collateral balance after swap is below minimum
      */
-    function enterLeveragedPosition(
+    function enterLeveragedPositionWithCollateral(
         IVToken collateralMarket,
         uint256 collateralAmountSeed,
         IVToken borrowedMarket,
+        uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
+        bytes[] calldata swapData
+    ) external;
+
+    /**
+     * @notice Enters a leveraged position by using existing borrowed assets and converting them to collateral
+     * @dev This function uses flash loans to borrow additional assets, swaps the total borrowed amount
+     *      for collateral tokens, and supplies the collateral to the Venus protocol to amplify the user's position.
+     *      The user must have delegated permission to this contract via the comptroller.
+     * @param collateralMarket The vToken market where collateral will be supplied
+     * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan
+     * @param borrowedAmountSeed The initial amount of borrowed assets the user has (can be 0)
+     * @param borrowedAmountToFlashLoan The additional amount to borrow via flash loan for leverage
+     * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
+     * @param swapData Array of bytes containing swap instructions for converting borrowed assets to collateral
+     * @custom:emits LeveragedPositionEntered
+     * @custom:error Unauthorized if caller is not user or approved delegate
+     * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
+     * @custom:error EnterLeveragePositionFailed if mint or borrow operations fail
+     * @custom:error SwapCallFailed if token swap execution fails
+     * @custom:error InsufficientCollateralAfterSwap if collateral balance after swap is below minimum
+     */
+    function enterLeveragedPositionWithBorrowed(
+        IVToken collateralMarket,
+        IVToken borrowedMarket,
+        uint256 borrowedAmountSeed,
         uint256 borrowedAmountToFlashLoan,
         uint256 minAmountOutAfterSwap,
         bytes[] calldata swapData

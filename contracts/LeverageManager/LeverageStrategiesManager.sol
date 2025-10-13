@@ -29,11 +29,13 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
     /**
      * @notice Enumeration of operation types for flash loan callbacks
-     * @param ENTER Operation for entering a leveraged position
+     * @param ENTER_WITH_COLLATERAL Operation for entering a leveraged position with collateral seed
+     * @param ENTER_WITH_BORROWED Operation for entering a leveraged position with borrowed asset seed
      * @param EXIT Operation for exiting a leveraged position
      */
     enum OperationType {
-        ENTER,
+        ENTER_WITH_COLLATERAL,
+        ENTER_WITH_BORROWED,
         EXIT
     }
 
@@ -45,6 +47,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     
     /// @dev Transient variable to store the collateral amount during flash loan execution
     uint256 transient transientCollateralAmount;
+    
+    /// @dev Transient variable to store the borrowed amount seed during flash loan execution
+    uint256 transient transientBorrowedAmountSeed;
     
     /// @dev Transient variable to store the minimum amountOut expected after swap
     uint256 transient transientMinAmountOutAfterSwap;
@@ -74,7 +79,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /// @inheritdoc ILeverageStrategiesManager
-    function enterLeveragedPosition(
+    function enterLeveragedPositionWithCollateral(
         IVToken collateralMarket,
         uint256 collateralAmountSeed,
         IVToken borrowedMarket,
@@ -88,7 +93,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         transientCollateralMarket = collateralMarket;
         transientCollateralAmount = collateralAmountSeed;
         transientMinAmountOutAfterSwap = minAmountOutAfterSwap;
-        operationType = OperationType.ENTER;
+        operationType = OperationType.ENTER_WITH_COLLATERAL;
 
         bytes memory swapCallData = abi.encodeWithSelector(swapHelper.multicall.selector, swapData);
 
@@ -105,11 +110,54 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             swapCallData
         );
 
-        emit LeveragedPositionEntered(
+        emit LeveragedPositionEnteredWithCollateral(
             msg.sender,
             collateralMarket,
             collateralAmountSeed,
             borrowedMarket,
+            borrowedAmountToFlashLoan
+        );
+
+        _checkAccountSafe(msg.sender);
+    }
+
+    /// @inheritdoc ILeverageStrategiesManager
+    function enterLeveragedPositionWithBorrowed(
+        IVToken collateralMarket,
+        IVToken borrowedMarket,
+        uint256 borrowedAmountSeed,
+        uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
+        bytes[] calldata swapData
+    ) external {
+        _checkIfUserDelegated(msg.sender);
+        _checkAccountSafe(msg.sender);
+        
+        transientCollateralMarket = collateralMarket;
+        transientBorrowedAmountSeed = borrowedAmountSeed;
+        transientMinAmountOutAfterSwap = minAmountOutAfterSwap;
+        operationType = OperationType.ENTER_WITH_BORROWED;
+
+        bytes memory swapCallData = abi.encodeWithSelector(swapHelper.multicall.selector, swapData);
+
+        IVToken[] memory borrowedMarkets = new IVToken[](1);
+        borrowedMarkets[0] = borrowedMarket;
+        uint256[] memory flashLoanAmounts = new uint256[](1);
+        flashLoanAmounts[0] = borrowedAmountToFlashLoan;
+
+        COMPTROLLER.executeFlashLoan(
+            payable(msg.sender),
+            payable(address(this)),
+            borrowedMarkets,
+            flashLoanAmounts,
+            swapCallData
+        );
+
+        emit LeveragedPositionEnteredWithBorrowed(
+            msg.sender,
+            collateralMarket,
+            borrowedMarket,
+            borrowedAmountSeed, // Use borrowed amount seed as the amount in the event
             borrowedAmountToFlashLoan
         );
 
@@ -178,8 +226,13 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             revert FlashLoanAssetOrAmountMismatch(); 
         }
 
-        if(operationType == OperationType.ENTER) {
+        if(operationType == OperationType.ENTER_WITH_COLLATERAL) {
             uint256 amountToRepay = _executeEnterOperation(initiator, vTokens[0], amounts[0], premiums[0], param);
+
+            repayAmounts = new uint256[](1);
+            repayAmounts[0] = amountToRepay;
+        } else if(operationType == OperationType.ENTER_WITH_BORROWED) {
+            uint256 amountToRepay = _executeEnterWithBorrowedOperation(initiator, vTokens[0], amounts[0], premiums[0], param);
 
             repayAmounts = new uint256[](1);
             repayAmounts[0] = amountToRepay;
@@ -223,6 +276,55 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         }
 
         uint256 mintSuccess = transientCollateralMarket.mintBehalf(initiator, swappedCollateraAmountOut + transientCollateralAmount);
+        if (mintSuccess != 0) {
+            revert EnterLeveragePositionFailed();
+        }
+
+        borrowedAssetAmountToRepay = borrowedAssetAmount + borrowedAssetFees;
+
+        uint256 borrowSuccess = borrowMarket.borrowBehalf(initiator, borrowedAssetAmountToRepay);
+        if (borrowSuccess != 0) {
+            revert EnterLeveragePositionFailed();
+        }
+
+        if (borrowedAsset.balanceOf(address(this)) < borrowedAssetAmountToRepay) {
+            revert InsufficientFundsToRepayFlashloan();
+        }
+
+        borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepay);
+    }
+
+    /**
+     * @notice Executes the enter leveraged position with borrowed assets operation during flash loan callback
+     * @dev This function performs the following steps:
+     *      1. Transfers user's seed borrowed assets (if any) to this contract
+     *      2. Swaps the total borrowed assets (seed + flash loan) for collateral assets
+     *      3. Supplies all collateral to the Venus market on behalf of the user
+     *      4. Borrows the repayment amount on behalf of the user
+     *      5. Approves the borrowed asset for repayment to the flash loan
+     * @param initiator The user address that initiated the leveraged position
+     * @param borrowMarket The vToken market from which assets were borrowed
+     * @param borrowedAssetAmount The amount of borrowed assets received from flash loan
+     * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
+     * @param swapCallData The encoded swap instructions for converting borrowed to collateral assets
+     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
+     * @custom:error EnterLeveragePositionFailed if mint or borrow operations fail
+     * @custom:error SwapCallFailed if token swap execution fails
+     * @custom:error InsufficientAmountOutAfterSwap if collateral balance after swap is below minimum
+     */
+    function _executeEnterWithBorrowedOperation(address initiator, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
+        IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
+        IERC20Upgradeable collateralAsset = IERC20Upgradeable(transientCollateralMarket.underlying());
+
+        if(transientBorrowedAmountSeed > 0) {
+            borrowedAsset.safeTransferFrom(initiator, address(this), transientBorrowedAmountSeed);
+        }
+
+        uint256 totalBorrowedAmountToSwap = transientBorrowedAmountSeed + borrowedAssetAmount;
+
+        uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, totalBorrowedAmountToSwap, collateralAsset, transientMinAmountOutAfterSwap, swapCallData);
+
+        uint256 mintSuccess = transientCollateralMarket.mintBehalf(initiator, swappedCollateralAmountOut);
         if (mintSuccess != 0) {
             revert EnterLeveragePositionFailed();
         }
