@@ -4,8 +4,8 @@ pragma solidity 0.8.25;
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import { IVToken, IComptroller, IVBNB } from "../Interfaces.sol";
-import { ISwapHelper } from "./ISwapHelper.sol";
+import { IVToken, IComptroller, IWBNB, IVBNB } from "../Interfaces.sol";
+import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
 
 /**
  * @title PositionSwapper
@@ -25,11 +25,29 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @notice Mapping of approved swap pairs. (marketFrom => marketTo => helper => status)
     mapping(address => mapping(address => mapping(address => bool))) public approvedPairs;
 
-    /// @notice Emitted after a successful swap and mint.
-    event CollateralSwapped(address indexed user, address marketFrom, address marketTo, uint256 amountOut);
+    /// @notice The swap helper contract for executing token swaps
+    SwapHelper public immutable swapHelper;
 
-    /// @notice Emitted when a user swaps their debt from one market to another.
-    event DebtSwapped(address indexed user, address marketFrom, address marketTo, uint256 amountOut);
+    /// @notice The wrapped native token contract (e.g., WBNB)
+    IWBNB public immutable wrappedNative;
+
+    /// @notice Emitted after a successful collateral swap
+    event CollateralSwapped(
+        address indexed user,
+        address indexed marketFrom,
+        address indexed marketTo,
+        uint256 amountSwapped,
+        uint256 amountReceived
+    );
+
+    /// @notice Emitted when a user swaps their debt from one market to another
+    event DebtSwapped(
+        address indexed user,
+        address indexed marketFrom,
+        address indexed marketTo,
+        uint256 amountSwapped,
+        uint256 amountReceived
+    );
 
     /// @notice Emitted when the owner sweeps leftover ERC-20 tokens.
     event SweepToken(address indexed token, address indexed receiver, uint256 amount);
@@ -94,19 +112,28 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @custom:error AccrueInterestFailed
     error AccrueInterestFailed(uint256 errCode);
 
-    /**
-     * @notice Constructor to set immutable variables.
-     * @param _comptroller The address of the Comptroller contract.
-     * @param _nativeMarket The address of the native market (e.g., vBNB).
-     * @custom:error Throw ZeroAddress if comptroller address is zero.
-     */
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _comptroller, address _nativeMarket) {
-        if (_comptroller == address(0)) revert ZeroAddress();
-        if (_nativeMarket == address(0)) revert ZeroAddress();
+    /// @custom:error SwapCallFailed
+    error SwapCallFailed();
 
-        COMPTROLLER = IComptroller(_comptroller);
-        NATIVE_MARKET = _nativeMarket;
+
+     /**
+     * @notice Constructor to set immutable variables
+     * @param _comptroller The address of the Comptroller contract
+     * @param _swapHelper The address of the SwapHelper contract
+     * @param _wrappedNative The address of the wrapped native token (e.g., WBNB)
+     * @param _nativeVToken The address of the native vToken (e.g., vBNB)
+     * @custom:oz-upgrades-unsafe-allow constructor
+     */
+    constructor(IComptroller _comptroller, SwapHelper _swapHelper, IWBNB _wrappedNative, address _nativeVToken) {
+        if (address(_comptroller) == address(0)) revert ZeroAddress();
+        if (address(_swapHelper) == address(0)) revert ZeroAddress();
+        if (address(_wrappedNative) == address(0)) revert ZeroAddress();
+        if (address(_nativeVToken) == address(0)) revert ZeroAddress();
+
+        COMPTROLLER = _comptroller;
+        swapHelper = _swapHelper;
+        wrappedNative = _wrappedNative;
+        NATIVE_MARKET = _nativeVToken;
         _disableInitializers();
     }
 
@@ -128,7 +155,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param user The address whose collateral is being swapped.
      * @param marketFrom The vToken market to seize from.
      * @param marketTo The vToken market to mint into.
-     * @param helper The ISwapHelper contract for performing the token swap.
+     * @param swapData Array of bytes containing swap instructions for the SwapHelper
      * @custom:error Throw NoVTokenBalance The user has no vToken balance in the marketFrom.
      * @custom:event Emits CollateralSwapped event.
      */
@@ -136,12 +163,12 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         address user,
         IVToken marketFrom,
         IVToken marketTo,
-        ISwapHelper helper
+        bytes[] calldata swapData
     ) external payable nonReentrant {
         uint256 userBalance = marketFrom.balanceOf(user);
         if (userBalance == 0) revert NoVTokenBalance();
-        _swapCollateral(user, marketFrom, marketTo, userBalance, helper);
-        emit CollateralSwapped(user, address(marketFrom), address(marketTo), userBalance);
+        uint256 amountReceived = _swapCollateral(user, marketFrom, marketTo, userBalance, swapData);
+        emit CollateralSwapped(user, address(marketFrom), address(marketTo), userBalance, amountReceived);
     }
 
     /**
@@ -150,7 +177,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketFrom The vToken market to seize from.
      * @param marketTo The vToken market to mint into.
      * @param amountToSwap The amount of vTokens to seize and swap.
-     * @param helper The ISwapHelper contract for performing the token swap.
+     * @param swapData Array of bytes containing swap instructions for the SwapHelper
      * @custom:error Throw NoVTokenBalance The user has insufficient vToken balance in the marketFrom.
      * @custom:error Throw ZeroAmount The amountToSwap is zero.
      * @custom:event Emits CollateralSwapped event.
@@ -160,12 +187,12 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         IVToken marketFrom,
         IVToken marketTo,
         uint256 amountToSwap,
-        ISwapHelper helper
+        bytes[] calldata swapData
     ) external payable nonReentrant {
         if (amountToSwap == 0) revert ZeroAmount();
         if (amountToSwap > marketFrom.balanceOf(user)) revert NoVTokenBalance();
-        _swapCollateral(user, marketFrom, marketTo, amountToSwap, helper);
-        emit CollateralSwapped(user, address(marketFrom), address(marketTo), amountToSwap);
+        uint256 amountReceived = _swapCollateral(user, marketFrom, marketTo, amountToSwap, swapData);
+        emit CollateralSwapped(user, address(marketFrom), address(marketTo), amountToSwap, amountReceived);
     }
 
     /**
@@ -173,7 +200,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param user The address whose debt is being swapped.
      * @param marketFrom The vToken market from which debt is swapped.
      * @param marketTo The vToken market into which the new debt is borrowed.
-     * @param helper The ISwapHelper contract for performing the token swap.
+     * @param swapData Array of bytes containing swap instructions for the SwapHelper
      * @custom:error Throw NoBorrowBalance The user has no borrow balance in the marketFrom.
      * @custom:event Emits DebtSwapped event.
      */
@@ -181,12 +208,12 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         address user,
         IVToken marketFrom,
         IVToken marketTo,
-        ISwapHelper helper
+        bytes[] calldata swapData
     ) external payable nonReentrant {
         uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
         if (borrowBalance == 0) revert NoBorrowBalance();
-        _swapDebt(user, marketFrom, marketTo, borrowBalance, helper);
-        emit DebtSwapped(user, address(marketFrom), address(marketTo), borrowBalance);
+        uint256 amountReceived = _swapDebt(user, marketFrom, marketTo, borrowBalance, swapData);
+        emit DebtSwapped(user, address(marketFrom), address(marketTo), borrowBalance, amountReceived);
     }
 
     /**
@@ -195,7 +222,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketFrom The vToken market from which debt is swapped.
      * @param marketTo The vToken market into which the new debt is borrowed.
      * @param amountToSwap The amount of debt to swap.
-     * @param helper The ISwapHelper contract for performing the token swap.
+     * @param swapData Array of bytes containing swap instructions for the SwapHelper
      * @custom:error Throw NoBorrowBalance The user has insufficient borrow balance in the marketFrom.
      * @custom:error Throw ZeroAmount The amountToSwap is zero.
      * @custom:event Emits DebtSwapped event.
@@ -205,12 +232,12 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         IVToken marketFrom,
         IVToken marketTo,
         uint256 amountToSwap,
-        ISwapHelper helper
+        bytes[] calldata swapData
     ) external payable nonReentrant {
         if (amountToSwap == 0) revert ZeroAmount();
         if (amountToSwap > marketFrom.borrowBalanceCurrent(user)) revert NoBorrowBalance();
-        _swapDebt(user, marketFrom, marketTo, amountToSwap, helper);
-        emit DebtSwapped(user, address(marketFrom), address(marketTo), amountToSwap);
+        uint256 amountReceived = _swapDebt(user, marketFrom, marketTo, amountToSwap, swapData);
+        emit DebtSwapped(user, address(marketFrom), address(marketTo), amountToSwap, amountReceived);
     }
 
     /**
@@ -268,7 +295,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @param marketFrom The vToken market from which collateral is seized.
      * @param marketTo The vToken market into which the swapped collateral is minted.
      * @param amountToSeize The amount of vTokens to seize and convert.
-     * @param swapHelper The swap helper contract used to perform the token conversion.
+     * @param swapData Array of bytes containing swap instructions for the SwapHelper
      * @custom:error Throw NotApprovedHelper if the specified swap pair and helper are not approved.
      * @custom:error Throw MarketNotListed if one of the specified markets is not listed in the Comptroller.
      * @custom:error Throw Unauthorized if the caller is neither the user nor an approved delegate.
@@ -277,14 +304,15 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @custom:error Throw NoUnderlyingReceived if no underlying tokens are received from the swap.
      * @custom:error Throw MintFailed if the mint operation fails.
      * @custom:error Throw AccrueInterestFailed if the accrueInterest operation fails.
+     * @custom:error Throw SwapCallFailed if the token swap execution fails
      */
     function _swapCollateral(
         address user,
         IVToken marketFrom,
         IVToken marketTo,
         uint256 amountToSeize,
-        ISwapHelper swapHelper
-    ) internal {
+        bytes[] calldata swapData
+    ) internal returns (uint256 amountReceived) {
         if (!approvedPairs[address(marketFrom)][address(marketTo)][address(swapHelper)]) {
             revert NotApprovedHelper();
         }
@@ -302,36 +330,46 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         _accrueInterest(marketFrom);
         _checkAccountSafe(user);
 
+         // Seize vTokens from user to this contract
         uint256 err = marketFrom.seize(address(this), user, amountToSeize);
         if (err != 0) revert SeizeFailed(err);
 
-        address toUnderlyingAddress = marketTo.underlying();
-        IERC20Upgradeable toUnderlying = IERC20Upgradeable(toUnderlyingAddress);
-        uint256 toUnderlyingBalanceBefore = toUnderlying.balanceOf(address(this));
+        // Get underlying tokens by redeeming vTokens
+        IERC20Upgradeable fromUnderlying;
+        uint256 receivedFromToken;
 
-        if (address(marketFrom) == NATIVE_MARKET) {
+        if (address(marketFrom) == address(NATIVE_MARKET)) {
+            // Handle native token market (e.g., vBNB)
             uint256 nativeBalanceBefore = address(this).balance;
             err = marketFrom.redeem(amountToSeize);
             if (err != 0) revert RedeemFailed(err);
 
-            uint256 receivedNative = address(this).balance - nativeBalanceBefore;
-            if (receivedNative == 0) revert NoUnderlyingReceived();
+            receivedFromToken = address(this).balance - nativeBalanceBefore;
+            if (receivedFromToken == 0) revert NoUnderlyingReceived();
 
-            swapHelper.swapInternal{ value: receivedNative }(address(0), toUnderlyingAddress, receivedNative);
+            // Wrap native tokens to wrapped native for swapping
+            wrappedNative.deposit{ value: receivedFromToken }();
+            fromUnderlying = IERC20Upgradeable(address(wrappedNative));
         } else {
-            IERC20Upgradeable fromUnderlying = IERC20Upgradeable(marketFrom.underlying());
+            // Handle regular ERC20 token markets
+            fromUnderlying = IERC20Upgradeable(marketFrom.underlying());
             uint256 fromUnderlyingBalanceBefore = fromUnderlying.balanceOf(address(this));
 
             err = marketFrom.redeem(amountToSeize);
             if (err != 0) revert RedeemFailed(err);
 
-            uint256 receivedFromToken = fromUnderlying.balanceOf(address(this)) - fromUnderlyingBalanceBefore;
+            receivedFromToken = fromUnderlying.balanceOf(address(this)) - fromUnderlyingBalanceBefore;
             if (receivedFromToken == 0) revert NoUnderlyingReceived();
-
-            fromUnderlying.forceApprove(address(swapHelper), receivedFromToken);
-
-            swapHelper.swapInternal(address(fromUnderlying), toUnderlyingAddress, receivedFromToken);
         }
+
+        // Prepare for swap
+        IERC20Upgradeable toUnderlying;
+        toUnderlying = IERC20Upgradeable(marketTo.underlying());
+
+        uint256 toUnderlyingBalanceBefore = toUnderlying.balanceOf(address(this));
+
+        // Perform swap using SwapHelper
+        _performSwap(fromUnderlying, receivedFromToken, swapData);
 
         uint256 toUnderlyingReceived = toUnderlying.balanceOf(address(this)) - toUnderlyingBalanceBefore;
         if (toUnderlyingReceived == 0) revert NoUnderlyingReceived();
@@ -347,80 +385,72 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         }
 
         _checkAccountSafe(user);
+
+        return toUnderlyingReceived;
     }
 
     /**
-     * @notice Internal function that performs the full debt swap process.
-     * @param user The address whose debt is being swapped.
-     * @param marketFrom The vToken market to which debt is repaid.
-     * @param marketTo The vToken market into which the new debt is borrowed.
-     * @param amountToBorrow The amount of new debt to borrow.
-     * @param swapHelper The swap helper contract used to perform the token conversion.
-     * @custom:error Throw NotApprovedHelper if the swap helper is not approved for the given markets.
-     * @custom:error Throw MarketNotListed if one of the specified markets is not listed in the Comptroller.
-     * @custom:error Throw Unauthorized if the caller is neither the user nor an approved delegate.
-     * @custom:error Throw BorrowFailed if the borrow operation fails.
-     * @custom:error Throw NoUnderlyingReceived if no underlying tokens are received from the swap.
-     * @custom:error Throw RepayFailed if the repay operation fails.
+     * @notice Internal function that performs the debt swap process
+     * @param user The address whose debt is being swapped
+     * @param marketFrom The vToken market to which debt is repaid
+     * @param marketTo The vToken market into which the new debt is borrowed (cannot be VBNB)
+     * @param amountToBorrow The amount of debt to borrow from marketTo
+     * @param swapData Array of bytes containing swap instructions for the SwapHelper
+     * @return amountReceived The amount of underlying tokens received after the swap
+     * @custom:error MarketNotListed if one of the specified markets is not listed in the Comptroller
+     * @custom:error Unauthorized if the caller is neither the user nor an approved delegate
+     * @custom:error BorrowFailed if the borrow operation fails
+     * @custom:error NoUnderlyingReceived if no underlying tokens are received from the swap
+     * @custom:error RepayFailed if the repay operation fails
+     * @custom:error SwapCallFailed if the token swap execution fails
      */
     function _swapDebt(
         address user,
         IVToken marketFrom,
         IVToken marketTo,
         uint256 amountToBorrow,
-        ISwapHelper swapHelper
-    ) internal {
-        if (!approvedPairs[address(marketFrom)][address(marketTo)][address(swapHelper)]) {
-            revert NotApprovedHelper();
-        }
-
-        (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
-        if (!isMarketListed) revert MarketNotListed(address(marketFrom));
-
-        (isMarketListed, , ) = COMPTROLLER.markets(address(marketTo));
-        if (!isMarketListed) revert MarketNotListed(address(marketTo));
-
-        if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
-            revert Unauthorized(msg.sender);
-        }
-
+        bytes[] calldata swapData
+    ) internal returns (uint256 amountReceived) {
+        _validateSwapPair(marketFrom, marketTo);
+        _validateUser(user);
         _checkAccountSafe(user);
 
-        address toUnderlyingAddress = marketTo.underlying();
-        IERC20Upgradeable toUnderlying = IERC20Upgradeable(toUnderlyingAddress);
-        uint256 toUnderlyingBalanceBefore = toUnderlying.balanceOf(address(this));
+        _borrowAndApprove(user, marketTo, amountToBorrow);
+        uint256 receivedFromToken = _performDebtSwap(marketFrom, swapData);
 
-        uint256 err = marketTo.borrowBehalf(user, amountToBorrow);
-        if (err != 0) revert BorrowFailed(err);
-
-        uint256 receivedToUnderlying = toUnderlying.balanceOf(address(this)) - toUnderlyingBalanceBefore;
-
-        toUnderlying.forceApprove(address(swapHelper), receivedToUnderlying);
-
-        if (address(marketFrom) == NATIVE_MARKET) {
-            uint256 fromUnderlyingBalanceBefore = address(this).balance;
-            swapHelper.swapInternal(toUnderlyingAddress, address(0), receivedToUnderlying);
-            uint256 receivedFromNative = address(this).balance - fromUnderlyingBalanceBefore;
-            IVBNB(NATIVE_MARKET).repayBorrowBehalf{ value: receivedFromNative }(user);
-        } else {
-            IERC20Upgradeable fromUnderlying = IERC20Upgradeable(marketFrom.underlying());
-            uint256 fromUnderlyingBalanceBefore = fromUnderlying.balanceOf(address(this));
-            swapHelper.swapInternal(toUnderlyingAddress, address(fromUnderlying), receivedToUnderlying);
-            uint256 receivedFromToken = fromUnderlying.balanceOf(address(this)) - fromUnderlyingBalanceBefore;
-
-            fromUnderlying.forceApprove(address(marketFrom), receivedFromToken);
-
-            err = marketFrom.repayBorrowBehalf(user, receivedFromToken);
-            if (err != 0) revert RepayFailed(err);
-        }
-
+        _repayDebtToMarket(user, marketFrom, receivedFromToken);
         _checkAccountSafe(user);
+
+        return receivedFromToken;
+    }
+
+    /**
+     * @notice Performs token swap via the SwapHelper contract
+     * @dev Transfers tokens to SwapHelper and executes the swap operation.
+     *      The swap operation is expected to return the output tokens to this contract.
+     * @param tokenIn The input token to be swapped
+     * @param amountIn The amount of input tokens to swap
+     * @param swapData Array of bytes containing swap instructions for the SwapHelper
+     * @custom:error SwapCallFailed if the swap execution fails
+     */
+    function _performSwap(IERC20Upgradeable tokenIn, uint256 amountIn, bytes[] calldata swapData) internal {
+        // Transfer tokens to SwapHelper
+        tokenIn.safeTransfer(address(swapHelper), amountIn);
+
+        // Encode swap instructions for SwapHelper multicall
+        bytes memory swapCallData = abi.encodeWithSelector(swapHelper.multicall.selector, swapData);
+
+        // Execute swap
+        (bool success, ) = address(swapHelper).call(swapCallData);
+        if (!success) {
+            revert SwapCallFailed();
+        }
     }
 
     /**
      * @dev Accrue interests on the vToken, reverting the transaction on failure
      * @param vToken The VToken whose interests we want to accrue
-     * @custom:error Thrwo AccrueInterestFailed if accrueInterest action fails on the VToken
+     * @custom:error Throw AccrueInterestFailed if accrueInterest action fails on the VToken
      */
     function _accrueInterest(IVToken vToken) internal {
         uint256 err = vToken.accrueInterest();
@@ -438,4 +468,84 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         (uint256 err, , uint256 shortfall) = COMPTROLLER.getAccountLiquidity(user);
         if (err != 0 || shortfall > 0) revert SwapCausesLiquidation(err);
     }
+
+    /**
+     * @notice Validates the swap pair and helper
+     */
+    function _validateSwapPair(IVToken marketFrom, IVToken marketTo) internal view {
+        if (!approvedPairs[address(marketFrom)][address(marketTo)][address(swapHelper)]) {
+            revert NotApprovedHelper();
+        }
+
+        (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
+        if (!isMarketListed) revert MarketNotListed(address(marketFrom));
+
+        (isMarketListed, , ) = COMPTROLLER.markets(address(marketTo));
+        if (!isMarketListed) revert MarketNotListed(address(marketTo));
+    }
+
+    /**
+     * @notice Validates user authorization
+     */
+    function _validateUser(address user) internal view {
+        if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
+            revert Unauthorized(msg.sender);
+        }
+    }
+
+    /**
+     * @notice Borrows tokens and approves swap helper
+     */
+    function _borrowAndApprove(address user, IVToken marketTo, uint256 amountToBorrow) internal returns (uint256) {
+        IERC20Upgradeable toUnderlying = IERC20Upgradeable(marketTo.underlying());
+        uint256 balanceBefore = toUnderlying.balanceOf(address(this));
+
+        uint256 err = marketTo.borrowBehalf(user, amountToBorrow);
+        if (err != 0) revert BorrowFailed(err);
+
+        uint256 received = toUnderlying.balanceOf(address(this)) - balanceBefore;
+        toUnderlying.forceApprove(address(swapHelper), received);
+
+        return received;
+    }
+
+    /**
+     * @notice Performs debt swap and returns received amount
+     */
+    function _performDebtSwap(IVToken marketFrom, bytes[] calldata swapData) internal returns (uint256) {
+        bool isFromNative = address(marketFrom) == address(NATIVE_MARKET);
+        IERC20Upgradeable fromUnderlying = isFromNative
+            ? IERC20Upgradeable(address(wrappedNative))
+            : IERC20Upgradeable(marketFrom.underlying());
+
+        uint256 balanceBefore = fromUnderlying.balanceOf(address(this));
+
+        // Execute swap instructions
+        bytes memory swapCallData = abi.encodeWithSelector(swapHelper.multicall.selector, swapData);
+        (bool success, ) = address(swapHelper).call(swapCallData);
+        if (!success) revert SwapCallFailed();
+
+        uint256 received = fromUnderlying.balanceOf(address(this)) - balanceBefore;
+        if (received == 0) revert NoUnderlyingReceived();
+
+        return received;
+    }
+
+    /**
+     * @notice Repays debt to market
+     */
+    function _repayDebtToMarket(address user, IVToken marketFrom, uint256 amount) internal {
+        bool isFromNative = address(marketFrom) == address(NATIVE_MARKET);
+
+        if (isFromNative) {
+            wrappedNative.withdraw(amount);
+            IVBNB(NATIVE_MARKET).repayBorrowBehalf{ value: amount }(user);
+        } else {
+            IERC20Upgradeable fromUnderlying = IERC20Upgradeable(marketFrom.underlying());
+            fromUnderlying.forceApprove(address(marketFrom), amount);
+            uint256 err = marketFrom.repayBorrowBehalf(user, amount);
+            if (err != 0) revert RepayFailed(err);
+        }
+    }
+
 }
