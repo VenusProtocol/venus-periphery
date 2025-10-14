@@ -255,7 +255,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
 
     /**
      * @notice Allows the owner to sweep leftover native tokens (e.g., BNB) from the contract.
-     * @custom:event Emits SweepToken event.
+     * @custom:event Emits SweepNative event.
      */
     function sweepNative() external onlyOwner {
         uint256 balance = address(this).balance;
@@ -313,19 +313,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         uint256 amountToSeize,
         bytes[] calldata swapData
     ) internal returns (uint256 amountReceived) {
-        if (!approvedPairs[address(marketFrom)][address(marketTo)][address(swapHelper)]) {
-            revert NotApprovedHelper();
-        }
-
-        (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
-        if (!isMarketListed) revert MarketNotListed(address(marketFrom));
-
-        (isMarketListed, , ) = COMPTROLLER.markets(address(marketTo));
-        if (!isMarketListed) revert MarketNotListed(address(marketTo));
-
-        if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
-            revert Unauthorized(msg.sender);
-        }
+        _validateSwapPair(marketFrom, marketTo);
+        _validateUser(user);
 
         _accrueInterest(marketFrom);
         _checkAccountSafe(user);
