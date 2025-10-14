@@ -1,0 +1,701 @@
+{
+  "address": "0xAbBc70Eb3ca57Ee2550959e386f1Bc6870056ecD",
+  "abi": [
+    {
+      "inputs": [],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [],
+      "name": "InvalidExpiryConfiguration",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "MarketNotEligibleForPause",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "MarketNotEligibleForUnlisting",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "MarketNotListed",
+      "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "oldThreshold",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "newThreshold",
+          "type": "uint256"
+        }
+      ],
+      "name": "GlobalDepositThresholdUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "toBePausedAfterTimestamp",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "canUnlist",
+          "type": "bool"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "toBeUnlistedMinTotalSupplyUSD",
+          "type": "uint256"
+        }
+      ],
+      "name": "MarketExpiryUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "MarketPaused",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "MarketUnlisted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "previousOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "OwnershipTransferStarted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "previousOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "OwnershipTransferred",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "acceptOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "canPauseMarket",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "canUnlistMarket",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "expiries",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "toBePausedAfterTimestamp",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "canUnlist",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256",
+          "name": "toBeUnlistedMinTotalSupplyUSD",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pauseTimestamp",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "unlistTimestamp",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "globalDepositThreshold",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "isMarketPaused",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "owner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "pauseMarket",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "pendingOwner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "renounceOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "newThreshold",
+          "type": "uint256"
+        }
+      ],
+      "name": "setGlobalDepositThreshold",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "toBePausedAfterTimestamp",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "canUnlist",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256",
+          "name": "toBeUnlistedMinTotalSupplyUSD",
+          "type": "uint256"
+        }
+      ],
+      "name": "setMarketExpiry",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "transferOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "unlistMarket",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "transactionHash": "0xc139ff8718a72b510d98eacb327caeb71309ecd62034cb25f098582e51808302",
+  "receipt": {
+    "to": null,
+    "from": "0x8BDA9f9E1fEF0DFd404Fef338D9fE4c543d172e1",
+    "contractAddress": "0xAbBc70Eb3ca57Ee2550959e386f1Bc6870056ecD",
+    "transactionIndex": 154,
+    "gasUsed": "1532836",
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000800000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000001040000000000000000000000000000000000020000000000000000000800000000000000000000000000000000400000000000000000000000000000000080000000000000000000000000000000004000000000000010000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000",
+    "blockHash": "0xfa0f699d3f110ccb1f5238e37f35ed550209e58e141e3d6d84a8ebfb98c71d60",
+    "transactionHash": "0xc139ff8718a72b510d98eacb327caeb71309ecd62034cb25f098582e51808302",
+    "logs": [
+      {
+        "transactionIndex": 154,
+        "blockNumber": 64573189,
+        "transactionHash": "0xc139ff8718a72b510d98eacb327caeb71309ecd62034cb25f098582e51808302",
+        "address": "0xAbBc70Eb3ca57Ee2550959e386f1Bc6870056ecD",
+        "topics": [
+          "0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0",
+          "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "0x0000000000000000000000008bda9f9e1fef0dfd404fef338d9fe4c543d172e1"
+        ],
+        "data": "0x",
+        "logIndex": 571,
+        "blockHash": "0xfa0f699d3f110ccb1f5238e37f35ed550209e58e141e3d6d84a8ebfb98c71d60"
+      }
+    ],
+    "blockNumber": 64573189,
+    "cumulativeGasUsed": "20888882",
+    "status": 1,
+    "byzantium": true
+  },
+  "args": [],
+  "numDeployments": 1,
+  "solcInputHash": "379cadb43a65f1f3e37ab3cf52749bc9",
+  "metadata": "{\"compiler\":{\"version\":\"0.8.25+commit.b61c2a91\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"InvalidExpiryConfiguration\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"MarketNotEligibleForPause\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"MarketNotEligibleForUnlisting\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"MarketNotListed\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"oldThreshold\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"newThreshold\",\"type\":\"uint256\"}],\"name\":\"GlobalDepositThresholdUpdated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"toBePausedAfterTimestamp\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"bool\",\"name\":\"canUnlist\",\"type\":\"bool\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"toBeUnlistedMinTotalSupplyUSD\",\"type\":\"uint256\"}],\"name\":\"MarketExpiryUpdated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"MarketPaused\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"MarketUnlisted\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"OwnershipTransferStarted\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"OwnershipTransferred\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"acceptOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"canPauseMarket\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"canUnlistMarket\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"expiries\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"toBePausedAfterTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"bool\",\"name\":\"canUnlist\",\"type\":\"bool\"},{\"internalType\":\"uint256\",\"name\":\"toBeUnlistedMinTotalSupplyUSD\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"pauseTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"unlistTimestamp\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"globalDepositThreshold\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"isMarketPaused\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"owner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"pauseMarket\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"pendingOwner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"renounceOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"newThreshold\",\"type\":\"uint256\"}],\"name\":\"setGlobalDepositThreshold\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"toBePausedAfterTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"bool\",\"name\":\"canUnlist\",\"type\":\"bool\"},{\"internalType\":\"uint256\",\"name\":\"toBeUnlistedMinTotalSupplyUSD\",\"type\":\"uint256\"}],\"name\":\"setMarketExpiry\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"transferOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"unlistMarket\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"author\":\"Venus\",\"details\":\"The Undertaker contract is responsible for pausing and unlisting markets in a permissionless manner, without requiring additional VIP approvals.\",\"events\":{\"GlobalDepositThresholdUpdated(uint256,uint256)\":{\"params\":{\"newThreshold\":\"The new global deposit threshold.\",\"oldThreshold\":\"The previous global deposit threshold.\"}},\"MarketExpiryUpdated(address,uint256,bool,uint256)\":{\"params\":{\"canUnlist\":\"If the market can be unlisted after being paused.\",\"market\":\"The address of the market.\",\"toBePausedAfterTimestamp\":\"The timestamp after which the market can be paused.\",\"toBeUnlistedMinTotalSupplyUSD\":\"The minimum total market supply (in USD) required to keep the market listed.\"}},\"MarketPaused(address)\":{\"params\":{\"market\":\"The address of the market that was paused.\"}},\"MarketUnlisted(address)\":{\"params\":{\"market\":\"The address of the market that was unlisted.\"}}},\"kind\":\"dev\",\"methods\":{\"acceptOwnership()\":{\"details\":\"The new owner accepts the ownership transfer.\"},\"canPauseMarket(address)\":{\"params\":{\"market\":\"The address of the market.\"},\"returns\":{\"_0\":\"True if the market\\u2019s total deposits are below the global threshold and it is not already paused.\"}},\"canUnlistMarket(address)\":{\"params\":{\"market\":\"The address of the market.\"},\"returns\":{\"_0\":\"True if the market is paused and the current block timestamp is greater than `marketExpiry()`.\"}},\"isMarketPaused(address)\":{\"params\":{\"market\":\"The address of the market.\"},\"returns\":{\"_0\":\"True if the market is paused\"}},\"owner()\":{\"details\":\"Returns the address of the current owner.\"},\"pauseMarket(address)\":{\"custom:error\":\"MarketNotEligibleForPause Thrown if the market is not eligible for pausing.\",\"custom:event\":\"Emits MarketPaused event.\",\"params\":{\"market\":\"The address of the market to pause.\"}},\"pendingOwner()\":{\"details\":\"Returns the address of the pending owner.\"},\"renounceOwnership()\":{\"details\":\"Leaves the contract without owner. It will not be possible to call `onlyOwner` functions. Can only be called by the current owner. NOTE: Renouncing ownership will leave the contract without an owner, thereby disabling any functionality that is only available to the owner.\"},\"setGlobalDepositThreshold(uint256)\":{\"custom:event\":\"Emits GlobalDepositThresholdUpdated event.\",\"details\":\"Restricted to governance (VIP).      Defines the minimum deposit level required to keep a market active.\",\"params\":{\"newThreshold\":\"The new threshold value.\"}},\"setMarketExpiry(address,uint256,bool,uint256)\":{\"custom:error\":\"MarketNotListed Thrown if the market is not listed.InvalidExpiryConfiguration Thrown if the configuration is invalid.\",\"custom:event\":\"Emits MarketExpiryUpdated event.\",\"details\":\"Restricted to governance (VIP).\",\"params\":{\"canUnlist\":\"If the market can be unlisted after being paused.\",\"market\":\"The address of the market.\",\"toBePausedAfterTimestamp\":\"The timestamp after which the market can be paused.\",\"toBeUnlistedMinTotalSupplyUSD\":\"The minimum total market supply (in USD) required to keep the market listed.\"}},\"transferOwnership(address)\":{\"details\":\"Starts the ownership transfer of the contract to a new account. Replaces the pending transfer if there is one. Can only be called by the current owner.\"},\"unlistMarket(address)\":{\"custom:error\":\"MarketNotEligibleForUnlisting Thrown if the market is not eligible for unlisting.\",\"custom:event\":\"Emits MarketUnlisted event.\",\"params\":{\"market\":\"The address of the market to unlist.\"}}},\"stateVariables\":{\"expiries\":{\"details\":\"vToken address => expiry configuration.\"},\"globalDepositThreshold\":{\"details\":\"If a market\\u2019s deposits fall below this threshold, it can be paused.\"}},\"title\":\"Undertaker\",\"version\":1},\"userdoc\":{\"errors\":{\"InvalidExpiryConfiguration()\":[{\"notice\":\"Thrown when the expiry configuration provided is invalid.\"}],\"MarketNotEligibleForPause()\":[{\"notice\":\"Thrown when attempting to pause a market that is not eligible.\"}],\"MarketNotEligibleForUnlisting()\":[{\"notice\":\"Thrown when attempting to unlist a market that is not eligible.\"}],\"MarketNotListed()\":[{\"notice\":\"Thrown when the market is not listed.\"}]},\"events\":{\"GlobalDepositThresholdUpdated(uint256,uint256)\":{\"notice\":\"Emitted when the global deposit threshold is updated.\"},\"MarketExpiryUpdated(address,uint256,bool,uint256)\":{\"notice\":\"Emitted when the expiry configuration for a market is updated.\"},\"MarketPaused(address)\":{\"notice\":\"Emitted when a market is paused.\"},\"MarketUnlisted(address)\":{\"notice\":\"Emitted when a market is unlisted.\"}},\"kind\":\"user\",\"methods\":{\"canPauseMarket(address)\":{\"notice\":\"Checks if a market can currently be paused.\"},\"canUnlistMarket(address)\":{\"notice\":\"Checks if a market can currently be unlisted.\"},\"expiries(address)\":{\"notice\":\"Mapping to store expiry configurations for markets.\"},\"globalDepositThreshold()\":{\"notice\":\"The global deposit threshold (in USD).\"},\"isMarketPaused(address)\":{\"notice\":\"Checks if a market is currently paused.\"},\"pauseMarket(address)\":{\"notice\":\"Pauses a market if the criteria are met.\"},\"setGlobalDepositThreshold(uint256)\":{\"notice\":\"Updates the global deposit threshold (in USD).\"},\"setMarketExpiry(address,uint256,bool,uint256)\":{\"notice\":\"Sets the expiry configuration for a market.\"},\"unlistMarket(address)\":{\"notice\":\"Unlists a market if the criteria are met.\"}},\"notice\":\"Undertaker contract.\",\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/Undertaker/Undertaker.sol\":\"Undertaker\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\",\"useLiteralContent\":true},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[]},\"sources\":{\"@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (token/ERC20/IERC20.sol)\\n\\npragma solidity ^0.8.0;\\n\\n/**\\n * @dev Interface of the ERC20 standard as defined in the EIP.\\n */\\ninterface IERC20Upgradeable {\\n    /**\\n     * @dev Emitted when `value` tokens are moved from one account (`from`) to\\n     * another (`to`).\\n     *\\n     * Note that `value` may be zero.\\n     */\\n    event Transfer(address indexed from, address indexed to, uint256 value);\\n\\n    /**\\n     * @dev Emitted when the allowance of a `spender` for an `owner` is set by\\n     * a call to {approve}. `value` is the new allowance.\\n     */\\n    event Approval(address indexed owner, address indexed spender, uint256 value);\\n\\n    /**\\n     * @dev Returns the amount of tokens in existence.\\n     */\\n    function totalSupply() external view returns (uint256);\\n\\n    /**\\n     * @dev Returns the amount of tokens owned by `account`.\\n     */\\n    function balanceOf(address account) external view returns (uint256);\\n\\n    /**\\n     * @dev Moves `amount` tokens from the caller's account to `to`.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * Emits a {Transfer} event.\\n     */\\n    function transfer(address to, uint256 amount) external returns (bool);\\n\\n    /**\\n     * @dev Returns the remaining number of tokens that `spender` will be\\n     * allowed to spend on behalf of `owner` through {transferFrom}. This is\\n     * zero by default.\\n     *\\n     * This value changes when {approve} or {transferFrom} are called.\\n     */\\n    function allowance(address owner, address spender) external view returns (uint256);\\n\\n    /**\\n     * @dev Sets `amount` as the allowance of `spender` over the caller's tokens.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * IMPORTANT: Beware that changing an allowance with this method brings the risk\\n     * that someone may use both the old and the new allowance by unfortunate\\n     * transaction ordering. One possible solution to mitigate this race\\n     * condition is to first reduce the spender's allowance to 0 and set the\\n     * desired value afterwards:\\n     * https://github.com/ethereum/EIPs/issues/20#issuecomment-263524729\\n     *\\n     * Emits an {Approval} event.\\n     */\\n    function approve(address spender, uint256 amount) external returns (bool);\\n\\n    /**\\n     * @dev Moves `amount` tokens from `from` to `to` using the\\n     * allowance mechanism. `amount` is then deducted from the caller's\\n     * allowance.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * Emits a {Transfer} event.\\n     */\\n    function transferFrom(address from, address to, uint256 amount) external returns (bool);\\n}\\n\",\"keccak256\":\"0x0e1f0f5f62f67a881cd1a9597acbc0a5e4071f3c2c10449a183b922ae7272e3f\",\"license\":\"MIT\"},\"@openzeppelin/contracts/access/Ownable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (access/Ownable.sol)\\n\\npragma solidity ^0.8.0;\\n\\nimport \\\"../utils/Context.sol\\\";\\n\\n/**\\n * @dev Contract module which provides a basic access control mechanism, where\\n * there is an account (an owner) that can be granted exclusive access to\\n * specific functions.\\n *\\n * By default, the owner account will be the one that deploys the contract. This\\n * can later be changed with {transferOwnership}.\\n *\\n * This module is used through inheritance. It will make available the modifier\\n * `onlyOwner`, which can be applied to your functions to restrict their use to\\n * the owner.\\n */\\nabstract contract Ownable is Context {\\n    address private _owner;\\n\\n    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);\\n\\n    /**\\n     * @dev Initializes the contract setting the deployer as the initial owner.\\n     */\\n    constructor() {\\n        _transferOwnership(_msgSender());\\n    }\\n\\n    /**\\n     * @dev Throws if called by any account other than the owner.\\n     */\\n    modifier onlyOwner() {\\n        _checkOwner();\\n        _;\\n    }\\n\\n    /**\\n     * @dev Returns the address of the current owner.\\n     */\\n    function owner() public view virtual returns (address) {\\n        return _owner;\\n    }\\n\\n    /**\\n     * @dev Throws if the sender is not the owner.\\n     */\\n    function _checkOwner() internal view virtual {\\n        require(owner() == _msgSender(), \\\"Ownable: caller is not the owner\\\");\\n    }\\n\\n    /**\\n     * @dev Leaves the contract without owner. It will not be possible to call\\n     * `onlyOwner` functions. Can only be called by the current owner.\\n     *\\n     * NOTE: Renouncing ownership will leave the contract without an owner,\\n     * thereby disabling any functionality that is only available to the owner.\\n     */\\n    function renounceOwnership() public virtual onlyOwner {\\n        _transferOwnership(address(0));\\n    }\\n\\n    /**\\n     * @dev Transfers ownership of the contract to a new account (`newOwner`).\\n     * Can only be called by the current owner.\\n     */\\n    function transferOwnership(address newOwner) public virtual onlyOwner {\\n        require(newOwner != address(0), \\\"Ownable: new owner is the zero address\\\");\\n        _transferOwnership(newOwner);\\n    }\\n\\n    /**\\n     * @dev Transfers ownership of the contract to a new account (`newOwner`).\\n     * Internal function without access restriction.\\n     */\\n    function _transferOwnership(address newOwner) internal virtual {\\n        address oldOwner = _owner;\\n        _owner = newOwner;\\n        emit OwnershipTransferred(oldOwner, newOwner);\\n    }\\n}\\n\",\"keccak256\":\"0xba43b97fba0d32eb4254f6a5a297b39a19a247082a02d6e69349e071e2946218\",\"license\":\"MIT\"},\"@openzeppelin/contracts/access/Ownable2Step.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (access/Ownable2Step.sol)\\n\\npragma solidity ^0.8.0;\\n\\nimport \\\"./Ownable.sol\\\";\\n\\n/**\\n * @dev Contract module which provides access control mechanism, where\\n * there is an account (an owner) that can be granted exclusive access to\\n * specific functions.\\n *\\n * By default, the owner account will be the one that deploys the contract. This\\n * can later be changed with {transferOwnership} and {acceptOwnership}.\\n *\\n * This module is used through inheritance. It will make available all functions\\n * from parent (Ownable).\\n */\\nabstract contract Ownable2Step is Ownable {\\n    address private _pendingOwner;\\n\\n    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);\\n\\n    /**\\n     * @dev Returns the address of the pending owner.\\n     */\\n    function pendingOwner() public view virtual returns (address) {\\n        return _pendingOwner;\\n    }\\n\\n    /**\\n     * @dev Starts the ownership transfer of the contract to a new account. Replaces the pending transfer if there is one.\\n     * Can only be called by the current owner.\\n     */\\n    function transferOwnership(address newOwner) public virtual override onlyOwner {\\n        _pendingOwner = newOwner;\\n        emit OwnershipTransferStarted(owner(), newOwner);\\n    }\\n\\n    /**\\n     * @dev Transfers ownership of the contract to a new account (`newOwner`) and deletes any pending owner.\\n     * Internal function without access restriction.\\n     */\\n    function _transferOwnership(address newOwner) internal virtual override {\\n        delete _pendingOwner;\\n        super._transferOwnership(newOwner);\\n    }\\n\\n    /**\\n     * @dev The new owner accepts the ownership transfer.\\n     */\\n    function acceptOwnership() public virtual {\\n        address sender = _msgSender();\\n        require(pendingOwner() == sender, \\\"Ownable2Step: caller is not the new owner\\\");\\n        _transferOwnership(sender);\\n    }\\n}\\n\",\"keccak256\":\"0xde231558366826d7cb61725af8147965a61c53b77a352cc8c9af38fc5a92ac3c\",\"license\":\"MIT\"},\"@openzeppelin/contracts/utils/Context.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.4) (utils/Context.sol)\\n\\npragma solidity ^0.8.0;\\n\\n/**\\n * @dev Provides information about the current execution context, including the\\n * sender of the transaction and its data. While these are generally available\\n * via msg.sender and msg.data, they should not be accessed in such a direct\\n * manner, since when dealing with meta-transactions the account sending and\\n * paying for execution may not be the actual sender (as far as an application\\n * is concerned).\\n *\\n * This contract is only required for intermediate, library-like contracts.\\n */\\nabstract contract Context {\\n    function _msgSender() internal view virtual returns (address) {\\n        return msg.sender;\\n    }\\n\\n    function _msgData() internal view virtual returns (bytes calldata) {\\n        return msg.data;\\n    }\\n\\n    function _contextSuffixLength() internal view virtual returns (uint256) {\\n        return 0;\\n    }\\n}\\n\",\"keccak256\":\"0xa92e4fa126feb6907daa0513ddd816b2eb91f30a808de54f63c17d0e162c3439\",\"license\":\"MIT\"},\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\ninterface OracleInterface {\\n    function getPrice(address asset) external view returns (uint256);\\n}\\n\\ninterface ResilientOracleInterface is OracleInterface {\\n    function updatePrice(address vToken) external;\\n\\n    function updateAssetPrice(address asset) external;\\n\\n    function getUnderlyingPrice(address vToken) external view returns (uint256);\\n}\\n\\ninterface BoundValidatorInterface {\\n    function validatePriceWithAnchorPrice(\\n        address asset,\\n        uint256 reporterPrice,\\n        uint256 anchorPrice\\n    ) external view returns (bool);\\n}\\n\",\"keccak256\":\"0xd3bbb7c9eef19e8f467342df6034ef95399a00964646fb8c82b438968ae3a8c0\",\"license\":\"BSD-3-Clause\"},\"contracts/Interfaces.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\nimport { IERC20Upgradeable } from \\\"@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol\\\";\\nimport { ResilientOracleInterface } from \\\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\\\";\\n\\ninterface IVToken is IERC20Upgradeable {\\n    function accrueInterest() external returns (uint256);\\n\\n    function redeem(uint256 redeemTokens) external returns (uint256);\\n\\n    function redeemUnderlying(uint256 redeemAmount) external returns (uint256);\\n\\n    function borrowBalanceCurrent(address borrower) external returns (uint256);\\n\\n    function balanceOfUnderlying(address owner) external returns (uint256);\\n\\n    function seize(address liquidator, address borrower, uint seizeTokens) external returns (uint);\\n\\n    function mintBehalf(address receiver, uint mintAmount) external returns (uint);\\n\\n    function borrowBehalf(address borrower, uint borrowAmount) external returns (uint256);\\n\\n    function repayBorrowBehalf(address borrower, uint repayAmount) external returns (uint256);\\n\\n    function comptroller() external view returns (IComptroller);\\n\\n    function borrowBalanceStored(address account) external view returns (uint256);\\n\\n    function underlying() external view returns (address);\\n\\n    function exchangeRateStored() external view returns (uint256);\\n}\\n\\ninterface IComptroller {\\n    enum Action {\\n        MINT,\\n        REDEEM,\\n        BORROW,\\n        REPAY,\\n        SEIZE,\\n        LIQUIDATE,\\n        TRANSFER,\\n        ENTER_MARKET,\\n        EXIT_MARKET\\n    }\\n\\n    function setActionsPaused(address[] calldata markets_, Action[] calldata actions_, bool paused_) external;\\n\\n    function setCollateralFactor(\\n        IVToken vToken,\\n        uint256 newCollateralFactorMantissa,\\n        uint256 newLiquidationThresholdMantissa\\n    ) external returns (uint256);\\n\\n    function setLiquidationIncentive(\\n        address vToken,\\n        uint256 newLiquidationIncentiveMantissa\\n    ) external returns (uint256);\\n\\n    function setIsBorrowAllowed(uint96 poolId, address vToken, bool borrowAllowed) external;\\n\\n    function enterMarkets(address[] calldata vTokens) external returns (uint256[] memory);\\n\\n    function setMarketBorrowCaps(address[] calldata vTokens, uint256[] calldata newBorrowCaps) external;\\n\\n    function setMarketSupplyCaps(address[] calldata vTokens, uint256[] calldata newSupplyCaps) external;\\n\\n    function unlistMarket(address vToken) external returns (uint256);\\n\\n    function liquidationIncentiveMantissa() external view returns (uint256);\\n\\n    function vaiController() external view returns (address);\\n\\n    function liquidatorContract() external view returns (address);\\n\\n    function oracle() external view returns (ResilientOracleInterface);\\n\\n    function actionPaused(address market, Action action) external view returns (bool);\\n\\n    function markets(address) external view returns (bool, uint256, bool);\\n\\n    function isForcedLiquidationEnabled(address) external view returns (bool);\\n\\n    function approvedDelegates(address borrower, address delegate) external view returns (bool);\\n\\n    function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);\\n}\\n\",\"keccak256\":\"0x2f1331c5f91596c3cbcfed12118e1245c30b759c7f715837635fbcfa32cdaea1\",\"license\":\"BSD-3-Clause\"},\"contracts/Undertaker/Undertaker.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity 0.8.25;\\n\\nimport { ResilientOracleInterface } from \\\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\\\";\\nimport { IVToken, IComptroller } from \\\"../Interfaces.sol\\\";\\nimport { Ownable2Step } from \\\"@openzeppelin/contracts/access/Ownable2Step.sol\\\";\\n\\n/**\\n * @title Undertaker\\n * @author Venus\\n * @notice Undertaker contract.\\n *\\n * @dev\\n * The Undertaker contract is responsible for pausing and unlisting markets\\n * in a permissionless manner, without requiring additional VIP approvals.\\n */\\ncontract Undertaker is Ownable2Step {\\n    struct Expiry {\\n        uint256 toBePausedAfterTimestamp;\\n        bool canUnlist;\\n        uint256 toBeUnlistedMinTotalSupplyUSD;\\n        uint256 pauseTimestamp;\\n        uint256 unlistTimestamp;\\n    }\\n\\n    /**\\n     * @notice The global deposit threshold (in USD).\\n     * @dev If a market\\u2019s deposits fall below this threshold, it can be paused.\\n     */\\n    uint256 public globalDepositThreshold;\\n\\n    /**\\n     * @notice Mapping to store expiry configurations for markets.\\n     * @dev vToken address => expiry configuration.\\n     */\\n    mapping(address => Expiry) public expiries;\\n\\n    /**\\n     * @notice Emitted when a market is paused.\\n     * @param market The address of the market that was paused.\\n     */\\n    event MarketPaused(address indexed market);\\n\\n    /**\\n     * @notice Emitted when a market is unlisted.\\n     * @param market The address of the market that was unlisted.\\n     */\\n    event MarketUnlisted(address indexed market);\\n\\n    /**\\n     * @notice Emitted when the global deposit threshold is updated.\\n     * @param oldThreshold The previous global deposit threshold.\\n     * @param newThreshold The new global deposit threshold.\\n     */\\n    event GlobalDepositThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);\\n\\n    /**\\n     * @notice Emitted when the expiry configuration for a market is updated.\\n     * @param market The address of the market.\\n     * @param toBePausedAfterTimestamp The timestamp after which the market can be paused.\\n     * @param canUnlist If the market can be unlisted after being paused.\\n     * @param toBeUnlistedMinTotalSupplyUSD The minimum total market supply (in USD) required to keep the market listed.\\n     */\\n    event MarketExpiryUpdated(\\n        address indexed market,\\n        uint256 toBePausedAfterTimestamp,\\n        bool canUnlist,\\n        uint256 toBeUnlistedMinTotalSupplyUSD\\n    );\\n\\n    /// @notice Thrown when the expiry configuration provided is invalid.\\n    error InvalidExpiryConfiguration();\\n\\n    /// @notice Thrown when attempting to pause a market that is not eligible.\\n    error MarketNotEligibleForPause();\\n\\n    /// @notice Thrown when attempting to unlist a market that is not eligible.\\n    error MarketNotEligibleForUnlisting();\\n\\n    /// @notice Thrown when the market is not listed.\\n    error MarketNotListed();\\n\\n    constructor() Ownable2Step() {}\\n\\n    /**\\n     * @notice Updates the global deposit threshold (in USD).\\n     * @dev Restricted to governance (VIP).\\n     *      Defines the minimum deposit level required to keep a market active.\\n     * @param newThreshold The new threshold value.\\n     * @custom:event Emits GlobalDepositThresholdUpdated event.\\n     */\\n    function setGlobalDepositThreshold(uint256 newThreshold) external onlyOwner {\\n        emit GlobalDepositThresholdUpdated(globalDepositThreshold, newThreshold);\\n        globalDepositThreshold = newThreshold;\\n    }\\n\\n    /**\\n     * @notice Sets the expiry configuration for a market.\\n     * @dev Restricted to governance (VIP).\\n     * @param market The address of the market.\\n     * @param toBePausedAfterTimestamp The timestamp after which the market can be paused.\\n     * @param canUnlist If the market can be unlisted after being paused.\\n     * @param toBeUnlistedMinTotalSupplyUSD The minimum total market supply (in USD) required to keep the market listed.\\n     * @custom:error MarketNotListed Thrown if the market is not listed.\\n     * @custom:error InvalidExpiryConfiguration Thrown if the configuration is invalid.\\n     * @custom:event Emits MarketExpiryUpdated event.\\n     */\\n    function setMarketExpiry(\\n        address market,\\n        uint256 toBePausedAfterTimestamp,\\n        bool canUnlist,\\n        uint256 toBeUnlistedMinTotalSupplyUSD\\n    ) external onlyOwner {\\n        (bool isListed, , ) = IVToken(market).comptroller().markets(market);\\n        if (!isListed) {\\n            revert MarketNotListed();\\n        }\\n\\n        if (toBePausedAfterTimestamp < block.timestamp) {\\n            revert InvalidExpiryConfiguration();\\n        }\\n\\n        if (!canUnlist && toBeUnlistedMinTotalSupplyUSD != 0) {\\n            revert InvalidExpiryConfiguration();\\n        }\\n\\n        expiries[market] = Expiry({\\n            toBePausedAfterTimestamp: toBePausedAfterTimestamp,\\n            canUnlist: canUnlist,\\n            toBeUnlistedMinTotalSupplyUSD: toBeUnlistedMinTotalSupplyUSD,\\n            pauseTimestamp: 0,\\n            unlistTimestamp: 0\\n        });\\n        emit MarketExpiryUpdated(market, toBePausedAfterTimestamp, canUnlist, toBeUnlistedMinTotalSupplyUSD);\\n    }\\n\\n    /**\\n     * @notice Pauses a market if the criteria are met.\\n     * @param market The address of the market to pause.\\n     * @custom:error MarketNotEligibleForPause Thrown if the market is not eligible for pausing.\\n     * @custom:event Emits MarketPaused event.\\n     */\\n    function pauseMarket(address market) external {\\n        if (!canPauseMarket(market)) {\\n            revert MarketNotEligibleForPause();\\n        }\\n\\n        IComptroller comptroller = IVToken(market).comptroller();\\n        comptroller.setCollateralFactor(IVToken(market), 0, 0);\\n\\n        IComptroller.Action[] memory actions = new IComptroller.Action[](3);\\n        actions[0] = IComptroller.Action.MINT;\\n        actions[1] = IComptroller.Action.BORROW;\\n        actions[2] = IComptroller.Action.ENTER_MARKET;\\n\\n        address[] memory markets = new address[](1);\\n        markets[0] = market;\\n\\n        comptroller.setActionsPaused(markets, actions, true);\\n\\n        expiries[market].pauseTimestamp = block.timestamp;\\n\\n        emit MarketPaused(market);\\n    }\\n\\n    /**\\n     * @notice Unlists a market if the criteria are met.\\n     * @param market The address of the market to unlist.\\n     * @custom:error MarketNotEligibleForUnlisting Thrown if the market is not eligible for unlisting.\\n     * @custom:event Emits MarketUnlisted event.\\n     */\\n    function unlistMarket(address market) external {\\n        if (!canUnlistMarket(market)) {\\n            revert MarketNotEligibleForUnlisting();\\n        }\\n\\n        IComptroller.Action[] memory actions = new IComptroller.Action[](6);\\n        actions[0] = IComptroller.Action.REDEEM;\\n        actions[1] = IComptroller.Action.REPAY;\\n        actions[2] = IComptroller.Action.SEIZE;\\n        actions[3] = IComptroller.Action.LIQUIDATE;\\n        actions[4] = IComptroller.Action.TRANSFER;\\n        actions[5] = IComptroller.Action.EXIT_MARKET;\\n\\n        address[] memory markets = new address[](1);\\n        markets[0] = market;\\n\\n        IComptroller comptroller = IVToken(market).comptroller();\\n        IComptroller(comptroller).setActionsPaused(markets, actions, true);\\n\\n        uint256[] memory caps = new uint256[](1);\\n        caps[0] = 0;\\n\\n        IComptroller(comptroller).setMarketBorrowCaps(markets, caps);\\n        IComptroller(comptroller).setMarketSupplyCaps(markets, caps);\\n\\n        IComptroller(comptroller).unlistMarket(market);\\n\\n        expiries[market].unlistTimestamp = block.timestamp;\\n\\n        emit MarketUnlisted(market);\\n    }\\n\\n    /**\\n     * @notice Checks if a market is currently paused.\\n     * @param market The address of the market.\\n     * @return True if the market is paused\\n     */\\n    function isMarketPaused(address market) public view returns (bool) {\\n        IComptroller comptroller = IVToken(market).comptroller();\\n        (, uint256 collateralFactorMantissa, ) = IComptroller(comptroller).markets(market);\\n\\n        if (\\n            collateralFactorMantissa == 0 &&\\n            IComptroller(comptroller).actionPaused(market, IComptroller.Action.MINT) &&\\n            IComptroller(comptroller).actionPaused(market, IComptroller.Action.BORROW) &&\\n            IComptroller(comptroller).actionPaused(market, IComptroller.Action.ENTER_MARKET)\\n        ) {\\n            return true;\\n        }\\n\\n        return false;\\n    }\\n\\n    /**\\n     * @notice Checks if a market can currently be paused.\\n     * @param market The address of the market.\\n     * @return True if the market\\u2019s total deposits are below the global threshold and it is not already paused.\\n     */\\n    function canPauseMarket(address market) public view returns (bool) {\\n        Expiry memory expiry = expiries[market];\\n\\n        if (expiry.pauseTimestamp != 0) {\\n            return false;\\n        }\\n\\n        if (expiry.toBePausedAfterTimestamp != 0 && block.timestamp < expiry.toBePausedAfterTimestamp) {\\n            return false;\\n        }\\n\\n        IComptroller comptroller = IVToken(market).comptroller();\\n\\n        if (expiry.toBePausedAfterTimestamp == 0) {\\n            uint256 totalDepositsUSD = getTotalDeposit(market);\\n\\n            if (totalDepositsUSD > globalDepositThreshold) {\\n                return false;\\n            }\\n        }\\n\\n        if (\\n            comptroller.actionPaused(market, IComptroller.Action.MINT) ||\\n            comptroller.actionPaused(market, IComptroller.Action.BORROW) ||\\n            comptroller.actionPaused(market, IComptroller.Action.ENTER_MARKET)\\n        ) {\\n            return false;\\n        }\\n\\n        (, uint256 collateralFactorMantissa, ) = comptroller.markets(market);\\n        if (collateralFactorMantissa == 0) {\\n            return false;\\n        }\\n\\n        return true;\\n    }\\n\\n    /**\\n     * @notice Checks if a market can currently be unlisted.\\n     * @param market The address of the market.\\n     * @return True if the market is paused and the current block timestamp is greater than `marketExpiry()`.\\n     */\\n    function canUnlistMarket(address market) public view returns (bool) {\\n        IComptroller comptroller = IVToken(market).comptroller();\\n        (bool isListed, , ) = comptroller.markets(market);\\n        if (!isListed) {\\n            return false;\\n        }\\n\\n        Expiry memory expiry = expiries[market];\\n\\n        if (expiry.unlistTimestamp != 0) {\\n            return false;\\n        }\\n\\n        if (!isMarketPaused(market)) {\\n            return false;\\n        }\\n\\n        if (!expiry.canUnlist) {\\n            return false;\\n        }\\n\\n        uint256 totalDepositsUSD = getTotalDeposit(market);\\n\\n        if (totalDepositsUSD > expiry.toBeUnlistedMinTotalSupplyUSD) {\\n            return false;\\n        }\\n\\n        return true;\\n    }\\n\\n    /**\\n     * @notice Returns the total deposits of a market in USD.\\n     * @param market The address of the market.\\n     * @return The total deposits in USD.\\n     */\\n    function getTotalDeposit(address market) internal view returns (uint256) {\\n        IComptroller comptroller = IVToken(market).comptroller();\\n        ResilientOracleInterface oracle = comptroller.oracle();\\n        uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;\\n        uint256 price = oracle.getUnderlyingPrice(market);\\n        uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;\\n        return totalDepositsUSD;\\n    }\\n}\\n\",\"keccak256\":\"0xfb6fffee57ac053244c77dc104f7822ca71dcb7e2fa8a011d746024b73feb10d\",\"license\":\"BSD-3-Clause\"}},\"version\":1}",
+  "bytecode": "0x6080604052348015600e575f80fd5b50601633601a565b6083565b600180546001600160a01b03191690556031816034565b50565b5f80546001600160a01b038381166001600160a01b0319831681178455604051919092169283917f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e09190a35050565b611a39806100905f395ff3fe608060405234801561000f575f80fd5b50600436106100e5575f3560e01c8063a5ba520d11610088578063e30c397811610063578063e30c397814610213578063e737add314610224578063e952cba914610237578063f2fde38b1461024a575f80fd5b8063a5ba520d146101da578063cf7fb264146101ed578063e050f5ef14610200575f80fd5b8063715018a6116100c3578063715018a61461018357806379ba50971461018b5780638da5cb5b14610193578063980cdc71146101b7575f80fd5b80630686dab6146100e95780631fd6a5dc146100fe5780634f4d8b361461016c575b5f80fd5b6100fc6100f736600461173f565b61025d565b005b61013f61010c36600461173f565b600360208190525f918252604090912080546001820154600283015493830154600490930154919360ff90911692909185565b604080519586529315156020860152928401919091526060830152608082015260a0015b60405180910390f35b61017560025481565b604051908152602001610163565b6100fc61071a565b6100fc61072d565b5f546001600160a01b03165b6040516001600160a01b039091168152602001610163565b6101ca6101c536600461173f565b6107ac565b6040519015158152602001610163565b6100fc6101e8366004611761565b610aac565b6101ca6101fb36600461173f565b610af5565b6101ca61020e36600461173f565b610d40565b6001546001600160a01b031661019f565b6100fc610232366004611785565b610ee3565b6100fc61024536600461173f565b6110e0565b6100fc61025836600461173f565b6113bd565b61026681610d40565b6102865760405160016275c3cb60e11b0319815260040160405180910390fd5b60408051600680825260e082019092525f916020820160c0803683370190505090506001815f815181106102bc576102bc6117ca565b602002602001019060088111156102d5576102d56117de565b908160088111156102e8576102e86117de565b81525050600381600181518110610301576103016117ca565b6020026020010190600881111561031a5761031a6117de565b9081600881111561032d5761032d6117de565b81525050600481600281518110610346576103466117ca565b6020026020010190600881111561035f5761035f6117de565b90816008811115610372576103726117de565b8152505060058160038151811061038b5761038b6117ca565b602002602001019060088111156103a4576103a46117de565b908160088111156103b7576103b76117de565b815250506006816004815181106103d0576103d06117ca565b602002602001019060088111156103e9576103e96117de565b908160088111156103fc576103fc6117de565b81525050600881600581518110610415576104156117ca565b6020026020010190600881111561042e5761042e6117de565b90816008811115610441576104416117de565b9052506040805160018082528183019092525f916020808301908036833701905050905082815f81518110610478576104786117ca565b60200260200101906001600160a01b031690816001600160a01b0316815250505f836001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa1580156104d5573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906104f991906117f2565b604051630125551160e51b81529091506001600160a01b038216906324aaa2209061052d9085908790600190600401611870565b5f604051808303815f87803b158015610544575f80fd5b505af1158015610556573d5f803e3d5ffd5b505f9250600191506105659050565b60405190808252806020026020018201604052801561058e578160200160208202803683370190505b5090505f815f815181106105a4576105a46117ca565b602090810291909101015260405163186db48f60e01b81526001600160a01b0383169063186db48f906105dd90869085906004016118d7565b5f604051808303815f87803b1580156105f4575f80fd5b505af1158015610606573d5f803e3d5ffd5b505060405163344dabd160e21b81526001600160a01b038516925063d136af44915061063890869085906004016118d7565b5f604051808303815f87803b15801561064f575f80fd5b505af1158015610661573d5f803e3d5ffd5b50506040516303436d5b60e11b81526001600160a01b03888116600483015285169250630686dab691506024016020604051808303815f875af11580156106aa573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906106ce919061192c565b506001600160a01b0385165f8181526003602052604080822042600490910155517f302feb03efd5741df80efe7f97f5d93d74d46a542a3d312d0faae64fa1f3e0e99190a25050505050565b61072261142d565b61072b5f611486565b565b60015433906001600160a01b031681146107a05760405162461bcd60e51b815260206004820152602960248201527f4f776e61626c6532537465703a2063616c6c6572206973206e6f7420746865206044820152683732bb9037bbb732b960b91b60648201526084015b60405180910390fd5b6107a981611486565b50565b6001600160a01b0381165f908152600360208181526040808420815160a08101835281548152600182015460ff1615159381019390935260028101549183019190915291820154606082018190526004909201546080820152901561081357505f92915050565b8051158015906108235750805142105b1561083057505f92915050565b5f836001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa15801561086d573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061089191906117f2565b82519091505f036108be575f6108a68561149f565b90506002548111156108bc57505f949350505050565b505b604051630742d14b60e51b81526001600160a01b0382169063e85a2960906108ec9087905f90600401611943565b602060405180830381865afa158015610907573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061092b9190611960565b8061099f5750604051630742d14b60e51b81526001600160a01b0382169063e85a296090610960908790600290600401611943565b602060405180830381865afa15801561097b573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061099f9190611960565b80610a135750604051630742d14b60e51b81526001600160a01b0382169063e85a2960906109d4908790600790600401611943565b602060405180830381865afa1580156109ef573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610a139190611960565b15610a2157505f9392505050565b604051638e8f294b60e01b81526001600160a01b0385811660048301525f9190831690638e8f294b90602401606060405180830381865afa158015610a68573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610a8c919061197b565b50915050805f03610aa157505f949350505050565b506001949350505050565b610ab461142d565b60025460408051918252602082018390527fd603de9a55208a071bea65ebeb0d7b708889a49fb6490e6eaae6542b96323f17910160405180910390a1600255565b5f80826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015610b33573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610b5791906117f2565b604051638e8f294b60e01b81526001600160a01b0385811660048301529192505f91831690638e8f294b90602401606060405180830381865afa158015610ba0573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610bc4919061197b565b5091505080158015610c3e5750604051630742d14b60e51b81526001600160a01b0383169063e85a296090610bff9087905f90600401611943565b602060405180830381865afa158015610c1a573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610c3e9190611960565b8015610cb35750604051630742d14b60e51b81526001600160a01b0383169063e85a296090610c74908790600290600401611943565b602060405180830381865afa158015610c8f573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610cb39190611960565b8015610d285750604051630742d14b60e51b81526001600160a01b0383169063e85a296090610ce9908790600790600401611943565b602060405180830381865afa158015610d04573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610d289190611960565b15610d37575060019392505050565b505f9392505050565b5f80826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015610d7e573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610da291906117f2565b604051638e8f294b60e01b81526001600160a01b0385811660048301529192505f91831690638e8f294b90602401606060405180830381865afa158015610deb573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610e0f919061197b565b5050905080610e2157505f9392505050565b6001600160a01b0384165f90815260036020818152604092839020835160a08101855281548152600182015460ff161515928101929092526002810154938201939093529082015460608201526004909101546080820181905215610e8a57505f949350505050565b610e9385610af5565b610ea157505f949350505050565b8060200151610eb457505f949350505050565b5f610ebe8661149f565b90508160400151811115610ed757505f95945050505050565b50600195945050505050565b610eeb61142d565b5f846001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015610f28573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610f4c91906117f2565b604051638e8f294b60e01b81526001600160a01b0387811660048301529190911690638e8f294b90602401606060405180830381865afa158015610f92573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610fb6919061197b565b5050905080610fd8576040516334b04fe360e11b815260040160405180910390fd5b42841015610ff95760405163289cf11760e01b815260040160405180910390fd5b8215801561100657508115155b156110245760405163289cf11760e01b815260040160405180910390fd5b6040805160a08101825285815284151560208083018281528385018781525f6060808701828152608088018381526001600160a01b038f168085526003808952948b902099518a55955160018a01805460ff19169115159190911790559351600289015551918701919091559051600490950194909455845189815291820192909252928301859052917f99c8a139c2238fdc43719940934678d41d97d5385e9b9ff8f3971a9cc176c9fb910160405180910390a25050505050565b6110e9816107ac565b6111065760405163602651db60e01b815260040160405180910390fd5b5f816001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015611143573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061116791906117f2565b604051635cc4fdeb60e01b81526001600160a01b0384811660048301525f60248301819052604483015291925090821690635cc4fdeb906064016020604051808303815f875af11580156111bd573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906111e1919061192c565b50604080516003808252608082019092525f91602082016060803683370190505090505f815f81518110611217576112176117ca565b60200260200101906008811115611230576112306117de565b90816008811115611243576112436117de565b8152505060028160018151811061125c5761125c6117ca565b60200260200101906008811115611275576112756117de565b90816008811115611288576112886117de565b815250506007816002815181106112a1576112a16117ca565b602002602001019060088111156112ba576112ba6117de565b908160088111156112cd576112cd6117de565b9052506040805160018082528183019092525f916020808301908036833701905050905083815f81518110611304576113046117ca565b6001600160a01b039283166020918202929092010152604051630125551160e51b8152908416906324aaa220906113449084908690600190600401611870565b5f604051808303815f87803b15801561135b575f80fd5b505af115801561136d573d5f803e3d5ffd5b505050506001600160a01b0384165f81815260036020819052604080832042920191909155517f0d65e0f4a7cf3a67f8d4e1f952cd658769a7e982c95cbbe018fa38feb543b12f9190a250505050565b6113c561142d565b600180546001600160a01b0383166001600160a01b031990911681179091556113f55f546001600160a01b031690565b6001600160a01b03167f38d16b8cac22d99fc7c124b9cd0de2d3fa1faef420bfe791d8c362d765e2270060405160405180910390a350565b5f546001600160a01b0316331461072b5760405162461bcd60e51b815260206004820181905260248201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e65726044820152606401610797565b600180546001600160a01b03191690556107a9816116dc565b5f80826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa1580156114dd573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061150191906117f2565b90505f816001600160a01b0316637dc0d1d06040518163ffffffff1660e01b8152600401602060405180830381865afa158015611540573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061156491906117f2565b90505f670de0b6b3a7640000856001600160a01b031663182df0f56040518163ffffffff1660e01b8152600401602060405180830381865afa1580156115ac573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906115d0919061192c565b866001600160a01b03166318160ddd6040518163ffffffff1660e01b8152600401602060405180830381865afa15801561160c573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611630919061192c565b61163a91906119bb565b61164491906119e4565b60405163fc57d4df60e01b81526001600160a01b0387811660048301529192505f9184169063fc57d4df90602401602060405180830381865afa15801561168d573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906116b1919061192c565b90505f670de0b6b3a76400006116c783856119bb565b6116d191906119e4565b979650505050505050565b5f80546001600160a01b038381166001600160a01b0319831681178455604051919092169283917f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e09190a35050565b6001600160a01b03811681146107a9575f80fd5b5f6020828403121561174f575f80fd5b813561175a8161172b565b9392505050565b5f60208284031215611771575f80fd5b5035919050565b80151581146107a9575f80fd5b5f805f8060808587031215611798575f80fd5b84356117a38161172b565b93506020850135925060408501356117ba81611778565b9396929550929360600135925050565b634e487b7160e01b5f52603260045260245ffd5b634e487b7160e01b5f52602160045260245ffd5b5f60208284031215611802575f80fd5b815161175a8161172b565b5f815180845260208085019450602084015f5b838110156118455781516001600160a01b031687529582019590820190600101611820565b509495945050505050565b6009811061186c57634e487b7160e01b5f52602160045260245ffd5b9052565b606081525f611882606083018661180d565b8281036020848101919091528551808352868201928201905f5b818110156118bf576118af838651611850565b938301939183019160010161189c565b50508093505050508215156040830152949350505050565b604081525f6118e9604083018561180d565b8281036020848101919091528451808352858201928201905f5b8181101561191f57845183529383019391830191600101611903565b5090979650505050505050565b5f6020828403121561193c575f80fd5b5051919050565b6001600160a01b03831681526040810161175a6020830184611850565b5f60208284031215611970575f80fd5b815161175a81611778565b5f805f6060848603121561198d575f80fd5b835161199881611778565b6020850151604086015191945092506119b081611778565b809150509250925092565b80820281158282048414176119de57634e487b7160e01b5f52601160045260245ffd5b92915050565b5f826119fe57634e487b7160e01b5f52601260045260245ffd5b50049056fea264697066735822122034743cf33f4b5221c732ff70f1e47f795c45ed3fe47441cacde5a174bf3454d664736f6c63430008190033",
+  "deployedBytecode": "0x608060405234801561000f575f80fd5b50600436106100e5575f3560e01c8063a5ba520d11610088578063e30c397811610063578063e30c397814610213578063e737add314610224578063e952cba914610237578063f2fde38b1461024a575f80fd5b8063a5ba520d146101da578063cf7fb264146101ed578063e050f5ef14610200575f80fd5b8063715018a6116100c3578063715018a61461018357806379ba50971461018b5780638da5cb5b14610193578063980cdc71146101b7575f80fd5b80630686dab6146100e95780631fd6a5dc146100fe5780634f4d8b361461016c575b5f80fd5b6100fc6100f736600461173f565b61025d565b005b61013f61010c36600461173f565b600360208190525f918252604090912080546001820154600283015493830154600490930154919360ff90911692909185565b604080519586529315156020860152928401919091526060830152608082015260a0015b60405180910390f35b61017560025481565b604051908152602001610163565b6100fc61071a565b6100fc61072d565b5f546001600160a01b03165b6040516001600160a01b039091168152602001610163565b6101ca6101c536600461173f565b6107ac565b6040519015158152602001610163565b6100fc6101e8366004611761565b610aac565b6101ca6101fb36600461173f565b610af5565b6101ca61020e36600461173f565b610d40565b6001546001600160a01b031661019f565b6100fc610232366004611785565b610ee3565b6100fc61024536600461173f565b6110e0565b6100fc61025836600461173f565b6113bd565b61026681610d40565b6102865760405160016275c3cb60e11b0319815260040160405180910390fd5b60408051600680825260e082019092525f916020820160c0803683370190505090506001815f815181106102bc576102bc6117ca565b602002602001019060088111156102d5576102d56117de565b908160088111156102e8576102e86117de565b81525050600381600181518110610301576103016117ca565b6020026020010190600881111561031a5761031a6117de565b9081600881111561032d5761032d6117de565b81525050600481600281518110610346576103466117ca565b6020026020010190600881111561035f5761035f6117de565b90816008811115610372576103726117de565b8152505060058160038151811061038b5761038b6117ca565b602002602001019060088111156103a4576103a46117de565b908160088111156103b7576103b76117de565b815250506006816004815181106103d0576103d06117ca565b602002602001019060088111156103e9576103e96117de565b908160088111156103fc576103fc6117de565b81525050600881600581518110610415576104156117ca565b6020026020010190600881111561042e5761042e6117de565b90816008811115610441576104416117de565b9052506040805160018082528183019092525f916020808301908036833701905050905082815f81518110610478576104786117ca565b60200260200101906001600160a01b031690816001600160a01b0316815250505f836001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa1580156104d5573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906104f991906117f2565b604051630125551160e51b81529091506001600160a01b038216906324aaa2209061052d9085908790600190600401611870565b5f604051808303815f87803b158015610544575f80fd5b505af1158015610556573d5f803e3d5ffd5b505f9250600191506105659050565b60405190808252806020026020018201604052801561058e578160200160208202803683370190505b5090505f815f815181106105a4576105a46117ca565b602090810291909101015260405163186db48f60e01b81526001600160a01b0383169063186db48f906105dd90869085906004016118d7565b5f604051808303815f87803b1580156105f4575f80fd5b505af1158015610606573d5f803e3d5ffd5b505060405163344dabd160e21b81526001600160a01b038516925063d136af44915061063890869085906004016118d7565b5f604051808303815f87803b15801561064f575f80fd5b505af1158015610661573d5f803e3d5ffd5b50506040516303436d5b60e11b81526001600160a01b03888116600483015285169250630686dab691506024016020604051808303815f875af11580156106aa573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906106ce919061192c565b506001600160a01b0385165f8181526003602052604080822042600490910155517f302feb03efd5741df80efe7f97f5d93d74d46a542a3d312d0faae64fa1f3e0e99190a25050505050565b61072261142d565b61072b5f611486565b565b60015433906001600160a01b031681146107a05760405162461bcd60e51b815260206004820152602960248201527f4f776e61626c6532537465703a2063616c6c6572206973206e6f7420746865206044820152683732bb9037bbb732b960b91b60648201526084015b60405180910390fd5b6107a981611486565b50565b6001600160a01b0381165f908152600360208181526040808420815160a08101835281548152600182015460ff1615159381019390935260028101549183019190915291820154606082018190526004909201546080820152901561081357505f92915050565b8051158015906108235750805142105b1561083057505f92915050565b5f836001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa15801561086d573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061089191906117f2565b82519091505f036108be575f6108a68561149f565b90506002548111156108bc57505f949350505050565b505b604051630742d14b60e51b81526001600160a01b0382169063e85a2960906108ec9087905f90600401611943565b602060405180830381865afa158015610907573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061092b9190611960565b8061099f5750604051630742d14b60e51b81526001600160a01b0382169063e85a296090610960908790600290600401611943565b602060405180830381865afa15801561097b573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061099f9190611960565b80610a135750604051630742d14b60e51b81526001600160a01b0382169063e85a2960906109d4908790600790600401611943565b602060405180830381865afa1580156109ef573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610a139190611960565b15610a2157505f9392505050565b604051638e8f294b60e01b81526001600160a01b0385811660048301525f9190831690638e8f294b90602401606060405180830381865afa158015610a68573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610a8c919061197b565b50915050805f03610aa157505f949350505050565b506001949350505050565b610ab461142d565b60025460408051918252602082018390527fd603de9a55208a071bea65ebeb0d7b708889a49fb6490e6eaae6542b96323f17910160405180910390a1600255565b5f80826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015610b33573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610b5791906117f2565b604051638e8f294b60e01b81526001600160a01b0385811660048301529192505f91831690638e8f294b90602401606060405180830381865afa158015610ba0573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610bc4919061197b565b5091505080158015610c3e5750604051630742d14b60e51b81526001600160a01b0383169063e85a296090610bff9087905f90600401611943565b602060405180830381865afa158015610c1a573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610c3e9190611960565b8015610cb35750604051630742d14b60e51b81526001600160a01b0383169063e85a296090610c74908790600290600401611943565b602060405180830381865afa158015610c8f573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610cb39190611960565b8015610d285750604051630742d14b60e51b81526001600160a01b0383169063e85a296090610ce9908790600790600401611943565b602060405180830381865afa158015610d04573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610d289190611960565b15610d37575060019392505050565b505f9392505050565b5f80826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015610d7e573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610da291906117f2565b604051638e8f294b60e01b81526001600160a01b0385811660048301529192505f91831690638e8f294b90602401606060405180830381865afa158015610deb573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610e0f919061197b565b5050905080610e2157505f9392505050565b6001600160a01b0384165f90815260036020818152604092839020835160a08101855281548152600182015460ff161515928101929092526002810154938201939093529082015460608201526004909101546080820181905215610e8a57505f949350505050565b610e9385610af5565b610ea157505f949350505050565b8060200151610eb457505f949350505050565b5f610ebe8661149f565b90508160400151811115610ed757505f95945050505050565b50600195945050505050565b610eeb61142d565b5f846001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015610f28573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610f4c91906117f2565b604051638e8f294b60e01b81526001600160a01b0387811660048301529190911690638e8f294b90602401606060405180830381865afa158015610f92573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610fb6919061197b565b5050905080610fd8576040516334b04fe360e11b815260040160405180910390fd5b42841015610ff95760405163289cf11760e01b815260040160405180910390fd5b8215801561100657508115155b156110245760405163289cf11760e01b815260040160405180910390fd5b6040805160a08101825285815284151560208083018281528385018781525f6060808701828152608088018381526001600160a01b038f168085526003808952948b902099518a55955160018a01805460ff19169115159190911790559351600289015551918701919091559051600490950194909455845189815291820192909252928301859052917f99c8a139c2238fdc43719940934678d41d97d5385e9b9ff8f3971a9cc176c9fb910160405180910390a25050505050565b6110e9816107ac565b6111065760405163602651db60e01b815260040160405180910390fd5b5f816001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015611143573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061116791906117f2565b604051635cc4fdeb60e01b81526001600160a01b0384811660048301525f60248301819052604483015291925090821690635cc4fdeb906064016020604051808303815f875af11580156111bd573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906111e1919061192c565b50604080516003808252608082019092525f91602082016060803683370190505090505f815f81518110611217576112176117ca565b60200260200101906008811115611230576112306117de565b90816008811115611243576112436117de565b8152505060028160018151811061125c5761125c6117ca565b60200260200101906008811115611275576112756117de565b90816008811115611288576112886117de565b815250506007816002815181106112a1576112a16117ca565b602002602001019060088111156112ba576112ba6117de565b908160088111156112cd576112cd6117de565b9052506040805160018082528183019092525f916020808301908036833701905050905083815f81518110611304576113046117ca565b6001600160a01b039283166020918202929092010152604051630125551160e51b8152908416906324aaa220906113449084908690600190600401611870565b5f604051808303815f87803b15801561135b575f80fd5b505af115801561136d573d5f803e3d5ffd5b505050506001600160a01b0384165f81815260036020819052604080832042920191909155517f0d65e0f4a7cf3a67f8d4e1f952cd658769a7e982c95cbbe018fa38feb543b12f9190a250505050565b6113c561142d565b600180546001600160a01b0383166001600160a01b031990911681179091556113f55f546001600160a01b031690565b6001600160a01b03167f38d16b8cac22d99fc7c124b9cd0de2d3fa1faef420bfe791d8c362d765e2270060405160405180910390a350565b5f546001600160a01b0316331461072b5760405162461bcd60e51b815260206004820181905260248201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e65726044820152606401610797565b600180546001600160a01b03191690556107a9816116dc565b5f80826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa1580156114dd573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061150191906117f2565b90505f816001600160a01b0316637dc0d1d06040518163ffffffff1660e01b8152600401602060405180830381865afa158015611540573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061156491906117f2565b90505f670de0b6b3a7640000856001600160a01b031663182df0f56040518163ffffffff1660e01b8152600401602060405180830381865afa1580156115ac573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906115d0919061192c565b866001600160a01b03166318160ddd6040518163ffffffff1660e01b8152600401602060405180830381865afa15801561160c573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611630919061192c565b61163a91906119bb565b61164491906119e4565b60405163fc57d4df60e01b81526001600160a01b0387811660048301529192505f9184169063fc57d4df90602401602060405180830381865afa15801561168d573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906116b1919061192c565b90505f670de0b6b3a76400006116c783856119bb565b6116d191906119e4565b979650505050505050565b5f80546001600160a01b038381166001600160a01b0319831681178455604051919092169283917f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e09190a35050565b6001600160a01b03811681146107a9575f80fd5b5f6020828403121561174f575f80fd5b813561175a8161172b565b9392505050565b5f60208284031215611771575f80fd5b5035919050565b80151581146107a9575f80fd5b5f805f8060808587031215611798575f80fd5b84356117a38161172b565b93506020850135925060408501356117ba81611778565b9396929550929360600135925050565b634e487b7160e01b5f52603260045260245ffd5b634e487b7160e01b5f52602160045260245ffd5b5f60208284031215611802575f80fd5b815161175a8161172b565b5f815180845260208085019450602084015f5b838110156118455781516001600160a01b031687529582019590820190600101611820565b509495945050505050565b6009811061186c57634e487b7160e01b5f52602160045260245ffd5b9052565b606081525f611882606083018661180d565b8281036020848101919091528551808352868201928201905f5b818110156118bf576118af838651611850565b938301939183019160010161189c565b50508093505050508215156040830152949350505050565b604081525f6118e9604083018561180d565b8281036020848101919091528451808352858201928201905f5b8181101561191f57845183529383019391830191600101611903565b5090979650505050505050565b5f6020828403121561193c575f80fd5b5051919050565b6001600160a01b03831681526040810161175a6020830184611850565b5f60208284031215611970575f80fd5b815161175a81611778565b5f805f6060848603121561198d575f80fd5b835161199881611778565b6020850151604086015191945092506119b081611778565b809150509250925092565b80820281158282048414176119de57634e487b7160e01b5f52601160045260245ffd5b92915050565b5f826119fe57634e487b7160e01b5f52601260045260245ffd5b50049056fea264697066735822122034743cf33f4b5221c732ff70f1e47f795c45ed3fe47441cacde5a174bf3454d664736f6c63430008190033",
+  "devdoc": {
+    "author": "Venus",
+    "details": "The Undertaker contract is responsible for pausing and unlisting markets in a permissionless manner, without requiring additional VIP approvals.",
+    "events": {
+      "GlobalDepositThresholdUpdated(uint256,uint256)": {
+        "params": {
+          "newThreshold": "The new global deposit threshold.",
+          "oldThreshold": "The previous global deposit threshold."
+        }
+      },
+      "MarketExpiryUpdated(address,uint256,bool,uint256)": {
+        "params": {
+          "canUnlist": "If the market can be unlisted after being paused.",
+          "market": "The address of the market.",
+          "toBePausedAfterTimestamp": "The timestamp after which the market can be paused.",
+          "toBeUnlistedMinTotalSupplyUSD": "The minimum total market supply (in USD) required to keep the market listed."
+        }
+      },
+      "MarketPaused(address)": {
+        "params": {
+          "market": "The address of the market that was paused."
+        }
+      },
+      "MarketUnlisted(address)": {
+        "params": {
+          "market": "The address of the market that was unlisted."
+        }
+      }
+    },
+    "kind": "dev",
+    "methods": {
+      "acceptOwnership()": {
+        "details": "The new owner accepts the ownership transfer."
+      },
+      "canPauseMarket(address)": {
+        "params": {
+          "market": "The address of the market."
+        },
+        "returns": {
+          "_0": "True if the market’s total deposits are below the global threshold and it is not already paused."
+        }
+      },
+      "canUnlistMarket(address)": {
+        "params": {
+          "market": "The address of the market."
+        },
+        "returns": {
+          "_0": "True if the market is paused and the current block timestamp is greater than `marketExpiry()`."
+        }
+      },
+      "isMarketPaused(address)": {
+        "params": {
+          "market": "The address of the market."
+        },
+        "returns": {
+          "_0": "True if the market is paused"
+        }
+      },
+      "owner()": {
+        "details": "Returns the address of the current owner."
+      },
+      "pauseMarket(address)": {
+        "custom:error": "MarketNotEligibleForPause Thrown if the market is not eligible for pausing.",
+        "custom:event": "Emits MarketPaused event.",
+        "params": {
+          "market": "The address of the market to pause."
+        }
+      },
+      "pendingOwner()": {
+        "details": "Returns the address of the pending owner."
+      },
+      "renounceOwnership()": {
+        "details": "Leaves the contract without owner. It will not be possible to call `onlyOwner` functions. Can only be called by the current owner. NOTE: Renouncing ownership will leave the contract without an owner, thereby disabling any functionality that is only available to the owner."
+      },
+      "setGlobalDepositThreshold(uint256)": {
+        "custom:event": "Emits GlobalDepositThresholdUpdated event.",
+        "details": "Restricted to governance (VIP).      Defines the minimum deposit level required to keep a market active.",
+        "params": {
+          "newThreshold": "The new threshold value."
+        }
+      },
+      "setMarketExpiry(address,uint256,bool,uint256)": {
+        "custom:error": "MarketNotListed Thrown if the market is not listed.InvalidExpiryConfiguration Thrown if the configuration is invalid.",
+        "custom:event": "Emits MarketExpiryUpdated event.",
+        "details": "Restricted to governance (VIP).",
+        "params": {
+          "canUnlist": "If the market can be unlisted after being paused.",
+          "market": "The address of the market.",
+          "toBePausedAfterTimestamp": "The timestamp after which the market can be paused.",
+          "toBeUnlistedMinTotalSupplyUSD": "The minimum total market supply (in USD) required to keep the market listed."
+        }
+      },
+      "transferOwnership(address)": {
+        "details": "Starts the ownership transfer of the contract to a new account. Replaces the pending transfer if there is one. Can only be called by the current owner."
+      },
+      "unlistMarket(address)": {
+        "custom:error": "MarketNotEligibleForUnlisting Thrown if the market is not eligible for unlisting.",
+        "custom:event": "Emits MarketUnlisted event.",
+        "params": {
+          "market": "The address of the market to unlist."
+        }
+      }
+    },
+    "stateVariables": {
+      "expiries": {
+        "details": "vToken address => expiry configuration."
+      },
+      "globalDepositThreshold": {
+        "details": "If a market’s deposits fall below this threshold, it can be paused."
+      }
+    },
+    "title": "Undertaker",
+    "version": 1
+  },
+  "userdoc": {
+    "errors": {
+      "InvalidExpiryConfiguration()": [
+        {
+          "notice": "Thrown when the expiry configuration provided is invalid."
+        }
+      ],
+      "MarketNotEligibleForPause()": [
+        {
+          "notice": "Thrown when attempting to pause a market that is not eligible."
+        }
+      ],
+      "MarketNotEligibleForUnlisting()": [
+        {
+          "notice": "Thrown when attempting to unlist a market that is not eligible."
+        }
+      ],
+      "MarketNotListed()": [
+        {
+          "notice": "Thrown when the market is not listed."
+        }
+      ]
+    },
+    "events": {
+      "GlobalDepositThresholdUpdated(uint256,uint256)": {
+        "notice": "Emitted when the global deposit threshold is updated."
+      },
+      "MarketExpiryUpdated(address,uint256,bool,uint256)": {
+        "notice": "Emitted when the expiry configuration for a market is updated."
+      },
+      "MarketPaused(address)": {
+        "notice": "Emitted when a market is paused."
+      },
+      "MarketUnlisted(address)": {
+        "notice": "Emitted when a market is unlisted."
+      }
+    },
+    "kind": "user",
+    "methods": {
+      "canPauseMarket(address)": {
+        "notice": "Checks if a market can currently be paused."
+      },
+      "canUnlistMarket(address)": {
+        "notice": "Checks if a market can currently be unlisted."
+      },
+      "expiries(address)": {
+        "notice": "Mapping to store expiry configurations for markets."
+      },
+      "globalDepositThreshold()": {
+        "notice": "The global deposit threshold (in USD)."
+      },
+      "isMarketPaused(address)": {
+        "notice": "Checks if a market is currently paused."
+      },
+      "pauseMarket(address)": {
+        "notice": "Pauses a market if the criteria are met."
+      },
+      "setGlobalDepositThreshold(uint256)": {
+        "notice": "Updates the global deposit threshold (in USD)."
+      },
+      "setMarketExpiry(address,uint256,bool,uint256)": {
+        "notice": "Sets the expiry configuration for a market."
+      },
+      "unlistMarket(address)": {
+        "notice": "Unlists a market if the criteria are met."
+      }
+    },
+    "notice": "Undertaker contract.",
+    "version": 1
+  },
+  "storageLayout": {
+    "storage": [
+      {
+        "astId": 85,
+        "contract": "contracts/Undertaker/Undertaker.sol:Undertaker",
+        "label": "_owner",
+        "offset": 0,
+        "slot": "0",
+        "type": "t_address"
+      },
+      {
+        "astId": 198,
+        "contract": "contracts/Undertaker/Undertaker.sol:Undertaker",
+        "label": "_pendingOwner",
+        "offset": 0,
+        "slot": "1",
+        "type": "t_address"
+      },
+      {
+        "astId": 630,
+        "contract": "contracts/Undertaker/Undertaker.sol:Undertaker",
+        "label": "globalDepositThreshold",
+        "offset": 0,
+        "slot": "2",
+        "type": "t_uint256"
+      },
+      {
+        "astId": 636,
+        "contract": "contracts/Undertaker/Undertaker.sol:Undertaker",
+        "label": "expiries",
+        "offset": 0,
+        "slot": "3",
+        "type": "t_mapping(t_address,t_struct(Expiry)627_storage)"
+      }
+    ],
+    "types": {
+      "t_address": {
+        "encoding": "inplace",
+        "label": "address",
+        "numberOfBytes": "20"
+      },
+      "t_bool": {
+        "encoding": "inplace",
+        "label": "bool",
+        "numberOfBytes": "1"
+      },
+      "t_mapping(t_address,t_struct(Expiry)627_storage)": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => struct Undertaker.Expiry)",
+        "numberOfBytes": "32",
+        "value": "t_struct(Expiry)627_storage"
+      },
+      "t_struct(Expiry)627_storage": {
+        "encoding": "inplace",
+        "label": "struct Undertaker.Expiry",
+        "members": [
+          {
+            "astId": 618,
+            "contract": "contracts/Undertaker/Undertaker.sol:Undertaker",
+            "label": "toBePausedAfterTimestamp",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_uint256"
+          },
+          {
+            "astId": 620,
+            "contract": "contracts/Undertaker/Undertaker.sol:Undertaker",
+            "label": "canUnlist",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_bool"
+          },
+          {
+            "astId": 622,
+            "contract": "contracts/Undertaker/Undertaker.sol:Undertaker",
+            "label": "toBeUnlistedMinTotalSupplyUSD",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_uint256"
+          },
+          {
+            "astId": 624,
+            "contract": "contracts/Undertaker/Undertaker.sol:Undertaker",
+            "label": "pauseTimestamp",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_uint256"
+          },
+          {
+            "astId": 626,
+            "contract": "contracts/Undertaker/Undertaker.sol:Undertaker",
+            "label": "unlistTimestamp",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_uint256"
+          }
+        ],
+        "numberOfBytes": "160"
+      },
+      "t_uint256": {
+        "encoding": "inplace",
+        "label": "uint256",
+        "numberOfBytes": "32"
+      }
+    }
+  }
+}

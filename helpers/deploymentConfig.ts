@@ -57,7 +57,7 @@ export const BASE_MAINNET_MULTISIG = "0x1803Cf1D3495b43cC628aa1d8638A981F8CD341C
 export const UNICHAIN_SEPOLIA_MULTISIG = "0x9831D3A641E8c7F082EEA75b8249c99be9D09a34";
 export const UNICHAIN_MAINNET_MULTISIG = "0x1803Cf1D3495b43cC628aa1d8638A981F8CD341C";
 
-export const preconfiguredAddresses = {
+export const preconfiguredAddresses: Record<string, { [key: string]: string }> = {
   hardhat: {
     VTreasury: "account:deployer",
     AccessControlManager: Wallet.createRandom().address,
