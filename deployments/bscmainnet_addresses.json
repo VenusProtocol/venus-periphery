@@ -1,5 +1,7 @@
 {
   "name": "bscmainnet",
   "chainId": "56",
-  "addresses": {}
+  "addresses": {
+    "Undertaker": "0xAbBc70Eb3ca57Ee2550959e386f1Bc6870056ecD"
+  }
 }
