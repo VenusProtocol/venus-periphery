@@ -115,8 +115,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @custom:error SwapCallFailed
     error SwapCallFailed();
 
-
-     /**
+    /**
      * @notice Constructor to set immutable variables
      * @param _comptroller The address of the Comptroller contract
      * @param _swapHelper The address of the SwapHelper contract
@@ -319,7 +318,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         _accrueInterest(marketFrom);
         _checkAccountSafe(user);
 
-         // Seize vTokens from user to this contract
+        // Seize vTokens from user to this contract
         uint256 err = marketFrom.seize(address(this), user, amountToSeize);
         if (err != 0) revert SeizeFailed(err);
 
@@ -536,5 +535,4 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
             if (err != 0) revert RepayFailed(err);
         }
     }
-
 }
