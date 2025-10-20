@@ -1,3 +1,10 @@
+## [1.0.1-dev.1](https://github.com/VenusProtocol/venus-periphery/compare/v1.0.0...v1.0.1-dev.1) (2025-10-20)
+
+
+### Bug Fixes
+
+* fixed contract verification ([9f0293e](https://github.com/VenusProtocol/venus-periphery/commit/9f0293e7c0d53815f847c48d06fcdd47e6ae7d6c))
+
 ## 1.0.0 (2025-07-31)
 
 
