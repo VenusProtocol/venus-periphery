@@ -38,8 +38,14 @@ extendConfig((config: HardhatConfig) => {
       ...config.external,
       deployments: {
         hardhat: [],
-        bsctestnet: ["node_modules/@venusprotocol/venus-protocol/deployments/bsctestnet"],
-        bscmainnet: ["node_modules/@venusprotocol/venus-protocol/deployments/bscmainnet"],
+        bsctestnet: [
+          "node_modules/@venusprotocol/venus-protocol/deployments/bsctestnet",
+          "node_modules/@venusprotocol/governance-contracts/deployments/bsctestnet",
+        ],
+        bscmainnet: [
+          "node_modules/@venusprotocol/venus-protocol/deployments/bscmainnet",
+          "node_modules/@venusprotocol/governance-contracts/deployments/bscmainnet",
+        ],
         unichainmainnet: ["node_modules/@venusprotocol/venus-protocol/deployments/unichainmainnet"],
       },
     };

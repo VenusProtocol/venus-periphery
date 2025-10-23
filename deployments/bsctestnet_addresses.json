@@ -1,5 +1,7 @@
 {
   "name": "bsctestnet",
   "chainId": "97",
-  "addresses": {}
+  "addresses": {
+    "NativeTokenGateway_vWBNB": "0xF34AAfc540Adc827A84736553BD29DE87a117558"
+  }
 }

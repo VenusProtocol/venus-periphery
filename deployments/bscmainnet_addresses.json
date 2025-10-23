@@ -1,5 +1,7 @@
 {
   "name": "bscmainnet",
   "chainId": "56",
-  "addresses": {}
+  "addresses": {
+    "NativeTokenGateway_vWBNB_Core": "0x5143eb18aA057Cd8BC9734cCfD2651823e71585f"
+  }
 }
