@@ -12,11 +12,17 @@ import { IVToken } from "../Interfaces.sol";
  *      to specific assets by borrowing against their collateral and reinvesting the borrowed funds.
  */
 interface ILeverageStrategiesManager {
-    /// @custom:error EnterLeveragePositionFailed
-    error EnterLeveragePositionFailed();
+    /// @custom:error EnterLeveragePositionMintFailed
+    error EnterLeveragePositionMintFailed();
 
-    /// @custom:error ExitLeveragePositionFailed
-    error ExitLeveragePositionFailed();
+    /// @custom:error EnterLeveragePositionBorrowBehalfFailed
+    error EnterLeveragePositionBorrowBehalfFailed();
+
+    /// @custom:error ExitLeveragePositionRepayFailed
+    error ExitLeveragePositionRepayFailed();
+
+    /// @custom:error ExitLeveragePositionRedeemFailed
+    error ExitLeveragePositionRedeemFailed();
 
     /// @custom:error LeverageCausesLiquidation
     error LeverageCausesLiquidation();
@@ -41,6 +47,9 @@ interface ILeverageStrategiesManager {
 
     /// @custom:error InsufficientFundsToRepayFlashloan
     error InsufficientFundsToRepayFlashloan();
+
+    /// @custom:error TransferFromUserFailed
+    error TransferFromUserFailed();
 
     /// @notice Emitted when a user enters a leveraged position with collateral seed
     /// @param user The address of the user entering the position

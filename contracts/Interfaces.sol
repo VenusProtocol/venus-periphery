@@ -77,6 +77,10 @@ interface IComptroller {
 
     function checkMembership(address account, IVToken vToken) external view returns (bool);
 
+    function getBorrowingPower(
+        address account
+    ) external view returns (uint256 error, uint256 liquidity, uint256 shortfall);
+
     function executeFlashLoan(
         address payable onBehalf,
         address payable receiver,
@@ -121,6 +125,7 @@ interface IProtocolShareReserve {
     enum IncomeType {
         SPREAD,
         LIQUIDATION,
+        ERC4626_WRAPPER_REWARDS,
         FLASHLOAN
     }
 

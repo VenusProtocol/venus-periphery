@@ -86,7 +86,7 @@ describe("LeverageStrategiesManager", () => {
 
   afterEach(async () => {
     await comptroller.executeFlashLoan.reset();
-    await comptroller.getAccountLiquidity.reset();
+    await comptroller.getBorrowingPower.reset();
     await comptroller.approvedDelegates.reset();
   });
 
@@ -201,7 +201,7 @@ describe("LeverageStrategiesManager", () => {
         .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
         .returns(true);
 
-      comptroller.getAccountLiquidity.returns([0, parseEther("10"), 0]);
+      comptroller.getBorrowingPower.returns([0, parseEther("10"), 0]);
 
       comptroller.executeFlashLoan.returns();
 
@@ -224,7 +224,7 @@ describe("LeverageStrategiesManager", () => {
         .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
         .returns(true);
 
-      comptroller.getAccountLiquidity.returns([0, parseEther("10"), 0]);
+      comptroller.getBorrowingPower.returns([0, parseEther("10"), 0]);
 
       comptroller.executeFlashLoan.returns();
 
@@ -265,7 +265,7 @@ describe("LeverageStrategiesManager", () => {
           .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
           .returns(true);
 
-        comptroller.getAccountLiquidity.returns([0, parseEther("10"), 0]);
+        comptroller.getBorrowingPower.returns([0, parseEther("10"), 0]);
 
         comptroller.executeFlashLoan.returns();
 
@@ -283,7 +283,7 @@ describe("LeverageStrategiesManager", () => {
         );
 
         expect(comptroller.executeFlashLoan).to.have.been.calledOnce;
-        expect(comptroller.getAccountLiquidity).to.have.been.calledTwice;
+        expect(comptroller.getBorrowingPower).to.have.been.calledTwice;
       });
 
       it("should call executeFlashLoan with correct arguments", async () => {
@@ -291,7 +291,7 @@ describe("LeverageStrategiesManager", () => {
           .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
           .returns(true);
 
-        comptroller.getAccountLiquidity.returns([0, parseEther("10"), 0]);
+        comptroller.getBorrowingPower.returns([0, parseEther("10"), 0]);
         comptroller.executeFlashLoan.returns();
 
         const collateralAmountSeed = parseEther("1");
@@ -343,7 +343,7 @@ describe("LeverageStrategiesManager", () => {
           .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
           .returns(true);
 
-        comptroller.getAccountLiquidity.returns([0, 0, parseEther("1")]); // err=0, liquidity=0, shortfall=1
+        comptroller.getBorrowingPower.returns([0, 0, parseEther("1")]); // err=0, liquidity=0, shortfall=1
 
         const collateralAmountSeed = parseEther("1");
         const borrowedAmountToFlashLoan = parseEther("1");
@@ -366,8 +366,8 @@ describe("LeverageStrategiesManager", () => {
           .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
           .returns(true);
 
-        comptroller.getAccountLiquidity.returnsAtCall(0, [0, parseEther("10"), 0]);
-        comptroller.getAccountLiquidity.returnsAtCall(1, [0, 0, parseEther("1")]);
+        comptroller.getBorrowingPower.returnsAtCall(0, [0, parseEther("10"), 0]);
+        comptroller.getBorrowingPower.returnsAtCall(1, [0, 0, parseEther("1")]);
 
         const collateralAmountSeed = parseEther("1");
         const borrowedAmountToFlashLoan = parseEther("1");
@@ -436,7 +436,7 @@ describe("LeverageStrategiesManager", () => {
           .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
           .returns(true);
 
-        comptroller.getAccountLiquidity.returns([0, parseEther("10"), 0]);
+        comptroller.getBorrowingPower.returns([0, parseEther("10"), 0]);
 
         comptroller.executeFlashLoan.returns();
 
@@ -465,7 +465,7 @@ describe("LeverageStrategiesManager", () => {
           .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
           .returns(true);
 
-        comptroller.getAccountLiquidity.returns([0, parseEther("10"), 0]);
+        comptroller.getBorrowingPower.returns([0, parseEther("10"), 0]);
 
         comptroller.executeFlashLoan.returns();
 
@@ -483,7 +483,7 @@ describe("LeverageStrategiesManager", () => {
         );
 
         expect(comptroller.executeFlashLoan).to.have.been.calledOnce;
-        expect(comptroller.getAccountLiquidity).to.have.been.calledTwice;
+        expect(comptroller.getBorrowingPower).to.have.been.calledTwice;
       });
 
       it("should call executeFlashLoan with correct arguments", async () => {
@@ -491,7 +491,7 @@ describe("LeverageStrategiesManager", () => {
           .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
           .returns(true);
 
-        comptroller.getAccountLiquidity.returns([0, parseEther("10"), 0]);
+        comptroller.getBorrowingPower.returns([0, parseEther("10"), 0]);
         comptroller.executeFlashLoan.returns();
 
         const borrowedAmountSeed = parseEther("1.5");
@@ -543,7 +543,7 @@ describe("LeverageStrategiesManager", () => {
           .whenCalledWith(await alice.getAddress(), leverageStrategiesManager.address)
           .returns(true);
 
-        comptroller.getAccountLiquidity.returns([0, 0, parseEther("1")]); // err=0, liquidity=0, shortfall=1
+        comptroller.getBorrowingPower.returns([0, 0, parseEther("1")]); // err=0, liquidity=0, shortfall=1
 
         const borrowedAmountSeed = parseEther("1");
         const borrowedAmountToFlashLoan = parseEther("1");
@@ -568,8 +568,8 @@ describe("LeverageStrategiesManager", () => {
 
         comptroller.executeFlashLoan.returns();
 
-        comptroller.getAccountLiquidity.returnsAtCall(0, [0, parseEther("10"), 0]);
-        comptroller.getAccountLiquidity.returnsAtCall(1, [0, 0, parseEther("1")]);
+        comptroller.getBorrowingPower.returnsAtCall(0, [0, parseEther("10"), 0]);
+        comptroller.getBorrowingPower.returnsAtCall(1, [0, 0, parseEther("1")]);
 
         const borrowedAmountSeed = parseEther("1");
         const borrowedAmountToFlashLoan = parseEther("1");

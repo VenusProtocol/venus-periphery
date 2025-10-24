@@ -163,6 +163,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             borrowedAmountToFlashLoan
         );
 
+        _transferDustToInitiator(collateralMarket, msg.sender);
+        _transferDustToInitiator(borrowedMarket, msg.sender);
+
         _checkAccountSafe(msg.sender);
     }
 
@@ -205,8 +208,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             borrowedAmountToFlashLoan
         );
 
-        _transferDustToTreasury(collateralMarket);
-        _transferDustToTreasury(borrowedMarket);
+        _transferDustToInitiator(collateralMarket, msg.sender);
+        _transferDustToInitiator(borrowedMarket, msg.sender);
 
         _checkAccountSafe(msg.sender);
     }
@@ -264,36 +267,25 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
      * @param swapCallData The encoded swap instructions for converting borrowed to collateral assets
      * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
-     * @custom:error EnterLeveragePositionFailed if mint or borrow operations fail
+     * @custom:error TransferFromUserFailed if transferring seed borrowed assets from user fails
+     * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
+     * @custom:error EnterLeveragePositionBorrowBehalfFailed if  borrow behalf operation fails
      * @custom:error SwapCallFailed if token swap execution fails
      */
     function _executeEnterOperation(address initiator, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
+
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(transientCollateralMarket.underlying());
+        uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, borrowedAssetAmount, collateralAsset, transientMinAmountOutAfterSwap, swapCallData);
 
-        uint256 swappedCollateraAmountOut = _performSwap(borrowedAsset, borrowedAssetAmount, collateralAsset, transientMinAmountOutAfterSwap, swapCallData);
+        _transferTokensFromUserIfNeeded(collateralAsset, initiator, transientCollateralAmount);
 
-        if(transientCollateralAmount > 0) {
-            collateralAsset.safeTransferFrom(initiator, address(this), transientCollateralAmount);
-        }
-
-        uint256 mintSuccess = transientCollateralMarket.mintBehalf(initiator, swappedCollateraAmountOut + transientCollateralAmount);
+        uint256 mintSuccess = transientCollateralMarket.mintBehalf(initiator, swappedCollateralAmountOut + transientCollateralAmount);
         if (mintSuccess != 0) {
-            revert EnterLeveragePositionFailed();
+            revert EnterLeveragePositionMintFailed();
         }
 
-        borrowedAssetAmountToRepay = borrowedAssetAmount + borrowedAssetFees;
-
-        uint256 borrowSuccess = borrowMarket.borrowBehalf(initiator, borrowedAssetAmountToRepay);
-        if (borrowSuccess != 0) {
-            revert EnterLeveragePositionFailed();
-        }
-
-        if (borrowedAsset.balanceOf(address(this)) < borrowedAssetAmountToRepay) {
-            revert InsufficientFundsToRepayFlashloan();
-        }
-
-        borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepay);
+        borrowedAssetAmountToRepay = _borrowAndRepayFlashLoan(initiator, borrowMarket, borrowedAsset, borrowedAssetAmount, borrowedAssetFees);
     }
 
     /**
@@ -310,7 +302,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
      * @param swapCallData The encoded swap instructions for converting borrowed to collateral assets
      * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
-     * @custom:error EnterLeveragePositionFailed if mint or borrow operations fail
+     * @custom:error TransferFromUserFailed if transferring seed borrowed assets from user fails
+     * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
+     * @custom:error EnterLeveragePositionBorrowBehalfFailed if  borrow behalf operation fails
      * @custom:error SwapCallFailed if token swap execution fails
      * @custom:error InsufficientAmountOutAfterSwap if collateral balance after swap is below minimum
      */
@@ -318,9 +312,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(transientCollateralMarket.underlying());
 
-        if(transientBorrowedAmountSeed > 0) {
-            borrowedAsset.safeTransferFrom(initiator, address(this), transientBorrowedAmountSeed);
-        }
+        _transferTokensFromUserIfNeeded(borrowedAsset, initiator, transientBorrowedAmountSeed);
 
         uint256 totalBorrowedAmountToSwap = transientBorrowedAmountSeed + borrowedAssetAmount;
 
@@ -328,21 +320,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         uint256 mintSuccess = transientCollateralMarket.mintBehalf(initiator, swappedCollateralAmountOut);
         if (mintSuccess != 0) {
-            revert EnterLeveragePositionFailed();
+            revert EnterLeveragePositionMintFailed();
         }
 
-        borrowedAssetAmountToRepay = borrowedAssetAmount + borrowedAssetFees;
-
-        uint256 borrowSuccess = borrowMarket.borrowBehalf(initiator, borrowedAssetAmountToRepay);
-        if (borrowSuccess != 0) {
-            revert EnterLeveragePositionFailed();
-        }
-
-        if (borrowedAsset.balanceOf(address(this)) < borrowedAssetAmountToRepay) {
-            revert InsufficientFundsToRepayFlashloan();
-        }
-
-        borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepay);
+        borrowedAssetAmountToRepay = _borrowAndRepayFlashLoan(initiator, borrowMarket, borrowedAsset, borrowedAssetAmount, borrowedAssetFees);
     }
 
     /**
@@ -358,7 +339,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
      * @param swapCallData The encoded swap instructions for converting collateral to borrowed assets
      * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
-     * @custom:error ExitLeveragePositionFailed if repay or redeem operations fail
+     * @custom:error ExitLeveragePositionRepayFailed if repayment of borrowed assets fails
+     * @custom:error ExitLeveragePositionRedeemFailed if redeem operations fail
      * @custom:error SwapCallFailed if token swap execution fails
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
      */
@@ -369,14 +351,14 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         uint256 repaySuccess = borrowMarket.repayBorrowBehalf(initiator, borrowedAssetAmountToRepayFromFlashLoan);
 
         if (repaySuccess != 0) {
-            revert ExitLeveragePositionFailed();
+            revert ExitLeveragePositionRepayFailed();
         }
 
         uint256 minCollateralAmountInForSwap = transientCollateralAmount;
 
         uint256 redeemSuccess = transientCollateralMarket.redeemUnderlyingBehalf(initiator, minCollateralAmountInForSwap);
         if (redeemSuccess != 0) {
-            revert ExitLeveragePositionFailed();
+            revert ExitLeveragePositionRedeemFailed();
         }
         
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(transientCollateralMarket.underlying());
@@ -421,20 +403,72 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
+     * @notice Transfers tokens from the user to this contract if needed
+     * @dev If the specified amount is greater than zero, transfers tokens from the user.
+     *      Reverts if the actual transferred amount does not match the expected amount.
+     * @param token The ERC20 token to transfer
+     * @param user The address of the user to transfer tokens from
+     * @param amount The amount of tokens to transfer
+     * @custom:error TransferFromUserFailed if the transferred amount does not match the expected amount
+     */
+    function _transferTokensFromUserIfNeeded(IERC20Upgradeable token, address user, uint256 amount) internal {
+        if(amount > 0) {
+            uint256 tokenBalanceBefore = token.balanceOf(address(this));
+
+            token.safeTransferFrom(user, address(this), amount);
+            uint256 tokenBalanceAfter = token.balanceOf(address(this));
+            
+            if(tokenBalanceAfter - tokenBalanceBefore != amount) {
+                revert TransferFromUserFailed();
+            }
+        }
+    }
+
+    /**
      * @notice Transfers any remaining dust amounts to the protocol share reserve
      * @dev This function cleans up small remaining balances after operations and
      *      updates the protocol share reserve's asset state for proper accounting.
      * @param market The vToken market whose underlying asset dust should be transferred
      */
-    function _transferDustToTreasury(IVToken market) internal {
+    function _transferDustToInitiator(IVToken market, address initiator) internal {
         IERC20Upgradeable asset = IERC20Upgradeable(market.underlying());
 
         uint256 dustAmount = asset.balanceOf(address(this));
         if(dustAmount > 0) {
-            asset.safeTransfer(address(protocolShareReserve), dustAmount);
-            protocolShareReserve.updateAssetsState(address(COMPTROLLER), address(asset), IProtocolShareReserve.IncomeType.FLASHLOAN);
+            asset.safeTransfer(initiator, dustAmount);
         }
     }
+
+    /**
+     * @notice Borrows assets on behalf of the user to repay the flash loan
+     * @dev Borrows the total amount needed to repay the flash loan (principal + fees)
+     *      and approves the borrowed asset for repayment to the flash loan.
+     * @param initiator The user address that initiated the leveraged position
+     * @param borrowMarket The vToken market from which assets will be borrowed
+     * @param borrowedAsset The underlying asset being borrowed
+     * @param borrowedAssetAmount The amount of borrowed assets received from flash loan
+     * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
+     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
+     * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
+     * @custom:error EnterLeveragePositionBorrowBehalfFailed if  borrow behalf operation fails
+     */
+    function _borrowAndRepayFlashLoan(address initiator, IVToken borrowMarket, IERC20Upgradeable borrowedAsset, uint256 borrowedAssetAmount, uint256 borrowedAssetFees) internal returns (uint256 borrowedAssetAmountToRepay) {
+        borrowedAssetAmountToRepay = borrowedAssetAmount + borrowedAssetFees;
+
+        uint256 marketBalanceBeforeBorrow = borrowedAsset.balanceOf(address(borrowMarket));
+        uint256 borrowSuccess = borrowMarket.borrowBehalf(initiator, borrowedAssetAmountToRepay);
+        if (borrowSuccess != 0) {
+            revert EnterLeveragePositionBorrowBehalfFailed();
+        }
+        uint256 marketBalanceAfterBorrow = borrowedAsset.balanceOf(address(borrowMarket));
+
+        if (marketBalanceBeforeBorrow - marketBalanceAfterBorrow < borrowedAssetAmountToRepay) {
+            revert InsufficientFundsToRepayFlashloan();
+        }
+
+        borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepay);
+    }
+
     /**
      * @notice Checks if a user has delegated permission to this contract
      * @dev Verifies that the user has approved this contract as a delegate via the comptroller.
@@ -457,7 +491,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:error LeverageCausesLiquidation if the account has a liquidity shortfall or comptroller error
      */
     function _checkAccountSafe(address user) internal view {
-        (uint256 err, , uint256 shortfall) = COMPTROLLER.getAccountLiquidity(user);
+        (uint256 err, , uint256 shortfall) = COMPTROLLER.getBorrowingPower(user);
         if (err != 0 || shortfall > 0) revert LeverageCausesLiquidation();
     }
 }
