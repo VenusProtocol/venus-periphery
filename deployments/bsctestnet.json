@@ -1,5 +1,169 @@
 {
   "name": "bsctestnet",
   "chainId": "97",
-  "contracts": {}
+  "contracts": {
+    "MarketConfigurationAggregator": {
+      "address": "0x7bbC692907f23E4b7170de0e1483323ea322BDbF",
+      "abi": [
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "_comptroller",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "constructor"
+        },
+        {
+          "inputs": [],
+          "name": "EmptyBatch",
+          "type": "error"
+        },
+        {
+          "inputs": [],
+          "name": "ZeroAddress",
+          "type": "error"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint256",
+              "name": "count",
+              "type": "uint256"
+            }
+          ],
+          "name": "BorrowAllowedBatchExecuted",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint256",
+              "name": "count",
+              "type": "uint256"
+            }
+          ],
+          "name": "CollateralFactorBatchExecuted",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint256",
+              "name": "count",
+              "type": "uint256"
+            }
+          ],
+          "name": "LiquidationIncentiveBatchExecuted",
+          "type": "event"
+        },
+        {
+          "inputs": [],
+          "name": "COMPTROLLER",
+          "outputs": [
+            {
+              "internalType": "contract IComptroller",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "components": [
+                {
+                  "internalType": "uint96",
+                  "name": "poolId",
+                  "type": "uint96"
+                },
+                {
+                  "internalType": "address",
+                  "name": "vToken",
+                  "type": "address"
+                },
+                {
+                  "internalType": "bool",
+                  "name": "borrowAllowed",
+                  "type": "bool"
+                }
+              ],
+              "internalType": "struct MarketConfigurationAggregator.BorrowAllowedParams[]",
+              "name": "updates",
+              "type": "tuple[]"
+            }
+          ],
+          "name": "executeBorrowAllowedBatch",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "components": [
+                {
+                  "internalType": "contract IVToken",
+                  "name": "vToken",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "newCollateralFactorMantissa",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "newLiquidationThresholdMantissa",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct MarketConfigurationAggregator.CollateralFactorParams[]",
+              "name": "updates",
+              "type": "tuple[]"
+            }
+          ],
+          "name": "executeCollateralFactorBatch",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "vToken",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "newLiquidationIncentiveMantissa",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct MarketConfigurationAggregator.LiquidationIncentiveParams[]",
+              "name": "updates",
+              "type": "tuple[]"
+            }
+          ],
+          "name": "executeLiquidationIncentiveBatch",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        }
+      ]
+    }
+  }
 }

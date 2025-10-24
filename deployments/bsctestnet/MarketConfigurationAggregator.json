@@ -1,0 +1,286 @@
+{
+  "address": "0x7bbC692907f23E4b7170de0e1483323ea322BDbF",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_comptroller",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [],
+      "name": "EmptyBatch",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroAddress",
+      "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "count",
+          "type": "uint256"
+        }
+      ],
+      "name": "BorrowAllowedBatchExecuted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "count",
+          "type": "uint256"
+        }
+      ],
+      "name": "CollateralFactorBatchExecuted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "count",
+          "type": "uint256"
+        }
+      ],
+      "name": "LiquidationIncentiveBatchExecuted",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "COMPTROLLER",
+      "outputs": [
+        {
+          "internalType": "contract IComptroller",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            },
+            {
+              "internalType": "address",
+              "name": "vToken",
+              "type": "address"
+            },
+            {
+              "internalType": "bool",
+              "name": "borrowAllowed",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct MarketConfigurationAggregator.BorrowAllowedParams[]",
+          "name": "updates",
+          "type": "tuple[]"
+        }
+      ],
+      "name": "executeBorrowAllowedBatch",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "contract IVToken",
+              "name": "vToken",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "newCollateralFactorMantissa",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "newLiquidationThresholdMantissa",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct MarketConfigurationAggregator.CollateralFactorParams[]",
+          "name": "updates",
+          "type": "tuple[]"
+        }
+      ],
+      "name": "executeCollateralFactorBatch",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "vToken",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "newLiquidationIncentiveMantissa",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct MarketConfigurationAggregator.LiquidationIncentiveParams[]",
+          "name": "updates",
+          "type": "tuple[]"
+        }
+      ],
+      "name": "executeLiquidationIncentiveBatch",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "transactionHash": "0x0a02d39284eb0e41b99cc223271b6db4798747767eeacd5a11274852ebad70e2",
+  "receipt": {
+    "to": null,
+    "from": "0xe2a089cA69a90f1E27E723EFD339Cff4c4701AcC",
+    "contractAddress": "0x7bbC692907f23E4b7170de0e1483323ea322BDbF",
+    "transactionIndex": 0,
+    "gasUsed": "489786",
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "blockHash": "0xee7e3ce2dfdfcb343f880399ac1858af8846230d7c5d74f2424122ee5b9bd827",
+    "transactionHash": "0x0a02d39284eb0e41b99cc223271b6db4798747767eeacd5a11274852ebad70e2",
+    "logs": [],
+    "blockNumber": 63851968,
+    "cumulativeGasUsed": "489786",
+    "status": 1,
+    "byzantium": true
+  },
+  "args": ["0x94d1820b2D1c7c7452A163983Dc888CEC546b77D"],
+  "numDeployments": 1,
+  "solcInputHash": "64b54825ade203f7442499a580094a71",
+  "metadata": "{\"compiler\":{\"version\":\"0.8.25+commit.b61c2a91\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_comptroller\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"EmptyBatch\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"ZeroAddress\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"count\",\"type\":\"uint256\"}],\"name\":\"BorrowAllowedBatchExecuted\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"count\",\"type\":\"uint256\"}],\"name\":\"CollateralFactorBatchExecuted\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"count\",\"type\":\"uint256\"}],\"name\":\"LiquidationIncentiveBatchExecuted\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"COMPTROLLER\",\"outputs\":[{\"internalType\":\"contract IComptroller\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"components\":[{\"internalType\":\"uint96\",\"name\":\"poolId\",\"type\":\"uint96\"},{\"internalType\":\"address\",\"name\":\"vToken\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"borrowAllowed\",\"type\":\"bool\"}],\"internalType\":\"struct MarketConfigurationAggregator.BorrowAllowedParams[]\",\"name\":\"updates\",\"type\":\"tuple[]\"}],\"name\":\"executeBorrowAllowedBatch\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"components\":[{\"internalType\":\"contract IVToken\",\"name\":\"vToken\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"newCollateralFactorMantissa\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"newLiquidationThresholdMantissa\",\"type\":\"uint256\"}],\"internalType\":\"struct MarketConfigurationAggregator.CollateralFactorParams[]\",\"name\":\"updates\",\"type\":\"tuple[]\"}],\"name\":\"executeCollateralFactorBatch\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"components\":[{\"internalType\":\"address\",\"name\":\"vToken\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"newLiquidationIncentiveMantissa\",\"type\":\"uint256\"}],\"internalType\":\"struct MarketConfigurationAggregator.LiquidationIncentiveParams[]\",\"name\":\"updates\",\"type\":\"tuple[]\"}],\"name\":\"executeLiquidationIncentiveBatch\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"author\":\"Venus\",\"events\":{\"BorrowAllowedBatchExecuted(uint256)\":{\"params\":{\"count\":\"The number of updates executed in this batch\"}},\"CollateralFactorBatchExecuted(uint256)\":{\"params\":{\"count\":\"The number of updates executed in this batch\"}},\"LiquidationIncentiveBatchExecuted(uint256)\":{\"params\":{\"count\":\"The number of updates executed in this batch\"}}},\"kind\":\"dev\",\"methods\":{\"constructor\":{\"custom:error\":\"Reverts with ZeroAddress if the provided `_comptroller` is the zero address\",\"params\":{\"_comptroller\":\"Address of the comptroller\"}},\"executeBorrowAllowedBatch((uint96,address,bool)[])\":{\"custom:error\":\"Reverts with EmptyBatch if the updates array is empty\",\"custom:event\":\"Emits BorrowAllowedBatchExecuted\",\"params\":{\"updates\":\"Array of borrow allowed parameters\"}},\"executeCollateralFactorBatch((address,uint256,uint256)[])\":{\"custom:error\":\"Reverts with EmptyBatch if the updates array is empty\",\"custom:event\":\"Emits CollateralFactorBatchExecuted\",\"params\":{\"updates\":\"Array of collateral factor parameters\"}},\"executeLiquidationIncentiveBatch((address,uint256)[])\":{\"custom:error\":\"Reverts with EmptyBatch if the updates array is empty\",\"custom:event\":\"Emits LiquidationIncentiveBatchExecuted\",\"params\":{\"updates\":\"Array of liquidation incentive parameters\"}}},\"title\":\"MarketConfigurationAggregator\",\"version\":1},\"userdoc\":{\"errors\":{\"EmptyBatch()\":[{\"notice\":\"Error thrown when attempting to execute a batch with zero updates\"}],\"ZeroAddress()\":[{\"notice\":\"Error thrown when an zero address is provided\"}]},\"events\":{\"BorrowAllowedBatchExecuted(uint256)\":{\"notice\":\"Emitted after a batch of borrow allowed updates is executed\"},\"CollateralFactorBatchExecuted(uint256)\":{\"notice\":\"Emitted after a batch of collateral factor updates is executed\"},\"LiquidationIncentiveBatchExecuted(uint256)\":{\"notice\":\"Emitted after a batch of liquidation incentive updates is executed\"}},\"kind\":\"user\",\"methods\":{\"COMPTROLLER()\":{\"notice\":\"The Comptroller contract \"},\"constructor\":{\"notice\":\"Constructor to initialize the MarketConfigurationAggregator with the comptroller\"},\"executeBorrowAllowedBatch((uint96,address,bool)[])\":{\"notice\":\"Execute a batch of borrow allowed updates\"},\"executeCollateralFactorBatch((address,uint256,uint256)[])\":{\"notice\":\"Execute a batch of collateral factor updates\"},\"executeLiquidationIncentiveBatch((address,uint256)[])\":{\"notice\":\"Execute a batch of liquidation incentive updates\"}},\"notice\":\"Executes batches of market configuration updates.\",\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/MarketConfigurationAggregator/MarketConfigurationAggregator.sol\":\"MarketConfigurationAggregator\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\",\"useLiteralContent\":true},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[]},\"sources\":{\"@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (token/ERC20/IERC20.sol)\\n\\npragma solidity ^0.8.0;\\n\\n/**\\n * @dev Interface of the ERC20 standard as defined in the EIP.\\n */\\ninterface IERC20Upgradeable {\\n    /**\\n     * @dev Emitted when `value` tokens are moved from one account (`from`) to\\n     * another (`to`).\\n     *\\n     * Note that `value` may be zero.\\n     */\\n    event Transfer(address indexed from, address indexed to, uint256 value);\\n\\n    /**\\n     * @dev Emitted when the allowance of a `spender` for an `owner` is set by\\n     * a call to {approve}. `value` is the new allowance.\\n     */\\n    event Approval(address indexed owner, address indexed spender, uint256 value);\\n\\n    /**\\n     * @dev Returns the amount of tokens in existence.\\n     */\\n    function totalSupply() external view returns (uint256);\\n\\n    /**\\n     * @dev Returns the amount of tokens owned by `account`.\\n     */\\n    function balanceOf(address account) external view returns (uint256);\\n\\n    /**\\n     * @dev Moves `amount` tokens from the caller's account to `to`.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * Emits a {Transfer} event.\\n     */\\n    function transfer(address to, uint256 amount) external returns (bool);\\n\\n    /**\\n     * @dev Returns the remaining number of tokens that `spender` will be\\n     * allowed to spend on behalf of `owner` through {transferFrom}. This is\\n     * zero by default.\\n     *\\n     * This value changes when {approve} or {transferFrom} are called.\\n     */\\n    function allowance(address owner, address spender) external view returns (uint256);\\n\\n    /**\\n     * @dev Sets `amount` as the allowance of `spender` over the caller's tokens.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * IMPORTANT: Beware that changing an allowance with this method brings the risk\\n     * that someone may use both the old and the new allowance by unfortunate\\n     * transaction ordering. One possible solution to mitigate this race\\n     * condition is to first reduce the spender's allowance to 0 and set the\\n     * desired value afterwards:\\n     * https://github.com/ethereum/EIPs/issues/20#issuecomment-263524729\\n     *\\n     * Emits an {Approval} event.\\n     */\\n    function approve(address spender, uint256 amount) external returns (bool);\\n\\n    /**\\n     * @dev Moves `amount` tokens from `from` to `to` using the\\n     * allowance mechanism. `amount` is then deducted from the caller's\\n     * allowance.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * Emits a {Transfer} event.\\n     */\\n    function transferFrom(address from, address to, uint256 amount) external returns (bool);\\n}\\n\",\"keccak256\":\"0x0e1f0f5f62f67a881cd1a9597acbc0a5e4071f3c2c10449a183b922ae7272e3f\",\"license\":\"MIT\"},\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\ninterface OracleInterface {\\n    function getPrice(address asset) external view returns (uint256);\\n}\\n\\ninterface ResilientOracleInterface is OracleInterface {\\n    function updatePrice(address vToken) external;\\n\\n    function updateAssetPrice(address asset) external;\\n\\n    function getUnderlyingPrice(address vToken) external view returns (uint256);\\n}\\n\\ninterface BoundValidatorInterface {\\n    function validatePriceWithAnchorPrice(\\n        address asset,\\n        uint256 reporterPrice,\\n        uint256 anchorPrice\\n    ) external view returns (bool);\\n}\\n\",\"keccak256\":\"0xd3bbb7c9eef19e8f467342df6034ef95399a00964646fb8c82b438968ae3a8c0\",\"license\":\"BSD-3-Clause\"},\"contracts/Interfaces.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\nimport { IERC20Upgradeable } from \\\"@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol\\\";\\nimport { ResilientOracleInterface } from \\\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\\\";\\n\\ninterface IVToken is IERC20Upgradeable {\\n    function accrueInterest() external returns (uint256);\\n\\n    function redeem(uint256 redeemTokens) external returns (uint256);\\n\\n    function redeemUnderlying(uint256 redeemAmount) external returns (uint256);\\n\\n    function borrowBalanceCurrent(address borrower) external returns (uint256);\\n\\n    function balanceOfUnderlying(address owner) external returns (uint256);\\n\\n    function seize(address liquidator, address borrower, uint seizeTokens) external returns (uint);\\n\\n    function mintBehalf(address receiver, uint mintAmount) external returns (uint);\\n\\n    function borrowBehalf(address borrower, uint borrowAmount) external returns (uint256);\\n\\n    function repayBorrowBehalf(address borrower, uint repayAmount) external returns (uint256);\\n\\n    function comptroller() external view returns (IComptroller);\\n\\n    function borrowBalanceStored(address account) external view returns (uint256);\\n\\n    function underlying() external view returns (address);\\n}\\n\\ninterface IVBNB is IVToken {\\n    function repayBorrowBehalf(address borrower) external payable;\\n\\n    function liquidateBorrow(address borrower, IVToken vTokenCollateral) external payable;\\n}\\n\\ninterface IComptroller {\\n    enum Action {\\n        MINT,\\n        REDEEM,\\n        BORROW,\\n        REPAY,\\n        SEIZE,\\n        LIQUIDATE,\\n        TRANSFER,\\n        ENTER_MARKET,\\n        EXIT_MARKET\\n    }\\n\\n    function _setActionsPaused(address[] calldata markets_, Action[] calldata actions_, bool paused_) external;\\n\\n    function setCollateralFactor(\\n        IVToken vToken,\\n        uint256 newCollateralFactorMantissa,\\n        uint256 newLiquidationThresholdMantissa\\n    ) external returns (uint256);\\n\\n    function setLiquidationIncentive(\\n        address vToken,\\n        uint256 newLiquidationIncentiveMantissa\\n    ) external returns (uint256);\\n\\n    function setIsBorrowAllowed(uint96 poolId, address vToken, bool borrowAllowed) external;\\n\\n    function enterMarkets(address[] calldata vTokens) external returns (uint256[] memory);\\n\\n    function liquidationIncentiveMantissa() external view returns (uint256);\\n\\n    function vaiController() external view returns (address);\\n\\n    function liquidatorContract() external view returns (address);\\n\\n    function oracle() external view returns (ResilientOracleInterface);\\n\\n    function actionPaused(address market, Action action) external view returns (bool);\\n\\n    function markets(address) external view returns (bool, uint256, bool);\\n\\n    function isForcedLiquidationEnabled(address) external view returns (bool);\\n\\n    function approvedDelegates(address borrower, address delegate) external view returns (bool);\\n\\n    function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);\\n}\\n\\ninterface IWBNB is IERC20Upgradeable {\\n    function deposit() external payable;\\n\\n    function withdraw(uint256 amount) external;\\n}\\n\",\"keccak256\":\"0x49a1b0434dd5c6364fef89d413ad3f9a0272498a3620361bd0494a7b4100fea6\",\"license\":\"BSD-3-Clause\"},\"contracts/MarketConfigurationAggregator/MarketConfigurationAggregator.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity 0.8.25;\\n\\nimport { IComptroller, IVToken } from \\\"../Interfaces.sol\\\";\\n\\n/**\\n * @title MarketConfigurationAggregator\\n * @author Venus\\n * @notice Executes batches of market configuration updates.\\n */\\ncontract MarketConfigurationAggregator {\\n    /// @notice Struct representing parameters to update a market's collateral factor and liquidation threshold\\n    struct CollateralFactorParams {\\n        IVToken vToken;\\n        uint256 newCollateralFactorMantissa;\\n        uint256 newLiquidationThresholdMantissa;\\n    }\\n\\n    /// @notice Struct representing parameters to update a market's liquidation incentive\\n    struct LiquidationIncentiveParams {\\n        address vToken;\\n        uint256 newLiquidationIncentiveMantissa;\\n    }\\n\\n    /// @notice Struct representing parameters to enable or disable borrowing on a market\\n    struct BorrowAllowedParams {\\n        uint96 poolId;\\n        address vToken;\\n        bool borrowAllowed;\\n    }\\n\\n    /// @notice The Comptroller contract \\n    IComptroller public immutable COMPTROLLER;\\n\\n    /**\\n     * @notice Emitted after a batch of collateral factor updates is executed\\n     * @param count The number of updates executed in this batch\\n     */\\n    event CollateralFactorBatchExecuted(uint256 count);\\n\\n    /**\\n     * @notice Emitted after a batch of liquidation incentive updates is executed\\n     * @param count The number of updates executed in this batch\\n     */\\n    event LiquidationIncentiveBatchExecuted(uint256 count);\\n\\n    /**\\n     * @notice Emitted after a batch of borrow allowed updates is executed\\n     * @param count The number of updates executed in this batch\\n     */\\n    event BorrowAllowedBatchExecuted(uint256 count);\\n\\n    /// @notice Error thrown when an zero address is provided\\n    error ZeroAddress();\\n\\n    /// @notice Error thrown when attempting to execute a batch with zero updates\\n    error EmptyBatch();\\n\\n    /**\\n     * @notice Constructor to initialize the MarketConfigurationAggregator with the comptroller\\n     * @param _comptroller Address of the comptroller\\n     * @custom:error Reverts with ZeroAddress if the provided `_comptroller` is the zero address\\n     */\\n    constructor(address _comptroller) {\\n        if (_comptroller == address(0)) revert ZeroAddress();\\n        COMPTROLLER = IComptroller(_comptroller);\\n    }\\n\\n    /**\\n     * @notice Execute a batch of collateral factor updates\\n     * @param updates Array of collateral factor parameters\\n     * @custom:error Reverts with EmptyBatch if the updates array is empty\\n     * @custom:event Emits CollateralFactorBatchExecuted\\n     */\\n    function executeCollateralFactorBatch(CollateralFactorParams[] memory updates) external {\\n        uint256 length = updates.length;\\n        if (length == 0) revert EmptyBatch();\\n\\n        for (uint256 i; i < length; ++i) {\\n            CollateralFactorParams memory u = updates[i];\\n            COMPTROLLER.setCollateralFactor(u.vToken, u.newCollateralFactorMantissa, u.newLiquidationThresholdMantissa);\\n        }\\n\\n        emit CollateralFactorBatchExecuted(length);\\n    }\\n\\n    /**\\n     * @notice Execute a batch of liquidation incentive updates\\n     * @param updates Array of liquidation incentive parameters\\n     * @custom:error Reverts with EmptyBatch if the updates array is empty\\n     * @custom:event Emits LiquidationIncentiveBatchExecuted\\n     */\\n    function executeLiquidationIncentiveBatch(LiquidationIncentiveParams[] memory updates) external {\\n        uint256 length = updates.length;\\n        if (length == 0) revert EmptyBatch();\\n\\n        for (uint256 i; i < length; ++i) {\\n            LiquidationIncentiveParams memory u = updates[i];\\n            COMPTROLLER.setLiquidationIncentive(u.vToken, u.newLiquidationIncentiveMantissa);\\n        }\\n\\n        emit LiquidationIncentiveBatchExecuted(length);\\n    }\\n\\n    /**\\n     * @notice Execute a batch of borrow allowed updates\\n     * @param updates Array of borrow allowed parameters\\n     * @custom:error Reverts with EmptyBatch if the updates array is empty\\n     * @custom:event Emits BorrowAllowedBatchExecuted\\n     */\\n    function executeBorrowAllowedBatch(BorrowAllowedParams[] memory updates) external {\\n        uint256 length = updates.length;\\n        if (length == 0) revert EmptyBatch();\\n\\n        for (uint256 i; i < length; ++i) {\\n            BorrowAllowedParams memory u = updates[i];\\n            COMPTROLLER.setIsBorrowAllowed(u.poolId, u.vToken, u.borrowAllowed);\\n        }\\n\\n        emit BorrowAllowedBatchExecuted(length);\\n    }\\n}\\n\",\"keccak256\":\"0x85e9be68120852322308e237416cc71e02504db833233e9e283659fdbfdac551\",\"license\":\"BSD-3-Clause\"}},\"version\":1}",
+  "bytecode": "0x60a0604052348015600e575f80fd5b50604051610893380380610893833981016040819052602b916061565b6001600160a01b03811660515760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b0316608052608c565b5f602082840312156070575f80fd5b81516001600160a01b03811681146085575f80fd5b9392505050565b6080516107db6100b85f395f818160530152818161016101528181610283015261037601526107db5ff3fe608060405234801561000f575f80fd5b506004361061004a575f3560e01c80635f82c67e1461004e57806364cecfed1461009157806371b28ba2146100a65780638bacc939146100b9575b5f80fd5b6100757f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b03909116815260200160405180910390f35b6100a461009f366004610523565b6100cc565b005b6100a46100b436600461060e565b6101fd565b6100a46100c73660046106c2565b61032a565b80515f8190036100ef5760405163c2e5347d60e01b815260040160405180910390fd5b5f5b818110156101c4575f83828151811061010c5761010c61077a565b602090810291909101810151805191810151604080830151905163a89766dd60e01b81526bffffffffffffffffffffffff90941660048501526001600160a01b039182166024850152151560448401529092507f0000000000000000000000000000000000000000000000000000000000000000169063a89766dd906064015f604051808303815f87803b1580156101a2575f80fd5b505af11580156101b4573d5f803e3d5ffd5b50505050508060010190506100f1565b506040518181527f0d69d816c6b9e87f0f10907a0537f84c961f76e3d36865f087f4667afacb59dc906020015b60405180910390a15050565b80515f8190036102205760405163c2e5347d60e01b815260040160405180910390fd5b5f5b818110156102f9575f83828151811061023d5761023d61077a565b6020908102919091018101518051918101516040808301519051635cc4fdeb60e01b81526001600160a01b039485166004820152602481019290925260448201529092507f000000000000000000000000000000000000000000000000000000000000000090911690635cc4fdeb906064016020604051808303815f875af11580156102cb573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906102ef919061078e565b5050600101610222565b506040518181527fb2e60f0e7c07dff4ee2867a99c2f0a2807bc978a7f875a190fa0a64a61b8d20b906020016101f1565b80515f81900361034d5760405163c2e5347d60e01b815260040160405180910390fd5b5f5b81811015610427575f83828151811061036a5761036a61077a565b602002602001015190507f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316639bd8f6e8825f015183602001516040518363ffffffff1660e01b81526004016103dd9291906001600160a01b03929092168252602082015260400190565b6020604051808303815f875af11580156103f9573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061041d919061078e565b505060010161034f565b506040518181527f3f9ae5446ee6b85407de44c3385f2fb90c628f28d1ee1bd55c0ab912cf056de9906020016101f1565b634e487b7160e01b5f52604160045260245ffd5b6040516060810167ffffffffffffffff8111828210171561048f5761048f610458565b60405290565b6040805190810167ffffffffffffffff8111828210171561048f5761048f610458565b604051601f8201601f1916810167ffffffffffffffff811182821017156104e1576104e1610458565b604052919050565b5f67ffffffffffffffff82111561050257610502610458565b5060051b60200190565b6001600160a01b0381168114610520575f80fd5b50565b5f6020808385031215610534575f80fd5b823567ffffffffffffffff81111561054a575f80fd5b8301601f8101851361055a575f80fd5b803561056d610568826104e9565b6104b8565b8181526060918202830184019184820191908884111561058b575f80fd5b938501935b838510156106025780858a0312156105a6575f80fd5b6105ae61046c565b85356bffffffffffffffffffffffff811681146105c9575f80fd5b8152858701356105d88161050c565b8188015260408681013580151581146105ef575f80fd5b9082015283529384019391850191610590565b50979650505050505050565b5f602080838503121561061f575f80fd5b823567ffffffffffffffff811115610635575f80fd5b8301601f81018513610645575f80fd5b8035610653610568826104e9565b81815260609182028301840191848201919088841115610671575f80fd5b938501935b838510156106025780858a03121561068c575f80fd5b61069461046c565b853561069f8161050c565b815285870135878201526040808701359082015283529384019391850191610676565b5f60208083850312156106d3575f80fd5b823567ffffffffffffffff8111156106e9575f80fd5b8301601f810185136106f9575f80fd5b8035610707610568826104e9565b81815260069190911b82018301908381019087831115610725575f80fd5b928401925b8284101561076f5760408489031215610741575f80fd5b610749610495565b84356107548161050c565b8152848601358682015282526040909301929084019061072a565b979650505050505050565b634e487b7160e01b5f52603260045260245ffd5b5f6020828403121561079e575f80fd5b505191905056fea2646970667358221220a6b5a70af81f95eba6b54d88b78304088b7948733d8d22b145d58a851df010dc64736f6c63430008190033",
+  "deployedBytecode": "0x608060405234801561000f575f80fd5b506004361061004a575f3560e01c80635f82c67e1461004e57806364cecfed1461009157806371b28ba2146100a65780638bacc939146100b9575b5f80fd5b6100757f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b03909116815260200160405180910390f35b6100a461009f366004610523565b6100cc565b005b6100a46100b436600461060e565b6101fd565b6100a46100c73660046106c2565b61032a565b80515f8190036100ef5760405163c2e5347d60e01b815260040160405180910390fd5b5f5b818110156101c4575f83828151811061010c5761010c61077a565b602090810291909101810151805191810151604080830151905163a89766dd60e01b81526bffffffffffffffffffffffff90941660048501526001600160a01b039182166024850152151560448401529092507f0000000000000000000000000000000000000000000000000000000000000000169063a89766dd906064015f604051808303815f87803b1580156101a2575f80fd5b505af11580156101b4573d5f803e3d5ffd5b50505050508060010190506100f1565b506040518181527f0d69d816c6b9e87f0f10907a0537f84c961f76e3d36865f087f4667afacb59dc906020015b60405180910390a15050565b80515f8190036102205760405163c2e5347d60e01b815260040160405180910390fd5b5f5b818110156102f9575f83828151811061023d5761023d61077a565b6020908102919091018101518051918101516040808301519051635cc4fdeb60e01b81526001600160a01b039485166004820152602481019290925260448201529092507f000000000000000000000000000000000000000000000000000000000000000090911690635cc4fdeb906064016020604051808303815f875af11580156102cb573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906102ef919061078e565b5050600101610222565b506040518181527fb2e60f0e7c07dff4ee2867a99c2f0a2807bc978a7f875a190fa0a64a61b8d20b906020016101f1565b80515f81900361034d5760405163c2e5347d60e01b815260040160405180910390fd5b5f5b81811015610427575f83828151811061036a5761036a61077a565b602002602001015190507f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316639bd8f6e8825f015183602001516040518363ffffffff1660e01b81526004016103dd9291906001600160a01b03929092168252602082015260400190565b6020604051808303815f875af11580156103f9573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061041d919061078e565b505060010161034f565b506040518181527f3f9ae5446ee6b85407de44c3385f2fb90c628f28d1ee1bd55c0ab912cf056de9906020016101f1565b634e487b7160e01b5f52604160045260245ffd5b6040516060810167ffffffffffffffff8111828210171561048f5761048f610458565b60405290565b6040805190810167ffffffffffffffff8111828210171561048f5761048f610458565b604051601f8201601f1916810167ffffffffffffffff811182821017156104e1576104e1610458565b604052919050565b5f67ffffffffffffffff82111561050257610502610458565b5060051b60200190565b6001600160a01b0381168114610520575f80fd5b50565b5f6020808385031215610534575f80fd5b823567ffffffffffffffff81111561054a575f80fd5b8301601f8101851361055a575f80fd5b803561056d610568826104e9565b6104b8565b8181526060918202830184019184820191908884111561058b575f80fd5b938501935b838510156106025780858a0312156105a6575f80fd5b6105ae61046c565b85356bffffffffffffffffffffffff811681146105c9575f80fd5b8152858701356105d88161050c565b8188015260408681013580151581146105ef575f80fd5b9082015283529384019391850191610590565b50979650505050505050565b5f602080838503121561061f575f80fd5b823567ffffffffffffffff811115610635575f80fd5b8301601f81018513610645575f80fd5b8035610653610568826104e9565b81815260609182028301840191848201919088841115610671575f80fd5b938501935b838510156106025780858a03121561068c575f80fd5b61069461046c565b853561069f8161050c565b815285870135878201526040808701359082015283529384019391850191610676565b5f60208083850312156106d3575f80fd5b823567ffffffffffffffff8111156106e9575f80fd5b8301601f810185136106f9575f80fd5b8035610707610568826104e9565b81815260069190911b82018301908381019087831115610725575f80fd5b928401925b8284101561076f5760408489031215610741575f80fd5b610749610495565b84356107548161050c565b8152848601358682015282526040909301929084019061072a565b979650505050505050565b634e487b7160e01b5f52603260045260245ffd5b5f6020828403121561079e575f80fd5b505191905056fea2646970667358221220a6b5a70af81f95eba6b54d88b78304088b7948733d8d22b145d58a851df010dc64736f6c63430008190033",
+  "devdoc": {
+    "author": "Venus",
+    "events": {
+      "BorrowAllowedBatchExecuted(uint256)": {
+        "params": {
+          "count": "The number of updates executed in this batch"
+        }
+      },
+      "CollateralFactorBatchExecuted(uint256)": {
+        "params": {
+          "count": "The number of updates executed in this batch"
+        }
+      },
+      "LiquidationIncentiveBatchExecuted(uint256)": {
+        "params": {
+          "count": "The number of updates executed in this batch"
+        }
+      }
+    },
+    "kind": "dev",
+    "methods": {
+      "constructor": {
+        "custom:error": "Reverts with ZeroAddress if the provided `_comptroller` is the zero address",
+        "params": {
+          "_comptroller": "Address of the comptroller"
+        }
+      },
+      "executeBorrowAllowedBatch((uint96,address,bool)[])": {
+        "custom:error": "Reverts with EmptyBatch if the updates array is empty",
+        "custom:event": "Emits BorrowAllowedBatchExecuted",
+        "params": {
+          "updates": "Array of borrow allowed parameters"
+        }
+      },
+      "executeCollateralFactorBatch((address,uint256,uint256)[])": {
+        "custom:error": "Reverts with EmptyBatch if the updates array is empty",
+        "custom:event": "Emits CollateralFactorBatchExecuted",
+        "params": {
+          "updates": "Array of collateral factor parameters"
+        }
+      },
+      "executeLiquidationIncentiveBatch((address,uint256)[])": {
+        "custom:error": "Reverts with EmptyBatch if the updates array is empty",
+        "custom:event": "Emits LiquidationIncentiveBatchExecuted",
+        "params": {
+          "updates": "Array of liquidation incentive parameters"
+        }
+      }
+    },
+    "title": "MarketConfigurationAggregator",
+    "version": 1
+  },
+  "userdoc": {
+    "errors": {
+      "EmptyBatch()": [
+        {
+          "notice": "Error thrown when attempting to execute a batch with zero updates"
+        }
+      ],
+      "ZeroAddress()": [
+        {
+          "notice": "Error thrown when an zero address is provided"
+        }
+      ]
+    },
+    "events": {
+      "BorrowAllowedBatchExecuted(uint256)": {
+        "notice": "Emitted after a batch of borrow allowed updates is executed"
+      },
+      "CollateralFactorBatchExecuted(uint256)": {
+        "notice": "Emitted after a batch of collateral factor updates is executed"
+      },
+      "LiquidationIncentiveBatchExecuted(uint256)": {
+        "notice": "Emitted after a batch of liquidation incentive updates is executed"
+      }
+    },
+    "kind": "user",
+    "methods": {
+      "COMPTROLLER()": {
+        "notice": "The Comptroller contract "
+      },
+      "constructor": {
+        "notice": "Constructor to initialize the MarketConfigurationAggregator with the comptroller"
+      },
+      "executeBorrowAllowedBatch((uint96,address,bool)[])": {
+        "notice": "Execute a batch of borrow allowed updates"
+      },
+      "executeCollateralFactorBatch((address,uint256,uint256)[])": {
+        "notice": "Execute a batch of collateral factor updates"
+      },
+      "executeLiquidationIncentiveBatch((address,uint256)[])": {
+        "notice": "Execute a batch of liquidation incentive updates"
+      }
+    },
+    "notice": "Executes batches of market configuration updates.",
+    "version": 1
+  },
+  "storageLayout": {
+    "storage": [],
+    "types": null
+  }
+}

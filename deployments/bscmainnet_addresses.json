@@ -1,5 +1,7 @@
 {
   "name": "bscmainnet",
   "chainId": "56",
-  "addresses": {}
+  "addresses": {
+    "MarketConfigurationAggregator": "0x16bb2CEc0B286ceECca3aE195e378FDe264b43b4"
+  }
 }

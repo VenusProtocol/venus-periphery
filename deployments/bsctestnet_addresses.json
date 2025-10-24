@@ -1,5 +1,7 @@
 {
   "name": "bsctestnet",
   "chainId": "97",
-  "addresses": {}
+  "addresses": {
+    "MarketConfigurationAggregator": "0x7bbC692907f23E4b7170de0e1483323ea322BDbF"
+  }
 }
