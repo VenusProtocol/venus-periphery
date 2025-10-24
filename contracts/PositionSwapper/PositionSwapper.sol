@@ -22,9 +22,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @notice The vToken representing the native asset (e.g., vBNB).
     address public immutable NATIVE_MARKET;
 
-    /// @notice Mapping of approved swap pairs. (marketFrom => marketTo => helper => status)
-    mapping(address => mapping(address => mapping(address => bool))) public approvedPairs;
-
     /// @notice The swap helper contract for executing token swaps
     SwapHelper public immutable swapHelper;
 
@@ -103,12 +100,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /// @custom:error EnterMarketFailed
     error EnterMarketFailed(uint256 err);
 
-    /// @custom:error NotApprovedHelper
-    error NotApprovedHelper();
-
-    /// @custom:error InvalidMarkets
-    error InvalidMarkets();
-
     /// @custom:error AccrueInterestFailed
     error AccrueInterestFailed(uint256 errCode);
 
@@ -148,6 +139,32 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @notice Accepts native tokens (e.g., BNB) sent to this contract.
      */
     receive() external payable {}
+
+    /**
+     * @notice Allows the owner to sweep leftover ERC-20 tokens from the contract.
+     * @param token The token to sweep.
+     * @custom:event Emits SweepToken event.
+     */
+    function sweepToken(IERC20Upgradeable token) external onlyOwner {
+        uint256 balance = token.balanceOf(address(this));
+        if (balance > 0) {
+            token.safeTransfer(owner(), balance);
+            emit SweepToken(address(token), owner(), balance);
+        }
+    }
+
+    /**
+     * @notice Allows the owner to sweep leftover native tokens (e.g., BNB) from the contract.
+     * @custom:event Emits SweepNative event.
+     */
+    function sweepNative() external onlyOwner {
+        uint256 balance = address(this).balance;
+        if (balance > 0) {
+            (bool success, ) = payable(owner()).call{ value: balance }("");
+            if (!success) revert TransferFailed();
+            emit SweepNative(owner(), balance);
+        }
+    }
 
     /**
      * @notice Swaps the full vToken collateral of a user from one market to another.
@@ -240,62 +257,12 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     }
 
     /**
-     * @notice Allows the owner to sweep leftover ERC-20 tokens from the contract.
-     * @param token The token to sweep.
-     * @custom:event Emits SweepToken event.
-     */
-    function sweepToken(IERC20Upgradeable token) external onlyOwner {
-        uint256 balance = token.balanceOf(address(this));
-        if (balance > 0) {
-            token.safeTransfer(owner(), balance);
-            emit SweepToken(address(token), owner(), balance);
-        }
-    }
-
-    /**
-     * @notice Allows the owner to sweep leftover native tokens (e.g., BNB) from the contract.
-     * @custom:event Emits SweepNative event.
-     */
-    function sweepNative() external onlyOwner {
-        uint256 balance = address(this).balance;
-        if (balance > 0) {
-            (bool success, ) = payable(owner()).call{ value: balance }("");
-            if (!success) revert TransferFailed();
-            emit SweepNative(owner(), balance);
-        }
-    }
-
-    /**
-     * @notice Sets the approval status for a specific swap pair and helper.
-     * @param marketFrom The vToken market to swap from.
-     * @param marketTo The vToken market to swap to.
-     * @param helper The ISwapHelper contract used for the swap.
-     * @param status The approval status to set (true = approved, false = not approved).
-     * @custom:error Throw ZeroAddress if any address parameter is zero.
-     * @custom:error Throw InvalidMarkets if marketFrom and marketTo are the same.
-     * @custom:event Emits ApprovedPairUpdated event.
-     */
-    function setApprovedPair(address marketFrom, address marketTo, address helper, bool status) external onlyOwner {
-        if (marketFrom == address(0) || marketTo == address(0) || helper == address(0)) {
-            revert ZeroAddress();
-        }
-
-        if (marketFrom == marketTo) {
-            revert InvalidMarkets();
-        }
-
-        emit ApprovedPairUpdated(marketFrom, marketTo, helper, approvedPairs[marketFrom][marketTo][helper], status);
-        approvedPairs[marketFrom][marketTo][helper] = status;
-    }
-
-    /**
      * @notice Internal function that performs the full collateral swap process.
      * @param user The address whose collateral is being swapped.
      * @param marketFrom The vToken market from which collateral is seized.
      * @param marketTo The vToken market into which the swapped collateral is minted.
      * @param amountToSeize The amount of vTokens to seize and convert.
      * @param swapData Array of bytes containing swap instructions for the SwapHelper
-     * @custom:error Throw NotApprovedHelper if the specified swap pair and helper are not approved.
      * @custom:error Throw MarketNotListed if one of the specified markets is not listed in the Comptroller.
      * @custom:error Throw Unauthorized if the caller is neither the user nor an approved delegate.
      * @custom:error Throw SeizeFailed if the seize operation fails.
@@ -312,8 +279,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         uint256 amountToSeize,
         bytes[] calldata swapData
     ) internal returns (uint256 amountReceived) {
-        _validateSwapPair(marketFrom, marketTo);
-        _validateUser(user);
+        _checkMarketListed(marketFrom);
+        _checkMarketListed(marketTo);
+        _checkUserAuthorized(user);
 
         _accrueInterest(marketFrom);
         _checkAccountSafe(user);
@@ -399,8 +367,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
         uint256 amountToBorrow,
         bytes[] calldata swapData
     ) internal returns (uint256 amountReceived) {
-        _validateSwapPair(marketFrom, marketTo);
-        _validateUser(user);
+        _checkMarketListed(marketFrom);
+        _checkMarketListed(marketTo);
+        _checkUserAuthorized(user);
         _checkAccountSafe(user);
 
         _borrowAndApprove(user, marketTo, amountToBorrow);
@@ -448,6 +417,25 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     }
 
     /**
+     * @dev Ensures that the given market is listed in the Comptroller.
+     * @param market The vToken address to validate.
+     */
+    function _checkMarketListed(IVToken market) internal view {
+        (bool isMarketListed, , ) = COMPTROLLER.markets(address(market));
+        if (!isMarketListed) revert MarketNotListed(address(market));
+    }
+
+    /**
+     * @notice Checks that the caller is authorized to act on behalf of the specified user.
+     * @param user The address of the user for whom the action is being performed.
+     */
+    function _checkUserAuthorized(address user) internal view {
+        if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
+            revert Unauthorized(msg.sender);
+        }
+    }
+
+    /**
      * @dev Checks if a user's account is safe post-swap.
      * @param user The address to check.
      * @custom:error Throw SwapCausesLiquidation if the user's account is undercollateralized.
@@ -455,30 +443,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     function _checkAccountSafe(address user) internal view {
         (uint256 err, , uint256 shortfall) = COMPTROLLER.getAccountLiquidity(user);
         if (err != 0 || shortfall > 0) revert SwapCausesLiquidation(err);
-    }
-
-    /**
-     * @notice Validates the swap pair and helper
-     */
-    function _validateSwapPair(IVToken marketFrom, IVToken marketTo) internal view {
-        if (!approvedPairs[address(marketFrom)][address(marketTo)][address(swapHelper)]) {
-            revert NotApprovedHelper();
-        }
-
-        (bool isMarketListed, , ) = COMPTROLLER.markets(address(marketFrom));
-        if (!isMarketListed) revert MarketNotListed(address(marketFrom));
-
-        (isMarketListed, , ) = COMPTROLLER.markets(address(marketTo));
-        if (!isMarketListed) revert MarketNotListed(address(marketTo));
-    }
-
-    /**
-     * @notice Validates user authorization
-     */
-    function _validateUser(address user) internal view {
-        if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
-            revert Unauthorized(msg.sender);
-        }
     }
 
     /**
