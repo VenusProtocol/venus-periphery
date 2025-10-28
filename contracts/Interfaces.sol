@@ -28,6 +28,10 @@ interface IVToken is IERC20Upgradeable {
     function borrowBalanceStored(address account) external view returns (uint256);
 
     function underlying() external view returns (address);
+
+    function redeemBehalf(address redeemer, uint256 redeemTokens) external returns (uint256);
+
+    function flashLoanFeeMantissa() external view returns (uint256);
 }
 
 interface IVBNB is IVToken {
@@ -76,10 +80,29 @@ interface IComptroller {
     function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);
 
     function checkMembership(address account, IVToken vToken) external view returns (bool);
+
+    function executeFlashLoan(
+        address payable onBehalf,
+        address payable receiver,
+        IVToken[] memory vTokens,
+        uint256[] memory underlyingAmounts,
+        bytes memory param
+    ) external;
 }
 
 interface IWBNB is IERC20Upgradeable {
     function deposit() external payable;
 
     function withdraw(uint256 amount) external;
+}
+
+interface IFlashLoanReceiver {
+    function executeOperation(
+        IVToken[] calldata vTokens,
+        uint256[] calldata amounts,
+        uint256[] calldata premiums,
+        address initiator,
+        address onBehalf,
+        bytes calldata param
+    ) external returns (bool success, uint256[] memory repayAmounts);
 }
