@@ -6,6 +6,7 @@ import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { IVToken, IComptroller, IWBNB, IVBNB, IFlashLoanReceiver } from "../Interfaces.sol";
 import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
+import { IPositionSwapper } from "./IPositionSwapper.sol";
 
 /**
  * @title PositionSwapper
@@ -13,7 +14,7 @@ import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
  * @notice A contract to facilitate swapping collateral and debt positions between different vToken markets.
  * @custom:security-contact https://github.com/VenusProtocol/venus-periphery
  */
-contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, IFlashLoanReceiver {
+contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, IFlashLoanReceiver, IPositionSwapper {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @notice The Comptroller used for permission and liquidity checks.
@@ -31,125 +32,13 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     /// @notice The wrapped native token contract (e.g., WBNB)
     IWBNB public immutable WRAPPED_NATIVE;
 
-    /// @notice Emitted after a successful collateral swap
-    event CollateralSwapped(
-        address indexed user,
-        address indexed marketFrom,
-        address indexed marketTo,
-        uint256 amountSwapped
-    );
-
-    /// @notice Emitted when a user swaps their debt from one market to another
-    event DebtSwapped(
-        address indexed user,
-        address indexed marketFrom,
-        address indexed marketTo,
-        uint256 amountSwapped,
-        uint256 amountReceived
-    );
-
-    /// @notice Emitted when the owner sweeps leftover ERC-20 tokens.
-    event SweepToken(address indexed token, address indexed receiver, uint256 amount);
-
-    /// @notice Emitted when the owner sweeps leftover native tokens (e.g., BNB).
-    event SweepNative(address indexed receiver, uint256 amount);
-
-    /// @notice Emitted when an approved pair is updated.
-    event ApprovedPairUpdated(address marketFrom, address marketTo, address helper, bool oldStatus, bool newStatus);
-
-    enum OperationType {
-        NONE,
-        SWAP_COLLATERAL,
-        SWAP_DEBT,
-        SWAP_COLLATERAL_NATIVE_TO_WRAPPED,
-        SWAP_DEBT_NATIVE_TO_WRAPPED
-    }
-
-    /// @custom:error Unauthorized Caller is neither the user nor an approved delegate.
-    error Unauthorized(address account);
-
-    /// @custom:error SeizeFailed
-    error SeizeFailed(uint256 err);
-
-    /// @custom:error RedeemFailed
-    error RedeemFailed(uint256 err);
-
-    /// @custom:error BorrowFailed
-    error BorrowFailed(uint256 err);
-
-    /// @custom:error MintFailed
-    error MintFailed(uint256 err);
-
-    /// @custom:error RepayFailed
-    error RepayFailed(uint256 err);
-
-    /// @custom:error NoCollateralBalance
-    error NoCollateralBalance();
-
-    /// @custom:error NoVTokenBalance
-    error NoVTokenBalance();
-
-    /// @custom:error NoBorrowBalance
-    error NoBorrowBalance();
-
-    /// @custom:error ZeroAmount
-    error ZeroAmount();
-
-    /// @custom:error NoUnderlyingReceived
-    error NoUnderlyingReceived();
-
-    /// @custom:error SwapCausesLiquidation
-    error SwapCausesLiquidation(uint256 err);
-
-    /// @custom:error MarketNotListed
-    error MarketNotListed(address market);
-
-    /// @custom:error ZeroAddress
-    error ZeroAddress();
-
-    /// @custom:error TransferFailed
-    error TransferFailed();
-
-    /// @custom:error EnterMarketFailed
-    error EnterMarketFailed(uint256 err);
-
-    /// @custom:error AccrueInterestFailed
-    error AccrueInterestFailed(uint256 errCode);
-
-    /// @custom:error SwapCallFailed
-    error SwapCallFailed();
-
-    /// @custom:error InvalidFlashLoanAmountReceived
-    error InvalidFlashLoanAmountReceived();
-
-    /// @custom:error UnauthorizedCaller
-    error UnauthorizedCaller();
-
-    /// @custom:error FlashLoanAssetOrAmountMismatch
-    error FlashLoanAssetOrAmountMismatch();
-
-    /// @custom:error ExecuteOperationNotCalledCorrectly
-    error ExecuteOperationNotCalledCorrectly();
-
-    /// @custom:error InvalidFlashLoanBorrowedAsset
-    error InvalidFlashLoanBorrowedAsset();
-
-    /// @custom:error InsufficientFundsToRepayFlashloan
-    error InsufficientFundsToRepayFlashloan();
-
-    /// @custom:error InsufficientAmountOutAfterSwap
-    error InsufficientAmountOutAfterSwap();
-
-    /// @custom:error NoEnoughBalance
-    error NoEnoughBalance();
-
     /// @dev Transient slots used during flash loan workflows
-    OperationType transient operationType;
-    IVToken transient transientMarketFrom;
-    IVToken transient transientMarketTo;
-    uint256 transient transientDebtRepaymentAmount;
-    uint256 transient transientMinAmountOutAfterSwap;
-    uint256 transient transientCollateralRedeemAmount;
+    OperationType private operationType;
+    IVToken private transientMarketFrom;
+    IVToken private transientMarketTo;
+    uint256 private transientDebtRepaymentAmount;
+    uint256 private transientMinAmountOutAfterSwap;
+    uint256 private transientCollateralRedeemAmount;
 
     /**
      * @notice Constructor to set immutable variables
@@ -230,7 +119,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
         if (userBalance == 0) revert NoCollateralBalance();
         _swapCollateralNativeToWrapped(user, NATIVE_MARKET, WRAPPED_NATIVE_MARKET, userBalance);
-        emit CollateralSwapped(user, address(NATIVE_MARKET), address(WRAPPED_NATIVE_MARKET), userBalance);
     }
 
     /**
@@ -240,8 +128,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     function swapDebtNativeToWrapped(address user) external nonReentrant {
         uint256 borrowBalance = NATIVE_MARKET.borrowBalanceCurrent(user);
         if (borrowBalance == 0) revert NoBorrowBalance();
-        uint256 amountReceived = _swapDebtNativeToWrapped(user, NATIVE_MARKET, WRAPPED_NATIVE_MARKET, borrowBalance);
-        emit DebtSwapped(user, address(NATIVE_MARKET), address(WRAPPED_NATIVE_MARKET), borrowBalance, amountReceived);
+        _swapDebtNativeToWrapped(user, NATIVE_MARKET, WRAPPED_NATIVE_MARKET, borrowBalance);
     }
 
     /**
@@ -264,7 +151,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 userBalance = marketFrom.balanceOfUnderlying(user);
         if (userBalance == 0) revert NoCollateralBalance();
         _swapCollateral(user, marketFrom, marketTo, userBalance, minAmountToSupply, swapData);
-        emit CollateralSwapped(user, address(marketFrom), address(marketTo), userBalance);
     }
 
     /**
@@ -290,7 +176,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         if (maxAmountToSwap == 0) revert ZeroAmount();
         if (maxAmountToSwap > marketFrom.balanceOfUnderlying(user)) revert NoEnoughBalance();
         _swapCollateral(user, marketFrom, marketTo, maxAmountToSwap, minAmountToSupply, swapData);
-        emit CollateralSwapped(user, address(marketFrom), address(marketTo), maxAmountToSwap);
     }
 
     /**
@@ -312,8 +197,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     ) external payable nonReentrant {
         uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
         if (borrowBalance == 0) revert NoBorrowBalance();
-        uint256 amountReceived = _swapDebt(user, marketFrom, marketTo, borrowBalance, maxDebtAmountToOpen, swapData);
-        emit DebtSwapped(user, address(marketFrom), address(marketTo), borrowBalance, amountReceived);
+        _swapDebt(user, marketFrom, marketTo, borrowBalance, maxDebtAmountToOpen, swapData);
     }
 
     /**
@@ -338,15 +222,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     ) external payable nonReentrant {
         if (minDebtAmountToSwap == 0) revert ZeroAmount();
         if (minDebtAmountToSwap > marketFrom.borrowBalanceCurrent(user)) revert NoBorrowBalance();
-        uint256 amountReceived = _swapDebt(
-            user,
-            marketFrom,
-            marketTo,
-            minDebtAmountToSwap,
-            maxDebtAmountToOpen,
-            swapData
-        );
-        emit DebtSwapped(user, address(marketFrom), address(marketTo), minDebtAmountToSwap, amountReceived);
+        _swapDebt(user, marketFrom, marketTo, minDebtAmountToSwap, maxDebtAmountToOpen, swapData);
     }
 
     /**
@@ -381,7 +257,12 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         _validateAndEnterMarket(user, marketFrom, marketTo);
 
         operationType = OperationType.SWAP_COLLATERAL_NATIVE_TO_WRAPPED;
+
+        uint256 fromBalanceBefore = IERC20Upgradeable(marketFrom.underlying()).balanceOf(address(this));
+        uint256 toBalanceBefore = IERC20Upgradeable(marketTo.underlying()).balanceOf(address(this));
         COMPTROLLER.executeFlashLoan(payable(user), payable(address(this)), borrowedMarkets, flashLoanAmounts, "0x");
+        _refundDustToUser(user, marketFrom, fromBalanceBefore);
+        _refundDustToUser(user, marketTo, toBalanceBefore);
 
         _checkAccountSafe(user);
     }
@@ -392,7 +273,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param marketFrom Native vToken market (e.g., vBNB)
      * @param marketTo Wrapped-native vToken market (e.g., vWBNB)
      * @param debtRepaymentAmount Amount of native debt to repay
-     * @return amountReceived Equal to repaid amount on the native market
      * @custom:error Throw MarketNotListed if any market is not listed in Comptroller
      * @custom:error Throw Unauthorized if caller is neither the user nor an approved delegate
      * @custom:error Throw SwapCausesLiquidation if the operation would make the account unsafe
@@ -402,7 +282,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         IVToken marketFrom,
         IVToken marketTo,
         uint256 debtRepaymentAmount
-    ) internal returns (uint256 amountReceived) {
+    ) internal {
         _checkMarketListed(marketFrom);
         _checkMarketListed(marketTo);
         _checkUserAuthorized(user);
@@ -423,13 +303,14 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             flashLoanAmounts[0] = debtRepaymentAmount;
         }
 
+        uint256 wrappedNativeBefore = IERC20Upgradeable(marketTo.underlying()).balanceOf(address(this));
+
         operationType = OperationType.SWAP_DEBT_NATIVE_TO_WRAPPED;
         COMPTROLLER.executeFlashLoan(payable(user), payable(address(this)), borrowedMarkets, flashLoanAmounts, "0x");
 
-        _checkAccountSafe(user);
+        _refundDustToUser(user, marketTo, wrappedNativeBefore);
 
-        // In the native->wrapped debt path, the amount received is the amount of old-debt repaid
-        return debtRepaymentAmount;
+        _checkAccountSafe(user);
     }
 
     /**
@@ -473,6 +354,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
         _validateAndEnterMarket(user, marketFrom, marketTo);
 
+        uint256 fromBalanceBefore = IERC20Upgradeable(marketFrom.underlying()).balanceOf(address(this));
+        uint256 toBalanceBefore = IERC20Upgradeable(marketTo.underlying()).balanceOf(address(this));
+
         operationType = OperationType.SWAP_COLLATERAL;
         COMPTROLLER.executeFlashLoan(
             payable(user),
@@ -481,6 +365,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             flashLoanAmounts,
             abi.encodeWithSelector(SWAP_HELPER.multicall.selector, swapData)
         );
+
+        _refundDustToUser(user, marketFrom, fromBalanceBefore);
+        _refundDustToUser(user, marketTo, toBalanceBefore);
 
         _checkAccountSafe(user);
     }
@@ -493,7 +380,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param minDebtAmountToSwap The minimum amount of `marketFrom` debt to repay
      * @param maxDebtAmountToOpen The maximum amount to open on `marketTo`
      * @param swapData Array of bytes containing swap instructions for the SwapHelper
-     * @return amountReceived The amount of underlying tokens received after the swap
      * @custom:error Throw MarketNotListed One of the specified markets is not listed in the Comptroller
      * @custom:error Throw Unauthorized The caller is neither the user nor an approved delegate
      * @custom:error Throw BorrowFailed The borrow operation fails
@@ -508,7 +394,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 minDebtAmountToSwap,
         uint256 maxDebtAmountToOpen,
         bytes[] calldata swapData
-    ) internal returns (uint256 amountReceived) {
+    ) internal {
         _checkMarketListed(marketFrom);
         _checkMarketListed(marketTo);
         _checkUserAuthorized(user);
@@ -529,6 +415,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             flashLoanAmounts[0] = maxDebtAmountToOpen;
         }
 
+        uint256 fromBalanceBeforeDebt = IERC20Upgradeable(marketFrom.underlying()).balanceOf(address(this));
+        uint256 toBalanceBeforeDebt = IERC20Upgradeable(marketTo.underlying()).balanceOf(address(this));
+
         operationType = OperationType.SWAP_DEBT;
         COMPTROLLER.executeFlashLoan(
             payable(user),
@@ -538,10 +427,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             abi.encodeWithSelector(SWAP_HELPER.multicall.selector, swapData)
         );
 
-        _checkAccountSafe(user);
+        _refundDustToUser(user, marketFrom, fromBalanceBeforeDebt);
+        _refundDustToUser(user, marketTo, toBalanceBeforeDebt);
 
-        // Return the amount that was repaid on marketFrom
-        return minDebtAmountToSwap;
+        _checkAccountSafe(user);
     }
 
     /**
@@ -646,12 +535,16 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             revert InsufficientFundsToRepayFlashloan();
         }
         WRAPPED_NATIVE.deposit{ value: nativeBalanceAfter }();
-        IERC20Upgradeable(address(WRAPPED_NATIVE)).approve(address(COMPTROLLER), borrowedAssetAmountToRepay);
+        IERC20Upgradeable(address(WRAPPED_NATIVE)).approve(address(WRAPPED_NATIVE_MARKET), borrowedAssetAmountToRepay);
 
-        // Transfer dust to user
-        if (nativeBalanceAfter > borrowedAssetAmount) {
-            IERC20Upgradeable(address(WRAPPED_NATIVE)).safeTransfer(onBehalf, nativeBalanceAfter - borrowedAssetAmount);
-        }
+        // Emit event with precise amounts
+        emit CollateralSwapped(
+            onBehalf,
+            address(NATIVE_MARKET),
+            address(WRAPPED_NATIVE_MARKET),
+            nativeBalanceAfter,
+            borrowedAssetAmount - borrowedAssetFees
+        );
     }
 
     /**
@@ -688,7 +581,16 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
         // Approve Fee + dust
         borrowedAssetAmountToRepay = borrowedAssetAmount - transientDebtRepaymentAmount;
-        IERC20Upgradeable(address(WRAPPED_NATIVE)).approve(address(COMPTROLLER), borrowedAssetAmountToRepay);
+        IERC20Upgradeable(address(WRAPPED_NATIVE)).approve(address(WRAPPED_NATIVE_MARKET), borrowedAssetAmountToRepay);
+
+        // Emit event with precise amounts
+        emit DebtSwapped(
+            onBehalf,
+            address(NATIVE_MARKET),
+            address(WRAPPED_NATIVE_MARKET),
+            transientDebtRepaymentAmount,
+            borrowedAssetAmount
+        );
     }
 
     /**
@@ -733,7 +635,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         err = transientMarketTo.mintBehalf(onBehalf, toUnderlyingReceived);
         if (err != 0) revert MintFailed(err);
 
-        // Pull user's vTokens to this contract to redeem underlying
         uint256 fromUnderlyingBalanceBefore = fromUnderlying.balanceOf(address(this));
         err = transientMarketFrom.redeemUnderlyingBehalf(onBehalf, transientCollateralRedeemAmount);
         if (err != 0) revert RedeemFailed(err);
@@ -745,6 +646,15 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         }
 
         fromUnderlying.forceApprove(address(borrowMarket), borrowedAssetAmountToRepay);
+
+        // Emit event with precise amounts
+        emit CollateralSwapped(
+            onBehalf,
+            address(transientMarketFrom),
+            address(transientMarketTo),
+            fromUnderlyingReceived,
+            toUnderlyingReceived
+        );
     }
 
     /**
@@ -782,13 +692,17 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         err = transientMarketFrom.repayBorrowBehalf(onBehalf, transientMinAmountOutAfterSwap);
         if (err != 0) revert RepayFailed(err);
 
-        // Transfer dust to user
-        if (fromUnderlyingReceived > transientMinAmountOutAfterSwap) {
-            fromUnderlying.safeTransfer(onBehalf, fromUnderlyingReceived - transientMinAmountOutAfterSwap);
-        }
-
         borrowedAssetAmountToRepay = borrowedAssetFees;
         toUnderlying.forceApprove(address(borrowMarket), borrowedAssetAmountToRepay);
+
+        // Emit event with precise amounts
+        emit DebtSwapped(
+            onBehalf,
+            address(transientMarketFrom),
+            address(transientMarketTo),
+            transientMinAmountOutAfterSwap,
+            borrowedAssetAmount
+        );
     }
 
     /**
@@ -808,7 +722,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         IERC20Upgradeable tokenOut,
         uint256 minAmountOut,
         bytes calldata param
-    ) internal nonReentrant returns (uint256 amountOut) {
+    ) internal returns (uint256 amountOut) {
         tokenIn.safeTransfer(address(SWAP_HELPER), amountIn);
 
         uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
@@ -829,6 +743,21 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     }
 
     /**
+     * @dev Refunds any residual underlying tokens accrued during the operation back to the user.
+     * @param user The address to receive the residual tokens.
+     * @param market The vToken whose underlying is being refunded.
+     * @param balanceBefore The contract's underlying balance before the operation.
+     */
+    function _refundDustToUser(address user, IVToken market, uint256 balanceBefore) internal {
+        IERC20Upgradeable asset = IERC20Upgradeable(market.underlying());
+        uint256 balanceAfter = asset.balanceOf(address(this));
+        if (balanceAfter > balanceBefore) {
+            uint256 dustAmount = balanceAfter - balanceBefore;
+            asset.safeTransfer(user, dustAmount);
+        }
+    }
+
+    /**
      * @notice Calculates how much needs to be borrowed in a flash loan to get the required amount after paying the fee.
      * @param requiredAmount The amount needed after the flash loan fee is paid.
      * @param feeRate The flash loan fee rate, scaled by 1e18 (e.g. 9e14 = 0.09%).
@@ -844,6 +773,15 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         flashLoanAmount = (requiredAmount * 1e18) / denominator;
     }
 
+    /**
+     * @notice Ensures the `user` has entered the destination market before operations.
+     * @dev If `user` is already a member of `marketFrom` and not of `marketTo`,
+     *      this function calls Comptroller to enter `marketTo` on behalf of `user`.
+     * @param user The account for which membership is validated/updated.
+     * @param marketFrom The current vToken market the user participates in.
+     * @param marketTo The target vToken market the user must enter.
+     * @custom:error EnterMarketFailed Thrown when Comptroller.enterMarket returns a non-zero error code.
+     */
     function _validateAndEnterMarket(address user, IVToken marketFrom, IVToken marketTo) internal {
         if (COMPTROLLER.checkMembership(user, marketFrom) && !COMPTROLLER.checkMembership(user, marketTo)) {
             uint256 err = COMPTROLLER.enterMarket(user, address(marketTo));

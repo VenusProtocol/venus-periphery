@@ -31,6 +31,8 @@ interface IVToken is IERC20Upgradeable {
 
     function redeemBehalf(address redeemer, uint256 redeemTokens) external returns (uint256);
 
+    function redeemUnderlyingBehalf(address redeemer, uint256 redeemAmount) external returns (uint256);
+
     function flashLoanFeeMantissa() external view returns (uint256);
 }
 
