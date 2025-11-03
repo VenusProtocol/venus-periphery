@@ -671,7 +671,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 err;
         IERC20Upgradeable fromUnderlying = IERC20Upgradeable(transientMarketFrom.underlying());
         IERC20Upgradeable toUnderlying = IERC20Upgradeable(transientMarketTo.underlying());
-        if (fromUnderlying.balanceOf(address(this)) < borrowedAssetAmount) revert InvalidFlashLoanAmountReceived();
+        if (toUnderlying.balanceOf(address(this)) < borrowedAssetAmount) revert InvalidFlashLoanAmountReceived();
 
         // Perform swap using SwapHelper
         _performSwap(

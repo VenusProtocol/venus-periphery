@@ -1,17 +1,17 @@
-import { FakeContract, MockContract, smock } from "@defi-wonderland/smock";
+import { FakeContract, smock } from "@defi-wonderland/smock";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { BEP20Harness } from "@venusprotocol/venus-protocol/dist/typechain/contracts/test/BEP20.sol";
 import { expect } from "chai";
-import { BigNumber, Signer } from "ethers";
+import { Contract, Signer } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
 import {
-  ComptrollerLens__factory,
+  ComptrollerLensInterface,
   ComptrollerMock,
-  ComptrollerMock__factory,
+  EIP20Interface,
   IAccessControlManagerV8,
-  InterestRateModelHarness,
+  IProtocolShareReserve,
+  InterestRateModel,
   MockVBNB,
   PositionSwapper,
   ResilientOracleInterface,
@@ -21,670 +21,279 @@ import {
 } from "../../../typechain";
 
 type SetupMarketFixture = {
-  comptroller: MockContract<ComptrollerMock>;
+  comptroller: ComptrollerMock;
   vBNB: MockVBNB;
-  WBNB: FakeContract<WBNB>;
-  vWBNB: FakeContract<VBep20Harness>;
-  vUSDT: FakeContract<VBep20Harness>;
-  vUSDC: FakeContract<VBep20Harness>;
-  USDT: FakeContract<BEP20Harness>;
-  USDC: FakeContract<BEP20Harness>;
+  WBNB: WBNB;
+  vWBNB: VBep20Harness;
   positionSwapper: PositionSwapper;
   swapHelper: FakeContract<SwapHelper>;
+  vUSDT: VBep20Harness;
+  USDT: EIP20Interface;
+  vBUSD: VBep20Harness;
+  BUSD: EIP20Interface;
 };
+
+async function deployBNBMarkets(
+  comptroller: Contract,
+  acm: string,
+  irm: string,
+  psr: string,
+  admin: string,
+): Promise<{ WBNB: WBNB; vBNB: MockVBNB; vWBNB: VBep20Harness }> {
+  // Deploy vBNB
+  const VBNBFactory = await ethers.getContractFactory("MockVBNB");
+  const vBNB = await VBNBFactory.deploy(comptroller.address, irm, parseUnits("1", 28), "Venus BNB", "vBNB", 8, admin);
+
+  await comptroller._setMarketSupplyCaps([vBNB.address], [parseUnits("1000", 18)]);
+  await comptroller._setMarketBorrowCaps([vBNB.address], [parseUnits("1000", 18)]);
+  await comptroller.supportMarket(vBNB.address);
+  await vBNB.setAccessControlManager(acm);
+
+  // Deploy vWBNB
+  const WBNBFactory = await ethers.getContractFactory("WBNB");
+  const WBNB = await WBNBFactory.deploy();
+  await WBNB.deposit({ value: parseEther("50") });
+
+  const vTokenFactory = await ethers.getContractFactory("VBep20Harness");
+  const vTokenConfig = {
+    initialExchangeRateMantissa: parseUnits("1", 28),
+    name: "Venus WBNB",
+    symbol: "vWBNB",
+    decimals: 8,
+    becomeImplementationData: "0x",
+  };
+
+  const vWBNB = await vTokenFactory.deploy(
+    WBNB.address,
+    comptroller.address,
+    irm,
+    vTokenConfig.initialExchangeRateMantissa,
+    vTokenConfig.name,
+    vTokenConfig.symbol,
+    vTokenConfig.decimals,
+    admin,
+  );
+  await vWBNB.deployed();
+  await vWBNB.setAccessControlManager(acm);
+  await vWBNB.setProtocolShareReserve(psr);
+  await vWBNB.setFlashLoanEnabled(true);
+  await comptroller._setMarketSupplyCaps([vWBNB.address], [parseUnits("1000", 18)]);
+  await comptroller._setMarketBorrowCaps([vWBNB.address], [parseUnits("1000", 18)]);
+  await comptroller.supportMarket(vWBNB.address);
+  await comptroller.setIsBorrowAllowed(0, vBNB.address, true);
+  await comptroller.setIsBorrowAllowed(0, vWBNB.address, true);
+  await WBNB.approve(vWBNB.address, parseUnits("50", 18));
+  await vWBNB.mint(parseUnits("20", 18));
+  return { WBNB, vBNB, vWBNB };
+}
+
+async function deployVToken(
+  symbol: string,
+  comptroller: Contract,
+  acm: string,
+  irm: string,
+  psr: string,
+  admin: string,
+): Promise<{ mockToken: EIP20Interface; vToken: VBep20Harness }> {
+  const MockTokenFactory = await ethers.getContractFactory("MockToken");
+  const mockToken = await MockTokenFactory.deploy(symbol, symbol, 18);
+
+  const vTokenFactory = await ethers.getContractFactory("VBep20Harness");
+  const vTokenConfig = {
+    initialExchangeRateMantissa: parseUnits("1", 28),
+    name: "Venus " + symbol,
+    symbol: "v" + symbol,
+    decimals: 8,
+    becomeImplementationData: "0x",
+  };
+
+  const vToken = await vTokenFactory.deploy(
+    mockToken.address,
+    comptroller.address,
+    irm,
+    vTokenConfig.initialExchangeRateMantissa,
+    vTokenConfig.name,
+    vTokenConfig.symbol,
+    vTokenConfig.decimals,
+    admin,
+  );
+  await vToken.setAccessControlManager(acm);
+  await vToken.setProtocolShareReserve(psr);
+  await vToken.setFlashLoanEnabled(true);
+  await comptroller._setMarketSupplyCaps([vToken.address], [parseUnits("1000", 18)]);
+  await comptroller._setMarketBorrowCaps([vToken.address], [parseUnits("1000", 18)]);
+  await comptroller.supportMarket(vToken.address);
+  await comptroller.setIsBorrowAllowed(0, vToken.address, true);
+  await mockToken.faucet(parseEther("100"));
+  await mockToken.approve(vToken.address, parseEther("50"));
+  return { mockToken, vToken };
+}
 
 const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   const [admin] = await ethers.getSigners();
-
-  const oracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
   const accessControl = await smock.fake<IAccessControlManagerV8>("AccessControlManager");
   accessControl.isAllowedToCall.returns(true);
+  const comptrollerLens = await smock.fake<ComptrollerLensInterface>("ComptrollerLens");
+  const protocolShareReserve = await smock.fake<IProtocolShareReserve>("IProtocolShareReserve");
+  const interestRateModel = await smock.fake<InterestRateModel>("InterestRateModelHarness");
+  interestRateModel.isInterestRateModel.returns(true);
+  const resilientOracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
+  resilientOracle.getUnderlyingPrice.returns(parseUnits("1", 18));
 
-  const ComptrollerFactory = await smock.mock<ComptrollerMock__factory>("ComptrollerMock");
-  const comptroller = await ComptrollerFactory.deploy();
-
-  const ComptrollerLensFactory = await smock.mock<ComptrollerLens__factory>("ComptrollerLens");
-  const comptrollerLens = await ComptrollerLensFactory.deploy();
-
+  const comptrollerFactory = await ethers.getContractFactory("ComptrollerMock");
+  const comptroller = await comptrollerFactory.deploy();
   await comptroller._setAccessControl(accessControl.address);
   await comptroller._setComptrollerLens(comptrollerLens.address);
-  await comptroller._setPriceOracle(oracle.address);
-  // Remove liquidation incentive setting since it's not available in mock
+  await comptroller.setPriceOracle(resilientOracle.address);
 
-  const interestRateModelHarnessFactory = await ethers.getContractFactory("InterestRateModelHarness");
-  const InterestRateModelHarness = (await interestRateModelHarnessFactory.deploy(
-    parseUnits("1", 12),
-  )) as InterestRateModelHarness;
-
-  const VBNBFactory = await ethers.getContractFactory("MockVBNB");
-  const vBNB = await VBNBFactory.deploy(
-    comptroller.address,
-    InterestRateModelHarness.address,
-    parseUnits("1", 28),
-    "Venus BNB",
-    "vBNB",
-    8,
+  const { WBNB, vBNB, vWBNB } = await deployBNBMarkets(
+    comptroller,
+    accessControl.address,
+    interestRateModel.address,
+    protocolShareReserve.address,
     admin.address,
   );
 
-  await vBNB.setAccessControlManager(accessControl.address);
-
-  const WBNB = await smock.fake<WBNB>("WBNB");
-  // Set up WBNB mock behavior - simple defaults that will be overridden
-  WBNB.transfer.returns(true);
-  WBNB.transferFrom.returns(true);
-  WBNB.approve.returns(true);
-  WBNB.allowance.returns(parseEther("1000"));
-  WBNB.balanceOf.returns(parseEther("0")); // Default to 0
-
-  const vWBNB = await smock.fake<VBep20Harness>("VBep20Harness");
-  // Set up vWBNB mock behavior
-  vWBNB.underlying.returns(WBNB.address);
-  vWBNB.borrowBehalf.returns(0);
-  vWBNB.borrowBalanceStored.returns(0);
-  vWBNB.borrowBalanceCurrent.returns(0);
-  vWBNB.getCash.returns(parseEther("15"));
-  vWBNB.totalBorrowsCurrent.returns(0);
-  vWBNB.totalReserves.returns(0);
-  vWBNB.getAccountSnapshot.returns([0, 0, 0, parseEther("1")]);
-  vWBNB.mintBehalf.returns(0);
-  vWBNB.balanceOf.returns(parseUnits("0", 8)); // Default to 0
-  await vBNB._setReserveFactor(BigNumber.from("0"));
-
-  // ERC20 tokens for testing (mocked for easier testing)
-  const USDT = await smock.fake<BEP20Harness>("BEP20Harness");
-  const USDC = await smock.fake<BEP20Harness>("BEP20Harness");
-
-  // Set up basic token behavior
-  USDT.decimals.returns(6);
-  USDC.decimals.returns(6);
-  USDT.symbol.returns("USDT");
-  USDC.symbol.returns("USDC");
-  USDT.transfer.returns(true);
-  USDC.transfer.returns(true);
-  USDT.transferFrom.returns(true);
-  USDC.transferFrom.returns(true);
-  USDT.approve.returns(true);
-  USDC.approve.returns(true);
-  USDT.balanceOf.returns(0); // Default to 0, will be overridden in tests
-  USDC.balanceOf.returns(0);
-
-  // Create vToken mocks for USDT and USDC
-  const vUSDT = await smock.fake<VBep20Harness>("VBep20Harness");
-  vUSDT.underlying.returns(USDT.address);
-  vUSDT.borrowBehalf.returns(0);
-  vUSDT.borrowBalanceStored.returns(0);
-  vUSDT.borrowBalanceCurrent.returns(0);
-  vUSDT.getCash.returns(parseUnits("15000", 6));
-  vUSDT.totalBorrowsCurrent.returns(0);
-  vUSDT.totalReserves.returns(0);
-  vUSDT.getAccountSnapshot.returns([0, 0, 0, parseUnits("1", 6)]);
-  vUSDT.mintBehalf.returns(0);
-  vUSDT.repayBorrowBehalf.returns(0);
-  vUSDT.balanceOf.returns(parseUnits("0", 8));
-  vUSDT.seize.returns(0);
-  vUSDT.redeem.returns(0);
-
-  const vUSDC = await smock.fake<VBep20Harness>("VBep20Harness");
-  vUSDC.underlying.returns(USDC.address);
-  vUSDC.borrowBehalf.returns(0);
-  vUSDC.borrowBalanceStored.returns(0);
-  vUSDC.borrowBalanceCurrent.returns(0);
-  vUSDC.getCash.returns(parseUnits("15000", 6));
-  vUSDC.totalBorrowsCurrent.returns(0);
-  vUSDC.totalReserves.returns(0);
-  vUSDC.getAccountSnapshot.returns([0, 0, 0, parseUnits("1", 6)]);
-  vUSDC.mintBehalf.returns(0);
-  vUSDC.repayBorrowBehalf.returns(0);
-  vUSDC.balanceOf.returns(parseUnits("0", 8));
-  vUSDC.seize.returns(0);
-  vUSDC.redeem.returns(0);
-
-  oracle.getUnderlyingPrice.returns(() => {
-    return parseEther("1");
-  });
-
-  oracle.getPrice.returns(() => {
-    return parseEther("1");
-  });
-
-  await comptroller._supportMarket(vWBNB.address);
-  await comptroller._supportMarket(vBNB.address);
-  await comptroller._supportMarket(vUSDT.address);
-  await comptroller._supportMarket(vUSDC.address);
-
-  await comptroller._setMarketSupplyCaps(
-    [vWBNB.address, vBNB.address, vUSDT.address, vUSDC.address],
-    [parseEther("100"), parseEther("100"), parseUnits("100000", 6), parseUnits("100000", 6)],
-  );
-  await comptroller._setMarketBorrowCaps(
-    [vWBNB.address, vBNB.address, vUSDT.address, vUSDC.address],
-    [parseEther("100"), parseEther("100"), parseUnits("100000", 6), parseUnits("100000", 6)],
+  const { mockToken: USDT, vToken: vUSDT } = await deployVToken(
+    "USDT",
+    comptroller,
+    accessControl.address,
+    interestRateModel.address,
+    protocolShareReserve.address,
+    admin.address,
   );
 
-  const PositionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
+  const { mockToken: BUSD, vToken: vBUSD } = await deployVToken(
+    "BUSD",
+    comptroller,
+    accessControl.address,
+    interestRateModel.address,
+    protocolShareReserve.address,
+    admin.address,
+  );
 
-  // Use a fake SwapHelper instead of real one for better test control
-  const swapHelper = await smock.fake<SwapHelper>("SwapHelper");
+  const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
+  const swapHelper = await SwapHelperFactory.deploy(WBNB.address);
 
-  // Mock SwapHelper behavior to succeed
-  swapHelper.multicall.returns();
-
-  const positionSwapper = await upgrades.deployProxy(PositionSwapperFactory, [], {
-    constructorArgs: [comptroller.address, swapHelper.address, WBNB.address, vBNB.address],
+  const positionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
+  const positionSwapper = await upgrades.deployProxy(positionSwapperFactory, [], {
+    constructorArgs: [comptroller.address, swapHelper.address, WBNB.address, vBNB.address, vWBNB.address],
     initializer: "initialize",
     unsafeAllow: ["state-variable-immutable"],
   });
 
-  // Set approved swap pairs
-  await positionSwapper.setApprovedPair(vBNB.address, vWBNB.address, swapHelper.address, true);
-  await positionSwapper.setApprovedPair(vWBNB.address, vBNB.address, swapHelper.address, true);
-  await positionSwapper.setApprovedPair(vUSDT.address, vUSDC.address, swapHelper.address, true);
-  await positionSwapper.setApprovedPair(vUSDC.address, vUSDT.address, swapHelper.address, true);
-  await positionSwapper.setApprovedPair(vUSDT.address, vWBNB.address, swapHelper.address, true);
-  await positionSwapper.setApprovedPair(vWBNB.address, vUSDT.address, swapHelper.address, true);
+  await comptroller.setWhiteListFlashLoanAccount(positionSwapper.address, true);
 
   return {
     comptroller,
     vBNB,
     WBNB,
     vWBNB,
-    vUSDT,
-    vUSDC,
-    USDT,
-    USDC,
     positionSwapper,
     swapHelper,
+    vUSDT,
+    USDT,
+    vBUSD,
+    BUSD,
   };
 };
 
-describe("PositionSwapper", () => {
+describe("positionSwapper", () => {
   let vBNB: MockVBNB;
-  let WBNB: FakeContract<WBNB>;
-  let vWBNB: FakeContract<VBep20Harness>;
-  let vUSDT: FakeContract<VBep20Harness>;
-  let vUSDC: FakeContract<VBep20Harness>;
-  let USDT: any;
-  let USDC: any;
+  let WBNB: WBNB;
+  let vWBNB: VBep20Harness;
   let admin: Signer;
   let user1: Signer;
-  let user2: Signer;
-  let comptroller: MockContract<ComptrollerMock>;
+  let comptroller: ComptrollerMock;
   let positionSwapper: PositionSwapper;
+  let swapHelper: FakeContract<SwapHelper>;
+  let vUSDT: VBep20Harness;
+  let USDT: EIP20Interface;
+  let vBUSD: VBep20Harness;
+  let BUSD: EIP20Interface;
+  let user1Address: string;
 
   beforeEach(async () => {
-    [admin, user1, user2] = await ethers.getSigners();
-    ({ comptroller, vBNB, WBNB, vWBNB, vUSDT, vUSDC, USDT, USDC, positionSwapper } = await loadFixture(
+    [admin, user1] = await ethers.getSigners();
+    ({ comptroller, vBNB, WBNB, vWBNB, positionSwapper, swapHelper, vUSDT, USDT, vBUSD, BUSD } = await loadFixture(
       setupMarketFixture,
     ));
+    await comptroller.connect(user1).updateDelegate(positionSwapper.address, true);
+    await vBNB.connect(user1).mint({ value: parseEther("5") });
+    await vUSDT.mint(parseUnits("20", 18));
+    await vBUSD.mint(parseUnits("20", 18));
+    user1Address = await user1.getAddress();
   });
 
-  // Helper function to create realistic swapData that transfers tokens to PositionSwapper
-  const createMockSwapData = (): string[] => {
-    // With fake SwapHelper, we can just return any valid bytes data
-    // The actual transfer simulation is handled by the WBNB balance mocking
-    const mockCallData = "0x1234567890abcdef"; // Dummy bytes
-    return [mockCallData];
-  };
+  describe("swapCollateralNativeToWrapped", () => {
+    it("should swapCollateralNativeToWrapped from vBNB to vWBNB", async () => {
+      const vTokenBalance = await vBNB.balanceOf(user1Address);
+      await vBNB.connect(user1).approve(positionSwapper.address, vTokenBalance);
 
-  describe("swapDebt", async () => {
-    beforeEach(async () => {
-      // Both users need collateral to participate in lending protocol
-      await vBNB.connect(user1).mint({ value: parseEther("10") }); // user1 supplies collateral
-      await vBNB.connect(user2).mint({ value: parseEther("5") }); // user2 supplies collateral
+      const balanceBeforeSwap = await vWBNB.callStatic.balanceOfUnderlying(user1Address);
+      expect(balanceBeforeSwap.toString()).to.eq(parseUnits("0", 18));
 
-      await comptroller.connect(user1).enterMarkets([vBNB.address, vWBNB.address]);
-      await comptroller.connect(user2).enterMarkets([vBNB.address, vWBNB.address]);
+      await positionSwapper.connect(user1).swapCollateralNativeToWrapped(user1Address);
 
-      // Set up mock responses for borrowing
-      comptroller.borrowAllowed.returns(0);
-      comptroller.getAccountLiquidity.returns([0, parseEther("10"), 0]); // [error, liquidity, shortfall]
-
-      // User2 can now borrow because they have collateral
-      await vBNB.connect(user2).borrow(parseEther("1"));
-    });
-
-    it("should swapFullDebt from vBNB to vWBNB", async () => {
-      await comptroller.connect(user2).updateDelegate(positionSwapper.address, true);
-
-      // Provide ETH to PositionSwapper contract to ensure repayment works
-      await user1.sendTransaction({
-        to: positionSwapper.address,
-        value: parseEther("5"), // Enough ETH for repayments
-      });
-
-      // Based on venus-protocol patterns, mock borrowBehalf to simulate successful borrowing
-      vWBNB.borrowBehalf.returns(0); // Success
-
-      // Mock borrow balance changes for user2 in vWBNB (they will get 1 ETH debt)
-      vWBNB.getAccountSnapshot.returns([0, 0, parseEther("1"), parseEther("1")]);
-
-      // Account for multiple balance calls during the debt swap process
-      WBNB.balanceOf.reset();
-      WBNB.withdraw.reset();
-
-      // Mock WBNB withdraw function to succeed
-      WBNB.withdraw.returns();
-
-      // Set up more balance call responses to handle all calls during debt swap
-      WBNB.balanceOf.returnsAtCall(0, parseEther("0")); // Any initial calls
-      WBNB.balanceOf.returnsAtCall(1, parseEther("0")); // _borrowAndApprove calls
-      WBNB.balanceOf.returnsAtCall(2, parseEther("0")); // balanceBefore in _performDebtSwap
-      WBNB.balanceOf.returnsAtCall(3, parseEther("1")); // balanceAfter in _performDebtSwap (match the debt amount)
-      WBNB.balanceOf.returnsAtCall(4, parseEther("1")); // Any subsequent calls
-      WBNB.balanceOf.returnsAtCall(5, parseEther("1")); // Additional calls if any
-
-      // Default for any other calls
-      WBNB.balanceOf.returns(parseEther("0"));
-
-      // Create mock swap data (amount should match the debt)
-      const mockSwapData = createMockSwapData();
-
-      await positionSwapper
-        .connect(user2)
-        .swapFullDebt(await user2.getAddress(), vBNB.address, vWBNB.address, mockSwapData);
-
-      // Verify that vWBNB now has the debt (user2 borrowed from vWBNB to repay vBNB)
-      const snapshot = await vWBNB.callStatic.getAccountSnapshot(await user2.getAddress());
-      expect(snapshot[2].toString()).to.be.equal(parseEther("1").toString());
-    });
-
-    it("should swapDebtWithAmount from vBNB to vWBNB", async () => {
-      const amountToSwap = parseEther("1").div(2); // 50% partial
-
-      await comptroller.connect(user2).updateDelegate(positionSwapper.address, true);
-
-      // Provide ETH to PositionSwapper contract to ensure repayment works
-      await user1.sendTransaction({
-        to: positionSwapper.address,
-        value: parseEther("5"), // Enough ETH for repayments
-      });
-
-      // Based on venus-protocol patterns, mock borrowBehalf to simulate successful borrowing
-      vWBNB.borrowBehalf.returns(0); // Success
-
-      // Mock borrow balance changes for user2 in vWBNB (they will get 0.5 ETH debt)
-      vWBNB.getAccountSnapshot.returns([0, 0, parseEther("0.5"), parseEther("1")]);
-
-      // Account for multiple balance calls during the debt swap process
-      WBNB.balanceOf.reset();
-      WBNB.withdraw.reset();
-
-      // Mock WBNB withdraw function to succeed
-      WBNB.withdraw.returns();
-
-      // Set up more balance call responses to handle all calls during debt swap
-      WBNB.balanceOf.returnsAtCall(0, parseEther("0")); // Any initial calls
-      WBNB.balanceOf.returnsAtCall(1, parseEther("0")); // _borrowAndApprove calls
-      WBNB.balanceOf.returnsAtCall(2, parseEther("0")); // balanceBefore in _performDebtSwap
-      WBNB.balanceOf.returnsAtCall(3, amountToSwap); // balanceAfter in _performDebtSwap
-      WBNB.balanceOf.returnsAtCall(4, amountToSwap); // Any subsequent calls
-      WBNB.balanceOf.returnsAtCall(5, amountToSwap); // Additional calls if any
-
-      // Default for any other calls
-      WBNB.balanceOf.returns(parseEther("0"));
-
-      // Create swapData that transfers WBNB to PositionSwapper to simulate successful swap
-      const mockSwapData = createMockSwapData();
-
-      await positionSwapper
-        .connect(user2)
-        .swapDebtWithAmount(await user2.getAddress(), vBNB.address, vWBNB.address, amountToSwap, mockSwapData);
-      const snapshot = await vWBNB.callStatic.getAccountSnapshot(await user2.getAddress());
-      expect(snapshot[2].toString()).to.be.equal(parseEther("0.5").toString());
-    });
-
-    describe("should revert on debt swap failures", async () => {
-      it("should revert if caller is not user or approved delegate", async () => {
-        comptroller.approvedDelegates.returns(false);
-        const mockSwapData: string[] = [];
-
-        try {
-          await positionSwapper
-            .connect(user1)
-            .swapFullDebt(await user2.getAddress(), vBNB.address, vWBNB.address, mockSwapData);
-          expect.fail("Expected function to revert");
-        } catch (error) {
-          expect(error.message).to.include("revert");
-        }
-      });
-
-      it("should revert on swapDebtWithAmount with zero amount", async () => {
-        const mockSwapData: string[] = [];
-        try {
-          await positionSwapper
-            .connect(user1)
-            .swapDebtWithAmount(await user1.getAddress(), vBNB.address, vWBNB.address, 0, mockSwapData);
-          expect.fail("Expected function to revert");
-        } catch (error) {
-          expect(error.message).to.include("revert");
-        }
-      });
-
-      it("should revert if user borrow balance is zero", async () => {
-        const mockSwapData: string[] = [];
-        try {
-          await positionSwapper
-            .connect(user1)
-            .swapFullDebt(await user1.getAddress(), vBNB.address, vWBNB.address, mockSwapData);
-          expect.fail("Expected function to revert");
-        } catch (error) {
-          expect(error.message).to.include("revert");
-        }
-      });
-
-      it("should revert if swapDebtWithAmount is greater than user's borrow balance", async () => {
-        const amountToSwap = parseEther("2");
-        const mockSwapData: string[] = [];
-
-        await comptroller.connect(user2).updateDelegate(positionSwapper.address, true);
-
-        try {
-          await positionSwapper
-            .connect(user2)
-            .swapDebtWithAmount(await user2.getAddress(), vBNB.address, vWBNB.address, amountToSwap, mockSwapData);
-          expect.fail("Expected function to revert");
-        } catch (error) {
-          expect(error.message).to.include("revert");
-        }
-      });
+      const balanceAfterSupplying = await vWBNB.callStatic.balanceOfUnderlying(user1Address);
+      expect(balanceAfterSupplying.toString()).to.eq(parseUnits("5", 18));
     });
   });
 
-  describe("swapCollateral", async () => {
-    beforeEach(async () => {
-      // Users need to supply collateral first before they can swap it
-      await vBNB.connect(user1).mint({ value: parseEther("5") });
+  describe("swapDebtNativeToWrapped", () => {
+    it("should swapDebtNativeToWrapped from vBNB to vWBNB", async () => {
+      // Create a Debt for User1 on vBNB market
+      await vUSDT.mintBehalf(user1Address, parseEther("15"));
+      await comptroller.enterMarket(user1Address, vUSDT.address);
+      await vBNB.connect(user1).borrow(parseEther("2"));
+      expect(await vBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("2"));
+      expect(await vWBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
 
-      // Verify user1 has vBNB balance after minting
-      const vBNBBalance = await vBNB.balanceOf(await user1.getAddress());
-      expect(vBNBBalance).to.be.gt(0);
-
-      comptroller.seizeAllowed.returns(0);
-      comptroller.redeemAllowed.returns(0); // Allow redeem for collateral swaps
+      // Swap debt
+      await positionSwapper.connect(user1).swapDebtNativeToWrapped(user1Address);
+      expect(await vWBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("2"));
+      expect(await vBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
     });
+  });
 
-    it("should swapFullCollateral from vBNB to vWBNB", async () => {
-      // Reset and set up specific call sequence
-      WBNB.balanceOf.reset();
+  describe("swapCollateral", () => {
+    it("should swapFullCollateral from vWBNB to vUSDT", async () => {
+      // Work Around for Unit test call sweep insted of swap calldata
+      await USDT.transfer(swapHelper.address, parseUnits("12", 18));
+      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
+      const swapData = [sweepData];
 
-      // Set up the call sequence: first call returns 0, second call returns 5
-      // This simulates the balance before and after the swap
-      WBNB.balanceOf.returnsAtCall(0, parseEther("0")); // First call - before swap
-      WBNB.balanceOf.returnsAtCall(1, parseEther("5")); // Second call - after swap
-
-      // For any other calls, return 0
-      WBNB.balanceOf.returns(parseEther("0"));
-
-      // Mock vWBNB balance to reflect successful supply after collateral swap
-      vWBNB.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("5", 8));
-
-      // Create swapData that would result in tokens being transferred to PositionSwapper
-      const mockSwapData = createMockSwapData();
-
+      // Add some Collateral to vWBNB
+      await vWBNB.mintBehalf(user1Address, parseUnits("12", 18));
+      expect(await vUSDT.callStatic.balanceOf(user1Address)).to.eq(parseUnits("0", 18));
+      // Swap Collateral
       await positionSwapper
         .connect(user1)
-        .swapFullCollateral(await user1.getAddress(), vBNB.address, vWBNB.address, mockSwapData);
-
-      // Verify the swap completed without reverting
-      const balanceAfterSupplying = await vWBNB.balanceOf(await user1.getAddress());
-      expect(balanceAfterSupplying.toString()).to.eq(parseUnits("5", 8));
-    });
-
-    it("should swapCollateralWithAmount from vBNB to vWBNB", async () => {
-      const vBNBBalance = await vBNB.balanceOf(await user1.getAddress());
-      const amountToSeize = vBNBBalance.div(2); // 50% partial
-
-      // Reset and set up call sequence for partial swap
-      WBNB.balanceOf.reset();
-      WBNB.balanceOf.returnsAtCall(0, parseEther("0")); // Before swap
-      WBNB.balanceOf.returnsAtCall(1, parseEther("2.5")); // After swap
-      WBNB.balanceOf.returns(parseEther("0")); // Default
-
-      // Mock vWBNB balance to reflect successful partial supply
-      vWBNB.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("2.5", 8));
-
-      // Create swapData for partial collateral swap
-      const mockSwapData = createMockSwapData();
-
-      await positionSwapper
-        .connect(user1)
-        .swapCollateralWithAmount(await user1.getAddress(), vBNB.address, vWBNB.address, amountToSeize, mockSwapData);
-
-      // Verify the swap completed without reverting
-      const balanceAfterSwapping = await vWBNB.balanceOf(await user1.getAddress());
-      expect(balanceAfterSwapping.toString()).to.eq(parseUnits("2.5", 8));
-    });
-
-    describe("should revert on seize failures", async () => {
-      // Simplified tests - just check that main functions work
-      it("should perform basic swap operations", async () => {
-        // These tests can be expanded with proper error handling later
-        expect(positionSwapper.address).to.not.be.undefined;
-      });
+        .swapFullCollateral(user1Address, vWBNB.address, vUSDT.address, parseUnits("11", 18), swapData);
+      expect(await vUSDT.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("12", 18));
     });
   });
 
-  describe("SweepToken", () => {
-    it("should revert when called by non owner", async () => {
-      await expect(positionSwapper.connect(user1).sweepToken(WBNB.address)).to.be.rejectedWith(
-        "Ownable: caller is not the owner",
-      );
-    });
+  describe("swapDebt", () => {
+    it("should swapFullDebt from vWBNB to vUSDT", async () => {
+      // Create a Debt for User1 on vUSDT market
+      await vWBNB.mintBehalf(user1Address, parseEther("15"));
+      await comptroller.enterMarket(user1Address, vUSDT.address);
+      await vUSDT.connect(user1).borrow(parseEther("3"));
+      expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
+      expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
 
-    it("should sweep all tokens", async () => {
-      // Since WBNB is a fake contract, we need to mock the deposit and transfer operations
-      // First, mock that the contract has tokens
-      WBNB.balanceOf.whenCalledWith(positionSwapper.address).returns(parseUnits("0", 18));
-      WBNB.balanceOf.whenCalledWith(await admin.getAddress()).returns(parseUnits("2", 18));
+      await USDT.transfer(swapHelper.address, parseUnits("3", 18));
+      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
+      const swapData = [sweepData];
 
-      // Mock transfer to return true
-      WBNB.transfer.returns(true);
-
-      // Execute sweep - just verify it doesn't revert
-      await positionSwapper.connect(admin).sweepToken(WBNB.address);
-    });
-  });
-
-  describe("swapDebt - ERC20 Markets", async () => {
-    beforeEach(async () => {
-      // Set up token balances for testing (these are mocked, so no actual transactions)
-      // Mock token balances for users
-      USDT.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("10000", 6));
-      USDT.balanceOf.whenCalledWith(await user2.getAddress()).returns(parseUnits("10000", 6));
-      USDC.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("10000", 6));
-      USDC.balanceOf.whenCalledWith(await user2.getAddress()).returns(parseUnits("10000", 6));
-
-      // Mock mint operations for providing collateral
-      vUSDT.mint.returns(0);
-      vUSDC.mint.returns(0);
-
-      // Users mint vTokens as collateral (mock the transactions)
-      // Since we can't actually call mint on mocks, we just set up the expected state
-
-      // Mock balanceOf for vTokens (collateral)
-      vUSDT.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("50", 8)); // 50 vUSDT
-      vUSDT.balanceOf.whenCalledWith(await user2.getAddress()).returns(parseUnits("30", 8)); // 30 vUSDT
-
-      await comptroller.connect(user1).enterMarkets([vUSDT.address, vUSDC.address]);
-      await comptroller.connect(user2).enterMarkets([vUSDT.address, vUSDC.address]);
-
-      // Set up mock responses for borrowing
-      comptroller.borrowAllowed.returns(0);
-      comptroller.getAccountLiquidity.returns([0, parseUnits("5000", 6), 0]); // [error, liquidity, shortfall]
-
-      // Mock borrow operations
-      vUSDC.borrow.returns(0);
-      vUSDC.borrowBalanceCurrent.returns(parseUnits("1000", 6)); // User2 has 1000 USDC debt
-
-      // User2 borrows USDC using USDT as collateral
-      await vUSDC.connect(user2).borrow(parseUnits("1000", 6));
-    });
-
-    it("should swapFullDebt from vUSDC to vUSDT", async () => {
-      await comptroller.connect(user2).updateDelegate(positionSwapper.address, true);
-
-      // Mock borrowBehalf to simulate successful borrowing from vUSDT
-      vUSDT.borrowBehalf.returns(0);
-
-      // Mock borrow balance changes for user2 in vUSDT (they will get 1000 USDT debt equivalent)
-      vUSDT.getAccountSnapshot.returns([0, 0, parseUnits("1000", 6), parseUnits("1", 6)]);
-
-      // Mock token balances for swap simulation
-      USDC.balanceOf.reset();
-      USDT.transfer.returns(true);
-      USDC.transfer.returns(true);
-
-      // Set up balance call responses for debt swap
-      // We're swapping FROM vUSDC TO vUSDT, so we need USDC to repay the vUSDC debt
-      // _performDebtSwap checks USDC balance (fromUnderlying)
-      USDC.balanceOf.returnsAtCall(0, parseUnits("0", 6)); // balanceBefore in _performDebtSwap
-      USDC.balanceOf.returnsAtCall(1, parseUnits("1000", 6)); // balanceAfter in _performDebtSwap (swap USDT→USDC)
-
-      // Mock USDC balance for repayment
-      USDC.balanceOf.returns(parseUnits("1000", 6));
-
-      // Mock approve operations
-      USDT.approve.returns(true);
-      USDC.approve.returns(true);
-
-      const mockSwapData = createMockSwapData();
-
-      await positionSwapper
-        .connect(user2)
-        .swapFullDebt(await user2.getAddress(), vUSDC.address, vUSDT.address, mockSwapData);
-
-      // Verify the swap completed successfully
-      const snapshot = await vUSDT.callStatic.getAccountSnapshot(await user2.getAddress());
-      expect(snapshot[2].toString()).to.be.equal(parseUnits("1000", 6).toString());
-    });
-
-    it("should swapDebtWithAmount from vUSDC to vUSDT", async () => {
-      const amountToSwap = parseUnits("500", 6); // 50% partial swap
-
-      await comptroller.connect(user2).updateDelegate(positionSwapper.address, true);
-
-      // Mock borrowBehalf to simulate successful borrowing from vUSDT
-      vUSDT.borrowBehalf.returns(0);
-
-      // Mock borrow balance changes for user2 in vUSDT (they will get 500 USDT debt)
-      vUSDT.getAccountSnapshot.returns([0, 0, parseUnits("500", 6), parseUnits("1", 6)]);
-
-      // Mock token balances for swap simulation
-      USDC.balanceOf.reset();
-      USDT.transfer.returns(true);
-      USDC.transfer.returns(true);
-
-      // Set up balance call responses for partial debt swap
-      // We're swapping FROM vUSDC TO vUSDT, so we need USDC to repay the vUSDC debt
-      USDC.balanceOf.returnsAtCall(0, parseUnits("0", 6)); // balanceBefore in _performDebtSwap
-      USDC.balanceOf.returnsAtCall(1, parseUnits("500", 6)); // balanceAfter in _performDebtSwap (swap USDT→USDC)
-
-      // Mock USDC balance for repayment
-      USDC.balanceOf.returns(parseUnits("500", 6));
-
-      // Mock approve operations
-      USDT.approve.returns(true);
-      USDC.approve.returns(true);
-
-      const mockSwapData = createMockSwapData();
-
-      await positionSwapper
-        .connect(user2)
-        .swapDebtWithAmount(await user2.getAddress(), vUSDC.address, vUSDT.address, amountToSwap, mockSwapData);
-
-      const snapshot = await vUSDT.callStatic.getAccountSnapshot(await user2.getAddress());
-      expect(snapshot[2].toString()).to.be.equal(parseUnits("500", 6).toString());
-    });
-  });
-
-  describe("swapCollateral - ERC20 Markets", async () => {
-    beforeEach(async () => {
-      // Set up token balances for testing (these are mocked)
-      USDT.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("10000", 6));
-      USDC.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("10000", 6));
-
-      // Mock mint operations
-      vUSDT.mint.returns(0);
-
-      // User1 supplies USDT as collateral
-      await vUSDT.connect(user1).mint(parseUnits("5000", 6));
-
-      // Mock vToken balance for user1
-      vUSDT.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("50", 8)); // 50 vUSDT tokens
-
-      // Mock comptroller operations
-      comptroller.seizeAllowed.returns(0);
-      comptroller.redeemAllowed.returns(0);
-    });
-
-    it("should swapFullCollateral from vUSDT to vUSDC", async () => {
-      // Reset token balances
-      USDT.balanceOf.reset();
-      USDC.balanceOf.reset();
-
-      // Mock the redeem operation to return underlying USDT
-      USDT.balanceOf.returnsAtCall(0, parseUnits("0", 6)); // Before redeem
-      USDT.balanceOf.returnsAtCall(1, parseUnits("5000", 6)); // After redeem
-
-      // Mock the swap result - receive USDC
-      USDC.balanceOf.returnsAtCall(0, parseUnits("0", 6)); // Before swap
-      USDC.balanceOf.returnsAtCall(1, parseUnits("5000", 6)); // After swap
-
-      // Mock token transfers and approvals
-      USDT.transfer.returns(true);
-      USDT.approve.returns(true);
-      USDC.transfer.returns(true);
-      USDC.approve.returns(true);
-
-      // Mock vUSDC balance after supply
-      vUSDC.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("50", 8));
-
-      const mockSwapData = createMockSwapData();
-
+      // Swap Debt
       await positionSwapper
         .connect(user1)
-        .swapFullCollateral(await user1.getAddress(), vUSDT.address, vUSDC.address, mockSwapData);
-
-      // Verify the swap completed successfully
-      const balanceAfterSwap = await vUSDC.balanceOf(await user1.getAddress());
-      expect(balanceAfterSwap.toString()).to.eq(parseUnits("50", 8));
-    });
-
-    it("should swapCollateralWithAmount from vUSDT to vUSDC", async () => {
-      const vUSDTBalance = await vUSDT.balanceOf(await user1.getAddress());
-      const amountToSeize = vUSDTBalance.div(2); // 50% partial swap
-
-      // Reset token balances
-      USDT.balanceOf.reset();
-      USDC.balanceOf.reset();
-
-      // Mock partial redeem operation
-      USDT.balanceOf.returnsAtCall(0, parseUnits("0", 6)); // Before redeem
-      USDT.balanceOf.returnsAtCall(1, parseUnits("2500", 6)); // After redeem (half)
-
-      // Mock partial swap result
-      USDC.balanceOf.returnsAtCall(0, parseUnits("0", 6)); // Before swap
-      USDC.balanceOf.returnsAtCall(1, parseUnits("2500", 6)); // After swap (half)
-
-      // Mock token operations
-      USDT.transfer.returns(true);
-      USDT.approve.returns(true);
-      USDC.transfer.returns(true);
-      USDC.approve.returns(true);
-
-      // Mock vUSDC balance after partial supply
-      vUSDC.balanceOf.whenCalledWith(await user1.getAddress()).returns(parseUnits("25", 8));
-
-      const mockSwapData = createMockSwapData();
-
-      await positionSwapper
-        .connect(user1)
-        .swapCollateralWithAmount(await user1.getAddress(), vUSDT.address, vUSDC.address, amountToSeize, mockSwapData);
-
-      // Verify the partial swap completed successfully
-      const balanceAfterSwap = await vUSDC.balanceOf(await user1.getAddress());
-      expect(balanceAfterSwap.toString()).to.eq(parseUnits("25", 8));
+        .swapFullDebt(user1Address, vUSDT.address, vBUSD.address, parseUnits("4", 18), swapData);
+      expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
+      expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("4")); // removed debt 3, but opend new debt as 4
+      expect(await BUSD.balanceOf(user1Address)).to.equals(parseEther("0")); // remember maxDebtAmountToOpen is slipage and may cause fund loose
     });
   });
 });

@@ -201,7 +201,4 @@ interface IPositionSwapper {
         uint256 maxDebtAmountToOpen,
         bytes[] calldata swapData
     ) external payable;
-
 }
-
-
