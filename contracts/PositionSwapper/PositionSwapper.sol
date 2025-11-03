@@ -113,6 +113,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
     /**
      * @notice Swap user's entire native collateral (e.g., vBNB) into wrapped collateral (e.g., vWBNB).
+     * @dev FlashLoan fee: will be adjusted in the `marketTo` (destination) collateral amount.
      * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      *      Additionally, user needs to approve vTokens to this PositionSwapper contract to allow redemption on behalf of user.
      *      Since vBNB does not support redeemBehalf, an explicit transfer approval for vTokens is needed for this function.
@@ -130,6 +131,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
     /**
      * @notice Swap user's entire native debt (e.g., vBNB borrow) into wrapped debt (e.g., vWBNB borrow).
+     * @dev FlashLoan fee: extra debt will be opened (on `marketTo`) to cover the flash loan fee.
      * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose debt is being swapped.
      * @custom:error InsufficientBorrowBalance User has no native debt
@@ -143,6 +145,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
     /**
      * @notice Swaps the full vToken collateral of a user from one market to another.
+     * @dev FlashLoan fee: will be adjusted in the `marketTo` (destination) collateral amount.
      * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose collateral is being swapped.
      * @param marketFrom The vToken market to seize from.
@@ -166,6 +169,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
     /**
      * @notice Swaps a specific amount of collateral from one market to another.
+     * @dev FlashLoan fee: fee will be adjusted in the `marketTo` (destination) collateral amount.
      * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose collateral is being swapped.
      * @param marketFrom The vToken market to seize from.
@@ -192,6 +196,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
     /**
      * @notice Swaps the full debt of a user from one market to another.
+     * @dev - FlashLoan fee: `maxDebtAmountToOpen` must include headroom to cover the flash-loan fee.
+     *      - Slippage: `maxDebtAmountToOpen` also caps the amount borrowed/consumed by `swapData`; any refund of
+     *        unused funds depends on the underlying swap API behavior.
      * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose debt is being swapped.
      * @param marketFrom The vToken market from which debt is swapped.
@@ -214,7 +221,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     }
 
     /**
-     * @notice Swaps a specific amount of debt from one market to another.
+      * @notice Swaps a specific amount of debt from one market to another.
+      * @dev - FlashLoan fee: `maxDebtAmountToOpen` must include headroom to cover the flash-loan fee.
+      *      - Slippage: `maxDebtAmountToOpen` caps how much can be borrowed; if set high, the swap may consume up
+      *        to this amount and any leftover/refund depends on the swap API invoked via `swapData`.
      * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose debt is being swapped.
      * @param marketFrom The vToken market from which debt is swapped.
@@ -237,6 +247,22 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         if (minDebtAmountToSwap == 0) revert ZeroAmount();
         if (minDebtAmountToSwap > marketFrom.borrowBalanceCurrent(user)) revert InsufficientBorrowBalance();
         _swapDebt(user, marketFrom, marketTo, minDebtAmountToSwap, maxDebtAmountToOpen, swapData);
+    }
+
+    /**
+     * @notice Quotes how much needs to be borrowed in a flash loan to obtain `requiredAmount` after paying `feeRate`.
+     * @dev Convenience helper that exposes the internal `calculateFlashLoanAmount` for external callers and tests.
+     *      Flash loan fee impact: callers can subtract `flashLoanAmount * feeRate / 1e18` from the quote to
+     *      validate the expected net amount, or use it to pre-compute the new debt to be opened on the target market.
+     * @param requiredAmount The amount needed after paying the flash loan fee.
+     * @param feeRate The flash loan fee rate, scaled by 1e18 (e.g. 1e15 = 0.1%).
+     * @return flashLoanAmount The total amount to borrow in the flash loan.
+     */
+    function quoteFlashLoanAmount(
+        uint256 requiredAmount,
+        uint256 feeRate
+    ) external pure returns (uint256 flashLoanAmount) {
+        return calculateFlashLoanAmount(requiredAmount, feeRate);
     }
 
     /**

@@ -272,6 +272,34 @@ describe("positionSwapper", () => {
         .swapFullCollateral(user1Address, vWBNB.address, vUSDT.address, parseUnits("11", 18), swapData);
       expect(await vUSDT.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("12", 18));
     });
+
+    it("should swapCollateralWithAmount from vWBNB to vUSDT (partial) and verify both balances", async () => {
+      // Work Around for Unit test call sweep instead of swap calldata
+      await USDT.transfer(swapHelper.address, parseUnits("5", 18));
+      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
+      const swapData = [sweepData];
+
+      // Add some Collateral to vWBNB (12)
+      await vWBNB.mintBehalf(user1Address, parseUnits("12", 18));
+      expect(await vUSDT.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("0", 18));
+      expect(await vWBNB.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("12", 18));
+
+      // Swap only part of the collateral (5)
+      await positionSwapper
+        .connect(user1)
+        .swapCollateralWithAmount(
+          user1Address,
+          vWBNB.address,
+          vUSDT.address,
+          parseUnits("5", 18),
+          parseUnits("5", 18),
+          swapData,
+        );
+
+      // Verify target market received 5 and source market reduced to 7
+      expect(await vUSDT.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("5", 18));
+      expect(await vWBNB.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("7", 18));
+    });
   });
 
   describe("swapDebt", () => {
@@ -294,6 +322,195 @@ describe("positionSwapper", () => {
       expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
       expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("4")); // removed debt 3, but opend new debt as 4
       expect(await BUSD.balanceOf(user1Address)).to.equals(parseEther("0")); // remember maxDebtAmountToOpen is slipage and may cause fund loose
+    });
+
+    it("should swapDebtWithAmount from vUSDT to vBUSD (partial)", async () => {
+      // Create a Debt for User1 on vUSDT market
+      await vWBNB.mintBehalf(user1Address, parseEther("15"));
+      await comptroller.enterMarket(user1Address, vUSDT.address);
+      await vUSDT.connect(user1).borrow(parseEther("3"));
+      expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
+      expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
+
+      // Provide USDT for the sweep to simulate swap output (repay 2)
+      await USDT.transfer(swapHelper.address, parseUnits("2", 18));
+      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
+      const swapData = [sweepData];
+
+      // Swap only part of the debt; repay 2 USDT, open 3 BUSD
+      await positionSwapper
+        .connect(user1)
+        .swapDebtWithAmount(
+          user1Address,
+          vUSDT.address,
+          vBUSD.address,
+          parseUnits("2", 18),
+          parseUnits("3", 18),
+          swapData,
+        );
+
+      expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("1"));
+      expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
+      expect(await BUSD.balanceOf(user1Address)).to.equals(parseEther("0"));
+    });
+  });
+
+  describe("with flash loan fee", () => {
+    beforeEach(async () => {
+      // Set a small flash loan fee: 1% (1e16 mantissa)
+      await vWBNB.setFlashLoanFeeMantissa(parseUnits("0.01", 18), parseUnits("0.5", 18));
+      await vBUSD.setFlashLoanFeeMantissa(parseUnits("0.01", 18), parseUnits("0.5", 18));
+    });
+
+    it("should swapCollateralNativeToWrapped accounting for fee", async () => {
+      const vTokenBalance = await vBNB.balanceOf(user1Address);
+      await vBNB.connect(user1).approve(positionSwapper.address, vTokenBalance);
+
+      const fee = await vWBNB.flashLoanFeeMantissa();
+      const amount = await vBNB.callStatic.balanceOfUnderlying(user1Address);
+      const expectedMint = amount.sub(amount.mul(fee).div(parseUnits("1", 18)));
+
+      const before = await vWBNB.callStatic.balanceOfUnderlying(user1Address);
+      expect(before.toString()).to.eq(parseUnits("0", 18));
+
+      await positionSwapper.connect(user1).swapCollateralNativeToWrapped(user1Address);
+
+      const afterBal = await vWBNB.callStatic.balanceOfUnderlying(user1Address);
+      // Allow small precision differences due to accrued interest during operations
+      const tolerance = parseUnits("0.005", 18); // ±0.5% absolute (~5e15 wei)
+      expect(afterBal).to.be.closeTo(expectedMint, tolerance);
+    });
+
+    it("should swapFullDebt with fee and keep target debt equal to requested amount", async () => {
+      // Create a Debt for User1 on vUSDT market
+      await vWBNB.mintBehalf(user1Address, parseEther("15"));
+      await comptroller.enterMarket(user1Address, vUSDT.address);
+      await vUSDT.connect(user1).borrow(parseEther("3"));
+      expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
+      expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
+
+      await USDT.transfer(swapHelper.address, parseUnits("3", 18));
+      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
+      const swapData = [sweepData];
+
+      // Swap Debt: request to open 4 BUSD debt; with fee, borrowed amount > 4, but fee is repaid
+      await positionSwapper
+        .connect(user1)
+        .swapFullDebt(user1Address, vUSDT.address, vBUSD.address, parseUnits("4", 18), swapData);
+      const usdtAfter = await vUSDT.callStatic.borrowBalanceCurrent(user1Address);
+      const busdAfter = await vBUSD.callStatic.borrowBalanceCurrent(user1Address);
+      const targetDebt = parseEther("4");
+      const feeMantissa = await vBUSD.flashLoanFeeMantissa();
+      const quotedTargetDebt = await positionSwapper.quoteFlashLoanAmount(targetDebt, feeMantissa);
+      // Allow small precision differences due to accrued interest during operations
+      const absTolerance = parseUnits("0.005", 18); // ±0.5% absolute (~5e15 wei)
+      expect(usdtAfter).to.be.closeTo(0, absTolerance);
+      expect(busdAfter).to.be.closeTo(quotedTargetDebt, absTolerance);
+    });
+  });
+
+  describe("quoteFlashLoanAmount", () => {
+    it("should net the required amount after subtracting fee from quoted borrow", async () => {
+      const required = parseEther("100");
+      const fee = parseUnits("0.01", 18); // 1%
+      const quoted = await positionSwapper.quoteFlashLoanAmount(required, fee);
+      const feeAmount = quoted.mul(fee).div(parseUnits("1", 18));
+      const net = quoted.sub(feeAmount);
+      const tolerance = required.div(1_000_000);
+      expect(net).to.be.closeTo(required, tolerance);
+    });
+  });
+
+  describe("access and validation", () => {
+    it("should revert swapCollateralWithAmount when amount is zero", async () => {
+      const swapData: string[] = [];
+      await expect(
+        positionSwapper
+          .connect(user1)
+          .swapCollateralWithAmount(user1Address, vWBNB.address, vUSDT.address, 0, parseUnits("1", 18), swapData),
+      ).to.be.revertedWithCustomError(positionSwapper, "ZeroAmount");
+    });
+
+    it("should revert swapDebtWithAmount when amount is zero", async () => {
+      const swapData: string[] = [];
+      await expect(
+        positionSwapper
+          .connect(user1)
+          .swapDebtWithAmount(user1Address, vUSDT.address, vBUSD.address, 0, parseUnits("1", 18), swapData),
+      ).to.be.revertedWithCustomError(positionSwapper, "ZeroAmount");
+    });
+
+    it("should revert swapFullCollateral when no collateral balance", async () => {
+      const swapData: string[] = [];
+      await expect(
+        positionSwapper.connect(user1).swapFullCollateral(user1Address, vUSDT.address, vBUSD.address, 0, swapData),
+      ).to.be.revertedWithCustomError(positionSwapper, "InsufficientCollateralBalance");
+    });
+
+    it("should revert swapFullDebt when no borrow balance", async () => {
+      const swapData: string[] = [];
+      await expect(
+        positionSwapper
+          .connect(user1)
+          .swapFullDebt(user1Address, vUSDT.address, vBUSD.address, parseUnits("1", 18), swapData),
+      ).to.be.revertedWithCustomError(positionSwapper, "InsufficientBorrowBalance");
+    });
+
+    it("owner can sweep token and native; non-owner reverts", async () => {
+      // Send some USDT to PositionSwapper
+      await USDT.transfer(positionSwapper.address, parseUnits("1", 18));
+      // Send some native to PositionSwapper
+      const [adminSigner, nonOwner] = await ethers.getSigners();
+      await adminSigner.sendTransaction({ to: positionSwapper.address, value: parseEther("0.001") });
+
+      // Non-owner sweep attempts revert
+      await expect(positionSwapper.connect(nonOwner).sweepToken(USDT.address)).to.be.reverted;
+      await expect(positionSwapper.connect(nonOwner).sweepNative()).to.be.reverted;
+
+      // Owner can sweep successfully
+      const ownerUSDTBefore = await USDT.balanceOf(await adminSigner.getAddress());
+      await positionSwapper.connect(adminSigner).sweepToken(USDT.address);
+      const ownerUSDTAfter = await USDT.balanceOf(await adminSigner.getAddress());
+      expect(ownerUSDTAfter.sub(ownerUSDTBefore)).to.be.gte(parseUnits("1", 18));
+
+      const ownerNativeBefore = await ethers.provider.getBalance(await adminSigner.getAddress());
+      const tx = await positionSwapper.connect(adminSigner).sweepNative();
+      const receipt = await tx.wait();
+      const gasSpent = receipt.gasUsed.mul(tx.gasPrice ?? 0);
+      const ownerNativeAfter = await ethers.provider.getBalance(await adminSigner.getAddress());
+      // After - Before + gas >= swept amount (approximate due to gas); ensure increased
+      expect(ownerNativeAfter.add(gasSpent)).to.be.gt(ownerNativeBefore);
+    });
+  });
+
+  describe("negative paths: listing and authorization", () => {
+    it("should revert with MarketNotListed when market is not supported", async () => {
+      const fakeFrom = await smock.fake<VBep20Harness>("VBep20Harness");
+      const fakeTo = await smock.fake<VBep20Harness>("VBep20Harness");
+      fakeFrom.balanceOfUnderlying.returns(parseUnits("1", 18));
+
+      const swapData: string[] = [];
+      await expect(
+        positionSwapper.connect(user1).swapFullCollateral(user1Address, fakeFrom.address, fakeTo.address, 0, swapData),
+      ).to.be.revertedWithCustomError(positionSwapper, "MarketNotListed");
+    });
+
+    it("should revert with UnauthorizedCaller when caller is not user nor approved delegate", async () => {
+      const [adminSigner, otherUser] = await ethers.getSigners();
+      const {
+        comptroller: c2,
+        vBNB: vBNB2,
+        positionSwapper: ps2,
+        vWBNB: vWBNB2,
+      } = await loadFixture(setupMarketFixture);
+      const otherAddr = await otherUser.getAddress();
+
+      await vBNB2.connect(otherUser).mint({ value: parseEther("1") });
+
+      // Call on behalf of `otherUser` from admin (not delegated) → expect UnauthorizedCaller(admin)
+      await expect(ps2.connect(adminSigner).swapCollateralNativeToWrapped(otherAddr))
+        .to.be.revertedWithCustomError(ps2, "UnauthorizedCaller")
+        .withArgs(await adminSigner.getAddress());
     });
   });
 });
