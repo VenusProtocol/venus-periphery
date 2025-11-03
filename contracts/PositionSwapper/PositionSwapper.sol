@@ -5,7 +5,7 @@ import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/acc
 import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { IVToken, IComptroller, IWBNB, IVBNB, IFlashLoanReceiver } from "../Interfaces.sol";
-import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
+import { ISwapHelper } from "../SwapHelper/ISwapHelper.sol";
 import { IPositionSwapper } from "./IPositionSwapper.sol";
 
 /**
@@ -21,7 +21,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     IComptroller public immutable COMPTROLLER;
 
     /// @notice The swap helper contract for executing token swaps
-    SwapHelper public immutable SWAP_HELPER;
+    ISwapHelper public immutable SWAP_HELPER;
 
     /// @notice The wrapped native token contract (e.g., WBNB)
     IWBNB public immutable WRAPPED_NATIVE;
@@ -52,7 +52,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      */
     constructor(
         IComptroller _comptroller,
-        SwapHelper _swapHelper,
+        ISwapHelper _swapHelper,
         IWBNB _wrappedNative,
         IVBNB _nativeVToken,
         IVToken _wrappedNativeVToken
@@ -366,7 +366,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             payable(address(this)),
             borrowedMarkets,
             flashLoanAmounts,
-            abi.encodeWithSelector(SWAP_HELPER.multicall.selector, swapData)
+            abi.encodeWithSelector(ISwapHelper.multicall.selector, swapData)
         );
 
         _refundDustToUser(user, marketFrom, fromBalanceBefore);
@@ -422,7 +422,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             payable(address(this)),
             borrowedMarkets,
             flashLoanAmounts,
-            abi.encodeWithSelector(SWAP_HELPER.multicall.selector, swapData)
+            abi.encodeWithSelector(ISwapHelper.multicall.selector, swapData)
         );
 
         _refundDustToUser(user, marketFrom, fromBalanceBeforeDebt);
