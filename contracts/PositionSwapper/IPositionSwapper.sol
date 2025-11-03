@@ -52,99 +52,94 @@ interface IPositionSwapper {
     /// @param amount The amount of native tokens transferred to `receiver`
     event SweepNative(address indexed receiver, uint256 amount);
 
-    /// @notice Emitted when an approved pair is updated.
-    /// @param marketFrom The vToken market from which collateral/debt can be migrated
-    /// @param marketTo The vToken market to which collateral/debt can be migrated
-    /// @param helper The swap helper or adapter associated with this pair
-    /// @param oldStatus The previous approval status for this pair/helper
-    /// @param newStatus The new approval status for this pair/helper
-    event ApprovedPairUpdated(address marketFrom, address marketTo, address helper, bool oldStatus, bool newStatus);
+    /// @custom:error UnauthorizedCaller Caller is neither the user nor an approved delegate.
+    error UnauthorizedCaller(address account);
 
-    /// @custom:error Unauthorized Caller is neither the user nor an approved delegate.
-    error Unauthorized(address account);
-
-    /// @custom:error SeizeFailed
-    error SeizeFailed(uint256 err);
-
-    /// @custom:error RedeemFailed
+    /// @custom:error RedeemFailed Redeem on a vToken market returned a non-zero error code
     error RedeemFailed(uint256 err);
 
-    /// @custom:error BorrowFailed
-    error BorrowFailed(uint256 err);
-
-    /// @custom:error MintFailed
+    /// @custom:error MintFailed Mint on a vToken market returned a non-zero error code
     error MintFailed(uint256 err);
 
-    /// @custom:error RepayFailed
+    /// @custom:error RepayFailed Repay on a vToken market returned a non-zero error code
     error RepayFailed(uint256 err);
 
-    /// @custom:error NoCollateralBalance
-    error NoCollateralBalance();
+    /// @custom:error InsufficientCollateralBalance User has no collateral balance to swap
+    error InsufficientCollateralBalance();
 
-    /// @custom:error NoVTokenBalance
-    error NoVTokenBalance();
+    /// @custom:error InsufficientBorrowBalance User has no borrow balance to swap
+    error InsufficientBorrowBalance();
 
-    /// @custom:error NoBorrowBalance
-    error NoBorrowBalance();
-
-    /// @custom:error ZeroAmount
+    /// @custom:error ZeroAmount Provided amount parameter is zero
     error ZeroAmount();
 
-    /// @custom:error NoUnderlyingReceived
-    error NoUnderlyingReceived();
-
-    /// @custom:error SwapCausesLiquidation
+    /// @custom:error SwapCausesLiquidation Operation would put the account at risk (undercollateralized)
     error SwapCausesLiquidation(uint256 err);
 
-    /// @custom:error MarketNotListed
+    /// @custom:error MarketNotListed Provided vToken market is not listed in Comptroller
     error MarketNotListed(address market);
 
-    /// @custom:error ZeroAddress
+    /// @custom:error ZeroAddress One of the required addresses is zero
     error ZeroAddress();
 
-    /// @custom:error TransferFailed
+    /// @custom:error TransferFailed Native or ERC-20 transfer failed
     error TransferFailed();
 
-    /// @custom:error EnterMarketFailed
+    /// @custom:error EnterMarketFailed Comptroller.enterMarket returned a non-zero error code
     error EnterMarketFailed(uint256 err);
 
-    /// @custom:error AccrueInterestFailed
-    error AccrueInterestFailed(uint256 errCode);
+    /// @custom:error TokenSwapCallFailed Swap helper call reverted or returned false
+    error TokenSwapCallFailed();
 
-    /// @custom:error SwapCallFailed
-    error SwapCallFailed();
-
-    /// @custom:error InvalidFlashLoanAmountReceived
+    /// @custom:error InvalidFlashLoanAmountReceived Unexpected or insufficient tokens received for flash loan workflow
     error InvalidFlashLoanAmountReceived();
 
-    /// @custom:error UnauthorizedCaller
-    error UnauthorizedCaller();
+    /// @custom:error UnauthorizedExecutor Caller is not the expected Comptroller
+    error UnauthorizedExecutor();
 
-    /// @custom:error FlashLoanAssetOrAmountMismatch
+    /// @custom:error FlashLoanAssetOrAmountMismatch Invalid flash loan arrays length or >1 elements
     error FlashLoanAssetOrAmountMismatch();
 
-    /// @custom:error ExecuteOperationNotCalledCorrectly
-    error ExecuteOperationNotCalledCorrectly();
+    /// @custom:error InvalidExecuteOperation Unknown operation type in flash loan callback
+    error InvalidExecuteOperation();
 
-    /// @custom:error InvalidFlashLoanBorrowedAsset
-    error InvalidFlashLoanBorrowedAsset();
-
-    /// @custom:error InsufficientFundsToRepayFlashloan
+    /// @custom:error InsufficientFundsToRepayFlashloan Not enough proceeds to repay flash loan plus fees
     error InsufficientFundsToRepayFlashloan();
 
-    /// @custom:error InsufficientAmountOutAfterSwap
+    /// @custom:error InsufficientAmountOutAfterSwap Swap output lower than required minimum
     error InsufficientAmountOutAfterSwap();
 
-    /// @custom:error NoEnoughBalance
-    error NoEnoughBalance();
-
     // External functions
+    /// @notice Allows the owner to sweep leftover ERC-20 tokens from the contract.
+    /// @param token The token to sweep.
+    /// @custom:event Emits SweepToken event.
     function sweepToken(IERC20Upgradeable token) external;
+
+    /// @notice Allows the owner to sweep leftover native tokens (e.g., BNB) from the contract.
+    /// @custom:event Emits SweepNative event.
+    /// @custom:error TransferFailed Native transfer failed
     function sweepNative() external;
 
+    /// @notice Swap user's entire native collateral (e.g., vBNB) into wrapped collateral (e.g., vWBNB).
+    /// @param user Address of the user.
+    /// @custom:error InsufficientCollateralBalance User has no native collateral
+    /// @custom:event Emits CollateralSwapped on success
     function swapCollateralNativeToWrapped(address user) external;
+
+    /// @notice Swap user's entire native debt (e.g., vBNB borrow) into wrapped debt (e.g., vWBNB borrow).
+    /// @param user Address of the user.
+    /// @custom:error InsufficientBorrowBalance User has no native debt
+    /// @custom:event Emits DebtSwapped on success
     function swapDebtNativeToWrapped(address user) external;
 
+    /// @notice Swaps the full vToken collateral of a user from one market to another.
+    /// @param user The address whose collateral is being swapped.
+    /// @param marketFrom The vToken market to seize from.
+    /// @param marketTo The vToken market to mint into.
+    /// @param minAmountToSupply Minimum amount of target underlying to supply after swap.
+    /// @param swapData Array of bytes containing swap instructions for the SwapHelper.
+    /// @custom:error InsufficientCollateralBalance The user has no underlying balance in the `marketFrom`.
+    /// @custom:event Emits CollateralSwapped event.
     function swapFullCollateral(
         address user,
         IVToken marketFrom,
@@ -153,6 +148,16 @@ interface IPositionSwapper {
         bytes[] calldata swapData
     ) external payable;
 
+    /// @notice Swaps a specific amount of collateral from one market to another.
+    /// @param user The address whose collateral is being swapped.
+    /// @param marketFrom The vToken market to seize from.
+    /// @param marketTo The vToken market to mint into.
+    /// @param maxAmountToSwap The maximum amount of underlying to swap from `marketFrom`.
+    /// @param minAmountToSupply Minimum amount of target underlying to supply after swap.
+    /// @param swapData Array of bytes containing swap instructions for the SwapHelper.
+    /// @custom:error ZeroAmount The `maxAmountToSwap` is zero.
+    /// @custom:error InsufficientCollateralBalance The user has insufficient underlying balance in the `marketFrom`.
+    /// @custom:event Emits CollateralSwapped event.
     function swapCollateralWithAmount(
         address user,
         IVToken marketFrom,
@@ -162,6 +167,14 @@ interface IPositionSwapper {
         bytes[] calldata swapData
     ) external payable;
 
+    /// @notice Swaps the full debt of a user from one market to another.
+    /// @param user The address whose debt is being swapped.
+    /// @param marketFrom The vToken market from which debt is swapped.
+    /// @param marketTo The vToken market into which the new debt is borrowed.
+    /// @param maxDebtAmountToOpen Maximum amount to open as new debt on `marketTo` (before fee rounding).
+    /// @param swapData Array of bytes containing swap instructions for the SwapHelper.
+    /// @custom:error InsufficientBorrowBalance The user has no borrow balance in the `marketFrom`.
+    /// @custom:event Emits DebtSwapped event.
     function swapFullDebt(
         address user,
         IVToken marketFrom,
@@ -170,6 +183,16 @@ interface IPositionSwapper {
         bytes[] calldata swapData
     ) external payable;
 
+    /// @notice Swaps a specific amount of debt from one market to another.
+    /// @param user The address whose debt is being swapped.
+    /// @param marketFrom The vToken market from which debt is swapped.
+    /// @param marketTo The vToken market into which the new debt is borrowed.
+    /// @param minDebtAmountToSwap The minimum amount of debt of `marketFrom` to repay.
+    /// @param maxDebtAmountToOpen The maximum amount to open as new debt on `marketTo`.
+    /// @param swapData Array of bytes containing swap instructions for the SwapHelper.
+    /// @custom:error ZeroAmount The `minDebtAmountToSwap` is zero.
+    /// @custom:error InsufficientBorrowBalance The user has insufficient borrow balance in the `marketFrom`.
+    /// @custom:event Emits DebtSwapped event.
     function swapDebtWithAmount(
         address user,
         IVToken marketFrom,

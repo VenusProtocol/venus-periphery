@@ -20,25 +20,25 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     /// @notice The Comptroller used for permission and liquidity checks.
     IComptroller public immutable COMPTROLLER;
 
-    /// @notice The vToken representing the native asset (e.g., vBNB).
-    IVBNB public immutable NATIVE_MARKET;
-
-    /// @notice The vToken representing the wrapped native asset (e.g., vWBNB).
-    IVToken public immutable WRAPPED_NATIVE_MARKET;
-
     /// @notice The swap helper contract for executing token swaps
     SwapHelper public immutable SWAP_HELPER;
 
     /// @notice The wrapped native token contract (e.g., WBNB)
     IWBNB public immutable WRAPPED_NATIVE;
 
+    /// @notice The vToken representing the native asset (e.g., vBNB).
+    IVBNB public immutable NATIVE_MARKET;
+
+    /// @notice The vToken representing the wrapped native asset (e.g., vWBNB).
+    IVToken public immutable WRAPPED_NATIVE_MARKET;
+
     /// @dev Transient slots used during flash loan workflows
-    OperationType private operationType;
-    IVToken private transientMarketFrom;
-    IVToken private transientMarketTo;
-    uint256 private transientDebtRepaymentAmount;
-    uint256 private transientMinAmountOutAfterSwap;
-    uint256 private transientCollateralRedeemAmount;
+    OperationType transient operationType;
+    IVToken transient transientMarketFrom;
+    IVToken transient transientMarketTo;
+    uint256 transient transientDebtRepaymentAmount;
+    uint256 transient transientCollateralRedeemAmount;
+    uint256 transient transientMinAmountToSupply;
 
     /**
      * @notice Constructor to set immutable variables
@@ -47,6 +47,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param _wrappedNative The address of the wrapped native token (e.g., WBNB)
      * @param _nativeVToken The address of the native vToken (e.g., vBNB)
      * @param _wrappedNativeVToken The address of the wrapped-native vToken (e.g., vWBNB)
+     * @custom:error ZeroAddress If any of the provided addresses is zero
      * @custom:oz-upgrades-unsafe-allow constructor
      */
     constructor(
@@ -99,6 +100,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     /**
      * @notice Allows the owner to sweep leftover native tokens (e.g., BNB) from the contract.
      * @custom:event Emits SweepNative event.
+     * @custom:error TransferFailed Native transfer failed
      */
     function sweepNative() external onlyOwner {
         uint256 balance = address(this).balance;
@@ -111,34 +113,43 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
     /**
      * @notice Swap user's entire native collateral (e.g., vBNB) into wrapped collateral (e.g., vWBNB).
-     * @param user Address of the user.
+     * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
+     *      Additionally, user needs to approve vTokens to this PositionSwapper contract to allow redemption on behalf of user.
+     *      Since vBNB does not support redeemBehalf, an explicit transfer approval for vTokens is needed for this function.
+     * @param user The address whose collateral is being swapped.
+     * @custom:error InsufficientCollateralBalance User has no native collateral
+     * @custom:event Emits CollateralSwapped on success
      */
     function swapCollateralNativeToWrapped(address user) external nonReentrant {
         uint256 userBalance = NATIVE_MARKET.balanceOfUnderlying(user);
-        transientCollateralRedeemAmount = NATIVE_MARKET.balanceOf(user);
+        if (userBalance == 0) revert InsufficientCollateralBalance();
 
-        if (userBalance == 0) revert NoCollateralBalance();
+        transientCollateralRedeemAmount = NATIVE_MARKET.balanceOf(user);
         _swapCollateralNativeToWrapped(user, NATIVE_MARKET, WRAPPED_NATIVE_MARKET, userBalance);
     }
 
     /**
      * @notice Swap user's entire native debt (e.g., vBNB borrow) into wrapped debt (e.g., vWBNB borrow).
-     * @param user Address of the user.
+     * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
+     * @param user The address whose debt is being swapped.
+     * @custom:error InsufficientBorrowBalance User has no native debt
+     * @custom:event Emits DebtSwapped on success
      */
     function swapDebtNativeToWrapped(address user) external nonReentrant {
         uint256 borrowBalance = NATIVE_MARKET.borrowBalanceCurrent(user);
-        if (borrowBalance == 0) revert NoBorrowBalance();
+        if (borrowBalance == 0) revert InsufficientBorrowBalance();
         _swapDebtNativeToWrapped(user, NATIVE_MARKET, WRAPPED_NATIVE_MARKET, borrowBalance);
     }
 
     /**
      * @notice Swaps the full vToken collateral of a user from one market to another.
+     * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose collateral is being swapped.
      * @param marketFrom The vToken market to seize from.
      * @param marketTo The vToken market to mint into.
      * @param minAmountToSupply Minimum amount of target underlying to supply after swap.
      * @param swapData Array of bytes containing swap instructions for the SwapHelper.
-     * @custom:error NoCollateralBalance The user has no underlying balance in the `marketFrom`.
+     * @custom:error InsufficientCollateralBalance The user has no underlying balance in the `marketFrom`.
      * @custom:event Emits CollateralSwapped event.
      */
     function swapFullCollateral(
@@ -149,20 +160,21 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         bytes[] calldata swapData
     ) external payable nonReentrant {
         uint256 userBalance = marketFrom.balanceOfUnderlying(user);
-        if (userBalance == 0) revert NoCollateralBalance();
+        if (userBalance == 0) revert InsufficientCollateralBalance();
         _swapCollateral(user, marketFrom, marketTo, userBalance, minAmountToSupply, swapData);
     }
 
     /**
      * @notice Swaps a specific amount of collateral from one market to another.
+     * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose collateral is being swapped.
      * @param marketFrom The vToken market to seize from.
      * @param marketTo The vToken market to mint into.
      * @param maxAmountToSwap The maximum amount of underlying to swap from `marketFrom`.
      * @param minAmountToSupply Minimum amount of target underlying to supply after swap.
      * @param swapData Array of bytes containing swap instructions for the SwapHelper.
-     * @custom:error NoEnoughBalance The user has insufficient underlying balance in the `marketFrom`.
      * @custom:error ZeroAmount The `maxAmountToSwap` is zero.
+     * @custom:error InsufficientCollateralBalance The user has insufficient underlying balance in the `marketFrom`.
      * @custom:event Emits CollateralSwapped event.
      */
     function swapCollateralWithAmount(
@@ -174,18 +186,19 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         bytes[] calldata swapData
     ) external payable nonReentrant {
         if (maxAmountToSwap == 0) revert ZeroAmount();
-        if (maxAmountToSwap > marketFrom.balanceOfUnderlying(user)) revert NoEnoughBalance();
+        if (maxAmountToSwap > marketFrom.balanceOfUnderlying(user)) revert InsufficientCollateralBalance();
         _swapCollateral(user, marketFrom, marketTo, maxAmountToSwap, minAmountToSupply, swapData);
     }
 
     /**
      * @notice Swaps the full debt of a user from one market to another.
+     * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose debt is being swapped.
      * @param marketFrom The vToken market from which debt is swapped.
      * @param marketTo The vToken market into which the new debt is borrowed.
      * @param maxDebtAmountToOpen Maximum amount to open as new debt on `marketTo` (before fee rounding).
      * @param swapData Array of bytes containing swap instructions for the SwapHelper.
-     * @custom:error NoBorrowBalance The user has no borrow balance in the `marketFrom`.
+     * @custom:error InsufficientBorrowBalance The user has no borrow balance in the `marketFrom`.
      * @custom:event Emits DebtSwapped event.
      */
     function swapFullDebt(
@@ -196,20 +209,21 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         bytes[] calldata swapData
     ) external payable nonReentrant {
         uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
-        if (borrowBalance == 0) revert NoBorrowBalance();
+        if (borrowBalance == 0) revert InsufficientBorrowBalance();
         _swapDebt(user, marketFrom, marketTo, borrowBalance, maxDebtAmountToOpen, swapData);
     }
 
     /**
      * @notice Swaps a specific amount of debt from one market to another.
+     * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose debt is being swapped.
      * @param marketFrom The vToken market from which debt is swapped.
      * @param marketTo The vToken market into which the new debt is borrowed.
      * @param minDebtAmountToSwap The minimum amount of debt of `marketFrom` to repay.
      * @param maxDebtAmountToOpen The maximum amount to open as new debt on `marketTo`.
      * @param swapData Array of bytes containing swap instructions for the SwapHelper.
-     * @custom:error NoBorrowBalance The user has insufficient borrow balance in the `marketFrom`.
      * @custom:error ZeroAmount The `minDebtAmountToSwap` is zero.
+     * @custom:error InsufficientBorrowBalance The user has insufficient borrow balance in the `marketFrom`.
      * @custom:event Emits DebtSwapped event.
      */
     function swapDebtWithAmount(
@@ -221,7 +235,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         bytes[] calldata swapData
     ) external payable nonReentrant {
         if (minDebtAmountToSwap == 0) revert ZeroAmount();
-        if (minDebtAmountToSwap > marketFrom.borrowBalanceCurrent(user)) revert NoBorrowBalance();
+        if (minDebtAmountToSwap > marketFrom.borrowBalanceCurrent(user)) revert InsufficientBorrowBalance();
         _swapDebt(user, marketFrom, marketTo, minDebtAmountToSwap, maxDebtAmountToOpen, swapData);
     }
 
@@ -231,9 +245,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param marketFrom Native vToken market (e.g., vBNB)
      * @param marketTo Wrapped-native vToken market (e.g., vWBNB)
      * @param collateralAmountToSwap Amount of native underlying to migrate
-     * @custom:error Throw MarketNotListed if any market is not listed in Comptroller
-     * @custom:error Throw Unauthorized if caller is neither the user nor an approved delegate
-     * @custom:error Throw SwapCausesLiquidation if the operation would make the account unsafe
+     * @custom:error MarketNotListed If any market is not listed in Comptroller
+     * @custom:error UnauthorizedCaller If caller is neither the user nor an approved delegate
+     * @custom:error SwapCausesLiquidation If the operation would make the account unsafe
+     * @custom:error EnterMarketFailed If entering destination market fails
      */
     function _swapCollateralNativeToWrapped(
         address user,
@@ -246,24 +261,19 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         _checkUserAuthorized(user);
         _checkAccountSafe(user);
 
-        transientMarketFrom = marketFrom;
-        transientMarketTo = marketTo;
-
         IVToken[] memory borrowedMarkets = new IVToken[](1);
         borrowedMarkets[0] = WRAPPED_NATIVE_MARKET;
         uint256[] memory flashLoanAmounts = new uint256[](1);
         flashLoanAmounts[0] = collateralAmountToSwap;
 
         _validateAndEnterMarket(user, marketFrom, marketTo);
-
         operationType = OperationType.SWAP_COLLATERAL_NATIVE_TO_WRAPPED;
+        uint256 wrappedNativeBalance = WRAPPED_NATIVE.balanceOf(address(this));
 
-        uint256 fromBalanceBefore = IERC20Upgradeable(marketFrom.underlying()).balanceOf(address(this));
-        uint256 toBalanceBefore = IERC20Upgradeable(marketTo.underlying()).balanceOf(address(this));
+        // Executing flash loan here will trigger the Comptroller contract to call the executeOperation callback to this contract
         COMPTROLLER.executeFlashLoan(payable(user), payable(address(this)), borrowedMarkets, flashLoanAmounts, "0x");
-        _refundDustToUser(user, marketFrom, fromBalanceBefore);
-        _refundDustToUser(user, marketTo, toBalanceBefore);
 
+        _refundDustToUser(user, WRAPPED_NATIVE_MARKET, wrappedNativeBalance);
         _checkAccountSafe(user);
     }
 
@@ -273,9 +283,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param marketFrom Native vToken market (e.g., vBNB)
      * @param marketTo Wrapped-native vToken market (e.g., vWBNB)
      * @param debtRepaymentAmount Amount of native debt to repay
-     * @custom:error Throw MarketNotListed if any market is not listed in Comptroller
-     * @custom:error Throw Unauthorized if caller is neither the user nor an approved delegate
-     * @custom:error Throw SwapCausesLiquidation if the operation would make the account unsafe
+     * @custom:error MarketNotListed If any market is not listed in Comptroller
+     * @custom:error UnauthorizedCaller If caller is neither the user nor an approved delegate
+     * @custom:error SwapCausesLiquidation If the operation would make the account unsafe
      */
     function _swapDebtNativeToWrapped(
         address user,
@@ -288,28 +298,23 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         _checkUserAuthorized(user);
         _checkAccountSafe(user);
 
-        transientMarketFrom = marketFrom;
-        transientMarketTo = marketTo;
         transientDebtRepaymentAmount = debtRepaymentAmount;
-
         IVToken[] memory borrowedMarkets = new IVToken[](1);
         borrowedMarkets[0] = WRAPPED_NATIVE_MARKET;
 
         uint256[] memory flashLoanAmounts = new uint256[](1);
-        uint256 flashLoanFee = marketFrom.flashLoanFeeMantissa();
-        if (flashLoanFee != 0) {
-            flashLoanAmounts[0] = calculateFlashLoanAmount(debtRepaymentAmount, flashLoanFee);
-        } else {
-            flashLoanAmounts[0] = debtRepaymentAmount;
-        }
-
-        uint256 wrappedNativeBefore = IERC20Upgradeable(marketTo.underlying()).balanceOf(address(this));
+        uint256 flashLoanFee = WRAPPED_NATIVE_MARKET.flashLoanFeeMantissa();
+        flashLoanAmounts[0] = flashLoanFee == 0
+            ? debtRepaymentAmount
+            : calculateFlashLoanAmount(debtRepaymentAmount, flashLoanFee);
 
         operationType = OperationType.SWAP_DEBT_NATIVE_TO_WRAPPED;
+        uint256 wrappedNativeBalance = WRAPPED_NATIVE.balanceOf(address(this));
+
+        // Executing flash loan here will trigger the Comptroller contract to call the executeOperation callback to this contract
         COMPTROLLER.executeFlashLoan(payable(user), payable(address(this)), borrowedMarkets, flashLoanAmounts, "0x");
 
-        _refundDustToUser(user, marketTo, wrappedNativeBefore);
-
+        _refundDustToUser(user, WRAPPED_NATIVE_MARKET, wrappedNativeBalance);
         _checkAccountSafe(user);
     }
 
@@ -319,14 +324,12 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param marketFrom The vToken market from which collateral is seized.
      * @param marketTo The vToken market into which the swapped collateral is minted.
      * @param maxAmountToSwap The amount of underlying to seize and convert.
+     * @param minAmountToSupply Minimum amount of target underlying to supply after swap.
      * @param swapData Array of bytes containing swap instructions for the SwapHelper.
-     * @custom:error Throw MarketNotListed One of the specified markets is not listed in the Comptroller.
-     * @custom:error Throw Unauthorized The caller is neither the user nor an approved delegate.
-     * @custom:error Throw RedeemFailed The redeem operation fails.
-     * @custom:error Throw NoUnderlyingReceived No output from the token swap.
-     * @custom:error Throw MintFailed The mint operation fails.
-     * @custom:error Throw AccrueInterestFailed The accrueInterest operation fails.
-     * @custom:error Throw SwapCallFailed The token swap execution fails.
+     * @custom:error MarketNotListed One of the specified markets is not listed in the Comptroller
+     * @custom:error UnauthorizedCaller The caller is neither the user nor an approved delegate
+     * @custom:error SwapCausesLiquidation If the operation would make the account unsafe
+     * @custom:error EnterMarketFailed If entering destination market fails
      */
     function _swapCollateral(
         address user,
@@ -344,11 +347,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         transientMarketFrom = marketFrom;
         transientMarketTo = marketTo;
         transientCollateralRedeemAmount = maxAmountToSwap;
-        transientMinAmountOutAfterSwap = minAmountToSupply;
+        transientMinAmountToSupply = minAmountToSupply;
 
         IVToken[] memory borrowedMarkets = new IVToken[](1);
         borrowedMarkets[0] = marketFrom;
-
         uint256[] memory flashLoanAmounts = new uint256[](1);
         flashLoanAmounts[0] = maxAmountToSwap;
 
@@ -358,6 +360,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 toBalanceBefore = IERC20Upgradeable(marketTo.underlying()).balanceOf(address(this));
 
         operationType = OperationType.SWAP_COLLATERAL;
+        // Executing flash loan here will trigger the Comptroller contract to call the executeOperation callback to this contract
         COMPTROLLER.executeFlashLoan(
             payable(user),
             payable(address(this)),
@@ -380,12 +383,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param minDebtAmountToSwap The minimum amount of `marketFrom` debt to repay
      * @param maxDebtAmountToOpen The maximum amount to open on `marketTo`
      * @param swapData Array of bytes containing swap instructions for the SwapHelper
-     * @custom:error Throw MarketNotListed One of the specified markets is not listed in the Comptroller
-     * @custom:error Throw Unauthorized The caller is neither the user nor an approved delegate
-     * @custom:error Throw BorrowFailed The borrow operation fails
-     * @custom:error Throw NoUnderlyingReceived No output from the token swap
-     * @custom:error Throw RepayFailed The repay operation fails
-     * @custom:error Throw SwapCallFailed The token swap execution fails
+     * @custom:error MarketNotListed One of the specified markets is not listed in the Comptroller
+     * @custom:error UnauthorizedCaller The caller is neither the user nor an approved delegate
+     * @custom:error SwapCausesLiquidation If the operation would make the account unsafe
      */
     function _swapDebt(
         address user,
@@ -402,23 +402,21 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
         transientMarketFrom = marketFrom;
         transientMarketTo = marketTo;
-        transientMinAmountOutAfterSwap = minDebtAmountToSwap;
+        transientDebtRepaymentAmount = minDebtAmountToSwap;
 
         IVToken[] memory borrowedMarkets = new IVToken[](1);
         borrowedMarkets[0] = marketTo;
-
         uint256[] memory flashLoanAmounts = new uint256[](1);
-        uint256 flashLoanFee = marketFrom.flashLoanFeeMantissa();
-        if (flashLoanFee != 0) {
-            flashLoanAmounts[0] = calculateFlashLoanAmount(maxDebtAmountToOpen, flashLoanFee);
-        } else {
-            flashLoanAmounts[0] = maxDebtAmountToOpen;
-        }
+        uint256 flashLoanFee = marketTo.flashLoanFeeMantissa();
+        flashLoanAmounts[0] = flashLoanFee == 0
+            ? maxDebtAmountToOpen
+            : calculateFlashLoanAmount(maxDebtAmountToOpen, flashLoanFee);
 
         uint256 fromBalanceBeforeDebt = IERC20Upgradeable(marketFrom.underlying()).balanceOf(address(this));
         uint256 toBalanceBeforeDebt = IERC20Upgradeable(marketTo.underlying()).balanceOf(address(this));
 
         operationType = OperationType.SWAP_DEBT;
+        // Executing flash loan here will trigger the Comptroller contract to call the executeOperation callback to this contract
         COMPTROLLER.executeFlashLoan(
             payable(user),
             payable(address(this)),
@@ -438,13 +436,14 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param vTokens Array with the borrowed vToken market (single element)
      * @param amounts Array with the borrowed underlying amount (single element)
      * @param premiums Array with the flash loan fee amount (single element)
-     * @param onBehalf The user for whom the swap is performed
+     * @param /initiator The address that initiated the flash loan (unused)
+     * @param onBehalf The user for whome debt will be opened
      * @param param Encoded auxiliary data for the operation (e.g., swap multicall)
      * @return success Whether the execution succeeded
      * @return repayAmounts Amounts to approve for flash loan repayment
-     * @custom:error Throw UnauthorizedCaller when caller is not the Comptroller
-     * @custom:error Throw FlashLoanAssetOrAmountMismatch when array lengths mismatch or > 1 element
-     * @custom:error Throw ExecuteOperationNotCalledCorrectly when operation type is unknown
+     * @custom:error UnauthorizedExecutor When caller is not the Comptroller
+     * @custom:error FlashLoanAssetOrAmountMismatch When array lengths mismatch or > 1 element
+     * @custom:error InvalidExecuteOperation When operation type is unknown
      */
     function executeOperation(
         IVToken[] calldata vTokens,
@@ -455,7 +454,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         bytes calldata param
     ) external override returns (bool success, uint256[] memory repayAmounts) {
         if (msg.sender != address(COMPTROLLER)) {
-            revert UnauthorizedCaller();
+            revert UnauthorizedExecutor();
         }
         if (vTokens.length != 1 || amounts.length != 1 || premiums.length != 1) {
             revert FlashLoanAssetOrAmountMismatch();
@@ -480,7 +479,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             uint256 amountToRepay = _executeSwapDebtNativeToWrapped(onBehalf, vTokens[0], amounts[0], premiums[0]);
             repayAmounts[0] = amountToRepay;
         } else {
-            revert ExecuteOperationNotCalledCorrectly();
+            revert InvalidExecuteOperation();
         }
 
         return (true, repayAmounts);
@@ -489,33 +488,30 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     /**
      * @notice Executes native → wrapped-native collateral migration during flash loan.
      * @param onBehalf User for whom the migration is executed
-     * @param borrowMarket Borrowed market (must equal `WRAPPED_NATIVE_MARKET`)
+     * @param /borrowMarket Borrowed market (must equal `WRAPPED_NATIVE_MARKET`)
      * @param borrowedAssetAmount Amount borrowed from the flash loan
      * @param borrowedAssetFees Flash loan fee amount
      * @return borrowedAssetAmountToRepay Amount to approve back to the Comptroller
-     * @custom:error Throw InvalidFlashLoanBorrowedAsset if `borrowMarket` is incorrect
-     * @custom:error Throw InvalidFlashLoanAmountReceived if insufficient borrowed amount is observed
-     * @custom:error Throw MintFailed when minting on target market fails
-     * @custom:error Throw RedeemFailed when redeeming on source market fails
-     * @custom:error Throw InsufficientFundsToRepayFlashloan when repayment cannot be covered
+     * @custom:error InvalidFlashLoanAmountReceived If insufficient borrowed amount is observed
+     * @custom:error MintFailed When minting on target market fails
+     * @custom:error RedeemFailed When redeeming on source market fails
+     * @custom:error InsufficientFundsToRepayFlashloan When repayment cannot be covered
+     * @custom:event Emits CollateralSwapped on success
      */
     function _executeSwapCollateralNativeToWrapped(
         address onBehalf,
-        IVToken borrowMarket,
+        IVToken /* borrowMarket */,
         uint256 borrowedAssetAmount,
         uint256 borrowedAssetFees
     ) internal returns (uint256 borrowedAssetAmountToRepay) {
         uint256 err;
         // For vBNB to vWBNB we take flashLoan of WBNB as vBNB does not support flashLoan
-        if (borrowMarket != WRAPPED_NATIVE_MARKET) revert InvalidFlashLoanBorrowedAsset();
         if (WRAPPED_NATIVE.balanceOf(address(this)) < borrowedAssetAmount) revert InvalidFlashLoanAmountReceived();
 
         // supply new collateral
-        IERC20Upgradeable(address(WRAPPED_NATIVE)).forceApprove(
-            address(transientMarketTo),
-            borrowedAssetAmount - borrowedAssetFees
-        );
-        err = WRAPPED_NATIVE_MARKET.mintBehalf(onBehalf, borrowedAssetAmount - borrowedAssetFees);
+        uint256 newCollateralAmount = borrowedAssetAmount - borrowedAssetFees;
+        IERC20Upgradeable(address(WRAPPED_NATIVE)).forceApprove(address(WRAPPED_NATIVE_MARKET), newCollateralAmount);
+        err = WRAPPED_NATIVE_MARKET.mintBehalf(onBehalf, newCollateralAmount);
         if (err != 0) revert MintFailed(err);
 
         // redeem existing collateral (native)
@@ -527,56 +523,53 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         );
         err = NATIVE_MARKET.redeem(transientCollateralRedeemAmount);
         if (err != 0) revert RedeemFailed(err);
-        uint256 nativeBalanceAfter = address(this).balance - nativeBalanceBefore;
+        uint256 redeemedNativeAmount = address(this).balance - nativeBalanceBefore;
 
         // Wrap native tokens to repay FlashLoan
-        borrowedAssetAmountToRepay = borrowedAssetAmount + borrowedAssetFees;
-        if (nativeBalanceAfter < borrowedAssetAmount) {
+        if (redeemedNativeAmount < borrowedAssetAmount) {
             revert InsufficientFundsToRepayFlashloan();
         }
-        WRAPPED_NATIVE.deposit{ value: nativeBalanceAfter }();
+        WRAPPED_NATIVE.deposit{ value: redeemedNativeAmount }();
+        borrowedAssetAmountToRepay = borrowedAssetAmount + borrowedAssetFees;
         IERC20Upgradeable(address(WRAPPED_NATIVE)).approve(address(WRAPPED_NATIVE_MARKET), borrowedAssetAmountToRepay);
 
-        // Emit event with precise amounts
         emit CollateralSwapped(
             onBehalf,
             address(NATIVE_MARKET),
             address(WRAPPED_NATIVE_MARKET),
-            nativeBalanceAfter,
-            borrowedAssetAmount - borrowedAssetFees
+            redeemedNativeAmount,
+            newCollateralAmount
         );
     }
 
     /**
      * @notice Executes native → wrapped-native debt migration during flash loan.
      * @param onBehalf User for whom the migration is executed
-     * @param borrowMarket Borrowed market (must equal `WRAPPED_NATIVE_MARKET`)
+     * @param /borrowMarket Borrowed market (must equal `WRAPPED_NATIVE_MARKET`)
      * @param borrowedAssetAmount Amount borrowed from the flash loan
      * @param borrowedAssetFees Flash loan fee amount
      * @return borrowedAssetAmountToRepay Amount to approve back to the Comptroller
-     * @custom:error Throw InvalidFlashLoanBorrowedAsset if `borrowMarket` is incorrect
-     * @custom:error Throw InvalidFlashLoanAmountReceived if insufficient borrowed amount is observed
-     * @custom:error Throw InsufficientAmountOutAfterSwap if unwrap produced less than required
+     * @custom:error InvalidFlashLoanAmountReceived If insufficient borrowed amount is observed
+     * @custom:error InsufficientFundsToRepayFlashloan If unwrap produced less than required
+     * @custom:event Emits DebtSwapped on success
      */
     function _executeSwapDebtNativeToWrapped(
         address onBehalf,
-        IVToken borrowMarket,
+        IVToken /* borrowMarket */,
         uint256 borrowedAssetAmount,
         uint256 borrowedAssetFees
     ) internal returns (uint256 borrowedAssetAmountToRepay) {
         // Flash loaned asset is the wrapped native token
-        if (borrowMarket != WRAPPED_NATIVE_MARKET) revert InvalidFlashLoanBorrowedAsset();
         if (
-            IERC20Upgradeable(address(WRAPPED_NATIVE)).balanceOf(address(this)) < borrowedAssetAmount ||
+            WRAPPED_NATIVE.balanceOf(address(this)) < borrowedAssetAmount ||
             transientDebtRepaymentAmount > borrowedAssetAmount - borrowedAssetFees
-        ) {
-            revert InvalidFlashLoanAmountReceived();
-        }
+        ) revert InvalidFlashLoanAmountReceived();
 
+        // Withdraw FlashLoaned WBNB to native BNB and repay existing borrow
         uint256 nativeBalanceBefore = address(this).balance;
         WRAPPED_NATIVE.withdraw(transientDebtRepaymentAmount);
         uint256 nativeBalanceReceived = address(this).balance - nativeBalanceBefore;
-        if (nativeBalanceReceived < transientDebtRepaymentAmount) revert InsufficientAmountOutAfterSwap();
+        if (nativeBalanceReceived < transientDebtRepaymentAmount) revert InsufficientFundsToRepayFlashloan();
         NATIVE_MARKET.repayBorrowBehalf{ value: transientDebtRepaymentAmount }(onBehalf);
 
         // Approve Fee + dust
@@ -601,11 +594,11 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param borrowedAssetFees Flash loan fee amount
      * @param swapCallData Encoded `SWAP_HELPER.multicall` instructions
      * @return borrowedAssetAmountToRepay Amount to approve back to the Comptroller
-     * @custom:error Throw InvalidFlashLoanAmountReceived if borrowed tokens don't match expectations
-     * @custom:error Throw SwapCallFailed when swap call fails
-     * @custom:error Throw MintFailed when mint on target market fails
-     * @custom:error Throw RedeemFailed when redeem on source market fails
-     * @custom:error Throw InsufficientFundsToRepayFlashloan when repayment cannot be covered
+     * @custom:error InvalidFlashLoanAmountReceived If borrowed tokens don't match expectations
+     * @custom:error MintFailed When mint on target market fails
+     * @custom:error RedeemFailed When redeem on source market fails
+     * @custom:error InsufficientFundsToRepayFlashloan When repayment cannot be covered
+     * @custom:event Emits CollateralSwapped on success
      */
     function _executeSwapCollateral(
         address onBehalf,
@@ -618,8 +611,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         IERC20Upgradeable fromUnderlying = IERC20Upgradeable(transientMarketFrom.underlying());
         IERC20Upgradeable toUnderlying = IERC20Upgradeable(transientMarketTo.underlying());
         if (
-            transientCollateralRedeemAmount != borrowedAssetAmount ||
-            fromUnderlying.balanceOf(address(this)) < borrowedAssetAmount
+            fromUnderlying.balanceOf(address(this)) < borrowedAssetAmount ||
+            transientCollateralRedeemAmount != borrowedAssetAmount
         ) revert InvalidFlashLoanAmountReceived();
 
         // Perform swap using SwapHelper
@@ -627,7 +620,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             fromUnderlying,
             borrowedAssetAmount - borrowedAssetFees,
             toUnderlying,
-            transientMinAmountOutAfterSwap,
+            transientMinAmountToSupply,
             swapCallData
         );
 
@@ -640,19 +633,18 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         if (err != 0) revert RedeemFailed(err);
         uint256 fromUnderlyingReceived = fromUnderlying.balanceOf(address(this)) - fromUnderlyingBalanceBefore;
 
-        borrowedAssetAmountToRepay = fromUnderlyingReceived + borrowedAssetFees;
         if (fromUnderlyingReceived < borrowedAssetAmount) {
             revert InsufficientFundsToRepayFlashloan();
         }
 
+        borrowedAssetAmountToRepay = borrowedAssetAmount + borrowedAssetFees;
         fromUnderlying.forceApprove(address(borrowMarket), borrowedAssetAmountToRepay);
 
-        // Emit event with precise amounts
         emit CollateralSwapped(
             onBehalf,
             address(transientMarketFrom),
             address(transientMarketTo),
-            fromUnderlyingReceived,
+            transientCollateralRedeemAmount,
             toUnderlyingReceived
         );
     }
@@ -665,8 +657,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param borrowedAssetFees Flash loan fee amount
      * @param swapCallData Encoded `SWAP_HELPER.multicall` instructions
      * @return borrowedAssetAmountToRepay Amount to approve back to the Comptroller
-     * @custom:error Throw SwapCallFailed when swap call fails
-     * @custom:error Throw RepayFailed when repay on source market fails
+     * @custom:error InvalidFlashLoanAmountReceived If insufficient tokens received
+     * @custom:error RepayFailed When repay on source market fails
+     * @custom:event Emits DebtSwapped on success
      */
     function _executeSwapDebt(
         address onBehalf,
@@ -678,29 +671,29 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 err;
         IERC20Upgradeable fromUnderlying = IERC20Upgradeable(transientMarketFrom.underlying());
         IERC20Upgradeable toUnderlying = IERC20Upgradeable(transientMarketTo.underlying());
+        if (fromUnderlying.balanceOf(address(this)) < borrowedAssetAmount) revert InvalidFlashLoanAmountReceived();
 
         // Perform swap using SwapHelper
-        uint256 fromUnderlyingReceived = _performSwap(
+        _performSwap(
             toUnderlying,
             borrowedAssetAmount - borrowedAssetFees,
             fromUnderlying,
-            transientMinAmountOutAfterSwap,
+            transientDebtRepaymentAmount,
             swapCallData
         );
 
-        fromUnderlying.forceApprove(address(transientMarketFrom), transientMinAmountOutAfterSwap);
-        err = transientMarketFrom.repayBorrowBehalf(onBehalf, transientMinAmountOutAfterSwap);
+        fromUnderlying.forceApprove(address(transientMarketFrom), transientDebtRepaymentAmount);
+        err = transientMarketFrom.repayBorrowBehalf(onBehalf, transientDebtRepaymentAmount);
         if (err != 0) revert RepayFailed(err);
 
         borrowedAssetAmountToRepay = borrowedAssetFees;
         toUnderlying.forceApprove(address(borrowMarket), borrowedAssetAmountToRepay);
 
-        // Emit event with precise amounts
         emit DebtSwapped(
             onBehalf,
             address(transientMarketFrom),
             address(transientMarketTo),
-            transientMinAmountOutAfterSwap,
+            transientDebtRepaymentAmount,
             borrowedAssetAmount
         );
     }
@@ -714,7 +707,9 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param tokenOut The output token to be received from the swap
      * @param minAmountOut The minimum acceptable `tokenOut` amount, else revert
      * @param param The encoded swap instructions/calldata for the SwapHelper
-     * @custom:error SwapCallFailed if the swap execution fails
+     * @return amountOut The amount of output tokens received
+     * @custom:error TokenSwapCallFailed If the swap execution fails
+     * @custom:error InsufficientAmountOutAfterSwap If swap output is below minimum
      */
     function _performSwap(
         IERC20Upgradeable tokenIn,
@@ -724,22 +719,17 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         bytes calldata param
     ) internal returns (uint256 amountOut) {
         tokenIn.safeTransfer(address(SWAP_HELPER), amountIn);
-
         uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
 
         (bool success, ) = address(SWAP_HELPER).call(param);
         if (!success) {
-            revert SwapCallFailed();
+            revert TokenSwapCallFailed();
         }
 
-        uint256 tokenOutBalanceAfter = tokenOut.balanceOf(address(this));
-
-        amountOut = tokenOutBalanceAfter - tokenOutBalanceBefore;
+        amountOut = tokenOut.balanceOf(address(this)) - tokenOutBalanceBefore;
         if (amountOut < minAmountOut) {
             revert InsufficientAmountOutAfterSwap();
         }
-
-        return amountOut;
     }
 
     /**
@@ -780,7 +770,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param user The account for which membership is validated/updated.
      * @param marketFrom The current vToken market the user participates in.
      * @param marketTo The target vToken market the user must enter.
-     * @custom:error EnterMarketFailed Thrown when Comptroller.enterMarket returns a non-zero error code.
+     * @custom:error EnterMarketFailed When Comptroller.enterMarket returns a non-zero error code
      */
     function _validateAndEnterMarket(address user, IVToken marketFrom, IVToken marketTo) internal {
         if (COMPTROLLER.checkMembership(user, marketFrom) && !COMPTROLLER.checkMembership(user, marketTo)) {
@@ -792,6 +782,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     /**
      * @dev Ensures that the given market is listed in the Comptroller.
      * @param market The vToken address to validate.
+     * @custom:error MarketNotListed If the market is not listed in Comptroller
      */
     function _checkMarketListed(IVToken market) internal view {
         (bool isMarketListed, , ) = COMPTROLLER.markets(address(market));
@@ -801,17 +792,18 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     /**
      * @notice Checks that the caller is authorized to act on behalf of the specified user.
      * @param user The address of the user for whom the action is being performed.
+     * @custom:error UnauthorizedCaller If caller is neither the user nor an approved delegate
      */
     function _checkUserAuthorized(address user) internal view {
         if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
-            revert Unauthorized(msg.sender);
+            revert UnauthorizedCaller(msg.sender);
         }
     }
 
     /**
      * @dev Checks if a user's account is safe post-swap.
      * @param user The address to check.
-     * @custom:error Throw SwapCausesLiquidation if the user's account is undercollateralized.
+     * @custom:error SwapCausesLiquidation If the user's account is undercollateralized
      */
     function _checkAccountSafe(address user) internal view {
         (uint256 err, , uint256 shortfall) = COMPTROLLER.getAccountLiquidity(user);
