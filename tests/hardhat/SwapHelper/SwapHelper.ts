@@ -1,13 +1,16 @@
+import "@nomicfoundation/hardhat-chai-matchers";
 import { expect } from "chai";
-import { Signer } from "ethers";
+import { Signer, Wallet } from "ethers";
 import { _TypedDataEncoder, parseUnits } from "ethers/lib/utils";
 import { ethers, network } from "hardhat";
 
 import { FaucetToken, SwapHelper, WBNB } from "../../../typechain";
 
+const { constants } = ethers;
+
 describe("SwapHelper", () => {
-  const maxUint256 = ethers.constants.MaxUint256;
-  let owner: Signer;
+  const maxUint256 = constants.MaxUint256;
+  let owner: Wallet;
   let user1: Signer;
   let user2: Signer;
   let ownerAddress: string;
@@ -18,25 +21,28 @@ describe("SwapHelper", () => {
   let erc20: FaucetToken;
 
   beforeEach(async () => {
-    [owner, user1, user2] = await ethers.getSigners();
+    const signers = await ethers.getSigners();
+    owner = signers[0] as unknown as Wallet;
+    user1 = signers[1];
+    user2 = signers[2];
     ownerAddress = await owner.getAddress();
     userAddress = await user1.getAddress();
     user2Address = await user2.getAddress();
 
     const WBNBFactory = await ethers.getContractFactory("WBNB");
-    wBNB = await WBNBFactory.deploy();
+    wBNB = (await WBNBFactory.deploy()) as WBNB;
 
     const ERC20Factory = await ethers.getContractFactory("FaucetToken");
-    erc20 = await ERC20Factory.deploy(parseUnits("10000", 18), "Test Token", 18, "TEST");
+    erc20 = (await ERC20Factory.deploy(parseUnits("10000", 18), "Test Token", 18, "TEST")) as FaucetToken;
 
     const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
-    swapHelper = await SwapHelperFactory.deploy(wBNB.address, await owner.getAddress());
+    swapHelper = (await SwapHelperFactory.deploy(wBNB.address, await owner.getAddress())) as SwapHelper;
   });
 
   describe("constructor", () => {
     it("should revert when wrappedNative is zero address", async () => {
       const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
-      await expect(SwapHelperFactory.deploy(ethers.constants.AddressZero, ownerAddress)).to.be.revertedWithCustomError(
+      await expect(SwapHelperFactory.deploy(constants.AddressZero, ownerAddress)).to.be.revertedWithCustomError(
         swapHelper,
         "ZeroAddress",
       );
@@ -44,7 +50,7 @@ describe("SwapHelper", () => {
 
     it("should revert when backendSigner is zero address", async () => {
       const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
-      await expect(SwapHelperFactory.deploy(wBNB.address, ethers.constants.AddressZero)).to.be.revertedWithCustomError(
+      await expect(SwapHelperFactory.deploy(wBNB.address, constants.AddressZero)).to.be.revertedWithCustomError(
         swapHelper,
         "ZeroAddress",
       );
@@ -90,12 +96,27 @@ describe("SwapHelper", () => {
 
   describe("wrap", () => {
     it("should only work within multicall", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const amount = parseUnits("1", 18);
       expect(await wBNB.balanceOf(userAddress)).to.equal(0);
       const wrapData = await swapHelper.populateTransaction.wrap(amount);
-      await swapHelper
-        .connect(user1)
-        .multicall([wrapData.data!], maxUint256, ethers.utils.formatBytes32String("1"), "0x", { value: amount });
+      const calls = [wrapData.data!];
+      const deadline = maxUint256;
+      const salt = ethers.utils.formatBytes32String("1");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      await swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: amount });
       expect(await wBNB.balanceOf(swapHelper.address)).to.equal(amount);
     });
   });
@@ -122,26 +143,54 @@ describe("SwapHelper", () => {
     });
 
     it("should work within multicall", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const amount = parseUnits("1000", 18);
       await erc20.connect(owner).transfer(swapHelper.address, amount);
       const sweepData = await swapHelper.populateTransaction.sweep(erc20.address, userAddress);
-      await swapHelper
-        .connect(user1)
-        .multicall([sweepData.data!], maxUint256, ethers.utils.formatBytes32String("1"), "0x");
+      const calls = [sweepData.data!];
+      const deadline = maxUint256;
+      const salt = ethers.utils.formatBytes32String("2");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      await swapHelper.connect(user1).multicall(calls, deadline, salt, signature);
       expect(await erc20.balanceOf(swapHelper.address)).to.equal(0);
       expect(await erc20.balanceOf(userAddress)).to.equal(amount);
     });
 
     it("should wrap and transfer all in a single call", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const amount = parseUnits("1", 18);
       expect(await wBNB.balanceOf(userAddress)).to.equal(0);
       const wrapData = await swapHelper.populateTransaction.wrap(amount);
       const sweepData = await swapHelper.populateTransaction.sweep(wBNB.address, userAddress);
-      await swapHelper
-        .connect(user1)
-        .multicall([wrapData.data!, sweepData.data!], maxUint256, ethers.utils.formatBytes32String("1"), "0x", {
-          value: amount,
-        });
+      const calls = [wrapData.data!, sweepData.data!];
+      const deadline = maxUint256;
+      const salt = ethers.utils.formatBytes32String("3");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      await swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: amount });
       expect(await wBNB.balanceOf(swapHelper.address)).to.equal(0);
       expect(await wBNB.balanceOf(userAddress)).to.equal(amount);
     });
@@ -164,11 +213,26 @@ describe("SwapHelper", () => {
     });
 
     it("should work within multicall", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const spender = user2Address;
       const approveData = await swapHelper.populateTransaction.approveMax(erc20.address, spender);
-      await swapHelper
-        .connect(user1)
-        .multicall([approveData.data!], maxUint256, ethers.utils.formatBytes32String("1"), "0x");
+      const calls = [approveData.data!];
+      const deadline = maxUint256;
+      const salt = ethers.utils.formatBytes32String("4");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      await swapHelper.connect(user1).multicall(calls, deadline, salt, signature);
       expect(await erc20.allowance(swapHelper.address, spender)).to.equal(maxUint256);
     });
   });
@@ -183,64 +247,104 @@ describe("SwapHelper", () => {
     };
 
     it("should revert if calls array is empty", async () => {
-      const deadline = maxUint256;
-      const salt = ethers.utils.formatBytes32String("1");
-
-      await expect(swapHelper.connect(user1).multicall([], deadline, salt, "0x")).to.be.revertedWithCustomError(
-        swapHelper,
-        "NoCallsProvided",
-      );
-    });
-
-    it("should emit MulticallExecuted event without signature", async () => {
-      const amount = parseUnits("1", 18);
-      const wrapData = await swapHelper.populateTransaction.wrap(amount);
-      const deadline = maxUint256;
-      const salt = ethers.utils.formatBytes32String("1");
-
-      const tx = await swapHelper.connect(user1).multicall([wrapData.data!], deadline, salt, "0x", { value: amount });
-
-      await expect(tx).to.emit(swapHelper, "MulticallExecuted").withArgs(userAddress, 1, deadline, false);
-    });
-
-    it("should emit MulticallExecuted event with signature verification", async () => {
       const domain = {
         chainId: network.config.chainId,
         name: "VenusSwap",
         verifyingContract: swapHelper.address,
         version: "1",
       };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
+      const calls: string[] = [];
+      const deadline = maxUint256;
+      const salt = ethers.utils.formatBytes32String("5");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+
+      await expect(swapHelper.connect(user1).multicall(calls, deadline, salt, signature)).to.be.revertedWithCustomError(
+        swapHelper,
+        "NoCallsProvided",
+      );
+    });
+
+    it("should emit MulticallExecuted event", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const amount = parseUnits("1", 18);
       const wrapData = await swapHelper.populateTransaction.wrap(amount);
       const calls = [wrapData.data!];
       const deadline = maxUint256;
-      const salt = ethers.utils.formatBytes32String("1");
+      const salt = ethers.utils.formatBytes32String("6");
       const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
 
       const tx = await swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: amount });
 
-      await expect(tx).to.emit(swapHelper, "MulticallExecuted").withArgs(userAddress, 1, deadline, true);
+      await expect(tx).to.emit(swapHelper, "MulticallExecuted").withArgs(userAddress, 1, deadline, salt);
     });
 
     it("should emit MulticallExecuted with correct call count", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const amount = parseUnits("1", 18);
       const wrapData = await swapHelper.populateTransaction.wrap(amount);
+      const calls = [wrapData.data!, wrapData.data!, wrapData.data!];
       const deadline = maxUint256;
-      const salt = ethers.utils.formatBytes32String("1");
+      const salt = ethers.utils.formatBytes32String("7");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
 
-      const tx = await swapHelper
-        .connect(user1)
-        .multicall([wrapData.data!, wrapData.data!, wrapData.data!], deadline, salt, "0x", { value: amount.mul(3) });
+      const tx = await swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: amount.mul(3) });
 
-      await expect(tx).to.emit(swapHelper, "MulticallExecuted").withArgs(userAddress, 3, deadline, false);
+      await expect(tx).to.emit(swapHelper, "MulticallExecuted").withArgs(userAddress, 3, deadline, salt);
     });
 
     it("should revert if deadline is in the past", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const amount = parseUnits("1", 18);
       const wrapData = await swapHelper.populateTransaction.wrap(amount);
-      const salt = ethers.utils.formatBytes32String("1");
+      const calls = [wrapData.data!];
+      const deadline = 1234;
+      const salt = ethers.utils.formatBytes32String("8");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
       await expect(
-        swapHelper.connect(user1).multicall([wrapData.data!], 1234, salt, "0x", { value: amount }),
+        swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: amount }),
       ).to.be.revertedWithCustomError(swapHelper, "DeadlineReached");
     });
 
@@ -251,12 +355,19 @@ describe("SwapHelper", () => {
         verifyingContract: swapHelper.address,
         version: "1",
       };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const singleAmount = parseUnits("1", 18);
       const totalAmount = singleAmount.mul(3);
       const wrapData = await swapHelper.populateTransaction.wrap(singleAmount);
       const calls = [wrapData.data!, wrapData.data!, wrapData.data!];
       const deadline = maxUint256;
-      const salt = ethers.utils.formatBytes32String("1");
+      const salt = ethers.utils.formatBytes32String("9");
       const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
       await swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: totalAmount });
       expect(await wBNB.balanceOf(swapHelper.address)).to.equal(totalAmount);
@@ -269,11 +380,18 @@ describe("SwapHelper", () => {
         verifyingContract: swapHelper.address,
         version: "1",
       };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const singleAmount = parseUnits("1", 18);
       const totalAmount = singleAmount.mul(3);
       const wrapData = await swapHelper.populateTransaction.wrap(singleAmount);
       const deadline = maxUint256;
-      const salt = ethers.utils.formatBytes32String("1");
+      const salt = ethers.utils.formatBytes32String("10");
       const signature = await owner._signTypedData(domain, types, {
         // authorizing just one call, not 3
         calls: [wrapData.data!],
@@ -293,17 +411,32 @@ describe("SwapHelper", () => {
     });
 
     it("should revert if salt is reused", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
       const amount = parseUnits("1", 18);
       const wrapData = await swapHelper.populateTransaction.wrap(amount);
+      const calls = [wrapData.data!];
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("unique");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
 
       // First call should succeed
-      await swapHelper.connect(user1).multicall([wrapData.data!], deadline, salt, "0x", { value: amount });
+      await swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: amount });
 
       // Second call with same salt should fail
       await expect(
-        swapHelper.connect(user1).multicall([wrapData.data!], deadline, salt, "0x", { value: amount }),
+        swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: amount }),
       ).to.be.revertedWithCustomError(swapHelper, "SaltAlreadyUsed");
     });
   });

@@ -63,6 +63,10 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @dev Emitted when calls array is empty in multicall
     error NoCallsProvided();
 
+    /// @notice Error thrown when signature is missing but required
+    /// @dev Emitted when signature length is zero but verification is expected
+    error MissingSignature();
+
     /// @notice Event emitted when backend signer is updated
     /// @param oldSigner Previous backend signer address
     /// @param newSigner New backend signer address
@@ -72,8 +76,8 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @param caller Address that initiated the multicall
     /// @param callsCount Number of calls executed in the batch
     /// @param deadline Deadline timestamp used for the operation
-    /// @param signatureVerified Whether signature verification was performed
-    event MulticallExecuted(address indexed caller, uint256 callsCount, uint256 deadline, bool signatureVerified);
+    /// @param salt Salt used for replay protection
+    event MulticallExecuted(address indexed caller, uint256 callsCount, uint256 deadline, bytes32 salt);
 
     /// @notice Constructor
     /// @param wrappedNative_ Address of the wrapped native asset contract
@@ -130,19 +134,18 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
             revert DeadlineReached();
         }
 
+        if (signature.length == 0) {
+            revert MissingSignature();
+        }
         if (usedSalts[salt]) {
             revert SaltAlreadyUsed();
         }
         usedSalts[salt] = true;
 
-        bool signatureVerified = false;
-        if (signature.length != 0) {
-            bytes32 digest = _hashMulticall(calls, deadline, salt);
-            address signer = ECDSA.recover(digest, signature);
-            if (signer != backendSigner) {
-                revert Unauthorized();
-            }
-            signatureVerified = true;
+        bytes32 digest = _hashMulticall(calls, deadline, salt);
+        address signer = ECDSA.recover(digest, signature);
+        if (signer != backendSigner) {
+            revert Unauthorized();
         }
 
         for (uint256 i = 0; i < calls.length; i++) {
@@ -154,7 +157,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
             }
         }
 
-        emit MulticallExecuted(msg.sender, calls.length, deadline, signatureVerified);
+        emit MulticallExecuted(msg.sender, calls.length, deadline, salt);
     }
 
     /// @notice Generic call function to execute a call to an arbitrary address
