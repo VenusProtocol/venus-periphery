@@ -33,7 +33,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
 
     /// @notice Address authorized to sign multicall operations
     /// @dev Can be updated by contract owner via setBackendSigner
-    address public BACKEND_SIGNER;
+    address public backendSigner;
 
     /// @notice Mapping to track used salts for replay protection
     /// @dev Maps salt => bool to prevent reuse of same salt
@@ -44,7 +44,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     error DeadlineReached();
 
     /// @notice Error thrown when signature verification fails
-    /// @dev Emitted when recovered signer doesn't match BACKEND_SIGNER
+    /// @dev Emitted when recovered signer doesn't match backendSigner
     error Unauthorized();
 
     /// @notice Error thrown when zero address is provided as parameter
@@ -54,6 +54,14 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @notice Error thrown when salt has already been used
     /// @dev Prevents replay attacks by ensuring each salt is used only once
     error SaltAlreadyUsed();
+
+    /// @notice Error thrown when caller is not authorized
+    /// @dev Only owner or contract itself can call protected functions
+    error CallerNotAuthorized();
+
+    /// @notice Error thrown when no calls are provided to multicall
+    /// @dev Emitted when calls array is empty in multicall
+    error NoCallsProvided();
 
     /// @notice Event emitted when backend signer is updated
     /// @param oldSigner Previous backend signer address
@@ -81,9 +89,16 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
         }
 
         WRAPPED_NATIVE = IWBNB(wrappedNative_);
-        BACKEND_SIGNER = backendSigner_;
+        backendSigner = backendSigner_;
+    }
 
-        _transferOwnership(msg.sender);
+    /// @notice Modifier to restrict access to owner or contract itself
+    /// @dev Reverts with CallerNotAuthorized if caller is neither owner nor this contract
+    modifier onlyOwnerOrSelf() {
+        if (msg.sender != owner() && msg.sender != address(this)) {
+            revert CallerNotAuthorized();
+        }
+        _;
     }
 
     /// @notice Multicall function to execute multiple calls in a single transaction
@@ -97,6 +112,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @dev Protected by nonReentrant modifier to prevent reentrancy attacks
     /// @dev Emits MulticallExecuted event upon successful execution
     /// @custom:security Only the contract itself can call wrap, sweep, approveMax, and genericCall
+    /// @custom:error NoCallsProvided if calls array is empty
     /// @custom:error DeadlineReached if block.timestamp > deadline
     /// @custom:error SaltAlreadyUsed if salt has been used before
     /// @custom:error Unauthorized if signature verification fails
@@ -106,6 +122,10 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
         bytes32 salt,
         bytes calldata signature
     ) external payable nonReentrant {
+        if (calls.length == 0) {
+            revert NoCallsProvided();
+        }
+
         if (block.timestamp > deadline) {
             revert DeadlineReached();
         }
@@ -119,7 +139,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
         if (signature.length != 0) {
             bytes32 digest = _hashMulticall(calls, deadline, salt);
             address signer = ECDSA.recover(digest, signature);
-            if (signer != BACKEND_SIGNER) {
+            if (signer != backendSigner) {
                 revert Unauthorized();
             }
             signatureVerified = true;
@@ -144,7 +164,8 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @dev Should only be called via multicall for safety
     /// @custom:security Use with extreme caution - can call any contract with any data
     /// @custom:security Ensure proper validation of target and data in off-chain systems
-    function genericCall(address target, bytes calldata data) external payable {
+    /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
+    function genericCall(address target, bytes calldata data) external payable onlyOwnerOrSelf {
         target.functionCall(data);
     }
 
@@ -154,7 +175,8 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @dev Wrapped tokens remain in this contract until swept
     /// @dev Should only be called via multicall
     /// @custom:security Ensure msg.value matches amount parameter
-    function wrap(uint256 amount) external payable {
+    /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
+    function wrap(uint256 amount) external payable onlyOwnerOrSelf {
         WRAPPED_NATIVE.deposit{ value: amount }();
     }
 
@@ -164,7 +186,8 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @dev Transfers the entire balance of token held by this contract
     /// @dev Uses SafeERC20 for safe transfer operations
     /// @dev Should only be called via multicall
-    function sweep(IERC20Upgradeable token, address to) external {
+    /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
+    function sweep(IERC20Upgradeable token, address to) external onlyOwnerOrSelf {
         token.safeTransfer(to, token.balanceOf(address(this)));
     }
 
@@ -175,7 +198,8 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @dev Uses forceApprove to handle tokens that require 0 approval first
     /// @dev Should only be called via multicall
     /// @custom:security Grants unlimited approval - ensure spender is trusted
-    function approveMax(IERC20Upgradeable token, address spender) external {
+    /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
+    function approveMax(IERC20Upgradeable token, address spender) external onlyOwnerOrSelf {
         token.forceApprove(spender, type(uint256).max);
     }
 
@@ -190,8 +214,8 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
         if (newSigner == address(0)) {
             revert ZeroAddress();
         }
-        address oldSigner = BACKEND_SIGNER;
-        BACKEND_SIGNER = newSigner;
+        address oldSigner = backendSigner;
+        backendSigner = newSigner;
 
         emit BackendSignerUpdated(oldSigner, newSigner);
     }

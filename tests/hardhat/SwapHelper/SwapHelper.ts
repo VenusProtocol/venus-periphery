@@ -69,12 +69,12 @@ describe("SwapHelper", () => {
   describe("setBackendSigner", () => {
     it("should allow owner to change backend signer", async () => {
       const newSigner = userAddress;
-      expect(await swapHelper.BACKEND_SIGNER()).to.equal(ownerAddress);
+      expect(await swapHelper.backendSigner()).to.equal(ownerAddress);
 
       const tx = await swapHelper.connect(owner).setBackendSigner(newSigner);
       await expect(tx).to.emit(swapHelper, "BackendSignerUpdated").withArgs(ownerAddress, newSigner);
 
-      expect(await swapHelper.BACKEND_SIGNER()).to.equal(newSigner);
+      expect(await swapHelper.backendSigner()).to.equal(newSigner);
     });
 
     it("should prevent non-owner from changing backend signer", async () => {
@@ -107,9 +107,18 @@ describe("SwapHelper", () => {
       expect(await erc20.balanceOf(swapHelper.address)).to.equal(amount);
       expect(await erc20.balanceOf(userAddress)).to.equal(0);
 
-      await swapHelper.connect(user1).sweep(erc20.address, userAddress);
+      await swapHelper.connect(owner).sweep(erc20.address, userAddress);
       expect(await erc20.balanceOf(swapHelper.address)).to.equal(0);
       expect(await erc20.balanceOf(userAddress)).to.equal(amount);
+    });
+
+    it("should revert if called by non-owner outside multicall", async () => {
+      const amount = parseUnits("1000", 18);
+      await erc20.connect(owner).transfer(swapHelper.address, amount);
+      await expect(swapHelper.connect(user1).sweep(erc20.address, userAddress)).to.be.revertedWithCustomError(
+        swapHelper,
+        "CallerNotAuthorized",
+      );
     });
 
     it("should work within multicall", async () => {
@@ -142,8 +151,16 @@ describe("SwapHelper", () => {
     it("should approve maximum amount to a spender", async () => {
       const spender = user2Address;
       expect(await erc20.allowance(swapHelper.address, spender)).to.equal(0);
-      await swapHelper.connect(user1).approveMax(erc20.address, spender);
+      await swapHelper.connect(owner).approveMax(erc20.address, spender);
       expect(await erc20.allowance(swapHelper.address, spender)).to.equal(maxUint256);
+    });
+
+    it("should revert if called by non-owner outside multicall", async () => {
+      const spender = user2Address;
+      await expect(swapHelper.connect(user1).approveMax(erc20.address, spender)).to.be.revertedWithCustomError(
+        swapHelper,
+        "CallerNotAuthorized",
+      );
     });
 
     it("should work within multicall", async () => {
@@ -164,6 +181,16 @@ describe("SwapHelper", () => {
         { name: "salt", type: "bytes32" },
       ],
     };
+
+    it("should revert if calls array is empty", async () => {
+      const deadline = maxUint256;
+      const salt = ethers.utils.formatBytes32String("1");
+
+      await expect(swapHelper.connect(user1).multicall([], deadline, salt, "0x")).to.be.revertedWithCustomError(
+        swapHelper,
+        "NoCallsProvided",
+      );
+    });
 
     it("should emit MulticallExecuted event without signature", async () => {
       const amount = parseUnits("1", 18);
