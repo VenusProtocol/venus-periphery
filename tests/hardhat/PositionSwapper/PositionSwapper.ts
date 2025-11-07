@@ -173,7 +173,7 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   );
 
   const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
-  const swapHelper = await SwapHelperFactory.deploy(WBNB.address);
+  const swapHelper = await SwapHelperFactory.deploy(WBNB.address, admin.address);
 
   const positionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
   const positionSwapper = await upgrades.deployProxy(positionSwapperFactory, [], {

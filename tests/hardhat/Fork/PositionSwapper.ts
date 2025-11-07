@@ -29,6 +29,8 @@ const vWBNB_HOLDER = "0x6DF9aDc1837Bf37E0B1b943d59A7E50D9678c81B";
 const BORROWER_ADDRESSES = "0xF322942f644A996A617BD29c16bd7d231d9F35E9";
 const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
 
+const BORROW_TOLERANCE = parseEther("0.0005");
+
 const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 
 type SetupMarketFixture = {
@@ -269,11 +271,15 @@ if (FORK_MAINNET) {
         it("should partially swap vBNB to vWBNB for a user", async () => {
           const borrower = await initMainnetUser(BORROWER_ADDRESSES, ethers.utils.parseUnits("2"));
           const amountOfBorrow = parseEther("1");
+          const borrowerAddress = await borrower.getAddress();
 
           await vBNB.connect(borrower).borrow(amountOfBorrow);
 
-          const borrowedBalanceBefore = await vWBNB.callStatic.borrowBalanceCurrent(await borrower.getAddress());
-          expect(borrowedBalanceBefore).to.be.eq(0);
+          const borrowedBalanceBeforeVBNB = await vBNB.callStatic.borrowBalanceCurrent(borrowerAddress);
+          expect(borrowedBalanceBeforeVBNB).to.be.closeTo(amountOfBorrow, BORROW_TOLERANCE);
+
+          const borrowedBalanceBeforeVWBNB = await vWBNB.callStatic.borrowBalanceCurrent(borrowerAddress);
+          expect(borrowedBalanceBeforeVWBNB).to.be.eq(0);
 
           await coreComptroller.connect(borrower).updateDelegate(positionSwapper.address, true);
 
@@ -291,17 +297,25 @@ if (FORK_MAINNET) {
               wBNBSwapHelper.address,
             );
 
-          const borrowedBalanceAfter = await vWBNB.callStatic.borrowBalanceCurrent(await borrower.getAddress());
-          expect(borrowedBalanceAfter).to.be.eq(amountOfBorrowToSwap);
+          const borrowedBalanceAfterVWBNB = await vWBNB.callStatic.borrowBalanceCurrent(borrowerAddress);
+          expect(borrowedBalanceAfterVWBNB).to.be.closeTo(amountOfBorrowToSwap, BORROW_TOLERANCE);
+
+          const borrowedBalanceAfterVBNB = await vBNB.callStatic.borrowBalanceCurrent(borrowerAddress);
+          expect(borrowedBalanceAfterVBNB).to.be.lt(borrowedBalanceBeforeVBNB);
+          expect(borrowedBalanceBeforeVBNB.sub(borrowedBalanceAfterVBNB)).to.be.closeTo(
+            amountOfBorrowToSwap,
+            BORROW_TOLERANCE,
+          );
         });
 
         it("should swap full vBNB to vWBNB for a user", async () => {
           const borrower = await initMainnetUser(BORROWER_ADDRESSES, ethers.utils.parseUnits("2"));
           const amountOfBorrow = parseEther("1");
+          const borrowerAddress = await borrower.getAddress();
 
           await vBNB.connect(borrower).borrow(amountOfBorrow);
 
-          const borrowedBalanceBefore = await vWBNB.callStatic.borrowBalanceCurrent(await borrower.getAddress());
+          const borrowedBalanceBeforeVWBNB = await vWBNB.callStatic.borrowBalanceCurrent(borrowerAddress);
 
           await coreComptroller.connect(borrower).updateDelegate(positionSwapper.address, true);
 
@@ -309,10 +323,13 @@ if (FORK_MAINNET) {
 
           await positionSwapper
             .connect(borrower)
-            .swapFullDebt(await borrower.getAddress(), vBNB.address, vWBNB.address, wBNBSwapHelper.address);
+            .swapFullDebt(borrowerAddress, vBNB.address, vWBNB.address, wBNBSwapHelper.address);
 
-          const borrowedBalanceAfter = await vWBNB.callStatic.borrowBalanceCurrent(await borrower.getAddress());
-          expect(borrowedBalanceAfter).to.be.gt(borrowedBalanceBefore);
+          const borrowedBalanceAfterVWBNB = await vWBNB.callStatic.borrowBalanceCurrent(borrowerAddress);
+          expect(borrowedBalanceAfterVWBNB).to.be.gt(borrowedBalanceBeforeVWBNB);
+          const borrowedBalanceAfterVBNB = await vBNB.callStatic.borrowBalanceCurrent(borrowerAddress);
+          expect(borrowedBalanceAfterVWBNB).to.be.closeTo(borrowedBalanceBeforeVBNB, BORROW_TOLERANCE);
+          expect(borrowedBalanceAfterVBNB).to.be.lte(BORROW_TOLERANCE);
         });
       });
     });

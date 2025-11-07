@@ -7,4 +7,3 @@ import { Diamond } from "@venusprotocol/venus-protocol/contracts/Comptroller/Dia
 import { MockVBNB } from "@venusprotocol/venus-protocol/contracts/test/MockVBNB.sol";
 import { VBep20Harness } from "@venusprotocol/venus-protocol/contracts/test/VBep20Harness.sol";
 import { ComptrollerLens } from "@venusprotocol/venus-protocol/contracts/Lens/ComptrollerLens.sol";
-import { InterestRateModelHarness } from "@venusprotocol/venus-protocol/contracts/test/InterestRateModelHarness.sol";
