@@ -15,7 +15,7 @@ import { IWBNB } from "../Interfaces.sol";
  * @author Venus Protocol
  * @notice Helper contract for executing multiple token operations atomically
  * @dev This contract provides utilities for wrapping native tokens, managing approvals,
- *      and executing arbitrary calls in a single transaction. It supports optional
+ *      and executing arbitrary calls in a single transaction. It supports
  *      signature verification using EIP-712 for backend-authorized operations.
  *      All functions except multicall are designed to be called internally via multicall.
  * @custom:security-contact security@venus.io
@@ -79,6 +79,26 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @param salt Salt used for replay protection
     event MulticallExecuted(address indexed caller, uint256 callsCount, uint256 deadline, bytes32 salt);
 
+    /// @notice Event emitted when native asset is wrapped
+    /// @param amount Amount of native asset wrapped
+    event Wrapped(uint256 amount);
+
+    /// @notice Event emitted when tokens are swept from the contract
+    /// @param token Address of the token swept
+    /// @param to Recipient address
+    /// @param amount Amount of tokens swept
+    event Swept(address indexed token, address indexed to, uint256 amount);
+
+    /// @notice Event emitted when maximum approval is granted
+    /// @param token Address of the token approved
+    /// @param spender Address granted the approval
+    event ApprovedMax(address indexed token, address indexed spender);
+
+    /// @notice Event emitted when generic call is executed
+    /// @param target Address of the contract called
+    /// @param data Encoded function call data
+    event GenericCallExecuted(address indexed target, bytes data);
+
     /// @notice Constructor
     /// @param wrappedNative_ Address of the wrapped native asset contract
     /// @param backendSigner_ Address authorized to sign multicall operations
@@ -109,12 +129,12 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @param calls Array of encoded function calls to execute on this contract
     /// @param deadline Unix timestamp after which the transaction will revert
     /// @param salt Unique value to ensure this exact multicall can only be executed once
-    /// @param signature Optional EIP-712 signature from backend signer (empty bytes to skip verification)
+    /// @param signature Optional EIP-712 signature from backend signer
     /// @dev All calls are executed atomically - if any call fails, entire transaction reverts
     /// @dev Calls must be to functions on this contract (address(this))
     /// @dev Signature verification is only performed if signature.length != 0
     /// @dev Protected by nonReentrant modifier to prevent reentrancy attacks
-    /// @dev Emits MulticallExecuted event upon successful execution
+    /// @custom:event MulticallExecuted emitted upon successful execution
     /// @custom:security Only the contract itself can call wrap, sweep, approveMax, and genericCall
     /// @custom:error NoCallsProvided if calls array is empty
     /// @custom:error DeadlineReached if block.timestamp > deadline
@@ -170,6 +190,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
     function genericCall(address target, bytes calldata data) external payable onlyOwnerOrSelf {
         target.functionCall(data);
+        emit GenericCallExecuted(target, data);
     }
 
     /// @notice Wraps native asset into an ERC-20 wrapped token
@@ -181,6 +202,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
     function wrap(uint256 amount) external payable onlyOwnerOrSelf {
         WRAPPED_NATIVE.deposit{ value: amount }();
+        emit Wrapped(amount);
     }
 
     /// @notice Sweeps entire balance of an ERC-20 token to a specified address
@@ -191,7 +213,11 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @dev Should only be called via multicall
     /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
     function sweep(IERC20Upgradeable token, address to) external onlyOwnerOrSelf {
-        token.safeTransfer(to, token.balanceOf(address(this)));
+        uint256 amount = token.balanceOf(address(this));
+        if (amount > 0) {
+            token.safeTransfer(to, amount);
+        }
+        emit Swept(address(token), to, amount);
     }
 
     /// @notice Approves maximum amount of an ERC-20 token to a specified spender
@@ -204,6 +230,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
     function approveMax(IERC20Upgradeable token, address spender) external onlyOwnerOrSelf {
         token.forceApprove(spender, type(uint256).max);
+        emit ApprovedMax(address(token), spender);
     }
 
     /// @notice Updates the backend signer address
@@ -217,10 +244,9 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
         if (newSigner == address(0)) {
             revert ZeroAddress();
         }
-        address oldSigner = backendSigner;
-        backendSigner = newSigner;
 
-        emit BackendSignerUpdated(oldSigner, newSigner);
+        emit BackendSignerUpdated(backendSigner, newSigner);
+        backendSigner = newSigner;
     }
 
     /// @notice Produces an EIP-712 digest of the multicall data

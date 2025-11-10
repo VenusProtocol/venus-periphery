@@ -119,6 +119,32 @@ describe("SwapHelper", () => {
       await swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: amount });
       expect(await wBNB.balanceOf(swapHelper.address)).to.equal(amount);
     });
+
+    it("should emit Wrapped event", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
+      const amount = parseUnits("1", 18);
+      const wrapData = await swapHelper.populateTransaction.wrap(amount);
+      const calls = [wrapData.data!];
+      const deadline = maxUint256;
+      const salt = ethers.utils.formatBytes32String("11");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+
+      await expect(swapHelper.connect(user1).multicall(calls, deadline, salt, signature, { value: amount }))
+        .to.emit(swapHelper, "Wrapped")
+        .withArgs(amount);
+    });
   });
 
   describe("sweep", () => {
@@ -183,7 +209,6 @@ describe("SwapHelper", () => {
         ],
       };
       const amount = parseUnits("1", 18);
-      expect(await wBNB.balanceOf(userAddress)).to.equal(0);
       const wrapData = await swapHelper.populateTransaction.wrap(amount);
       const sweepData = await swapHelper.populateTransaction.sweep(wBNB.address, userAddress);
       const calls = [wrapData.data!, sweepData.data!];
@@ -194,6 +219,51 @@ describe("SwapHelper", () => {
       expect(await wBNB.balanceOf(swapHelper.address)).to.equal(0);
       expect(await wBNB.balanceOf(userAddress)).to.equal(amount);
     });
+
+    it("should handle sweep when balance is zero", async () => {
+      const balanceBefore = await erc20.balanceOf(userAddress);
+      expect(await erc20.balanceOf(swapHelper.address)).to.equal(0);
+
+      await swapHelper.connect(owner).sweep(erc20.address, userAddress);
+
+      expect(await erc20.balanceOf(swapHelper.address)).to.equal(0);
+      expect(await erc20.balanceOf(userAddress)).to.equal(balanceBefore);
+    });
+
+    it("should emit Swept event", async () => {
+      const domain = {
+        chainId: network.config.chainId,
+        name: "VenusSwap",
+        verifyingContract: swapHelper.address,
+        version: "1",
+      };
+      const types = {
+        Multicall: [
+          { name: "calls", type: "bytes[]" },
+          { name: "deadline", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+        ],
+      };
+      const amount = parseUnits("1000", 18);
+      await erc20.connect(owner).transfer(swapHelper.address, amount);
+      const sweepData = await swapHelper.populateTransaction.sweep(erc20.address, userAddress);
+      const calls = [sweepData.data!];
+      const deadline = maxUint256;
+      const salt = ethers.utils.formatBytes32String("12");
+      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+
+      await expect(swapHelper.connect(user1).multicall(calls, deadline, salt, signature))
+        .to.emit(swapHelper, "Swept")
+        .withArgs(erc20.address, userAddress, amount);
+    });
+
+    it("should emit Swept event with zero amount when balance is zero", async () => {
+      expect(await erc20.balanceOf(swapHelper.address)).to.equal(0);
+
+      await expect(swapHelper.connect(owner).sweep(erc20.address, userAddress))
+        .to.emit(swapHelper, "Swept")
+        .withArgs(erc20.address, userAddress, 0);
+    });
   });
 
   describe("approveMax", () => {
@@ -202,6 +272,14 @@ describe("SwapHelper", () => {
       expect(await erc20.allowance(swapHelper.address, spender)).to.equal(0);
       await swapHelper.connect(owner).approveMax(erc20.address, spender);
       expect(await erc20.allowance(swapHelper.address, spender)).to.equal(maxUint256);
+    });
+
+    it("should emit ApprovedMax event", async () => {
+      const spender = user2Address;
+
+      await expect(swapHelper.connect(owner).approveMax(erc20.address, spender))
+        .to.emit(swapHelper, "ApprovedMax")
+        .withArgs(erc20.address, spender);
     });
 
     it("should revert if called by non-owner outside multicall", async () => {
