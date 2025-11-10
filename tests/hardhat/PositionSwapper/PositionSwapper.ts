@@ -1,9 +1,9 @@
 import { FakeContract, smock } from "@defi-wonderland/smock";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
-import { Contract, Signer } from "ethers";
+import { BigNumber, Contract, Signer, Wallet } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
-import { ethers, upgrades } from "hardhat";
+import { ethers, network, upgrades } from "hardhat";
 
 import {
   ComptrollerLensInterface,
@@ -202,7 +202,7 @@ describe("positionSwapper", () => {
   let vBNB: MockVBNB;
   let WBNB: WBNB;
   let vWBNB: VBep20Harness;
-  let admin: Signer;
+  let admin: Wallet;
   let user1: Signer;
   let comptroller: ComptrollerMock;
   let positionSwapper: PositionSwapper;
@@ -224,6 +224,48 @@ describe("positionSwapper", () => {
     await vBUSD.mint(parseUnits("20", 18));
     user1Address = await user1.getAddress();
   });
+
+  async function createSweepMulticallData(
+    token: EIP20Interface,
+    recipient: string,
+    amount: BigNumber,
+    signer: Wallet,
+    salt: string,
+  ): Promise<string> {
+    const tokenAddress = token.address;
+
+    // Transfer token to swapHelper if amount is provided
+    if (amount) {
+      await token.transfer(swapHelper.address, amount);
+    }
+
+    // Encode sweep function call
+    const sweepData = swapHelper.interface.encodeFunctionData("sweep", [tokenAddress, recipient]);
+
+    // Create EIP-712 signature
+    const domain = {
+      chainId: network.config.chainId,
+      name: "VenusSwap",
+      verifyingContract: swapHelper.address,
+      version: "1",
+    };
+    const types = {
+      Multicall: [
+        { name: "calls", type: "bytes[]" },
+        { name: "deadline", type: "uint256" },
+        { name: "salt", type: "bytes32" },
+      ],
+    };
+    const calls = [sweepData];
+    const deadline = "17627727131762772187";
+    const saltValue = salt || ethers.utils.formatBytes32String(Math.random().toString());
+    const signature = await signer._signTypedData(domain, types, { calls, deadline, salt: saltValue });
+
+    // Encode multicall with all parameters
+    const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
+
+    return multicallData;
+  }
 
   describe("swapCollateralNativeToWrapped", () => {
     it("should swapCollateralNativeToWrapped from vBNB to vWBNB", async () => {
@@ -259,25 +301,33 @@ describe("positionSwapper", () => {
   describe("swapCollateral", () => {
     it("should swapFullCollateral from vWBNB to vUSDT", async () => {
       // Work Around for Unit test call sweep insted of swap calldata
-      await USDT.transfer(swapHelper.address, parseUnits("12", 18));
-      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
-      const swapData = [sweepData];
-
+      const multicallData = await createSweepMulticallData(
+        USDT,
+        positionSwapper.address,
+        parseUnits("12", 18),
+        admin,
+        ethers.utils.formatBytes32String("2"),
+      );
       // Add some Collateral to vWBNB
       await vWBNB.mintBehalf(user1Address, parseUnits("12", 18));
       expect(await vUSDT.callStatic.balanceOf(user1Address)).to.eq(parseUnits("0", 18));
       // Swap Collateral
       await positionSwapper
         .connect(user1)
-        .swapFullCollateral(user1Address, vWBNB.address, vUSDT.address, parseUnits("11", 18), swapData);
+        .swapFullCollateral(user1Address, vWBNB.address, vUSDT.address, parseUnits("11", 18), [multicallData]);
       expect(await vUSDT.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("12", 18));
     });
 
     it("should swapCollateralWithAmount from vWBNB to vUSDT (partial) and verify both balances", async () => {
       // Work Around for Unit test call sweep instead of swap calldata
-      await USDT.transfer(swapHelper.address, parseUnits("5", 18));
-      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
-      const swapData = [sweepData];
+      const multicallData = await createSweepMulticallData(
+        USDT,
+        positionSwapper.address,
+        parseUnits("5", 18),
+        admin,
+        ethers.utils.formatBytes32String("3"),
+      );
+      const swapData = [multicallData];
 
       // Add some Collateral to vWBNB (12)
       await vWBNB.mintBehalf(user1Address, parseUnits("12", 18));
@@ -311,9 +361,14 @@ describe("positionSwapper", () => {
       expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
       expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
 
-      await USDT.transfer(swapHelper.address, parseUnits("3", 18));
-      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
-      const swapData = [sweepData];
+      const multicallData = await createSweepMulticallData(
+        USDT,
+        positionSwapper.address,
+        parseUnits("3", 18),
+        admin,
+        ethers.utils.formatBytes32String("4"),
+      );
+      const swapData = [multicallData];
 
       // Swap Debt
       await positionSwapper
@@ -333,9 +388,14 @@ describe("positionSwapper", () => {
       expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
 
       // Provide USDT for the sweep to simulate swap output (repay 2)
-      await USDT.transfer(swapHelper.address, parseUnits("2", 18));
-      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
-      const swapData = [sweepData];
+      const multicallData = await createSweepMulticallData(
+        USDT,
+        positionSwapper.address,
+        parseUnits("2", 18),
+        admin,
+        ethers.utils.formatBytes32String("5"),
+      );
+      const swapData = [multicallData];
 
       // Swap only part of the debt; repay 2 USDT, open 3 BUSD
       await positionSwapper
@@ -389,9 +449,14 @@ describe("positionSwapper", () => {
       expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
       expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
 
-      await USDT.transfer(swapHelper.address, parseUnits("3", 18));
-      const sweepData = swapHelper.interface.encodeFunctionData("sweep", [USDT.address, positionSwapper.address]);
-      const swapData = [sweepData];
+      const multicallData = await createSweepMulticallData(
+        USDT,
+        positionSwapper.address,
+        parseUnits("3", 18),
+        admin,
+        ethers.utils.formatBytes32String("6"),
+      );
+      const swapData = [multicallData];
 
       // Swap Debt: request to open 4 BUSD debt; with fee, borrowed amount > 4, but fee is repaid
       await positionSwapper

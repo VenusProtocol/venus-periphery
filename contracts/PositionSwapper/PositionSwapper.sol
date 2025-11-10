@@ -392,7 +392,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             payable(address(this)),
             borrowedMarkets,
             flashLoanAmounts,
-            abi.encodeWithSelector(ISwapHelper.multicall.selector, swapData)
+            swapData[0]
         );
 
         _refundDustToUser(user, marketFrom, fromBalanceBefore);
@@ -448,7 +448,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
             payable(address(this)),
             borrowedMarkets,
             flashLoanAmounts,
-            abi.encodeWithSelector(ISwapHelper.multicall.selector, swapData)
+            swapData[0]
         );
 
         _refundDustToUser(user, marketFrom, fromBalanceBeforeDebt);
