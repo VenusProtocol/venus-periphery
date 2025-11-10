@@ -12,7 +12,7 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuar
  * @title SwapHelper
  * @author Venus Protocol
  * @notice Helper contract for executing multiple token operations atomically
- * @dev This contract provides utilities for wrapping native tokens, managing approvals,
+ * @dev This contract provides utilities for managing approvals,
  *      and executing arbitrary calls in a single transaction. It supports
  *      signature verification using EIP-712 for backend-authorized operations.
  *      All functions except multicall are designed to be called internally via multicall.
@@ -123,7 +123,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @dev Signature verification is only performed if signature.length != 0
     /// @dev Protected by nonReentrant modifier to prevent reentrancy attacks
     /// @custom:event MulticallExecuted emitted upon successful execution
-    /// @custom:security Only the contract itself can call wrap, sweep, approveMax, and genericCall
+    /// @custom:security Only the contract itself can call sweep, approveMax, and genericCall
     /// @custom:error NoCallsProvided if calls array is empty
     /// @custom:error DeadlineReached if block.timestamp > deadline
     /// @custom:error SaltAlreadyUsed if salt has been used before
