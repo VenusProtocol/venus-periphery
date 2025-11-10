@@ -8,8 +8,6 @@ import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-import { IWBNB } from "../Interfaces.sol";
-
 /**
  * @title SwapHelper
  * @author Venus Protocol
@@ -27,9 +25,6 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @notice EIP-712 typehash for Multicall struct used in signature verification
     /// @dev keccak256("Multicall(bytes[] calls,uint256 deadline,bytes32 salt)")
     bytes32 internal constant MULTICALL_TYPEHASH = keccak256("Multicall(bytes[] calls,uint256 deadline,bytes32 salt)");
-
-    /// @notice Wrapped native asset contract (e.g., WBNB, WETH)
-    IWBNB public immutable WRAPPED_NATIVE;
 
     /// @notice Address authorized to sign multicall operations
     /// @dev Can be updated by contract owner via setBackendSigner
@@ -79,10 +74,6 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @param salt Salt used for replay protection
     event MulticallExecuted(address indexed caller, uint256 callsCount, uint256 deadline, bytes32 salt);
 
-    /// @notice Event emitted when native asset is wrapped
-    /// @param amount Amount of native asset wrapped
-    event Wrapped(uint256 amount);
-
     /// @notice Event emitted when tokens are swept from the contract
     /// @param token Address of the token swept
     /// @param to Recipient address
@@ -100,19 +91,16 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     event GenericCallExecuted(address indexed target, bytes data);
 
     /// @notice Constructor
-    /// @param wrappedNative_ Address of the wrapped native asset contract
     /// @param backendSigner_ Address authorized to sign multicall operations
     /// @dev Initializes EIP-712 domain with name "VenusSwap" and version "1"
     /// @dev Transfers ownership to msg.sender
-    /// @dev Reverts with ZeroAddress if either parameter is address(0)
-    /// @custom:error ZeroAddress if wrappedNative_ is address(0)
+    /// @dev Reverts with ZeroAddress if parameter is address(0)
     /// @custom:error ZeroAddress if backendSigner_ is address(0)
-    constructor(address wrappedNative_, address backendSigner_) EIP712("VenusSwap", "1") {
-        if (wrappedNative_ == address(0) || backendSigner_ == address(0)) {
+    constructor(address backendSigner_) EIP712("VenusSwap", "1") {
+        if (backendSigner_ == address(0)) {
             revert ZeroAddress();
         }
 
-        WRAPPED_NATIVE = IWBNB(wrappedNative_);
         backendSigner = backendSigner_;
     }
 
@@ -145,7 +133,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
         uint256 deadline,
         bytes32 salt,
         bytes calldata signature
-    ) external payable nonReentrant {
+    ) external nonReentrant {
         if (calls.length == 0) {
             revert NoCallsProvided();
         }
@@ -188,21 +176,9 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @custom:security Use with extreme caution - can call any contract with any data
     /// @custom:security Ensure proper validation of target and data in off-chain systems
     /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
-    function genericCall(address target, bytes calldata data) external payable onlyOwnerOrSelf {
+    function genericCall(address target, bytes calldata data) external onlyOwnerOrSelf {
         target.functionCall(data);
         emit GenericCallExecuted(target, data);
-    }
-
-    /// @notice Wraps native asset into an ERC-20 wrapped token
-    /// @param amount Amount of native asset to wrap (must match msg.value)
-    /// @dev Calls deposit() on WRAPPED_NATIVE contract with msg.value
-    /// @dev Wrapped tokens remain in this contract until swept
-    /// @dev Should only be called via multicall
-    /// @custom:security Ensure msg.value matches amount parameter
-    /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
-    function wrap(uint256 amount) external payable onlyOwnerOrSelf {
-        WRAPPED_NATIVE.deposit{ value: amount }();
-        emit Wrapped(amount);
     }
 
     /// @notice Sweeps entire balance of an ERC-20 token to a specified address
