@@ -8,3 +8,5 @@ import { Diamond } from "@venusprotocol/venus-protocol/contracts/Comptroller/Dia
 import { MockVBNB } from "@venusprotocol/venus-protocol/contracts/test/MockVBNB.sol";
 import { VBep20Harness } from "@venusprotocol/venus-protocol/contracts/test/VBep20Harness.sol";
 import { ComptrollerLens } from "@venusprotocol/venus-protocol/contracts/Lens/ComptrollerLens.sol";
+import { ChainlinkOracle } from "@venusprotocol/oracle/contracts/oracles/ChainlinkOracle.sol";
+import { BinanceOracle } from "@venusprotocol/oracle/contracts/oracles/BinanceOracle.sol";

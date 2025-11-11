@@ -286,7 +286,7 @@ describe("positionSwapper", () => {
     it("should swapDebtNativeToWrapped from vBNB to vWBNB", async () => {
       // Create a Debt for User1 on vBNB market
       await vUSDT.mintBehalf(user1Address, parseEther("15"));
-      await comptroller.enterMarket(user1Address, vUSDT.address);
+      await comptroller.connect(user1).enterMarkets([vUSDT.address]);
       await vBNB.connect(user1).borrow(parseEther("2"));
       expect(await vBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("2"));
       expect(await vWBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
@@ -316,6 +316,7 @@ describe("positionSwapper", () => {
         .connect(user1)
         .swapFullCollateral(user1Address, vWBNB.address, vUSDT.address, parseUnits("11", 18), [multicallData]);
       expect(await vUSDT.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("12", 18));
+      expect(await vWBNB.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("0", 18));
     });
 
     it("should swapCollateralWithAmount from vWBNB to vUSDT (partial) and verify both balances", async () => {
@@ -356,11 +357,10 @@ describe("positionSwapper", () => {
     it("should swapFullDebt from vWBNB to vUSDT", async () => {
       // Create a Debt for User1 on vUSDT market
       await vWBNB.mintBehalf(user1Address, parseEther("15"));
-      await comptroller.enterMarket(user1Address, vUSDT.address);
+      await comptroller.connect(user1).enterMarkets([vUSDT.address]);
       await vUSDT.connect(user1).borrow(parseEther("3"));
       expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
       expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
-
       const multicallData = await createSweepMulticallData(
         USDT,
         positionSwapper.address,
@@ -382,7 +382,7 @@ describe("positionSwapper", () => {
     it("should swapDebtWithAmount from vUSDT to vBUSD (partial)", async () => {
       // Create a Debt for User1 on vUSDT market
       await vWBNB.mintBehalf(user1Address, parseEther("15"));
-      await comptroller.enterMarket(user1Address, vUSDT.address);
+      await comptroller.connect(user1).enterMarkets([vUSDT.address]);
       await vUSDT.connect(user1).borrow(parseEther("3"));
       expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
       expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
@@ -444,7 +444,7 @@ describe("positionSwapper", () => {
     it("should swapFullDebt with fee and keep target debt equal to requested amount", async () => {
       // Create a Debt for User1 on vUSDT market
       await vWBNB.mintBehalf(user1Address, parseEther("15"));
-      await comptroller.enterMarket(user1Address, vUSDT.address);
+      await comptroller.connect(user1).enterMarkets([vUSDT.address]);
       await vUSDT.connect(user1).borrow(parseEther("3"));
       expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
       expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
