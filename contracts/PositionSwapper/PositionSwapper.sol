@@ -2,8 +2,13 @@
 pragma solidity 0.8.28;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
-import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import {
+    SafeERC20Upgradeable,
+    IERC20Upgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import {
+    ReentrancyGuardUpgradeable
+} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { IVToken, IComptroller, IWBNB, IVBNB, IFlashLoanReceiver } from "../Interfaces.sol";
 import { ISwapHelper } from "../SwapHelper/ISwapHelper.sol";
 import { IPositionSwapper } from "./IPositionSwapper.sol";
@@ -221,10 +226,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     }
 
     /**
-      * @notice Swaps a specific amount of debt from one market to another.
-      * @dev - FlashLoan fee: `maxDebtAmountToOpen` must include headroom to cover the flash-loan fee.
-      *      - Slippage: `maxDebtAmountToOpen` caps how much can be borrowed; if set high, the swap may consume up
-      *        to this amount and any leftover/refund depends on the swap API invoked via `swapData`.
+     * @notice Swaps a specific amount of debt from one market to another.
+     * @dev - FlashLoan fee: `maxDebtAmountToOpen` must include headroom to cover the flash-loan fee.
+     *      - Slippage: `maxDebtAmountToOpen` caps how much can be borrowed; if set high, the swap may consume up
+     *        to this amount and any leftover/refund depends on the swap API invoked via `swapData`.
      * @dev User needs to add this PositionSwapper contract to their approved delegates to use this function.
      * @param user The address whose debt is being swapped.
      * @param marketFrom The vToken market from which debt is swapped.
@@ -285,7 +290,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         _checkMarketListed(marketFrom);
         _checkMarketListed(marketTo);
         _checkUserAuthorized(user);
-        _checkAccountSafe(user);
 
         IVToken[] memory borrowedMarkets = new IVToken[](1);
         borrowedMarkets[0] = WRAPPED_NATIVE_MARKET;
@@ -322,7 +326,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         _checkMarketListed(marketFrom);
         _checkMarketListed(marketTo);
         _checkUserAuthorized(user);
-        _checkAccountSafe(user);
 
         transientDebtRepaymentAmount = debtRepaymentAmount;
         IVToken[] memory borrowedMarkets = new IVToken[](1);
@@ -368,7 +371,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         _checkMarketListed(marketFrom);
         _checkMarketListed(marketTo);
         _checkUserAuthorized(user);
-        _checkAccountSafe(user);
 
         transientMarketFrom = marketFrom;
         transientMarketTo = marketTo;
@@ -424,7 +426,6 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         _checkMarketListed(marketFrom);
         _checkMarketListed(marketTo);
         _checkUserAuthorized(user);
-        _checkAccountSafe(user);
 
         transientMarketFrom = marketFrom;
         transientMarketTo = marketTo;
@@ -796,11 +797,11 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param user The account for which membership is validated/updated.
      * @param marketFrom The current vToken market the user participates in.
      * @param marketTo The target vToken market the user must enter.
-     * @custom:error EnterMarketFailed When Comptroller.enterMarket returns a non-zero error code
+     * @custom:error EnterMarketFailed When Comptroller.enterMarketBehalf returns a non-zero error code
      */
     function _validateAndEnterMarket(address user, IVToken marketFrom, IVToken marketTo) internal {
         if (COMPTROLLER.checkMembership(user, marketFrom) && !COMPTROLLER.checkMembership(user, marketTo)) {
-            uint256 err = COMPTROLLER.enterMarket(user, address(marketTo));
+            uint256 err = COMPTROLLER.enterMarketBehalf(user, address(marketTo));
             if (err != 0) revert EnterMarketFailed(err);
         }
     }
