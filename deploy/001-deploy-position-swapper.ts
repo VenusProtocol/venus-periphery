@@ -9,6 +9,8 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 
   const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
   const vBNBDeployment = await deployments.get("vBNB");
+   const vWBNBDeploymentAddress = "0x6bCa74586218dB34cdB402295796b79663d816e9";
+
   const comptrollerDeployment = await deployments.get("Unitroller");
   const timelock = await deployments.get("NormalTimelock");
 
@@ -18,10 +20,12 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
   );
 
+  const swapHelper = await ethers.getContract("SwapHelper");
+
   await deploy("PositionSwapper", {
     from: deployer,
     log: true,
-    args: [comptrollerDeployment.address, vBNBDeployment.address],
+    args: [comptrollerDeployment.address, swapHelper.address, WBNB_ADDRESS, vBNBDeployment.address, vWBNBDeploymentAddress],
     proxy: {
       owner: network.name === "hardhat" ? deployer : timelock.address,
       proxyContract: "OptimizedTransparentUpgradeableProxy",
@@ -35,25 +39,9 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
       },
     },
   });
-
-  const positionSwapper = await ethers.getContract("PositionSwapper");
-
-  await deploy("WBNBSwapHelper", {
-    from: deployer,
-    args: [positionSwapper.address, WBNB_ADDRESS],
-    log: true,
-    skipIfAlreadyDeployed: true,
-  });
-
-  if ((await positionSwapper.owner) === deployer) {
-    console.log("Transferring ownership to Normal Timelock ....");
-    const tx = await positionSwapper.transferOwnership(timelock.address);
-    await tx.wait();
-    console.log("Ownership transferred to Normal Timelock");
-  }
 };
 
 func.tags = ["PositionSwapper"];
-func.skip = async hre => hre.network.name === "hardhat";
+// func.skip = async hre => hre.network.name === "hardhat";
 
 export default func;

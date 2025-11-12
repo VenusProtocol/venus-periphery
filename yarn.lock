@@ -2076,34 +2076,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/hardhat-toolbox@npm:^2.0.0":
-  version: 2.0.2
-  resolution: "@nomicfoundation/hardhat-toolbox@npm:2.0.2"
-  peerDependencies:
-    "@ethersproject/abi": ^5.4.7
-    "@ethersproject/providers": ^5.4.7
-    "@nomicfoundation/hardhat-chai-matchers": ^1.0.0
-    "@nomicfoundation/hardhat-network-helpers": ^1.0.0
-    "@nomiclabs/hardhat-ethers": ^2.0.0
-    "@nomiclabs/hardhat-etherscan": ^3.0.0
-    "@typechain/ethers-v5": ^10.1.0
-    "@typechain/hardhat": ^6.1.2
-    "@types/chai": ^4.2.0
-    "@types/mocha": ">=9.1.0"
-    "@types/node": ">=12.0.0"
-    chai: ^4.2.0
-    ethers: ^5.4.7
-    hardhat: ^2.11.0
-    hardhat-gas-reporter: ^1.0.8
-    solidity-coverage: ^0.8.1
-    ts-node: ">=8.0.0"
-    typechain: ^8.1.0
-    typescript: ">=4.5.0"
-  checksum: a2eafb709acbabe40de4871c4e8684a03098f045dba4fc6c6e9281358d072f386a668488c109e2a36b8eade01dc4c4f9e8a76fa45c92591857c590c6e19f1ae7
-  languageName: node
-  linkType: hard
-
-"@nomicfoundation/hardhat-verify@npm:^2.0.8":
+"@nomicfoundation/hardhat-verify@npm:^2.0.14, @nomicfoundation/hardhat-verify@npm:^2.0.8":
   version: 2.1.1
   resolution: "@nomicfoundation/hardhat-verify@npm:2.1.1"
   dependencies:
@@ -2228,26 +2201,6 @@ __metadata:
     ethers: ^5.0.0
     hardhat: ^2.0.0
   checksum: 72321317e55eb510306e04c42353c5f7ceb42d086fc76cc740120da6e1635b7ad5bbf23a8d6b02bd590754adcf646618933111624085ab249b1ff3482e773226
-  languageName: node
-  linkType: hard
-
-"@nomiclabs/hardhat-etherscan@npm:^3.0.3":
-  version: 3.1.8
-  resolution: "@nomiclabs/hardhat-etherscan@npm:3.1.8"
-  dependencies:
-    "@ethersproject/abi": ^5.1.2
-    "@ethersproject/address": ^5.0.2
-    cbor: ^8.1.0
-    chalk: ^2.4.2
-    debug: ^4.1.1
-    fs-extra: ^7.0.1
-    lodash: ^4.17.11
-    semver: ^6.3.0
-    table: ^6.8.0
-    undici: ^5.14.0
-  peerDependencies:
-    hardhat: ^2.0.4
-  checksum: 13864380d104705a54668adf2fb37a87d1147a064c1d29dbc356390e7254d5c7501b9b3af9c4ec2f9d9ff642a01417d5d35970d626fe706f5f4830820ae89ecb
   languageName: node
   linkType: hard
 
@@ -4252,7 +4205,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@venusprotocol/governance-contracts@npm:^2.11.0, @venusprotocol/governance-contracts@npm:^2.12.0, @venusprotocol/governance-contracts@npm:^2.9.0":
+"@venusprotocol/governance-contracts@npm:^2.12.0, @venusprotocol/governance-contracts@npm:^2.9.0":
   version: 2.12.0
   resolution: "@venusprotocol/governance-contracts@npm:2.12.0"
   dependencies:
@@ -4260,6 +4213,17 @@ __metadata:
     hardhat-deploy-ethers: ^0.3.0-beta.13
     module-alias: ^2.2.2
   checksum: 7ba150d1e61db3a8e7d0653fa7b7b5b0f1f7e709f9d55ff4a03f4fcf2892dd30fd6cb569fc927ba736c9c1444104bd3b1e07c917c76cb8f4dee938bcb0dca762
+  languageName: node
+  linkType: hard
+
+"@venusprotocol/governance-contracts@npm:^2.13.0":
+  version: 2.13.0
+  resolution: "@venusprotocol/governance-contracts@npm:2.13.0"
+  dependencies:
+    "@venusprotocol/solidity-utilities": 2.0.0
+    hardhat-deploy-ethers: ^0.3.0-beta.13
+    module-alias: ^2.2.2
+  checksum: 329b35ac75ce18a1f7aa785b321f8f124f75a82cfe06cb1b9fb65ecbe19771cae2760bdc37ffd3208e6f56c431358d76c95b4a0b7766eb669df7adca0a017342
   languageName: node
   linkType: hard
 
@@ -4302,6 +4266,28 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@venusprotocol/oracle@npm:^2.12.0":
+  version: 2.14.0
+  resolution: "@venusprotocol/oracle@npm:2.14.0"
+  dependencies:
+    "@chainlink/contracts": ^0.5.1
+    "@defi-wonderland/smock": 2.4.0
+    "@nomicfoundation/hardhat-network-helpers": ^1.0.8
+    "@openzeppelin/contracts": ^4.6.0
+    "@openzeppelin/contracts-upgradeable": ^4.7.3
+    "@venusprotocol/governance-contracts": ^2.13.0
+    "@venusprotocol/solidity-utilities": ^2.0.0
+    "@venusprotocol/venus-protocol": ^9.7.0
+    ethers: ^5.6.8
+    hardhat: 2.22.18
+    hardhat-deploy: ^0.12.4
+    module-alias: ^2.2.2
+    patch-package: ^8.0.0
+    solidity-docgen: ^0.6.0-beta.29
+  checksum: e10a6b303cb2d41f158fdae300d030f9fb506e0d389414a7b94fdada89bd322ad3e452a8b929a8e42602dd93e380916bbc86c9ba58fdf5178d38fbbb71edadb8
+  languageName: node
+  linkType: hard
+
 "@venusprotocol/protocol-reserve@npm:^3.2.0, @venusprotocol/protocol-reserve@npm:^3.3.0":
   version: 3.3.0
   resolution: "@venusprotocol/protocol-reserve@npm:3.3.0"
@@ -4320,6 +4306,27 @@ __metadata:
     hardhat-deploy: ^0.14.0
     module-alias: ^2.2.2
   checksum: 0f2d80a6f5b70d52f4c216996bc1e76cf3d17740890e48ff07e33675f902e0cdc8a663113e9cb69c3f71b9bf46d020ed1acfc7784e8c2f47b61dc83dd10d7fda
+  languageName: node
+  linkType: hard
+
+"@venusprotocol/protocol-reserve@npm:^3.4.0":
+  version: 3.4.0
+  resolution: "@venusprotocol/protocol-reserve@npm:3.4.0"
+  dependencies:
+    "@nomiclabs/hardhat-ethers": ^2.2.3
+    "@openzeppelin/contracts": ^4.8.3
+    "@openzeppelin/contracts-upgradeable": ^4.8.3
+    "@openzeppelin/hardhat-upgrades": ^1.21.0
+    "@solidity-parser/parser": ^0.13.2
+    "@venusprotocol/governance-contracts": ^2.13.0
+    "@venusprotocol/isolated-pools": ^4.0.0
+    "@venusprotocol/oracle": ^2.12.0
+    "@venusprotocol/solidity-utilities": ^2.0.3
+    "@venusprotocol/venus-protocol": ^9.7.0
+    ethers: ^5.7.0
+    hardhat-deploy: ^0.14.0
+    module-alias: ^2.2.2
+  checksum: 55eea3af6e7b427d552e97641f12b2738ebe404644fd76a44cdae43e6648613608925fdae6602901eb791b03bf6978af8bbc45dff14128b4765fe6ab8916e592
   languageName: node
   linkType: hard
 
@@ -4345,6 +4352,21 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@venusprotocol/token-bridge@npm:^2.7.0":
+  version: 2.7.0
+  resolution: "@venusprotocol/token-bridge@npm:2.7.0"
+  dependencies:
+    "@layerzerolabs/solidity-examples": ^1.0.0
+    "@openzeppelin/contracts": ^4.8.3
+    "@openzeppelin/contracts-upgradeable": ^4.8.3
+    "@openzeppelin/hardhat-upgrades": ^1.21.0
+    "@solidity-parser/parser": ^0.13.2
+    ethers: ^5.7.0
+    module-alias: ^2.2.2
+  checksum: 4a5a028632ebafff6401cc03b6ff0194d2d63c16aae4030b0461bebc8e028484feca877065bbfad2891581b5c94dd41d0c209d3fb60d174841bf008d9ea51203
+  languageName: node
+  linkType: hard
+
 "@venusprotocol/venus-periphery@workspace:.":
   version: 0.0.0-use.local
   resolution: "@venusprotocol/venus-periphery@workspace:."
@@ -4358,9 +4380,8 @@ __metadata:
     "@matterlabs/hardhat-zksync-verify": 0.7.0
     "@nomicfoundation/hardhat-chai-matchers": ^1.0.3
     "@nomicfoundation/hardhat-network-helpers": ^1.0.4
-    "@nomicfoundation/hardhat-toolbox": ^2.0.0
+    "@nomicfoundation/hardhat-verify": ^2.0.14
     "@nomiclabs/hardhat-ethers": ^2.2.3
-    "@nomiclabs/hardhat-etherscan": ^3.0.3
     "@openzeppelin/contracts": ^4.8.3
     "@openzeppelin/contracts-upgradeable": ^4.8.3
     "@openzeppelin/hardhat-upgrades": ^1.21.0
@@ -4382,7 +4403,7 @@ __metadata:
     "@venusprotocol/oracle": ^2.13.0
     "@venusprotocol/protocol-reserve": ^3.3.0
     "@venusprotocol/solidity-utilities": 2.0.3
-    "@venusprotocol/venus-protocol": "file:../venus-protocol/venusprotocol-venus-protocol-9.8.0-dev.20.tgz"
+    "@venusprotocol/venus-protocol": 10.0.0
     bignumber.js: 9.0.0
     chai: ^4.3.6
     dotenv: ^10.0.0
@@ -4415,21 +4436,22 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@venusprotocol/venus-protocol@file:../venus-protocol/venusprotocol-venus-protocol-9.8.0-dev.20.tgz::locator=%40venusprotocol%2Fvenus-periphery%40workspace%3A.":
-  version: 9.8.0-dev.20
-  resolution: "@venusprotocol/venus-protocol@file:../venus-protocol/venusprotocol-venus-protocol-9.8.0-dev.20.tgz::locator=%40venusprotocol%2Fvenus-periphery%40workspace%3A."
+"@venusprotocol/venus-protocol@npm:10.0.0":
+  version: 10.0.0
+  resolution: "@venusprotocol/venus-protocol@npm:10.0.0"
   dependencies:
     "@nomicfoundation/hardhat-ethers": ^3.0.0
     "@openzeppelin/contracts": 4.9.3
     "@openzeppelin/contracts-upgradeable": ^4.8.0
-    "@venusprotocol/governance-contracts": ^2.11.0
-    "@venusprotocol/protocol-reserve": ^3.2.0
+    "@venusprotocol/governance-contracts": ^2.13.0
+    "@venusprotocol/protocol-reserve": ^3.4.0
     "@venusprotocol/solidity-utilities": ^2.1.0
-    "@venusprotocol/token-bridge": ^2.6.0
+    "@venusprotocol/token-bridge": ^2.7.0
     bignumber.js: ^9.1.2
     dotenv: ^16.0.1
     module-alias: ^2.2.2
-  checksum: 6d2004a186a51971bda7a867c4ff55b9b49b4a04b51f7912221ac9e4e90879c1908594e52768ee80e7a403373ae0e63dacccb9535e7bad62b5dd92a503fe7ced
+    patch-package: ^8.0.0
+  checksum: e32bbd682e9d9a3a74015ce962832da1637119838be74c85fe86668ed1bc70b07e4872f93b356f0562af1d61fc97af29cee980db9b154dddccaafbfb311a1ceb
   languageName: node
   linkType: hard
 
