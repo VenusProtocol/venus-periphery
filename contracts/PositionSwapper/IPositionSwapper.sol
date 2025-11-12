@@ -137,7 +137,7 @@ interface IPositionSwapper {
     /// @param marketFrom The vToken market to seize from.
     /// @param marketTo The vToken market to mint into.
     /// @param minAmountToSupply Minimum amount of target underlying to supply after swap.
-    /// @param swapData Array of bytes containing swap instructions for the SwapHelper.
+    /// @param swapData Bytes containing swap instructions for the SwapHelper.
     /// @custom:error InsufficientCollateralBalance The user has no underlying balance in the `marketFrom`.
     /// @custom:event Emits CollateralSwapped event.
     function swapFullCollateral(
@@ -145,7 +145,7 @@ interface IPositionSwapper {
         IVToken marketFrom,
         IVToken marketTo,
         uint256 minAmountToSupply,
-        bytes[] calldata swapData
+        bytes calldata swapData
     ) external payable;
 
     /// @notice Swaps a specific amount of collateral from one market to another.
@@ -154,7 +154,7 @@ interface IPositionSwapper {
     /// @param marketTo The vToken market to mint into.
     /// @param maxAmountToSwap The maximum amount of underlying to swap from `marketFrom`.
     /// @param minAmountToSupply Minimum amount of target underlying to supply after swap.
-    /// @param swapData Array of bytes containing swap instructions for the SwapHelper.
+    /// @param swapData Bytes containing swap instructions for the SwapHelper.
     /// @custom:error ZeroAmount The `maxAmountToSwap` is zero.
     /// @custom:error InsufficientCollateralBalance The user has insufficient underlying balance in the `marketFrom`.
     /// @custom:event Emits CollateralSwapped event.
@@ -164,7 +164,7 @@ interface IPositionSwapper {
         IVToken marketTo,
         uint256 maxAmountToSwap,
         uint256 minAmountToSupply,
-        bytes[] calldata swapData
+        bytes calldata swapData
     ) external payable;
 
     /// @notice Swaps the full debt of a user from one market to another.
@@ -172,7 +172,7 @@ interface IPositionSwapper {
     /// @param marketFrom The vToken market from which debt is swapped.
     /// @param marketTo The vToken market into which the new debt is borrowed.
     /// @param maxDebtAmountToOpen Maximum amount to open as new debt on `marketTo` (before fee rounding).
-    /// @param swapData Array of bytes containing swap instructions for the SwapHelper.
+    /// @param swapData Bytes containing swap instructions for the SwapHelper.
     /// @custom:error InsufficientBorrowBalance The user has no borrow balance in the `marketFrom`.
     /// @custom:event Emits DebtSwapped event.
     function swapFullDebt(
@@ -180,7 +180,7 @@ interface IPositionSwapper {
         IVToken marketFrom,
         IVToken marketTo,
         uint256 maxDebtAmountToOpen,
-        bytes[] calldata swapData
+        bytes calldata swapData
     ) external payable;
 
     /// @notice Swaps a specific amount of debt from one market to another.
@@ -189,7 +189,7 @@ interface IPositionSwapper {
     /// @param marketTo The vToken market into which the new debt is borrowed.
     /// @param minDebtAmountToSwap The minimum amount of debt of `marketFrom` to repay.
     /// @param maxDebtAmountToOpen The maximum amount to open as new debt on `marketTo`.
-    /// @param swapData Array of bytes containing swap instructions for the SwapHelper.
+    /// @param swapData Bytes containing swap instructions for the SwapHelper.
     /// @custom:error ZeroAmount The `minDebtAmountToSwap` is zero.
     /// @custom:error InsufficientBorrowBalance The user has insufficient borrow balance in the `marketFrom`.
     /// @custom:event Emits DebtSwapped event.
@@ -199,6 +199,6 @@ interface IPositionSwapper {
         IVToken marketTo,
         uint256 minDebtAmountToSwap,
         uint256 maxDebtAmountToOpen,
-        bytes[] calldata swapData
+        bytes calldata swapData
     ) external payable;
 }

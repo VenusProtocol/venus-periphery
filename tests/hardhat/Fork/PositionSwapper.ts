@@ -1,6 +1,6 @@
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
-import { Signer, Wallet } from "ethers";
+import { Signer } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, network, upgrades } from "hardhat";
 
@@ -20,12 +20,15 @@ import {
   VBep20Delegator,
   VBep20Delegator__factory,
   VToken__factory,
+  VTreasury,
+  VTreasury__factory,
   WBNB,
   WBNB__factory,
 } from "../../../typechain";
 import { forking, initMainnetUser } from "./utils";
 
 const NORMAL_TIMELOCK = "0x939bD8d64c0A9583A7Dcea9933f7b21697ab6396";
+const VTREASURY = "0xf322942f644a996a617bd29c16bd7d231d9f35e9";
 const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
 const COMPTROLLER_ADDRESS = "0xfd36e2c2a6789db23113685031d7f16329158384";
 const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
@@ -211,8 +214,8 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
 async function createSwapAPICallData(
   swapHelper: SwapHelper,
   positionSwapper: string,
-  balmytarget: string,
-  balmyCalldata: string,
+  dexTarget: string,
+  dexCalldata: string,
   tokenIn: string,
   tokenOut: string,
 ): Promise<string> {
@@ -232,8 +235,8 @@ async function createSwapAPICallData(
   };
 
   // Encode  function call
-  const approveMaxCall = swapHelper.interface.encodeFunctionData("approveMax", [tokenIn, balmytarget]);
-  const genericCall = swapHelper.interface.encodeFunctionData("genericCall", [balmytarget, balmyCalldata]);
+  const approveMaxCall = swapHelper.interface.encodeFunctionData("approveMax", [tokenIn, dexTarget]);
+  const genericCall = swapHelper.interface.encodeFunctionData("genericCall", [dexTarget, dexCalldata]);
   const tokenInSweepCall = swapHelper.interface.encodeFunctionData("sweep", [tokenIn, positionSwapper]);
   const tokenOutSweepCall = swapHelper.interface.encodeFunctionData("sweep", [tokenOut, positionSwapper]);
 
@@ -258,6 +261,8 @@ if (FORK_MAINNET) {
       let positionSwapper: PositionSwapper;
       let swapHelper: SwapHelper;
       let comptroller: ComptrollerMock;
+      let WBNB: WBNB;
+      let USDC: IERC20;
       let vBNB: VBNB;
       let vWBNB: VBep20Delegator;
       let vUSDC: VBep20Delegator;
@@ -270,7 +275,7 @@ if (FORK_MAINNET) {
       });
 
       beforeEach(async function () {
-        ({ positionSwapper, comptroller, vBNB, vWBNB, vUSDC, vETH, swapHelper } = await loadFixture(
+        ({ positionSwapper, comptroller, vBNB, vWBNB, vUSDC, vETH, swapHelper, WBNB, USDC } = await loadFixture(
           setupMarketFixture,
         ));
         await comptroller.setWhiteListFlashLoanAccount(positionSwapper.address, true);
@@ -338,15 +343,15 @@ if (FORK_MAINNET) {
           const initialWBNBBalance = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER); // maxSellAmount
           expect(await vUSDC.callStatic.balanceOfUnderlying(vWBNB_HOLDER)).to.equals(0);
           const minCollateralToSupply = "1944062422904312610393"; // ~1% slippage
-          const balmyCalldata =
+          const dexCalldata =
             "0x5ae401dc00000000000000000000000000000000000000000000000000000000691343800000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000124b858183f000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000800000000000000000000000001148959f1ef3b32aa8c5484393723b79c2cd2a260000000000000000000000000000000000000000000000001bc38f4c890ad8a400000000000000000000000000000000000000000000006965fbe6ad76010f7a0000000000000000000000000000000000000000000000000000000000000042bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00006455d398326f99059ff775485246999027b31979550000648ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-          const balmyTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"; // uniswap
+          const dexTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"; // uniswap
 
           const multicallData = await createSwapAPICallData(
             swapHelper,
             positionSwapper.address,
-            balmyTarget,
-            balmyCalldata,
+            dexTarget,
+            dexCalldata,
             WBNB_ADDRESS,
             USDC_ADDRESS,
           );
@@ -354,7 +359,7 @@ if (FORK_MAINNET) {
           // Swap Collateral
           const tx = await positionSwapper
             .connect(vWBNB_HOLDER_SIGNER)
-            .swapFullCollateral(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, minCollateralToSupply, [multicallData]);
+            .swapFullCollateral(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, minCollateralToSupply, multicallData);
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
           const tolerance = parseUnits("0.0000001", 18);
@@ -369,15 +374,15 @@ if (FORK_MAINNET) {
           const initialWBNBBalance = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER); // amount argument
           expect(await vUSDC.callStatic.balanceOfUnderlying(vWBNB_HOLDER)).to.equals(0);
           const minCollateralToSupply = "1944062422904312610393"; // ~1% slippage
-          const balmyCalldata =
+          const dexCalldata =
             "0x5ae401dc00000000000000000000000000000000000000000000000000000000691343800000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000124b858183f000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000800000000000000000000000001148959f1ef3b32aa8c5484393723b79c2cd2a260000000000000000000000000000000000000000000000001bc38f4c890ad8a400000000000000000000000000000000000000000000006965fbe6ad76010f7a0000000000000000000000000000000000000000000000000000000000000042bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00006455d398326f99059ff775485246999027b31979550000648ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-          const balmyTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"; // uniswap
+          const dexTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"; // uniswap
 
           const multicallData = await createSwapAPICallData(
             swapHelper,
             positionSwapper.address,
-            balmyTarget,
-            balmyCalldata,
+            dexTarget,
+            dexCalldata,
             WBNB_ADDRESS,
             USDC_ADDRESS,
           );
@@ -390,7 +395,7 @@ if (FORK_MAINNET) {
               vUSDC_ADDRESS,
               initialWBNBBalance,
               minCollateralToSupply,
-              [multicallData],
+              multicallData,
             );
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
@@ -409,15 +414,15 @@ if (FORK_MAINNET) {
           expect(initialWBNBBorrow).to.be.gt(0);
           expect(initialUSDCBorrow).to.equal(0);
 
-          const balmyCalldata =
+          const dexCalldata =
             "0x83bd37f900018ac76a51cc950d9822d68b83fe1ad97b32cd580d00012170ed0880ac9a755fd29b2688956bd959f933f80a75524c2b08c3a8ec00000908695eee01390e8000028f5c0001da4F2e8041aa91A93B1D46Cf224Bbd4e9134a9EC000000011148959f1ef3b32AA8c5484393723B79C2Cd2a265b65fbbe3a150a3c0103b6de3b0b0101020301020104118a640a01040203010001031eab4a230105020203010f1249020e01000602000102840ecf2c010002030000000407080000000000000100000001089ffb3c2c0100020300000001070800000000000001000000010e08d2a20e010009020001309cc0f70e01000a0200014a7568f60e01000b02000143f27b970f0100020300000006000001000103e4c76f0f01000203000000640000010001b6cc29060f0100020300000002000001000117fb3a080a020c020d0001011b90ec6823020e020200011ea930340e02000f0201012222e98121021002000118000a290e0300110200011d79dcb10e0400120201011b0a8d7a0e0501130200011a6c1d660e0501140200000e0600150201032655edf600000302bb8dbf0e070016030103174ae13f0e0700170301039440f7140e0700180301032369e7cd0e07001903010304e879f50e07001a030103bd638da50e08001b0301035e00582a0e08001c030103ae23ea9b0e08001d0301020f0900031e000001f400000a000c0609000548af89970a001f0d030100052da69fad0e0000200d00054689a8ec0e0000210d00042100220d00060e0200232400080e000025260011049cfdaf0305010127240019110e91420f0e050128240011152a336b0e050129240011286079e40e05012a2400100e05012b24000f0590865e030501012c2d00190f057e18a50e05012e2d000f61ec87b80e05012f2d000f07c8ddb70e0501302d000f9ee75ff60e0501312d000f0bfeb23e0e0501322d000fb1e759a30e0501332d000e0e0501342d00010b1525ed0e05013503000108d32f360e050136030001354476c20e0501370300000c05010338040e0501393a00122c05011e380100014f073b00000000000005000001ff0000000000000000000000000000160caed03795365f3a589f10c379ffa7d75d4e768ac76a51cc950d9822d68b83fe1ad97b32cd580d55d398326f99059ff775485246999027b31979553efebc418efb585248a0d2140cfb87afcc2c63dd28ec0b36f0819ecb5005cab836f4ed5a2eca4d137491c04dc4575e086a8ee31f7ce1c6d56fb7dcc1238a358808379702088667322f80ac48bad5e6c4a0ffb9c1ce1fe56963b0321b32e7a0302114058b4f31fa980a675570939b737ebdde0471a4be40eb2c3c320d49019d4f9a92352e947c7e5acfe47d6892b7807bf19b7dddf89b706143896d05228f3121c2f5b9a3d9138ab2b74d581fc11346219ebf43fee9e7cea3dedca5984780bafc599bd69add087d561b3771a66ee31180906972580ade9b81afc5fcdc22536030b9ce783b6ddfb9a39ac7f439f568e5e66064dbd0ff10bfed5a797807042e9f63f18cfe10e1799b52c010ad415325d19af139e20b8aa8aab0f66a930ed3b004ba16ee11b3a9b142eaf2259b0dd8cc6bfdee087148c220e9141a075d18418abbac539e0ebfffd39e54a0f7e5f8fec40ade7933a664f2688fb5b81049dfb7703ada5e770543770612c49ea0f51fd2133d995cf00229bc523737415ad31847a90a2d92a8367a91efa1906bfc8c1e05bf10c4172fcd41e0913e95784454622d1c3724f546f84936696169c63e42cd08ce11f5deebbcebae6520507862d9b4be2156b15d54f41ee4ede2d5b0b455e446cf1cf8c69595804ba91dfdd8d6b960c9b0a7c4813c0decbb1097fff46d0ed6a39fb5f6a83043f4247f51881d1e3ae0f759afb801413a6c948ef4420000000000000000000000000000000000000000169f653a54acd441ab34b73da9946e2c451787efc98f01bf2141e1140ef8f8cad99d4b021d10718f4f3126d5de26413abdcf6948943fb9d0847d9818be60d4c4250438344bec816ec2dec99925deb4c7cc1c80529b483a663d869c137a1fd0cbd9855dc87130d2a12b9bcbfae4f2634d864a1ee1ce3ead9cbf72b6485e4b31601afe7b0a1210be2004d2b1d6c5f0f7b66764f6ec8c8dff7ba683102295e16409d171b26e4484402de70e3ea256be5a2630d7e88d7d1d3649232f28bf7467e9cdb27e6d902c16a1653fb2623567e21f8c50f0ae86f54ef4849b4eb47bd4dca84e1808da3354924cd243c66828cf7754704bba1018b967e59220b22ca03f68821a3276c9a674e4716e431f45807dcf19f284c7aa99f18a4fbcbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c1123e75b71019962cd4d21b0f3018a6412edb63c58f04aada1051885a3c4e296aab0a454ea1233a34fb87838a29b37598099ef5aa6b3fbeeef987c50d0e226f674bbf064f54ab47f42473ff80db98cba7d05c84581f0c41ad80ddf677a510360bae09a5a62fcb3c1794fb95bd8b1a97f6ad5d8a7e4943a1e0f338ec12d3f7c3d77a4b9fcc1f95f3fb6ad0ea68829abfa1a7b017078195c10a966d7411a0c95159f599f3d64a9d99ea21e68127bb6ce99f893da61be141893e4c6ad9272e8c04bab7e6a10604501a52170ed0880ac9a755fd29b2688956bd959f933f86cb5392b9ca52d7a0e6940e82d29087361360ec326c5e01524d2e6280a48f2c50ff6de7e52e9611cc697d2898e0d09264376196696c51d7abbbaa4a900000000";
-          const balmyTarget = "0x89b8AA89FDd0507a99d334CBe3C808fAFC7d850E"; // odos
+          const dexTarget = "0x89b8AA89FDd0507a99d334CBe3C808fAFC7d850E"; // odos
 
           const multicallData = await createSwapAPICallData(
             swapHelper,
             positionSwapper.address,
-            balmyTarget,
-            balmyCalldata,
+            dexTarget,
+            dexCalldata,
             USDC_ADDRESS,
             ETH_ADDRESS,
           );
@@ -425,7 +430,7 @@ if (FORK_MAINNET) {
           // Swap Debt
           const tx = await positionSwapper
             .connect(vETH_BORROWER_SIGNER)
-            .swapFullDebt(vETH_BORROWER, vETH_ADDRESS, vUSDC_ADDRESS, maxBorrowToOpen, [multicallData]);
+            .swapFullDebt(vETH_BORROWER, vETH_ADDRESS, vUSDC_ADDRESS, maxBorrowToOpen, multicallData);
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
 
@@ -446,15 +451,15 @@ if (FORK_MAINNET) {
           expect(initialETHBorrow).to.be.gt(0);
           expect(initialUSDCBorrow).to.equal(0);
 
-          const balmyCalldata =
+          const dexCalldata =
             "0x83bd37f900018ac76a51cc950d9822d68b83fe1ad97b32cd580d00012170ed0880ac9a755fd29b2688956bd959f933f80a75524c2b08c3a8ec00000908695eee01390e8000028f5c0001da4F2e8041aa91A93B1D46Cf224Bbd4e9134a9EC000000011148959f1ef3b32AA8c5484393723B79C2Cd2a265b65fbbe3a150a3c0103b6de3b0b0101020301020104118a640a01040203010001031eab4a230105020203010f1249020e01000602000102840ecf2c010002030000000407080000000000000100000001089ffb3c2c0100020300000001070800000000000001000000010e08d2a20e010009020001309cc0f70e01000a0200014a7568f60e01000b02000143f27b970f0100020300000006000001000103e4c76f0f01000203000000640000010001b6cc29060f0100020300000002000001000117fb3a080a020c020d0001011b90ec6823020e020200011ea930340e02000f0201012222e98121021002000118000a290e0300110200011d79dcb10e0400120201011b0a8d7a0e0501130200011a6c1d660e0501140200000e0600150201032655edf600000302bb8dbf0e070016030103174ae13f0e0700170301039440f7140e0700180301032369e7cd0e07001903010304e879f50e07001a030103bd638da50e08001b0301035e00582a0e08001c030103ae23ea9b0e08001d0301020f0900031e000001f400000a000c0609000548af89970a001f0d030100052da69fad0e0000200d00054689a8ec0e0000210d00042100220d00060e0200232400080e000025260011049cfdaf0305010127240019110e91420f0e050128240011152a336b0e050129240011286079e40e05012a2400100e05012b24000f0590865e030501012c2d00190f057e18a50e05012e2d000f61ec87b80e05012f2d000f07c8ddb70e0501302d000f9ee75ff60e0501312d000f0bfeb23e0e0501322d000fb1e759a30e0501332d000e0e0501342d00010b1525ed0e05013503000108d32f360e050136030001354476c20e0501370300000c05010338040e0501393a00122c05011e380100014f073b00000000000005000001ff0000000000000000000000000000160caed03795365f3a589f10c379ffa7d75d4e768ac76a51cc950d9822d68b83fe1ad97b32cd580d55d398326f99059ff775485246999027b31979553efebc418efb585248a0d2140cfb87afcc2c63dd28ec0b36f0819ecb5005cab836f4ed5a2eca4d137491c04dc4575e086a8ee31f7ce1c6d56fb7dcc1238a358808379702088667322f80ac48bad5e6c4a0ffb9c1ce1fe56963b0321b32e7a0302114058b4f31fa980a675570939b737ebdde0471a4be40eb2c3c320d49019d4f9a92352e947c7e5acfe47d6892b7807bf19b7dddf89b706143896d05228f3121c2f5b9a3d9138ab2b74d581fc11346219ebf43fee9e7cea3dedca5984780bafc599bd69add087d561b3771a66ee31180906972580ade9b81afc5fcdc22536030b9ce783b6ddfb9a39ac7f439f568e5e66064dbd0ff10bfed5a797807042e9f63f18cfe10e1799b52c010ad415325d19af139e20b8aa8aab0f66a930ed3b004ba16ee11b3a9b142eaf2259b0dd8cc6bfdee087148c220e9141a075d18418abbac539e0ebfffd39e54a0f7e5f8fec40ade7933a664f2688fb5b81049dfb7703ada5e770543770612c49ea0f51fd2133d995cf00229bc523737415ad31847a90a2d92a8367a91efa1906bfc8c1e05bf10c4172fcd41e0913e95784454622d1c3724f546f84936696169c63e42cd08ce11f5deebbcebae6520507862d9b4be2156b15d54f41ee4ede2d5b0b455e446cf1cf8c69595804ba91dfdd8d6b960c9b0a7c4813c0decbb1097fff46d0ed6a39fb5f6a83043f4247f51881d1e3ae0f759afb801413a6c948ef4420000000000000000000000000000000000000000169f653a54acd441ab34b73da9946e2c451787efc98f01bf2141e1140ef8f8cad99d4b021d10718f4f3126d5de26413abdcf6948943fb9d0847d9818be60d4c4250438344bec816ec2dec99925deb4c7cc1c80529b483a663d869c137a1fd0cbd9855dc87130d2a12b9bcbfae4f2634d864a1ee1ce3ead9cbf72b6485e4b31601afe7b0a1210be2004d2b1d6c5f0f7b66764f6ec8c8dff7ba683102295e16409d171b26e4484402de70e3ea256be5a2630d7e88d7d1d3649232f28bf7467e9cdb27e6d902c16a1653fb2623567e21f8c50f0ae86f54ef4849b4eb47bd4dca84e1808da3354924cd243c66828cf7754704bba1018b967e59220b22ca03f68821a3276c9a674e4716e431f45807dcf19f284c7aa99f18a4fbcbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c1123e75b71019962cd4d21b0f3018a6412edb63c58f04aada1051885a3c4e296aab0a454ea1233a34fb87838a29b37598099ef5aa6b3fbeeef987c50d0e226f674bbf064f54ab47f42473ff80db98cba7d05c84581f0c41ad80ddf677a510360bae09a5a62fcb3c1794fb95bd8b1a97f6ad5d8a7e4943a1e0f338ec12d3f7c3d77a4b9fcc1f95f3fb6ad0ea68829abfa1a7b017078195c10a966d7411a0c95159f599f3d64a9d99ea21e68127bb6ce99f893da61be141893e4c6ad9272e8c04bab7e6a10604501a52170ed0880ac9a755fd29b2688956bd959f933f86cb5392b9ca52d7a0e6940e82d29087361360ec326c5e01524d2e6280a48f2c50ff6de7e52e9611cc697d2898e0d09264376196696c51d7abbbaa4a900000000";
-          const balmyTarget = "0x89b8AA89FDd0507a99d334CBe3C808fAFC7d850E"; // odos
+          const dexTarget = "0x89b8AA89FDd0507a99d334CBe3C808fAFC7d850E"; // odos
 
           const multicallData = await createSwapAPICallData(
             swapHelper,
             positionSwapper.address,
-            balmyTarget,
-            balmyCalldata,
+            dexTarget,
+            dexCalldata,
             USDC_ADDRESS,
             ETH_ADDRESS,
           );
@@ -462,9 +467,14 @@ if (FORK_MAINNET) {
 
           const tx = await positionSwapper
             .connect(vETH_BORROWER_SIGNER)
-            .swapDebtWithAmount(vETH_BORROWER, vETH_ADDRESS, vUSDC_ADDRESS, initialETHBorrow, maxBorrowToOpen, [
+            .swapDebtWithAmount(
+              vETH_BORROWER,
+              vETH_ADDRESS,
+              vUSDC_ADDRESS,
+              initialETHBorrow,
+              maxBorrowToOpen,
               multicallData,
-            ]);
+            );
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
 
@@ -474,6 +484,193 @@ if (FORK_MAINNET) {
           const tolerance = parseUnits("0.0000001", 18);
           expect(finalETHBorrow).to.be.closeTo(0, tolerance);
           expect(finalUSDCBorrow).to.be.closeTo(maxBorrowToOpen, tolerance);
+        });
+      });
+
+      describe("with flash loan fee", () => {
+        beforeEach(async function () {
+          const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseUnits("2"));
+          // Set flash loan fee: 5% (0.05 mantissa)
+          const acm = IAccessControlManagerV8__factory.connect(ACM, timelock);
+          await acm.giveCallPermission(vWBNB_ADDRESS, "setFlashLoanFeeMantissa(uint256,uint256)", NORMAL_TIMELOCK);
+          const vWBNBMarket = VToken__factory.connect(vWBNB_ADDRESS, timelock);
+          await vWBNBMarket.setFlashLoanFeeMantissa(parseUnits("0.05", 18), parseUnits("0.5", 18));
+        });
+
+        it("should swapCollateralNativeToWrapped accounting for 5% flash loan fee", async function () {
+          const vBNB_HOLDER_SIGNER = await initMainnetUser(vBNB_HOLDER, parseEther("2"));
+          await comptroller.connect(vBNB_HOLDER_SIGNER).updateDelegate(positionSwapper.address, true);
+          const vBNBTokenBalance = await vBNB.balanceOf(vBNB_HOLDER);
+          await vBNB.connect(vBNB_HOLDER_SIGNER).approve(positionSwapper.address, vBNBTokenBalance);
+
+          const initialBNBBalance = await vBNB.callStatic.balanceOfUnderlying(vBNB_HOLDER);
+          const initialWBNBBalance = await vWBNB.callStatic.balanceOfUnderlying(vBNB_HOLDER);
+
+          expect(initialBNBBalance).to.be.gt(0);
+          expect(initialWBNBBalance).to.equal(0);
+
+          const fee = await vWBNB.flashLoanFeeMantissa();
+          const expectedMint = initialBNBBalance.sub(initialBNBBalance.mul(fee).div(parseUnits("1", 18)));
+
+          const tx = await positionSwapper.connect(vBNB_HOLDER_SIGNER).swapCollateralNativeToWrapped(vBNB_HOLDER);
+          const receipt = await tx.wait();
+          expect(receipt.status).to.equal(1);
+
+          const finalBNBBalance = await vBNB.callStatic.balanceOfUnderlying(vBNB_HOLDER);
+          const finalWBNBBalance = await vWBNB.callStatic.balanceOfUnderlying(vBNB_HOLDER);
+
+          expect(finalBNBBalance).to.equal(0);
+          // Verify new collateral is less than initial due to flash loan fee
+          expect(finalWBNBBalance).to.be.lt(initialBNBBalance);
+          // Use a tolerance that accounts for interest accrual and rounding (0.1% of initial balance)
+          const tolerance = initialBNBBalance.mul(1000).div(1000000); // 0.1% tolerance
+          expect(finalWBNBBalance).to.be.closeTo(expectedMint, tolerance);
+        });
+
+        it("should swapDebtNativeToWrapped accounting for 5% flash loan fee", async function () {
+          const vBNB_BORROWER_SIGNER = await initMainnetUser(vBNB_BORROWER, parseEther("2"));
+          await comptroller.connect(vBNB_BORROWER_SIGNER).updateDelegate(positionSwapper.address, true);
+
+          const initialBNBBorrowBalance = await vBNB.callStatic.borrowBalanceCurrent(vBNB_BORROWER);
+          const initialWBNBBorrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vBNB_BORROWER);
+
+          expect(initialBNBBorrowBalance).to.be.gt(0);
+          expect(initialWBNBBorrowBalance).to.equal(0);
+
+          const fee = await vWBNB.flashLoanFeeMantissa();
+          const expectedDebt = await positionSwapper.quoteFlashLoanAmount(initialBNBBorrowBalance, fee);
+
+          const tx = await positionSwapper.connect(vBNB_BORROWER_SIGNER).swapDebtNativeToWrapped(vBNB_BORROWER);
+          const receipt = await tx.wait();
+          expect(receipt.status).to.equal(1);
+
+          const finalBNBBorrowBalance = await vBNB.callStatic.borrowBalanceCurrent(vBNB_BORROWER);
+          const finalWBNBBorrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vBNB_BORROWER);
+
+          expect(finalBNBBorrowBalance).to.equal(0);
+          // Verify new debt is larger than initial due to flash loan fee being included
+          expect(finalWBNBBorrowBalance).to.be.gt(initialBNBBorrowBalance);
+          const tolerance = parseUnits("0.00000001", 18);
+          // The final debt should be the quoted amount which accounts for the flash loan fee
+          expect(finalWBNBBorrowBalance).to.be.closeTo(expectedDebt, tolerance);
+        });
+      });
+
+      describe("liquidity checks (failure paths)", () => {
+        let VTreasury: VTreasury;
+        beforeEach(async function () {
+          const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseUnits("2"));
+          VTreasury = VTreasury__factory.connect(VTREASURY, timelock);
+        });
+
+        it("should revert swapCollateralWithAmount (vWBNB -> vUSDC) when operation causes liquidation", async function () {
+          const [, user1] = await ethers.getSigners();
+          const user1Address = await user1.getAddress();
+          // Delegate to positionSwapper
+          await comptroller.connect(user1).updateDelegate(positionSwapper.address, true);
+
+          // Fund user1 with WBNB via VTreasury
+          const collateralAmount = parseUnits("20", 18);
+          await VTreasury.withdrawTreasuryBEP20(WBNB_ADDRESS, collateralAmount, user1Address);
+          const balance = await WBNB.balanceOf(user1Address);
+
+          // Enter markets and supply WBNB as collateral
+          await comptroller.connect(user1).enterMarkets([vWBNB_ADDRESS]);
+          await WBNB.connect(user1).approve(vWBNB_ADDRESS, collateralAmount);
+          await vWBNB.connect(user1).mint(collateralAmount);
+
+          // Borrow some USDC to create debt, leaving some headroom initially
+          const [, liquidity] = await comptroller.getBorrowingPower(user1Address);
+          const borrowAmount = liquidity; // borrow max
+          await vUSDC.connect(user1).borrow(borrowAmount);
+
+          // Set lower CF For target Market to cause liquidation
+          await comptroller["setCollateralFactor(address,uint256,uint256)"](
+            vUSDC_ADDRESS,
+            parseUnits("0.4", 18),
+            parseUnits("0.4", 18),
+          );
+
+          // Prepare swap data
+          const dexTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"; //uniswap
+          const dexCalldata =
+            "0x5ae401dc000000000000000000000000000000000000000000000000000000006913aa3a0000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000124b858183f000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000800000000000000000000000001148959f1ef3b32aa8c5484393723b79c2cd2a26000000000000000000000000000000000000000000000001158e460913d00000000000000000000000000000000000000000000000000367b5342785ebece07d0000000000000000000000000000000000000000000000000000000000000042bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00006455d398326f99059ff775485246999027b31979550000648ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            positionSwapper.address,
+            dexTarget,
+            dexCalldata,
+            WBNB_ADDRESS,
+            USDC_ADDRESS,
+          );
+
+          // Attempt to swap full collateral amount → should reduce collateral due to fee and cause liquidation
+          const amountToSwap = await vWBNB.callStatic.balanceOfUnderlying(user1Address);
+          const minToSupply = "15436964345161743044564";
+          await expect(
+            positionSwapper
+              .connect(user1)
+              .swapCollateralWithAmount(
+                user1Address,
+                vWBNB_ADDRESS,
+                vUSDC_ADDRESS,
+                amountToSwap,
+                minToSupply,
+                multicallData,
+              ),
+          ).to.be.revertedWith("math error"); // reverts early during redeem
+        });
+
+        it("should revert swapDebtWithAmount (vWBNB -> vUSDC) when operation causes liquidation", async function () {
+          const [, user1] = await ethers.getSigners();
+          const user1Address = await user1.getAddress();
+
+          // Delegate to positionSwapper
+          await comptroller.connect(user1).updateDelegate(positionSwapper.address, true);
+
+          // Fund collateral in USDC to allow borrowing WBNB
+          const usdcCollateral = parseUnits("2000", 18);
+          await VTreasury.withdrawTreasuryBEP20(USDC_ADDRESS, usdcCollateral, user1Address);
+          await comptroller.connect(user1).enterMarkets([vUSDC_ADDRESS, vWBNB_ADDRESS]);
+          await USDC.connect(user1).approve(vUSDC_ADDRESS, usdcCollateral);
+          await vUSDC.connect(user1).mint(usdcCollateral);
+
+          // Borrow WBNB to create a debt on vWBNB
+          // Use max borrowing power
+          const [, liq] = await comptroller.getBorrowingPower(user1Address);
+          console.log("liq", liq.toString());
+          const wbnbToBorrow = liq.div(1000);
+          console.log("wbnbToBorrow", wbnbToBorrow.toString());
+          await vWBNB.connect(user1).borrow(wbnbToBorrow);
+
+          // Set lower collateral factor for target market to cause liquidation
+          await comptroller["setCollateralFactor(address,uint256,uint256)"](
+            vUSDC_ADDRESS,
+            parseUnits("0.4", 18),
+            parseUnits("0.4", 18),
+          );
+
+          // Prepare swap data (WBNB -> USDC)
+          const dexTarget = "0x6a000f20005980200259b80c5102003040001068"; // uniswap
+          const dexCalldata =
+            "0xe3ead59e000000000000000000000000000010036c0190e009a000d0fc3541100a07380a0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000000000000000000000000059725991ece28800000000000000000000000000000000000000000000000000001688f230511604cf00000000000000000000000000000000000000000000000017b8932562d3cf2b76f3e699b0e8439cb60c3ed7ab318357000000000000000000000000040b4c020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001a01b81d678ffb9c0263b24a97847620c99d213eb1400000140008400000000000300000000000000000000000000000000000000000000000000000000c04b8d59000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000006a000f20005980200259b80c510200304000106800000000000000000000000000000000000000000000000000000000691cc378000000000000000000000000000000000000000000000059725991ece28800000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002b8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000000000000000000000";
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            positionSwapper.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          // Swap part (or all) of the WBNB debt into USDC debt; debt increases and should cause liquidation
+          const repayAmount = await vWBNB.callStatic.borrowBalanceCurrent(user1Address);
+          const maxToOpen = "1650000000000000000000";
+          await expect(
+            positionSwapper
+              .connect(user1)
+              .swapDebtWithAmount(user1Address, vWBNB_ADDRESS, vUSDC_ADDRESS, repayAmount, maxToOpen, multicallData),
+          ).to.be.revertedWith("math error"); // reverts early during opening of flashLoan debt
         });
       });
     });

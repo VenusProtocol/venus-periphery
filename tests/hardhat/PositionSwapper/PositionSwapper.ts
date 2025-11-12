@@ -314,7 +314,7 @@ describe("positionSwapper", () => {
       // Swap Collateral
       await positionSwapper
         .connect(user1)
-        .swapFullCollateral(user1Address, vWBNB.address, vUSDT.address, parseUnits("11", 18), [multicallData]);
+        .swapFullCollateral(user1Address, vWBNB.address, vUSDT.address, parseUnits("11", 18), multicallData);
       expect(await vUSDT.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("12", 18));
       expect(await vWBNB.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("0", 18));
     });
@@ -328,7 +328,6 @@ describe("positionSwapper", () => {
         admin,
         ethers.utils.formatBytes32String("3"),
       );
-      const swapData = [multicallData];
 
       // Add some Collateral to vWBNB (12)
       await vWBNB.mintBehalf(user1Address, parseUnits("12", 18));
@@ -344,7 +343,7 @@ describe("positionSwapper", () => {
           vUSDT.address,
           parseUnits("5", 18),
           parseUnits("5", 18),
-          swapData,
+          multicallData,
         );
 
       // Verify target market received 5 and source market reduced to 7
@@ -368,12 +367,11 @@ describe("positionSwapper", () => {
         admin,
         ethers.utils.formatBytes32String("4"),
       );
-      const swapData = [multicallData];
 
       // Swap Debt
       await positionSwapper
         .connect(user1)
-        .swapFullDebt(user1Address, vUSDT.address, vBUSD.address, parseUnits("4", 18), swapData);
+        .swapFullDebt(user1Address, vUSDT.address, vBUSD.address, parseUnits("4", 18), multicallData);
       expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
       expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("4")); // removed debt 3, but opend new debt as 4
       expect(await BUSD.balanceOf(user1Address)).to.equals(parseEther("0")); // remember maxDebtAmountToOpen is slipage and may cause fund loose
@@ -395,7 +393,6 @@ describe("positionSwapper", () => {
         admin,
         ethers.utils.formatBytes32String("5"),
       );
-      const swapData = [multicallData];
 
       // Swap only part of the debt; repay 2 USDT, open 3 BUSD
       await positionSwapper
@@ -406,7 +403,7 @@ describe("positionSwapper", () => {
           vBUSD.address,
           parseUnits("2", 18),
           parseUnits("3", 18),
-          swapData,
+          multicallData,
         );
 
       expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("1"));
@@ -456,12 +453,11 @@ describe("positionSwapper", () => {
         admin,
         ethers.utils.formatBytes32String("6"),
       );
-      const swapData = [multicallData];
 
       // Swap Debt: request to open 4 BUSD debt; with fee, borrowed amount > 4, but fee is repaid
       await positionSwapper
         .connect(user1)
-        .swapFullDebt(user1Address, vUSDT.address, vBUSD.address, parseUnits("4", 18), swapData);
+        .swapFullDebt(user1Address, vUSDT.address, vBUSD.address, parseUnits("4", 18), multicallData);
       const usdtAfter = await vUSDT.callStatic.borrowBalanceCurrent(user1Address);
       const busdAfter = await vBUSD.callStatic.borrowBalanceCurrent(user1Address);
       const targetDebt = parseEther("4");
@@ -488,7 +484,7 @@ describe("positionSwapper", () => {
 
   describe("access and validation", () => {
     it("should revert swapCollateralWithAmount when amount is zero", async () => {
-      const swapData: string[] = [];
+      const swapData = "0x";
       await expect(
         positionSwapper
           .connect(user1)
@@ -497,7 +493,7 @@ describe("positionSwapper", () => {
     });
 
     it("should revert swapDebtWithAmount when amount is zero", async () => {
-      const swapData: string[] = [];
+      const swapData = "0x";
       await expect(
         positionSwapper
           .connect(user1)
@@ -506,14 +502,14 @@ describe("positionSwapper", () => {
     });
 
     it("should revert swapFullCollateral when no collateral balance", async () => {
-      const swapData: string[] = [];
+      const swapData = "0x";
       await expect(
         positionSwapper.connect(user1).swapFullCollateral(user1Address, vUSDT.address, vBUSD.address, 0, swapData),
       ).to.be.revertedWithCustomError(positionSwapper, "InsufficientCollateralBalance");
     });
 
     it("should revert swapFullDebt when no borrow balance", async () => {
-      const swapData: string[] = [];
+      const swapData = "0x";
       await expect(
         positionSwapper
           .connect(user1)
@@ -554,7 +550,7 @@ describe("positionSwapper", () => {
       const fakeTo = await smock.fake<VBep20Harness>("VBep20Harness");
       fakeFrom.balanceOfUnderlying.returns(parseUnits("1", 18));
 
-      const swapData: string[] = [];
+      const swapData = "0x";
       await expect(
         positionSwapper.connect(user1).swapFullCollateral(user1Address, fakeFrom.address, fakeTo.address, 0, swapData),
       ).to.be.revertedWithCustomError(positionSwapper, "MarketNotListed");
