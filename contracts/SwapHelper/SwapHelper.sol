@@ -188,7 +188,11 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @dev Uses SafeERC20 for safe transfer operations
     /// @dev Should only be called via multicall
     /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
+    /// @custom:error ZeroAddress if token is address(0)
     function sweep(IERC20Upgradeable token, address to) external onlyOwnerOrSelf {
+        if (address(token) == address(0)) {
+            revert ZeroAddress();
+        }
         uint256 amount = token.balanceOf(address(this));
         if (amount > 0) {
             token.safeTransfer(to, amount);

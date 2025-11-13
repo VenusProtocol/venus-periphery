@@ -177,6 +177,13 @@ describe("SwapHelper", () => {
         .to.emit(swapHelper, "Swept")
         .withArgs(erc20.address, userAddress, 0);
     });
+
+    it("should revert when token is zero address", async () => {
+      await expect(swapHelper.connect(owner).sweep(constants.AddressZero, userAddress)).to.be.revertedWithCustomError(
+        swapHelper,
+        "ZeroAddress",
+      );
+    });
   });
 
   describe("approveMax", () => {
