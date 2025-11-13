@@ -172,7 +172,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @param target Address of the contract to call
     /// @param data Encoded function call data
     /// @dev This function can interact with any external contract
-    /// @dev Should only be called via multicall for safety
+    /// @dev Should only be called via multicall for safety, but can be called directly by owner
     /// @custom:security Use with extreme caution - can call any contract with any data
     /// @custom:security Ensure proper validation of target and data in off-chain systems
     /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
@@ -186,7 +186,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @param to Recipient address for the swept tokens
     /// @dev Transfers the entire balance of token held by this contract
     /// @dev Uses SafeERC20 for safe transfer operations
-    /// @dev Should only be called via multicall
+    /// @dev Should only be called via multicall for safety, but can be called directly by owner
     /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
     /// @custom:error ZeroAddress if token is address(0)
     function sweep(IERC20Upgradeable token, address to) external onlyOwnerOrSelf {
@@ -205,7 +205,7 @@ contract SwapHelper is EIP712, Ownable, ReentrancyGuard {
     /// @param spender Address to grant approval to
     /// @dev Sets approval to type(uint256).max for unlimited spending
     /// @dev Uses forceApprove to handle tokens that require 0 approval first
-    /// @dev Should only be called via multicall
+    /// @dev Should only be called via multicall for safety, but can be called directly by owner
     /// @custom:security Grants unlimited approval - ensure spender is trusted
     /// @custom:error CallerNotAuthorized if caller is not owner or contract itself
     function approveMax(IERC20Upgradeable token, address spender) external onlyOwnerOrSelf {
