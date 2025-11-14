@@ -141,6 +141,8 @@ contract Undertaker is Ownable2Step {
      * @custom:event Emits MarketPaused event.
      */
     function pauseMarket(address market) external {
+        IVToken(market).accrueInterest();
+        
         if (!canPauseMarket(market)) {
             revert MarketNotEligibleForPause();
         }
@@ -170,6 +172,8 @@ contract Undertaker is Ownable2Step {
      * @custom:event Emits MarketUnlisted event.
      */
     function unlistMarket(address market) external {
+        IVToken(market).accrueInterest();
+
         if (!canUnlistMarket(market)) {
             revert MarketNotEligibleForUnlisting();
         }
