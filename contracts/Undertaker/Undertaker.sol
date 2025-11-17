@@ -202,15 +202,15 @@ contract Undertaker is Ownable2Step {
         markets[0] = market;
 
         IComptroller comptroller = IVToken(market).comptroller();
-        IComptroller(comptroller).setActionsPaused(markets, actions, true);
+        comptroller.setActionsPaused(markets, actions, true);
 
         uint256[] memory caps = new uint256[](1);
         caps[0] = 0;
 
-        IComptroller(comptroller).setMarketBorrowCaps(markets, caps);
-        IComptroller(comptroller).setMarketSupplyCaps(markets, caps);
+        comptroller.setMarketBorrowCaps(markets, caps);
+        comptroller.setMarketSupplyCaps(markets, caps);
 
-        IComptroller(comptroller).unlistMarket(market);
+        comptroller.unlistMarket(market);
 
         expiries[market].unlistTimestamp = block.timestamp;
 
@@ -224,13 +224,13 @@ contract Undertaker is Ownable2Step {
      */
     function isMarketPaused(address market) public view returns (bool) {
         IComptroller comptroller = IVToken(market).comptroller();
-        (, uint256 collateralFactorMantissa, ) = IComptroller(comptroller).markets(market);
+        (, uint256 collateralFactorMantissa, ) = comptroller.markets(market);
 
         if (
             collateralFactorMantissa == 0 &&
-            IComptroller(comptroller).actionPaused(market, IComptroller.Action.MINT) &&
-            IComptroller(comptroller).actionPaused(market, IComptroller.Action.BORROW) &&
-            IComptroller(comptroller).actionPaused(market, IComptroller.Action.ENTER_MARKET)
+            comptroller.actionPaused(market, IComptroller.Action.MINT) &&
+            comptroller.actionPaused(market, IComptroller.Action.BORROW) &&
+            comptroller.actionPaused(market, IComptroller.Action.ENTER_MARKET)
         ) {
             return true;
         }
