@@ -15,11 +15,19 @@ import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
  * in a permissionless manner, without requiring additional VIP approvals.
  */
 contract Undertaker is Ownable2Step {
+    /**
+     * @dev Expiry configuration for a market.
+     */
     struct Expiry {
+        /// @notice When set (>0), the market may be paused after this UNIX timestamp.
         uint256 toBePausedAfterTimestamp;
+        /// @notice Whether the market is allowed to be unlisted after being paused.
         bool canUnlist;
+        /// @notice When `canUnlist` is true, the market is eligible to be unlisted only if the total value of supplied assets (in USD) falls below this threshold.
         uint256 toBeUnlistedMinTotalSupplyUSD;
+        /// @notice Timestamp when the market was paused (0 if not paused).
         uint256 pauseTimestamp;
+        /// @notice Timestamp when the market was unlisted (0 if still listed).
         uint256 unlistTimestamp;
     }
 
