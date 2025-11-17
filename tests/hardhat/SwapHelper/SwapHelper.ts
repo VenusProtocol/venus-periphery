@@ -184,6 +184,13 @@ describe("SwapHelper", () => {
         "ZeroAddress",
       );
     });
+
+    it("should revert when to is zero address", async () => {
+      await expect(swapHelper.connect(owner).sweep(erc20.address, constants.AddressZero)).to.be.revertedWithCustomError(
+        swapHelper,
+        "ZeroAddress",
+      );
+    });
   });
 
   describe("approveMax", () => {
@@ -338,9 +345,10 @@ describe("SwapHelper", () => {
       const deadline = 1234;
       const salt = ethers.utils.formatBytes32String("7");
       const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
-      await expect(
-        swapHelper.connect(user1).multicall(calls, deadline, salt, signature),
-      ).to.be.revertedWithCustomError(swapHelper, "DeadlineReached");
+      await expect(swapHelper.connect(user1).multicall(calls, deadline, salt, signature)).to.be.revertedWithCustomError(
+        swapHelper,
+        "DeadlineReached",
+      );
     });
 
     it("should check signature if provided", async () => {
@@ -424,9 +432,10 @@ describe("SwapHelper", () => {
       await swapHelper.connect(user1).multicall(calls, deadline, salt, signature);
 
       // Second call with same salt should fail
-      await expect(
-        swapHelper.connect(user1).multicall(calls, deadline, salt, signature),
-      ).to.be.revertedWithCustomError(swapHelper, "SaltAlreadyUsed");
+      await expect(swapHelper.connect(user1).multicall(calls, deadline, salt, signature)).to.be.revertedWithCustomError(
+        swapHelper,
+        "SaltAlreadyUsed",
+      );
     });
   });
 });
