@@ -27,8 +27,9 @@ contract Undertaker is Ownable2Step {
     uint256 private constant EXP_SCALE = 1e18;
 
     /**
-     * @notice The global deposit threshold (in USD).
-     * @dev If a market’s deposits fall below this threshold, it can be paused.
+     * @notice Global deposit threshold (denominated in USD).
+     * @dev If a market does not have `toBePausedAfterTimestamp` set and its total deposits drop below this threshold,
+     * the market can be paused.
      */
     uint256 public globalDepositThreshold;
 
@@ -145,7 +146,7 @@ contract Undertaker is Ownable2Step {
      */
     function pauseMarket(address market) external {
         IVToken(market).accrueInterest();
-        
+
         if (!canPauseMarket(market)) {
             revert MarketNotEligibleForPause();
         }
