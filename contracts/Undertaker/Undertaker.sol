@@ -136,6 +136,10 @@ contract Undertaker is Ownable2Step {
             revert InvalidExpiryConfiguration();
         }
 
+        if (canUnlist && toBeUnlistedMinTotalSupplyUSD == 0) {
+            revert InvalidExpiryConfiguration();
+        }
+
         expiries[market] = Expiry({
             toBePausedAfterTimestamp: toBePausedAfterTimestamp,
             canUnlist: canUnlist,
