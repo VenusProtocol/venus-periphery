@@ -23,6 +23,9 @@ contract Undertaker is Ownable2Step {
         uint256 unlistTimestamp;
     }
 
+    /// @dev Base unit for computations, usually used in scaling (multiplications, divisions)
+    uint256 private constant EXP_SCALE = 1e18;
+
     /**
      * @notice The global deposit threshold (in USD).
      * @dev If a market’s deposits fall below this threshold, it can be paused.
@@ -245,7 +248,7 @@ contract Undertaker is Ownable2Step {
         IComptroller comptroller = IVToken(market).comptroller();
 
         if (expiry.toBePausedAfterTimestamp == 0) {
-            uint256 totalDepositsUSD = getTotalDeposit(market);
+            uint256 totalDepositsUSD = _getTotalDeposit(market);
 
             if (totalDepositsUSD > globalDepositThreshold) {
                 return false;
@@ -294,7 +297,7 @@ contract Undertaker is Ownable2Step {
             return false;
         }
 
-        uint256 totalDepositsUSD = getTotalDeposit(market);
+        uint256 totalDepositsUSD = _getTotalDeposit(market);
 
         if (totalDepositsUSD > expiry.toBeUnlistedMinTotalSupplyUSD) {
             return false;
@@ -311,9 +314,9 @@ contract Undertaker is Ownable2Step {
     function _getTotalDeposit(address market) internal view returns (uint256) {
         IComptroller comptroller = IVToken(market).comptroller();
         ResilientOracleInterface oracle = comptroller.oracle();
-        uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
+        uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / EXP_SCALE;
         uint256 price = oracle.getUnderlyingPrice(market);
-        uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
+        uint256 totalDepositsUSD = (totalSupplied * price) / EXP_SCALE;
         return totalDepositsUSD;
     }
 }
