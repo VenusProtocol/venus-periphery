@@ -308,7 +308,7 @@ contract Undertaker is Ownable2Step {
      * @param market The address of the market.
      * @return The total deposits in USD.
      */
-    function getTotalDeposit(address market) internal view returns (uint256) {
+    function _getTotalDeposit(address market) internal view returns (uint256) {
         IComptroller comptroller = IVToken(market).comptroller();
         ResilientOracleInterface oracle = comptroller.oracle();
         uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
