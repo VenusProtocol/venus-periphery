@@ -13,16 +13,16 @@ import { IVToken } from "../Interfaces.sol";
  */
 interface ILeverageStrategiesManager {
     /// @custom:error EnterLeveragePositionMintFailed
-    error EnterLeveragePositionMintFailed();
+    error EnterLeveragePositionMintFailed(uint256 errorCode);
 
     /// @custom:error EnterLeveragePositionBorrowBehalfFailed
-    error EnterLeveragePositionBorrowBehalfFailed();
+    error EnterLeveragePositionBorrowBehalfFailed(uint256 errorCode);
 
     /// @custom:error ExitLeveragePositionRepayFailed
-    error ExitLeveragePositionRepayFailed();
+    error ExitLeveragePositionRepayFailed(uint256 errorCode);
 
     /// @custom:error ExitLeveragePositionRedeemFailed
-    error ExitLeveragePositionRedeemFailed();
+    error ExitLeveragePositionRedeemFailed(uint256 errorCode);
 
     /// @custom:error LeverageCausesLiquidation
     error LeverageCausesLiquidation();
@@ -47,6 +47,12 @@ interface ILeverageStrategiesManager {
 
     /// @custom:error InsufficientFundsToRepayFlashloan
     error InsufficientFundsToRepayFlashloan();
+
+    /// @custom:error InitiatorMismatch
+    error InitiatorMismatch();
+
+    /// @custom:error OnBehalfMismatch
+    error OnBehalfMismatch();
 
     /// @custom:error TransferFromUserFailed
     error TransferFromUserFailed();
@@ -103,7 +109,7 @@ interface ILeverageStrategiesManager {
      * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan
      * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for leverage
      * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
-     * @param swapData Array of bytes containing swap instructions for converting borrowed assets to collateral
+     * @param swapData Bytes containing swap instructions for converting borrowed assets to collateral
      * @custom:emits LeveragedPositionEntered
      * @custom:error Unauthorized if caller is not user or approved delegate
      * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
@@ -117,7 +123,7 @@ interface ILeverageStrategiesManager {
         IVToken borrowedMarket,
         uint256 borrowedAmountToFlashLoan,
         uint256 minAmountOutAfterSwap,
-        bytes[] calldata swapData
+        bytes calldata swapData
     ) external;
 
     /**
@@ -130,7 +136,7 @@ interface ILeverageStrategiesManager {
      * @param borrowedAmountSeed The initial amount of borrowed assets the user has (can be 0)
      * @param borrowedAmountToFlashLoan The additional amount to borrow via flash loan for leverage
      * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
-     * @param swapData Array of bytes containing swap instructions for converting borrowed assets to collateral
+     * @param swapData Bytes containing swap instructions for converting borrowed assets to collateral
      * @custom:emits LeveragedPositionEntered
      * @custom:error Unauthorized if caller is not user or approved delegate
      * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
@@ -144,7 +150,7 @@ interface ILeverageStrategiesManager {
         uint256 borrowedAmountSeed,
         uint256 borrowedAmountToFlashLoan,
         uint256 minAmountOutAfterSwap,
-        bytes[] calldata swapData
+        bytes calldata swapData
     ) external;
 
     /**
@@ -156,7 +162,7 @@ interface ILeverageStrategiesManager {
      * @param collateralAmountToRedeemForSwap The amount of collateral to redeem and swap
      * @param borrowedMarket The vToken market where debt will be repaid via flash loan
      * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for debt repayment
-     * @param swapData Array of bytes containing swap instructions for converting collateral to borrowed assets
+     * @param swapData Bytes containing swap instructions for converting collateral to borrowed assets
      * @custom:emits LeveragedPositionExited
      * @custom:error Unauthorized if caller is not user or approved delegate
      * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
@@ -169,6 +175,6 @@ interface ILeverageStrategiesManager {
         IVToken borrowedMarket,
         uint256 borrowedAmountToFlashLoan,
         uint256 minAmountOutAfterSwap,
-        bytes[] calldata swapData
+        bytes calldata swapData
     ) external;
 }
