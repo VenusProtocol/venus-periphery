@@ -104,6 +104,10 @@ contract Undertaker is Ownable2Step {
     /// @notice Thrown when unlisting the market fails.
     error FailedToUnlistMarket(uint256 errorCode);
 
+    /**
+     * @notice Constructor to initialize the Undertaker contract.
+     * @param corePoolComptroller The address of the Core Pool Comptroller contract.
+     */
     constructor(ICorePoolComptroller corePoolComptroller) Ownable2Step() {
         CORE_POOL_COMPTROLLER = corePoolComptroller;
     }
@@ -181,10 +185,15 @@ contract Undertaker is Ownable2Step {
         IComptroller comptroller = IVToken(market).comptroller();
 
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
-            uint256 err = CORE_POOL_COMPTROLLER.setCollateralFactor(market, 0, 0);
+            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+                (bool isListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, market);
+                if (isListed) {
+                    uint256 err = CORE_POOL_COMPTROLLER.setCollateralFactor(i, market, 0, 0);
 
-            if (err != 0) {
-                revert FailedToSetCollateralFactor(err);
+                    if (err != 0) {
+                        revert FailedToSetCollateralFactor(err);
+                    }
+                }
             }
         } else {
             IILComptroller(address(comptroller)).setCollateralFactor(market, 0, 0);
@@ -303,9 +312,21 @@ contract Undertaker is Ownable2Step {
             return false;
         }
 
-        (, uint256 collateralFactorMantissa, ) = comptroller.markets(market);
-        if (collateralFactorMantissa == 0) {
-            return false;
+        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
+            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+                (bool isListed, uint256 collateralFactorMantissa, , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(
+                    i,
+                    market
+                );
+                if (isListed && collateralFactorMantissa == 0) {
+                    return false;
+                }
+            }
+        } else {
+            (, uint256 collateralFactorMantissa, ) = comptroller.markets(market);
+            if (collateralFactorMantissa == 0) {
+                return false;
+            }
         }
 
         return true;
