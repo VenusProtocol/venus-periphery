@@ -35,7 +35,7 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   const vETH = VToken__factory.connect(vETH_ADDRESS, timelock);
 
   const undertakerFactory = await ethers.getContractFactory("Undertaker");
-  const undertaker = await undertakerFactory.connect(timelock).deploy();
+  const undertaker = await undertakerFactory.connect(timelock).deploy(COMPTROLLER_ADDRESS);
   await undertaker.deployed();
 
   const acm = IAccessControlManagerV8__factory.connect(ACM, timelock) as IAccessControlManagerV8;

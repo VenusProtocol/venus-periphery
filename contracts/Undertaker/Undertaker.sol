@@ -2,7 +2,10 @@
 pragma solidity 0.8.25;
 
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
-import { IVToken, IComptroller } from "../Interfaces.sol";
+import { IVToken } from "../Interfaces/IVToken.sol";
+import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
+import { IILComptroller } from "../Interfaces/IILComptroller.sol";
+import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /**
@@ -31,8 +34,11 @@ contract Undertaker is Ownable2Step {
         uint256 unlistTimestamp;
     }
 
-    /// @dev Base unit for computations, usually used in scaling (multiplications, divisions)
+    /// @notice Base unit for computations, usually used in scaling (multiplications, divisions)
     uint256 private constant EXP_SCALE = 1e18;
+
+    /// @notice Core Pool Comptroller contract.
+    ICorePoolComptroller public immutable CORE_POOL_COMPTROLLER;
 
     /**
      * @notice Global deposit threshold (denominated in USD).
@@ -92,7 +98,15 @@ contract Undertaker is Ownable2Step {
     /// @notice Thrown when the market is not listed.
     error MarketNotListed();
 
-    constructor() Ownable2Step() {}
+    /// @notice Thrown when setting the collateral factor fails.
+    error FailedToSetCollateralFactor(uint256 errorCode);
+
+    /// @notice Thrown when unlisting the market fails.
+    error FailedToUnlistMarket(uint256 errorCode);
+
+    constructor(ICorePoolComptroller corePoolComptroller) Ownable2Step() {
+        CORE_POOL_COMPTROLLER = corePoolComptroller;
+    }
 
     /**
      * @notice Updates the global deposit threshold (in USD).
@@ -124,6 +138,7 @@ contract Undertaker is Ownable2Step {
         uint256 toBeUnlistedMinTotalSupplyUSD
     ) external onlyOwner {
         (bool isListed, , ) = IVToken(market).comptroller().markets(market);
+
         if (!isListed) {
             revert MarketNotListed();
         }
@@ -164,7 +179,16 @@ contract Undertaker is Ownable2Step {
         }
 
         IComptroller comptroller = IVToken(market).comptroller();
-        comptroller.setCollateralFactor(IVToken(market), 0, 0);
+
+        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
+            uint256 err = CORE_POOL_COMPTROLLER.setCollateralFactor(market, 0, 0);
+
+            if (err != 0) {
+                revert FailedToSetCollateralFactor(err);
+            }
+        } else {
+            IILComptroller(address(comptroller)).setCollateralFactor(market, 0, 0);
+        }
 
         IComptroller.Action[] memory actions = new IComptroller.Action[](3);
         actions[0] = IComptroller.Action.MINT;
@@ -214,7 +238,10 @@ contract Undertaker is Ownable2Step {
         comptroller.setMarketBorrowCaps(markets, caps);
         comptroller.setMarketSupplyCaps(markets, caps);
 
-        comptroller.unlistMarket(market);
+        uint256 err = comptroller.unlistMarket(market);
+        if (err != 0) {
+            revert FailedToUnlistMarket(err);
+        }
 
         expiries[market].unlistTimestamp = block.timestamp;
 
