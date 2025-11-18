@@ -146,7 +146,7 @@ interface IPositionSwapper {
         IVToken marketTo,
         uint256 minAmountToSupply,
         bytes calldata swapData
-    ) external payable;
+    ) external;
 
     /// @notice Swaps a specific amount of collateral from one market to another.
     /// @param user The address whose collateral is being swapped.
@@ -165,7 +165,7 @@ interface IPositionSwapper {
         uint256 maxAmountToSwap,
         uint256 minAmountToSupply,
         bytes calldata swapData
-    ) external payable;
+    ) external;
 
     /// @notice Swaps the full debt of a user from one market to another.
     /// @param user The address whose debt is being swapped.
@@ -181,7 +181,7 @@ interface IPositionSwapper {
         IVToken marketTo,
         uint256 maxDebtAmountToOpen,
         bytes calldata swapData
-    ) external payable;
+    ) external;
 
     /// @notice Swaps a specific amount of debt from one market to another.
     /// @param user The address whose debt is being swapped.
@@ -200,5 +200,5 @@ interface IPositionSwapper {
         uint256 minDebtAmountToSwap,
         uint256 maxDebtAmountToOpen,
         bytes calldata swapData
-    ) external payable;
+    ) external;
 }

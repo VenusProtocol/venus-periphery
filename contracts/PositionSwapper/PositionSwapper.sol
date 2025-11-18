@@ -2,13 +2,8 @@
 pragma solidity 0.8.28;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import {
-    SafeERC20Upgradeable,
-    IERC20Upgradeable
-} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
-import {
-    ReentrancyGuardUpgradeable
-} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { IVToken, IComptroller, IWBNB, IVBNB, IFlashLoanReceiver } from "../Interfaces.sol";
 import { ISwapHelper } from "../SwapHelper/ISwapHelper.sol";
 import { IPositionSwapper } from "./IPositionSwapper.sol";
@@ -21,6 +16,9 @@ import { IPositionSwapper } from "./IPositionSwapper.sol";
  */
 contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, IFlashLoanReceiver, IPositionSwapper {
     using SafeERC20Upgradeable for IERC20Upgradeable;
+
+    /// @dev A unit (literal one) in EXP_SCALE
+    uint256 internal constant MANTISSA_ONE = 1e18;
 
     /// @notice The Comptroller used for permission and liquidity checks.
     IComptroller public immutable COMPTROLLER;
@@ -173,7 +171,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         IVToken marketTo,
         uint256 minAmountToSupply,
         bytes calldata swapData
-    ) external payable nonReentrant {
+    ) external nonReentrant {
         uint256 userBalance = marketFrom.balanceOfUnderlying(user);
         if (userBalance == 0) revert InsufficientCollateralBalance();
         _swapCollateral(user, marketFrom, marketTo, userBalance, minAmountToSupply, swapData);
@@ -205,7 +203,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 maxAmountToSwap,
         uint256 minAmountToSupply,
         bytes calldata swapData
-    ) external payable nonReentrant {
+    ) external nonReentrant {
         if (maxAmountToSwap == 0) revert ZeroAmount();
         if (maxAmountToSwap > marketFrom.balanceOfUnderlying(user)) revert InsufficientCollateralBalance();
         _swapCollateral(user, marketFrom, marketTo, maxAmountToSwap, minAmountToSupply, swapData);
@@ -233,7 +231,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         IVToken marketTo,
         uint256 maxDebtAmountToOpen,
         bytes calldata swapData
-    ) external payable nonReentrant {
+    ) external nonReentrant {
         uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
         if (borrowBalance == 0) revert InsufficientBorrowBalance();
         _swapDebt(user, marketFrom, marketTo, borrowBalance, maxDebtAmountToOpen, swapData);
@@ -265,7 +263,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 minDebtAmountToSwap,
         uint256 maxDebtAmountToOpen,
         bytes calldata swapData
-    ) external payable nonReentrant {
+    ) external nonReentrant {
         if (minDebtAmountToSwap == 0) revert ZeroAmount();
         if (minDebtAmountToSwap > marketFrom.borrowBalanceCurrent(user)) revert InsufficientBorrowBalance();
         _swapDebt(user, marketFrom, marketTo, minDebtAmountToSwap, maxDebtAmountToOpen, swapData);
@@ -802,8 +800,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     ) internal pure returns (uint256 flashLoanAmount) {
         // feeRate should be expressed as a scaled number, e.g. 9e14 for 0.09% (since 1e18 = 100%)
         //  FA = x / (1 - r)
-        uint256 denominator = 1e18 - feeRate;
-        flashLoanAmount = (requiredAmount * 1e18) / denominator;
+        uint256 denominator = MANTISSA_ONE - feeRate;
+        flashLoanAmount = (requiredAmount * MANTISSA_ONE) / denominator;
     }
 
     /**
