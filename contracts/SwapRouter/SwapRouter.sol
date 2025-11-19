@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-pragma solidity 0.8.25;
+pragma solidity 0.8.28;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
@@ -24,13 +24,13 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
     IComptroller public immutable COMPTROLLER;
 
     /// @notice The swap helper contract for executing token swaps
-    SwapHelper public immutable swapHelper;
+    SwapHelper public immutable SWAP_HELPER;
 
     /// @notice The wrapped native token contract (e.g., WBNB)
-    IWBNB public immutable wrappedNative;
+    IWBNB public immutable WRAPPED_NATIVE;
 
     /// @notice The native vToken address (e.g., vBNB)
-    address public immutable NATIVE_VTOKEN;
+    IVBNB public immutable NATIVE_VTOKEN;
 
     /// @notice Emitted when tokens are swapped and supplied to a Venus market
     event SwapAndSupply(
@@ -59,9 +59,6 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Emitted when leftover native tokens are swept by owner
     event SweepNative(address indexed receiver, uint256 amount);
-
-    /// @custom:error Thrown when an invalid vToken address is provided
-    error InvalidVToken(address vToken);
 
     /// @custom:error Thrown when a zero address is provided
     error ZeroAddress();
@@ -108,9 +105,9 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         if (_nativeVToken == address(0)) revert ZeroAddress();
 
         COMPTROLLER = _comptroller;
-        swapHelper = _swapHelper;
-        wrappedNative = _wrappedNative;
-        NATIVE_VTOKEN = _nativeVToken;
+        SWAP_HELPER = _swapHelper;
+        WRAPPED_NATIVE = _wrappedNative;
+        NATIVE_VTOKEN = IVBNB(_nativeVToken);
         _disableInitializers();
     }
 
@@ -133,7 +130,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param tokenIn The input token to swap from
      * @param amountIn The amount of input tokens to swap
      * @param minAmountOut The minimum amount of output tokens expected
-     * @param swapData Array of bytes containing swap instructions
+     * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndSupply event
      */
     function swapAndSupply(
@@ -141,7 +138,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         address tokenIn,
         uint256 amountIn,
         uint256 minAmountOut,
-        bytes[] calldata swapData
+        bytes calldata swapCallData
     ) external payable nonReentrant {
         if (amountIn == 0) revert ZeroAmount();
         _validateVToken(vToken);
@@ -152,7 +149,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         uint256 actualAmountIn = _handleTokenInput(tokenIn, amountIn);
 
         // Perform swap
-        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, minAmountOut, swapData);
+        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, minAmountOut, swapCallData);
 
         // Supply to Venus market
         uint256 amountSupplied = _supply(vToken, tokenOut, amountOut);
@@ -164,13 +161,13 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @notice Swaps native tokens (BNB) and supplies to a Venus market
      * @param vToken The vToken market to supply to
      * @param minAmountOut The minimum amount of output tokens expected
-     * @param swapData Array of bytes containing swap instructions
+     * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndSupply event
      */
     function swapNativeAndSupply(
         address vToken,
         uint256 minAmountOut,
-        bytes[] calldata swapData
+        bytes calldata swapCallData
     ) external payable nonReentrant {
         if (msg.value == 0) revert ZeroAmount();
         _validateVToken(vToken);
@@ -178,15 +175,15 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         address tokenOut = _getUnderlyingToken(vToken);
 
         // Wrap native tokens
-        wrappedNative.deposit{ value: msg.value }();
+        WRAPPED_NATIVE.deposit{ value: msg.value }();
 
         // Perform swap
-        uint256 amountOut = _performSwap(address(wrappedNative), tokenOut, msg.value, minAmountOut, swapData);
+        uint256 amountOut = _performSwap(address(WRAPPED_NATIVE), tokenOut, msg.value, minAmountOut, swapCallData);
 
         // Supply to Venus market
         uint256 amountSupplied = _supply(vToken, tokenOut, amountOut);
 
-        emit SwapAndSupply(msg.sender, vToken, address(wrappedNative), tokenOut, msg.value, amountOut, amountSupplied);
+        emit SwapAndSupply(msg.sender, vToken, address(WRAPPED_NATIVE), tokenOut, msg.value, amountOut, amountSupplied);
     }
 
     /**
@@ -195,7 +192,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param tokenIn The input token to swap from
      * @param amountIn The amount of input tokens to swap
      * @param minAmountOut The minimum amount of output tokens expected
-     * @param swapData Array of bytes containing swap instructions
+     * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndRepay event
      */
     function swapAndRepay(
@@ -203,7 +200,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         address tokenIn,
         uint256 amountIn,
         uint256 minAmountOut,
-        bytes[] calldata swapData
+        bytes calldata swapCallData
     ) external payable nonReentrant {
         if (amountIn == 0) revert ZeroAmount();
         _validateVToken(vToken);
@@ -214,7 +211,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         uint256 actualAmountIn = _handleTokenInput(tokenIn, amountIn);
 
         // Perform swap
-        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, minAmountOut, swapData);
+        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, minAmountOut, swapCallData);
 
         // Repay debt
         uint256 amountRepaid = _repay(vToken, tokenOut, amountOut);
@@ -226,13 +223,13 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @notice Swaps native tokens and repays debt to a Venus market
      * @param vToken The vToken market to repay debt to
      * @param minAmountOut The minimum amount of output tokens expected
-     * @param swapData Array of bytes containing swap instructions
+     * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndRepay event
      */
     function swapNativeAndRepay(
         address vToken,
         uint256 minAmountOut,
-        bytes[] calldata swapData
+        bytes calldata swapCallData
     ) external payable nonReentrant {
         if (msg.value == 0) revert ZeroAmount();
         _validateVToken(vToken);
@@ -240,15 +237,15 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         address tokenOut = _getUnderlyingToken(vToken);
 
         // Wrap native tokens
-        wrappedNative.deposit{ value: msg.value }();
+        WRAPPED_NATIVE.deposit{ value: msg.value }();
 
         // Perform swap
-        uint256 amountOut = _performSwap(address(wrappedNative), tokenOut, msg.value, minAmountOut, swapData);
+        uint256 amountOut = _performSwap(address(WRAPPED_NATIVE), tokenOut, msg.value, minAmountOut, swapCallData);
 
         // Repay debt
         uint256 amountRepaid = _repay(vToken, tokenOut, amountOut);
 
-        emit SwapAndRepay(msg.sender, vToken, address(wrappedNative), tokenOut, msg.value, amountOut, amountRepaid);
+        emit SwapAndRepay(msg.sender, vToken, address(WRAPPED_NATIVE), tokenOut, msg.value, amountOut, amountRepaid);
     }
 
     /**
@@ -256,14 +253,14 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param vToken The vToken market to repay full debt to
      * @param tokenIn The input token to swap from
      * @param maxAmountIn The maximum amount of input tokens to use
-     * @param swapData Array of bytes containing swap instructions
+     * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndRepay event
      */
     function swapAndRepayFull(
         address vToken,
         address tokenIn,
         uint256 maxAmountIn,
-        bytes[] calldata swapData
+        bytes calldata swapCallData
     ) external payable nonReentrant {
         if (maxAmountIn == 0) revert ZeroAmount();
         _validateVToken(vToken);
@@ -278,7 +275,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         uint256 actualAmountIn = _handleTokenInput(tokenIn, maxAmountIn);
 
         // Perform swap - no minAmountOut since we need exact debt amount
-        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, 0, swapData);
+        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, 0, swapCallData);
 
         // Ensure we have enough to cover debt
         if (amountOut < debtAmount) revert InsufficientAmountOut(amountOut, debtAmount);
@@ -338,8 +335,8 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @dev For native vToken (vBNB), returns wrapped native token address
      */
     function _getUnderlyingToken(address vToken) internal view returns (address underlying) {
-        if (vToken == NATIVE_VTOKEN) {
-            return address(wrappedNative);
+        if (vToken == address(NATIVE_VTOKEN)) {
+            return address(WRAPPED_NATIVE);
         } else {
             return IVToken(vToken).underlying();
         }
@@ -355,12 +352,11 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         if (tokenIn == address(0)) {
             // Native token - should use msg.value
             if (msg.value != amountIn) revert InsufficientBalance();
-            wrappedNative.deposit{ value: msg.value }();
+            WRAPPED_NATIVE.deposit{ value: msg.value }();
             return msg.value;
         } else {
             // ERC20 token - measure actual amount received
             IERC20Upgradeable token = IERC20Upgradeable(tokenIn);
-            if (token.balanceOf(msg.sender) < amountIn) revert InsufficientBalance();
 
             uint256 balanceBefore = token.balanceOf(address(this));
             token.safeTransferFrom(msg.sender, address(this), amountIn);
@@ -377,7 +373,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param tokenOut The output token address
      * @param amountIn The amount of input tokens
      * @param minAmountOut The minimum amount of output tokens expected
-     * @param swapData The swap execution data
+     * @param swapCallData The swap execution data
      * @return amountOut The actual amount of output tokens received
      */
     function _performSwap(
@@ -385,7 +381,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         address tokenOut,
         uint256 amountIn,
         uint256 minAmountOut,
-        bytes[] calldata swapData
+        bytes calldata swapCallData
     ) internal returns (uint256 amountOut) {
         // If tokens are the same, no swap needed
         if (tokenIn == tokenOut) {
@@ -396,14 +392,13 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         }
 
         // Transfer tokens to SwapHelper
-        IERC20Upgradeable(tokenIn).safeTransfer(address(swapHelper), amountIn);
+        IERC20Upgradeable(tokenIn).safeTransfer(address(SWAP_HELPER), amountIn);
 
         // Record balance before swap
         uint256 balanceBefore = IERC20Upgradeable(tokenOut).balanceOf(address(this));
 
         // Execute swap using SwapHelper multicall
-        bytes memory swapCallData = abi.encodeWithSelector(swapHelper.multicall.selector, swapData);
-        (bool success, ) = address(swapHelper).call(swapCallData);
+        (bool success, ) = address(SWAP_HELPER).call(swapCallData);
         if (!success) revert SwapFailed();
 
         // Calculate amount received
@@ -426,15 +421,14 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @return amountSupplied The actual amount supplied
      */
     function _supply(address vToken, address token, uint256 amount) internal returns (uint256 amountSupplied) {
-        if (vToken == NATIVE_VTOKEN) {
+        if (vToken == address(NATIVE_VTOKEN)) {
             // Handle native token supply
             IWBNB(token).withdraw(amount);
-            IVBNB(vToken).mint{ value: amount }();
+            NATIVE_VTOKEN.mint{ value: amount }();
             amountSupplied = amount;
         } else {
             // Handle ERC20 token supply
-            IERC20Upgradeable(token).safeApprove(vToken, 0);
-            IERC20Upgradeable(token).safeApprove(vToken, amount);
+            IERC20Upgradeable(token).forceApprove(vToken, amount);
             uint256 errorCode = IVToken(vToken).mintBehalf(msg.sender, amount);
             if (errorCode != 0) revert SupplyFailed(errorCode);
             amountSupplied = amount;
@@ -462,15 +456,14 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         // Don't repay more than owed
         uint256 repayAmount = amount > debtAmount ? debtAmount : amount;
 
-        if (vToken == NATIVE_VTOKEN) {
+        if (vToken == address(NATIVE_VTOKEN)) {
             // Handle native token repayment
             IWBNB(token).withdraw(repayAmount);
             IVBNB(vToken).repayBorrowBehalf{ value: repayAmount }(msg.sender);
             amountRepaid = repayAmount;
         } else {
             // Handle ERC20 token repayment
-            IERC20Upgradeable(token).safeApprove(vToken, 0);
-            IERC20Upgradeable(token).safeApprove(vToken, repayAmount);
+            IERC20Upgradeable(token).forceApprove(vToken, repayAmount);
             uint256 errorCode = IVToken(vToken).repayBorrowBehalf(msg.sender, repayAmount);
             if (errorCode != 0) revert RepayFailed(errorCode);
             amountRepaid = repayAmount;
@@ -479,10 +472,10 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         // Return any excess tokens to user
         if (amount > repayAmount) {
             uint256 excess = amount - repayAmount;
-            if (vToken == NATIVE_VTOKEN) {
+            if (vToken == address(NATIVE_VTOKEN)) {
                 // Convert back to wrapped native and transfer
-                wrappedNative.deposit{ value: excess }();
-                IERC20Upgradeable(address(wrappedNative)).safeTransfer(msg.sender, excess);
+                WRAPPED_NATIVE.deposit{ value: excess }();
+                IERC20Upgradeable(address(WRAPPED_NATIVE)).safeTransfer(msg.sender, excess);
             } else {
                 IERC20Upgradeable(token).safeTransfer(msg.sender, excess);
             }

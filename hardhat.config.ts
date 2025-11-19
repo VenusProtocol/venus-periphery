@@ -91,6 +91,23 @@ const config: HardhatUserConfig = {
         },
       },
       {
+        version: "0.8.28",
+        settings: {
+          optimizer: {
+            enabled: true,
+            details: {
+              yul: !process.env.CI,
+            },
+          },
+          evmVersion: "cancun",
+          outputSelection: {
+            "*": {
+              "*": ["storageLayout"],
+            },
+          },
+        },
+      },
+      {
         version: "0.5.16",
         settings: {
           optimizer: {
