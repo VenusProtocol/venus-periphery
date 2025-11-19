@@ -113,7 +113,7 @@ contract SwapHelper is EIP712, Ownable2Step, ReentrancyGuard {
         _;
     }
 
-    /// @notice Multicall function to execute multiple calls in a single transaction
+    /// @notice Multicall function to execute multiple calls in a single transaction.
     /// @param calls Array of encoded function calls to execute on this contract
     /// @param deadline Unix timestamp after which the transaction will revert
     /// @param salt Unique value to ensure this exact multicall can only be executed once
@@ -122,6 +122,8 @@ contract SwapHelper is EIP712, Ownable2Step, ReentrancyGuard {
     /// @dev Calls must be to functions on this contract (address(this))
     /// @dev Signature verification is only performed if signature.length != 0
     /// @dev Protected by nonReentrant modifier to prevent reentrancy attacks
+    /// @dev This function should be called as a part of a transaction that sends tokens to this contract and verifies if they received desired tokens after execution.
+    /// @dev EOA that calls this function should not send tokens directly nor approve this contract to spend tokens on their behalf.
     /// @custom:event MulticallExecuted emitted upon successful execution
     /// @custom:security Only the contract itself can call sweep, approveMax, and genericCall
     /// @custom:error NoCallsProvided if calls array is empty
