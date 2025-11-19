@@ -12,50 +12,56 @@ import { IVToken } from "../Interfaces.sol";
  *      to specific assets by borrowing against their collateral and reinvesting the borrowed funds.
  */
 interface ILeverageStrategiesManager {
-    /// @custom:error EnterLeveragePositionMintFailed
+    /// @custom:error UnauthorizedCaller Caller is neither the user nor an approved delegate.
+    error UnauthorizedCaller(address account);
+
+    /// @custom:error EnterLeveragePositionMintFailed mintBehalf on a vToken market returned a non-zero error code
     error EnterLeveragePositionMintFailed(uint256 errorCode);
 
-    /// @custom:error EnterLeveragePositionBorrowBehalfFailed
+    /// @custom:error EnterLeveragePositionBorrowBehalfFailed borrowBehalf on a vToken market returned a non-zero error code
     error EnterLeveragePositionBorrowBehalfFailed(uint256 errorCode);
 
-    /// @custom:error ExitLeveragePositionRepayFailed
+    /// @custom:error ExitLeveragePositionRepayFailed repayBehalf on a vToken market returned a non-zero error code
     error ExitLeveragePositionRepayFailed(uint256 errorCode);
 
-    /// @custom:error ExitLeveragePositionRedeemFailed
+    /// @custom:error ExitLeveragePositionRedeemFailed redeemBehalf on a vToken market returned a non-zero error code
     error ExitLeveragePositionRedeemFailed(uint256 errorCode);
 
-    /// @custom:error LeverageCausesLiquidation
+    /// @custom:error LeverageCausesLiquidation Operation would put the account at risk (undercollateralized)
     error LeverageCausesLiquidation();
 
-    /// @custom:error SwapCallFailed
-    error SwapCallFailed();
+    /// @custom:error TokenSwapCallFailed Swap helper call reverted or returned false
+    error TokenSwapCallFailed();
 
-    /// @custom:error Unauthorized Caller is neither the user nor an approved delegate.
-    error Unauthorized();
-
-    /// @custom:error FlashLoanAssetOrAmountMismatch
+    /// @custom:error FlashLoanAssetOrAmountMismatch Invalid flash loan arrays length or >1 elements
     error FlashLoanAssetOrAmountMismatch();
 
-    /// @custom:error ExecuteOperationNotCalledByAuthorizedContract
-    error ExecuteOperationNotCalledByAuthorizedContract();
+    /// @custom:error UnauthorizedExecutor Caller is not the expected Comptroller
+    error UnauthorizedExecutor();
 
-    /// @custom:error ExecuteOperationNotCalledCorrectly
-    error ExecuteOperationNotCalledCorrectly();
+    /// @custom:error InvalidExecuteOperation Unknown operation type in flash loan callback
+    error InvalidExecuteOperation();
 
-    /// @custom:error InsufficientAmountOutAfterSwap
+    /// @custom:error InsufficientAmountOutAfterSwap Swap output lower than required minimum
     error InsufficientAmountOutAfterSwap();
 
-    /// @custom:error InsufficientFundsToRepayFlashloan
+    /// @custom:error InsufficientFundsToRepayFlashloan Not enough proceeds to repay flash loan plus fees
     error InsufficientFundsToRepayFlashloan();
 
-    /// @custom:error InitiatorMismatch
+    /// @custom:error InitiatorMismatch Invalid initiator address in flash loan callback
     error InitiatorMismatch();
 
-    /// @custom:error OnBehalfMismatch
+    /// @custom:error OnBehalfMismatch Invalid onBehalf address in flash loan callback
     error OnBehalfMismatch();
 
-    /// @custom:error TransferFromUserFailed
+    /// @custom:error TransferFromUserFailed Failed to transfer tokens from user
     error TransferFromUserFailed();
+
+    /// @custom:error EnterMarketFailed Comptroller.enterMarketBehalf returned a non-zero error code
+    error EnterMarketFailed(uint256 err);
+
+    /// @custom:error MarketNotListed Provided vToken market is not listed in Comptroller
+    error MarketNotListed(address market);
 
     /// @notice Emitted when a user enters a leveraged position with collateral seed
     /// @param user The address of the user entering the position

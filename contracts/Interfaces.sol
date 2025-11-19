@@ -55,6 +55,8 @@ interface IComptroller {
 
     function enterMarkets(address[] calldata vTokens) external returns (uint256[] memory);
 
+    function enterMarketBehalf(address onBehalf, address vToken) external returns (uint256);
+
     function enterMarket(address user, address vToken) external returns (uint256);
 
     function liquidationIncentiveMantissa() external view returns (uint256);
