@@ -2,7 +2,10 @@
 pragma solidity 0.8.25;
 
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
-import { IVToken, IComptroller } from "../Interfaces.sol";
+import { IVToken } from "../Interfaces/IVToken.sol";
+import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
+import { IILComptroller } from "../Interfaces/IILComptroller.sol";
+import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /**
@@ -15,17 +18,32 @@ import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
  * in a permissionless manner, without requiring additional VIP approvals.
  */
 contract Undertaker is Ownable2Step {
+    /**
+     * @dev Expiry configuration for a market.
+     */
     struct Expiry {
+        /// @notice When set (>0), the market may be paused after this UNIX timestamp.
         uint256 toBePausedAfterTimestamp;
+        /// @notice Whether the market is allowed to be unlisted after being paused.
         bool canUnlist;
+        /// @notice When `canUnlist` is true, the market is eligible to be unlisted only if the total value of supplied assets (in USD) falls below this threshold.
         uint256 toBeUnlistedMinTotalSupplyUSD;
+        /// @notice Timestamp when the market was paused (0 if not paused).
         uint256 pauseTimestamp;
+        /// @notice Timestamp when the market was unlisted (0 if still listed).
         uint256 unlistTimestamp;
     }
 
+    /// @notice Base unit for computations, usually used in scaling (multiplications, divisions)
+    uint256 private constant EXP_SCALE = 1e18;
+
+    /// @notice Core Pool Comptroller contract.
+    ICorePoolComptroller public immutable CORE_POOL_COMPTROLLER;
+
     /**
-     * @notice The global deposit threshold (in USD).
-     * @dev If a market’s deposits fall below this threshold, it can be paused.
+     * @notice Global deposit threshold (denominated in USD).
+     * @dev If a market does not have `toBePausedAfterTimestamp` set and its total deposits drop below this threshold,
+     * the market can be paused.
      */
     uint256 public globalDepositThreshold;
 
@@ -80,7 +98,19 @@ contract Undertaker is Ownable2Step {
     /// @notice Thrown when the market is not listed.
     error MarketNotListed();
 
-    constructor() Ownable2Step() {}
+    /// @notice Thrown when setting the collateral factor fails.
+    error FailedToSetCollateralFactor(uint256 errorCode);
+
+    /// @notice Thrown when unlisting the market fails.
+    error FailedToUnlistMarket(uint256 errorCode);
+
+    /**
+     * @notice Constructor to initialize the Undertaker contract.
+     * @param corePoolComptroller The address of the Core Pool Comptroller contract.
+     */
+    constructor(ICorePoolComptroller corePoolComptroller) Ownable2Step() {
+        CORE_POOL_COMPTROLLER = corePoolComptroller;
+    }
 
     /**
      * @notice Updates the global deposit threshold (in USD).
@@ -112,6 +142,7 @@ contract Undertaker is Ownable2Step {
         uint256 toBeUnlistedMinTotalSupplyUSD
     ) external onlyOwner {
         (bool isListed, , ) = IVToken(market).comptroller().markets(market);
+
         if (!isListed) {
             revert MarketNotListed();
         }
@@ -121,6 +152,10 @@ contract Undertaker is Ownable2Step {
         }
 
         if (!canUnlist && toBeUnlistedMinTotalSupplyUSD != 0) {
+            revert InvalidExpiryConfiguration();
+        }
+
+        if (canUnlist && toBeUnlistedMinTotalSupplyUSD == 0) {
             revert InvalidExpiryConfiguration();
         }
 
@@ -142,13 +177,27 @@ contract Undertaker is Ownable2Step {
      */
     function pauseMarket(address market) external {
         IVToken(market).accrueInterest();
-        
+
         if (!canPauseMarket(market)) {
             revert MarketNotEligibleForPause();
         }
 
         IComptroller comptroller = IVToken(market).comptroller();
-        comptroller.setCollateralFactor(IVToken(market), 0, 0);
+
+        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
+            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+                (bool isListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, market);
+                if (isListed) {
+                    uint256 err = CORE_POOL_COMPTROLLER.setCollateralFactor(i, market, 0, 0);
+
+                    if (err != 0) {
+                        revert FailedToSetCollateralFactor(err);
+                    }
+                }
+            }
+        } else {
+            IILComptroller(address(comptroller)).setCollateralFactor(market, 0, 0);
+        }
 
         IComptroller.Action[] memory actions = new IComptroller.Action[](3);
         actions[0] = IComptroller.Action.MINT;
@@ -190,15 +239,18 @@ contract Undertaker is Ownable2Step {
         markets[0] = market;
 
         IComptroller comptroller = IVToken(market).comptroller();
-        IComptroller(comptroller).setActionsPaused(markets, actions, true);
+        comptroller.setActionsPaused(markets, actions, true);
 
         uint256[] memory caps = new uint256[](1);
         caps[0] = 0;
 
-        IComptroller(comptroller).setMarketBorrowCaps(markets, caps);
-        IComptroller(comptroller).setMarketSupplyCaps(markets, caps);
+        comptroller.setMarketBorrowCaps(markets, caps);
+        comptroller.setMarketSupplyCaps(markets, caps);
 
-        IComptroller(comptroller).unlistMarket(market);
+        uint256 err = comptroller.unlistMarket(market);
+        if (err != 0) {
+            revert FailedToUnlistMarket(err);
+        }
 
         expiries[market].unlistTimestamp = block.timestamp;
 
@@ -212,13 +264,13 @@ contract Undertaker is Ownable2Step {
      */
     function isMarketPaused(address market) public view returns (bool) {
         IComptroller comptroller = IVToken(market).comptroller();
-        (, uint256 collateralFactorMantissa, ) = IComptroller(comptroller).markets(market);
+        (, uint256 collateralFactorMantissa, ) = comptroller.markets(market);
 
         if (
             collateralFactorMantissa == 0 &&
-            IComptroller(comptroller).actionPaused(market, IComptroller.Action.MINT) &&
-            IComptroller(comptroller).actionPaused(market, IComptroller.Action.BORROW) &&
-            IComptroller(comptroller).actionPaused(market, IComptroller.Action.ENTER_MARKET)
+            comptroller.actionPaused(market, IComptroller.Action.MINT) &&
+            comptroller.actionPaused(market, IComptroller.Action.BORROW) &&
+            comptroller.actionPaused(market, IComptroller.Action.ENTER_MARKET)
         ) {
             return true;
         }
@@ -245,7 +297,7 @@ contract Undertaker is Ownable2Step {
         IComptroller comptroller = IVToken(market).comptroller();
 
         if (expiry.toBePausedAfterTimestamp == 0) {
-            uint256 totalDepositsUSD = getTotalDeposit(market);
+            uint256 totalDepositsUSD = _getTotalDeposit(market);
 
             if (totalDepositsUSD > globalDepositThreshold) {
                 return false;
@@ -260,9 +312,21 @@ contract Undertaker is Ownable2Step {
             return false;
         }
 
-        (, uint256 collateralFactorMantissa, ) = comptroller.markets(market);
-        if (collateralFactorMantissa == 0) {
-            return false;
+        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
+            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+                (bool isListed, uint256 collateralFactorMantissa, , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(
+                    i,
+                    market
+                );
+                if (isListed && collateralFactorMantissa == 0) {
+                    return false;
+                }
+            }
+        } else {
+            (, uint256 collateralFactorMantissa, ) = comptroller.markets(market);
+            if (collateralFactorMantissa == 0) {
+                return false;
+            }
         }
 
         return true;
@@ -294,7 +358,7 @@ contract Undertaker is Ownable2Step {
             return false;
         }
 
-        uint256 totalDepositsUSD = getTotalDeposit(market);
+        uint256 totalDepositsUSD = _getTotalDeposit(market);
 
         if (totalDepositsUSD > expiry.toBeUnlistedMinTotalSupplyUSD) {
             return false;
@@ -308,12 +372,12 @@ contract Undertaker is Ownable2Step {
      * @param market The address of the market.
      * @return The total deposits in USD.
      */
-    function getTotalDeposit(address market) internal view returns (uint256) {
+    function _getTotalDeposit(address market) internal view returns (uint256) {
         IComptroller comptroller = IVToken(market).comptroller();
         ResilientOracleInterface oracle = comptroller.oracle();
-        uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / 1e18;
+        uint256 totalSupplied = (IVToken(market).totalSupply() * IVToken(market).exchangeRateStored()) / EXP_SCALE;
         uint256 price = oracle.getUnderlyingPrice(market);
-        uint256 totalDepositsUSD = (totalSupplied * price) / 1e18;
+        uint256 totalDepositsUSD = (totalSupplied * price) / EXP_SCALE;
         return totalDepositsUSD;
     }
 }
