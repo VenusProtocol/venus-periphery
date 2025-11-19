@@ -250,16 +250,16 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         address onBehalf,
         bytes calldata param
     ) external override returns (bool success, uint256[] memory repayAmounts) {
+        if (msg.sender != address(COMPTROLLER)) {
+            revert UnauthorizedExecutor();
+        }
+
         if (initiator != address(this)) {
             revert InitiatorMismatch();
         }
 
         if (onBehalf != operationInitiator) {
             revert OnBehalfMismatch();
-        }
-
-        if (msg.sender != address(COMPTROLLER)) {
-            revert UnauthorizedExecutor();
         }
 
         if (vTokens.length != 1 || amounts.length != 1 || premiums.length != 1) {
@@ -306,7 +306,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(collateralMarket.underlying());
         uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, borrowedAssetAmount, collateralAsset, minAmountOutAfterSwap, swapCallData);
 
-        uint256 mintSuccess = collateralMarket.mintBehalf(onBehalf, swappedCollateralAmountOut + collateralAmount);
+        uint256 collateralAmountToMint = swappedCollateralAmountOut + collateralAmount;
+        collateralAsset.safeApprove(address(collateralMarket), collateralAmountToMint);
+
+        uint256 mintSuccess = collateralMarket.mintBehalf(onBehalf, collateralAmountToMint);
         if (mintSuccess != 0) {
             revert EnterLeveragePositionMintFailed(mintSuccess);
         }
@@ -341,6 +344,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         uint256 totalBorrowedAmountToSwap = borrowedAmountSeed + borrowedAssetAmount;
 
         uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, totalBorrowedAmountToSwap, collateralAsset, minAmountOutAfterSwap, swapCallData);
+
+        collateralAsset.safeApprove(address(collateralMarket), swappedCollateralAmountOut);
 
         uint256 mintSuccess = collateralMarket.mintBehalf(onBehalf, swappedCollateralAmountOut);
         if (mintSuccess != 0) {
@@ -440,14 +445,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     function _transferSeedAmountFromUser(IVToken market, address user, uint256 amount) internal {
         if(amount > 0) {
             IERC20Upgradeable token = IERC20Upgradeable(market.underlying());
-            uint256 tokenBalanceBefore = token.balanceOf(address(this));
-
             token.safeTransferFrom(user, address(this), amount);
-            uint256 tokenBalanceAfter = token.balanceOf(address(this));
-            
-            if(tokenBalanceAfter - tokenBalanceBefore != amount) {
-                revert TransferFromUserFailed();
-            }
         }
     }
 

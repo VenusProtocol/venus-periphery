@@ -4403,7 +4403,7 @@ __metadata:
     "@venusprotocol/oracle": ^2.13.0
     "@venusprotocol/protocol-reserve": ^3.3.0
     "@venusprotocol/solidity-utilities": 2.0.3
-    "@venusprotocol/venus-protocol": 10.0.0
+    "@venusprotocol/venus-protocol": "file:../venus-protocol/venusprotocol-venus-protocol-10.1.0-dev.1.tgz"
     bignumber.js: 9.0.0
     chai: ^4.3.6
     dotenv: ^10.0.0
@@ -4436,9 +4436,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@venusprotocol/venus-protocol@npm:10.0.0":
-  version: 10.0.0
-  resolution: "@venusprotocol/venus-protocol@npm:10.0.0"
+"@venusprotocol/venus-protocol@file:../venus-protocol/venusprotocol-venus-protocol-10.1.0-dev.1.tgz::locator=%40venusprotocol%2Fvenus-periphery%40workspace%3A.":
+  version: 10.1.0-dev.1
+  resolution: "@venusprotocol/venus-protocol@file:../venus-protocol/venusprotocol-venus-protocol-10.1.0-dev.1.tgz::locator=%40venusprotocol%2Fvenus-periphery%40workspace%3A."
   dependencies:
     "@nomicfoundation/hardhat-ethers": ^3.0.0
     "@openzeppelin/contracts": 4.9.3
@@ -4451,7 +4451,7 @@ __metadata:
     dotenv: ^16.0.1
     module-alias: ^2.2.2
     patch-package: ^8.0.0
-  checksum: e32bbd682e9d9a3a74015ce962832da1637119838be74c85fe86668ed1bc70b07e4872f93b356f0562af1d61fc97af29cee980db9b154dddccaafbfb311a1ceb
+  checksum: 33be68a2593b5c3368e751524880fa4be27b25cfb45a073a1198d6d119208241d070350c45524f60b8c570d6aeff7497fb2149136d4f644b475463ef657969fe
   languageName: node
   linkType: hard
 
