@@ -20,8 +20,6 @@ interface IVToken is IERC20Upgradeable {
 
     function borrowBehalf(address borrower, uint borrowAmount) external returns (uint256);
 
-    function repayBorrowBehalf(address borrower, uint repayAmount) external returns (uint256);
-
     function comptroller() external view returns (IComptroller);
 
     function borrowBalanceStored(address account) external view returns (uint256);
