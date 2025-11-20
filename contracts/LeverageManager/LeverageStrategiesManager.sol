@@ -102,7 +102,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkUserAuthorized(msg.sender);
         _checkAccountSafe(msg.sender);
 
-        _validateAndEnterMarket(msg.sender, _collateralMarket, _borrowedMarket);
+        _validateAndEnterMarket(msg.sender, _collateralMarket);
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
         
         operationInitiator = msg.sender;
@@ -150,7 +150,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkUserAuthorized(msg.sender);
         _checkAccountSafe(msg.sender);
 
-        _validateAndEnterMarket(msg.sender, _collateralMarket, _borrowedMarket);
+        _validateAndEnterMarket(msg.sender, _collateralMarket);
         _transferSeedAmountFromUser(_borrowedMarket, msg.sender, _borrowedAmountSeed);
 
         operationInitiator = msg.sender;
@@ -524,17 +524,15 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Ensures the user has entered the destination market before operations
-     * @dev If user is already a member of marketFrom and not of marketTo,
-     *      this function calls Comptroller to enter marketTo on behalf of user
+     * @notice Ensures the user has entered the market before operations
+     * @dev If user is not a member of market the function calls Comptroller to enter market on behalf of user
      * @param user The account for which membership is validated/updated
-     * @param marketFrom The current vToken market the user participates in
-     * @param marketTo The target vToken market the user must enter
+     * @param market The vToken market the user must enter 
      * @custom:error EnterMarketFailed when Comptroller.enterMarketBehalf returns a non-zero error code
      */
-    function _validateAndEnterMarket(address user, IVToken marketFrom, IVToken marketTo) internal {
-        if (COMPTROLLER.checkMembership(user, marketFrom) && !COMPTROLLER.checkMembership(user, marketTo)) {
-            uint256 err = COMPTROLLER.enterMarketBehalf(user, address(marketTo));
+    function _validateAndEnterMarket(address user, IVToken market) internal {
+        if (!COMPTROLLER.checkMembership(user, market)) {
+            uint256 err = COMPTROLLER.enterMarketBehalf(user, address(market));
             if (err != 0) revert EnterMarketFailed(err);
         }
     }
