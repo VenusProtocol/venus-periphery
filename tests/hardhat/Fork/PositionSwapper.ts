@@ -1,6 +1,6 @@
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
-import { Signer } from "ethers";
+import { constants, Signer } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, network, upgrades } from "hardhat";
 
@@ -359,7 +359,7 @@ if (FORK_MAINNET) {
           // Swap Collateral
           const tx = await positionSwapper
             .connect(vWBNB_HOLDER_SIGNER)
-            .swapFullCollateral(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, minCollateralToSupply, multicallData);
+            .swapCollateral(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, constants.MaxUint256, minCollateralToSupply, multicallData);
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
           const tolerance = parseUnits("0.0000001", 18);
@@ -389,7 +389,7 @@ if (FORK_MAINNET) {
 
           const tx = await positionSwapper
             .connect(vWBNB_HOLDER_SIGNER)
-            .swapCollateralWithAmount(
+            .swapCollateral(
               vWBNB_HOLDER,
               vWBNB_ADDRESS,
               vUSDC_ADDRESS,
@@ -430,7 +430,7 @@ if (FORK_MAINNET) {
           // Swap Debt
           const tx = await positionSwapper
             .connect(vETH_BORROWER_SIGNER)
-            .swapFullDebt(vETH_BORROWER, vETH_ADDRESS, vUSDC_ADDRESS, maxBorrowToOpen, multicallData);
+            .swapDebt(vETH_BORROWER, vETH_ADDRESS, vUSDC_ADDRESS, constants.MaxUint256, maxBorrowToOpen, multicallData);
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
 
@@ -467,7 +467,7 @@ if (FORK_MAINNET) {
 
           const tx = await positionSwapper
             .connect(vETH_BORROWER_SIGNER)
-            .swapDebtWithAmount(
+            .swapDebt(
               vETH_BORROWER,
               vETH_ADDRESS,
               vUSDC_ADDRESS,
@@ -610,7 +610,7 @@ if (FORK_MAINNET) {
           await expect(
             positionSwapper
               .connect(user1)
-              .swapCollateralWithAmount(
+              .swapCollateral(
                 user1Address,
                 vWBNB_ADDRESS,
                 vUSDC_ADDRESS,
@@ -638,9 +638,7 @@ if (FORK_MAINNET) {
           // Borrow WBNB to create a debt on vWBNB
           // Use max borrowing power
           const [, liq] = await comptroller.getBorrowingPower(user1Address);
-          console.log("liq", liq.toString());
           const wbnbToBorrow = liq.div(1000);
-          console.log("wbnbToBorrow", wbnbToBorrow.toString());
           await vWBNB.connect(user1).borrow(wbnbToBorrow);
 
           // Set lower collateral factor for target market to cause liquidation
@@ -669,7 +667,7 @@ if (FORK_MAINNET) {
           await expect(
             positionSwapper
               .connect(user1)
-              .swapDebtWithAmount(user1Address, vWBNB_ADDRESS, vUSDC_ADDRESS, repayAmount, maxToOpen, multicallData),
+              .swapDebt(user1Address, vWBNB_ADDRESS, vUSDC_ADDRESS, repayAmount, maxToOpen, multicallData),
           ).to.be.revertedWith("math error"); // reverts early during opening of flashLoan debt
         });
       });

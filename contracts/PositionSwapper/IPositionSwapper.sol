@@ -135,72 +135,40 @@ interface IPositionSwapper {
     /// @custom:event Emits DebtSwapped on success
     function swapDebtNativeToWrapped(address user) external;
 
-    /// @notice Swaps the full vToken collateral of a user from one market to another.
+    /// @notice Swaps collateral from one market to another.
     /// @param user The address whose collateral is being swapped.
     /// @param marketFrom The vToken market to seize from.
     /// @param marketTo The vToken market to mint into.
+    /// @param amountToSwap The amount of underlying to swap from `marketFrom`. Use `type(uint256).max` to swap full balance.
     /// @param minAmountToSupply Minimum amount of target underlying to supply after swap.
     /// @param swapData Bytes containing swap instructions for the SwapHelper.
-    /// @custom:error InsufficientCollateralBalance The user has no underlying balance in the `marketFrom`.
+    /// @custom:error ZeroAmount The `amountToSwap` is zero (and not `type(uint256).max`).
+    /// @custom:error InsufficientCollateralBalance The user has no or insufficient underlying balance in the `marketFrom`.
     /// @custom:event Emits CollateralSwapped event.
-    function swapFullCollateral(
+    function swapCollateral(
         address user,
         IVToken marketFrom,
         IVToken marketTo,
+        uint256 amountToSwap,
         uint256 minAmountToSupply,
         bytes calldata swapData
     ) external;
 
-    /// @notice Swaps a specific amount of collateral from one market to another.
-    /// @param user The address whose collateral is being swapped.
-    /// @param marketFrom The vToken market to seize from.
-    /// @param marketTo The vToken market to mint into.
-    /// @param maxAmountToSwap The maximum amount of underlying to swap from `marketFrom`.
-    /// @param minAmountToSupply Minimum amount of target underlying to supply after swap.
-    /// @param swapData Bytes containing swap instructions for the SwapHelper.
-    /// @custom:error ZeroAmount The `maxAmountToSwap` is zero.
-    /// @custom:error InsufficientCollateralBalance The user has insufficient underlying balance in the `marketFrom`.
-    /// @custom:event Emits CollateralSwapped event.
-    function swapCollateralWithAmount(
-        address user,
-        IVToken marketFrom,
-        IVToken marketTo,
-        uint256 maxAmountToSwap,
-        uint256 minAmountToSupply,
-        bytes calldata swapData
-    ) external;
-
-    /// @notice Swaps the full debt of a user from one market to another.
+    /// @notice Swaps debt from one market to another.
     /// @param user The address whose debt is being swapped.
     /// @param marketFrom The vToken market from which debt is swapped.
     /// @param marketTo The vToken market into which the new debt is borrowed.
+    /// @param repayAmount The amount of debt of `marketFrom` to repay. Use `type(uint256).max` to repay full debt.
     /// @param maxDebtAmountToOpen Maximum amount to open as new debt on `marketTo` (before fee rounding).
     /// @param swapData Bytes containing swap instructions for the SwapHelper.
-    /// @custom:error InsufficientBorrowBalance The user has no borrow balance in the `marketFrom`.
+    /// @custom:error ZeroAmount The `repayAmount` is zero (and not `type(uint256).max`).
+    /// @custom:error InsufficientBorrowBalance The user has no or insufficient borrow balance in the `marketFrom`.
     /// @custom:event Emits DebtSwapped event.
-    function swapFullDebt(
+    function swapDebt(
         address user,
         IVToken marketFrom,
         IVToken marketTo,
-        uint256 maxDebtAmountToOpen,
-        bytes calldata swapData
-    ) external;
-
-    /// @notice Swaps a specific amount of debt from one market to another.
-    /// @param user The address whose debt is being swapped.
-    /// @param marketFrom The vToken market from which debt is swapped.
-    /// @param marketTo The vToken market into which the new debt is borrowed.
-    /// @param minDebtAmountToSwap The minimum amount of debt of `marketFrom` to repay.
-    /// @param maxDebtAmountToOpen The maximum amount to open as new debt on `marketTo`.
-    /// @param swapData Bytes containing swap instructions for the SwapHelper.
-    /// @custom:error ZeroAmount The `minDebtAmountToSwap` is zero.
-    /// @custom:error InsufficientBorrowBalance The user has insufficient borrow balance in the `marketFrom`.
-    /// @custom:event Emits DebtSwapped event.
-    function swapDebtWithAmount(
-        address user,
-        IVToken marketFrom,
-        IVToken marketTo,
-        uint256 minDebtAmountToSwap,
+        uint256 repayAmount,
         uint256 maxDebtAmountToOpen,
         bytes calldata swapData
     ) external;

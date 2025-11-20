@@ -155,124 +155,78 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     }
 
     /**
-     * @notice Swaps the full vToken collateral of a user from one market to another.
+     * @notice Swaps collateral from one market to another.
      * @dev The user must add this PositionSwapper contract to their approved delegates.
      *      Flash loan fee: The fee is deducted from the destination collateral amount.
-     *      This function transfers the user's entire `marketFrom` collateral to the `swapHelper` contract,
+     *      This function transfers the user's collateral to the `swapHelper` contract,
      *      which must handle the conversion into `marketTo` tokens. In case of a non-zero flash loan fee,
-     *      only `(marketFrom - flashLoanFee)` collateral will be transferred to the `swapHelper`.
+     *      only `(amountToSwap - flashLoanFee)` collateral will be transferred to the `swapHelper`.
      *      The `swapHelper` (and the associated swap API) must account for this adjustment when constructing `swapData`.
+     *      If `amountToSwap` is set to `type(uint256).max`, the function will swap the user's entire balance.
      * @param user The address whose collateral is being swapped.
      * @param marketFrom The vToken market to redeem collateral from.
      * @param marketTo The vToken market to supply collateral into.
+     * @param amountToSwap The amount of underlying to swap from `marketFrom`. Use `type(uint256).max` to swap full balance.
      * @param minAmountToSupply Minimum amount of `marketTo` underlying to supply after swap. Validates the swapped tokens received.
      * @param swapData Bytes containing swap instructions for the SwapHelper.
      *                 Swaps flashLoaned amount `marketFrom` underlying to `marketTo` underlying asset.
-     * @custom:error InsufficientCollateralBalance If the user has no underlying balance in `marketFrom`.
+     * @custom:error ZeroAmount If `amountToSwap` is zero (and not `type(uint256).max`).
+     * @custom:error InsufficientCollateralBalance If the user has no or insufficient underlying balance in `marketFrom`.
      * @custom:event Emits CollateralSwapped event on success.
      */
-    function swapFullCollateral(
+    function swapCollateral(
         address user,
         IVToken marketFrom,
         IVToken marketTo,
+        uint256 amountToSwap,
         uint256 minAmountToSupply,
         bytes calldata swapData
     ) external nonReentrant {
+        if (amountToSwap == 0) revert ZeroAmount();
         uint256 userBalance = marketFrom.balanceOfUnderlying(user);
         if (userBalance == 0) revert InsufficientCollateralBalance();
-        _swapCollateral(user, marketFrom, marketTo, userBalance, minAmountToSupply, swapData);
+
+        uint256 swapAmount = amountToSwap == type(uint256).max ? userBalance : amountToSwap;
+        if (swapAmount > userBalance) revert InsufficientCollateralBalance();
+
+        _swapCollateral(user, marketFrom, marketTo, swapAmount, minAmountToSupply, swapData);
     }
 
     /**
-     * @notice Swaps a specific amount of collateral from one market to another.
-     * @dev The user must add this PositionSwapper contract to their approved delegates.
-     *      The specified `maxAmountToSwap` determines both the amount of collateral to transfer from `marketFrom`
-     *      and the flash loan amount. This amount is transferred to the `swapHelper` contract, which must handle
-     *      conversion into `marketTo` tokens. If the flash loan fee is non-zero, only `(maxAmountToSwap - flashLoanFee)`
-     *      will be transferred to the `swapHelper`. The `swapHelper` (and associated swap API) must account for
-     *      this adjustment when constructing `swapData`.
-     * @param user The address whose collateral is being swapped.
-     * @param marketFrom The vToken market to redeem collateral from.
-     * @param marketTo The vToken market to supply collateral into.
-     * @param maxAmountToSwap The maximum amount of underlying to swap from `marketFrom`.
-     * @param minAmountToSupply Minimum amount of `marketTo` underlying to supply after swap. Validates the swapped tokens received.
-     * @param swapData Bytes containing swap instructions for the SwapHelper.
-     *                 Swaps flashLoaned amount `marketFrom` underlying to `marketTo` underlying asset.
-     * @custom:error ZeroAmount If `maxAmountToSwap` is zero.
-     * @custom:error InsufficientCollateralBalance If the user has insufficient underlying balance in `marketFrom`.
-     * @custom:event Emits CollateralSwapped event on success.
-     */
-    function swapCollateralWithAmount(
-        address user,
-        IVToken marketFrom,
-        IVToken marketTo,
-        uint256 maxAmountToSwap,
-        uint256 minAmountToSupply,
-        bytes calldata swapData
-    ) external nonReentrant {
-        if (maxAmountToSwap == 0) revert ZeroAmount();
-        if (maxAmountToSwap > marketFrom.balanceOfUnderlying(user)) revert InsufficientCollateralBalance();
-        _swapCollateral(user, marketFrom, marketTo, maxAmountToSwap, minAmountToSupply, swapData);
-    }
-
-    /**
-     * @notice Swaps the full debt of a user from one market to another.
+     * @notice Swaps debt from one market to another.
      * @dev The user must add this PositionSwapper contract to their approved delegates.
      *      Flash loan fee: `maxDebtAmountToOpen` must include sufficient headroom to cover the flash loan fee.
      *      Slippage: `maxDebtAmountToOpen` also caps the amount consumed by the swap.
      *      This amount is taken as the flash loan and transferred to the `swapHelper` for the swap.
      *      In case of a non-zero flash loan fee, only `(maxDebtAmountToOpen - flashLoanFee)` is transferred.
+     *      If `repayAmount` is set to `type(uint256).max`, the function will repay the user's entire debt.
      * @param user The address whose debt is being swapped.
      * @param marketFrom The vToken market from which debt is repaid.
      * @param marketTo The vToken market into which the new debt is borrowed.
+     * @param repayAmount The amount of debt of `marketFrom` to repay. Use `type(uint256).max` to repay full debt.
      * @param maxDebtAmountToOpen Maximum amount of new debt to open on `marketTo`.
      * @param swapData Bytes containing swap instructions for the SwapHelper.
      *                 Swaps flashLoaned amount `marketTo` underlying to `marketFrom` underlying asset.
-     * @custom:error InsufficientBorrowBalance If the user has no borrow balance in `marketFrom`.
+     * @custom:error ZeroAmount If `repayAmount` is zero (and not `type(uint256).max`).
+     * @custom:error InsufficientBorrowBalance If the user has no or insufficient borrow balance in `marketFrom`.
      * @custom:event Emits DebtSwapped event on success.
      */
-    function swapFullDebt(
+    function swapDebt(
         address user,
         IVToken marketFrom,
         IVToken marketTo,
+        uint256 repayAmount,
         uint256 maxDebtAmountToOpen,
         bytes calldata swapData
     ) external nonReentrant {
+        if (repayAmount == 0) revert ZeroAmount();
         uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
         if (borrowBalance == 0) revert InsufficientBorrowBalance();
-        _swapDebt(user, marketFrom, marketTo, borrowBalance, maxDebtAmountToOpen, swapData);
-    }
 
-    /**
-     * @notice Swaps a specific amount of debt from one market to another.
-     * @dev The user must add this PositionSwapper contract to their approved delegates.
-     *      Flash loan fee: `maxDebtAmountToOpen` must include headroom to cover the flash loan fee.
-     *      Slippage: `maxDebtAmountToOpen` caps how much can be borrowed; if set high, the swap may consume up
-     *      to this amount and any leftover/refund depends on the swap API invoked via `swapData`.
-     *      This amount is taken as the flash loan and transferred to the `swapHelper` for the swap.
-     *      In case of a non-zero flash loan fee, only `(maxDebtAmountToOpen - flashLoanFee)` is transferred.
-     * @param user The address whose debt is being swapped.
-     * @param marketFrom The vToken market from which debt is repaid.
-     * @param marketTo The vToken market into which the new debt is borrowed.
-     * @param minDebtAmountToSwap The minimum amount of debt of `marketFrom` to repay.
-     * @param maxDebtAmountToOpen The maximum amount to open as new debt on `marketTo`.
-     * @param swapData Bytes containing swap instructions for the SwapHelper.
-     *                 Swaps flashLoaned amount `marketTo` underlying to `marketFrom` underlying asset.
-     * @custom:error ZeroAmount If `minDebtAmountToSwap` is zero.
-     * @custom:error InsufficientBorrowBalance If the user has insufficient borrow balance in `marketFrom`.
-     * @custom:event Emits DebtSwapped event on success.
-     */
-    function swapDebtWithAmount(
-        address user,
-        IVToken marketFrom,
-        IVToken marketTo,
-        uint256 minDebtAmountToSwap,
-        uint256 maxDebtAmountToOpen,
-        bytes calldata swapData
-    ) external nonReentrant {
-        if (minDebtAmountToSwap == 0) revert ZeroAmount();
-        if (minDebtAmountToSwap > marketFrom.borrowBalanceCurrent(user)) revert InsufficientBorrowBalance();
-        _swapDebt(user, marketFrom, marketTo, minDebtAmountToSwap, maxDebtAmountToOpen, swapData);
+        uint256 swapAmount = repayAmount == type(uint256).max ? borrowBalance : repayAmount;
+        if (swapAmount > borrowBalance) revert InsufficientBorrowBalance();
+
+        _swapDebt(user, marketFrom, marketTo, swapAmount, maxDebtAmountToOpen, swapData);
     }
 
     /**
