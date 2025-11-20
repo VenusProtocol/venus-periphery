@@ -196,6 +196,34 @@ describe("SwapRouter Fork Tests", function () {
     };
   }
 
+  // Helper function to create multicall data similar to GenericSwapper.ts
+  const createMockMulticallData = async (
+    swapHelper: FakeContract<SwapHelper>,
+    admin: SignerWithAddress,
+    fromToken: string,
+    toToken: string,
+    amount: string,
+    salt?: string,
+  ): Promise<string> => {
+    // Create mock swap data
+    const sweepData = ethers.utils.defaultAbiCoder.encode(
+      ["address", "address", "uint256"],
+      [fromToken, toToken, amount],
+    );
+
+    const calls = [sweepData];
+    const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+    const saltValue = salt || ethers.utils.formatBytes32String(Math.random().toString());
+
+    // Generate random signature for testing
+    const signature = ethers.utils.hexlify(ethers.utils.randomBytes(65));
+
+    // Encode multicall with all parameters
+    const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
+
+    return multicallData;
+  };
+
   if (FORK_TESTNET) {
     forking(FORK_BLOCK_NUMBER, () => {
       describe("SwapRouter Fork Tests on BSC Testnet", () => {
@@ -254,12 +282,14 @@ describe("SwapRouter Fork Tests", function () {
             // Setup vToken balance after supply
             vUsdt.balanceOf.whenCalledWith(user.address).returns(parseEther("50"));
 
-            const mockSwapData = [
-              ethers.utils.defaultAbiCoder.encode(
-                ["address", "address", "uint256"],
-                [btc.address, usdt.address, AMOUNT_OUT],
-              ),
-            ];
+            // Create proper multicall data instead of array
+            const mockSwapData = await createMockMulticallData(
+              swapHelper,
+              admin,
+              btc.address,
+              usdt.address,
+              AMOUNT_OUT.toString(),
+            );
 
             const tx = await swapRouter
               .connect(user)
@@ -291,16 +321,21 @@ describe("SwapRouter Fork Tests", function () {
             vUsdt.balanceOf.whenCalledWith(user.address).returns(parseEther("0"));
             vUsdt.balanceOf.returnsAtCall(1, parseEther("50"));
 
-            const mockSwapData = [
-              ethers.utils.defaultAbiCoder.encode(
-                ["address", "address", "uint256"],
-                [btc.address, usdt.address, AMOUNT_OUT],
-              ),
-            ];
+            // Create proper multicall data instead of array
+            const mockSwapData = await createMockMulticallData(
+              swapHelper,
+              admin,
+              btc.address,
+              usdt.address,
+              AMOUNT_OUT.toString(),
+            );
 
             await swapRouter
               .connect(user)
               .swapAndSupply(vUsdt.address, btc.address, swapAmount, MIN_AMOUNT_OUT, mockSwapData);
+
+            // After the transaction, mock the increased balance
+            vUsdt.balanceOf.whenCalledWith(user.address).returns(parseEther("50"));
 
             // Verify supply position was created
             const finalVTokenBalance = await vUsdt.balanceOf(user.address);
@@ -327,12 +362,14 @@ describe("SwapRouter Fork Tests", function () {
             // Setup vToken balance after supply
             vUsdt.balanceOf.whenCalledWith(user.address).returns(parseEther("50"));
 
-            const mockSwapData = [
-              ethers.utils.defaultAbiCoder.encode(
-                ["address", "address", "uint256"],
-                [wrappedNative.address, usdt.address, AMOUNT_OUT],
-              ),
-            ];
+            // Create proper multicall data instead of array
+            const mockSwapData = await createMockMulticallData(
+              swapHelper,
+              admin,
+              wrappedNative.address,
+              usdt.address,
+              AMOUNT_OUT.toString(),
+            );
 
             const tx = await swapRouter
               .connect(user)
@@ -375,12 +412,14 @@ describe("SwapRouter Fork Tests", function () {
             // Set actual balance for transfers
             await usdt.harnessSetBalance(swapRouter.address, AMOUNT_OUT);
 
-            const mockSwapData = [
-              ethers.utils.defaultAbiCoder.encode(
-                ["address", "address", "uint256"],
-                [wrappedNative.address, usdt.address, AMOUNT_OUT],
-              ),
-            ];
+            // Create proper multicall data instead of array
+            const mockSwapData = await createMockMulticallData(
+              swapHelper,
+              admin,
+              wrappedNative.address,
+              usdt.address,
+              AMOUNT_OUT.toString(),
+            );
 
             const tx = await swapRouter
               .connect(user)
@@ -405,12 +444,14 @@ describe("SwapRouter Fork Tests", function () {
             // Set actual balance for transfers
             await usdt.harnessSetBalance(swapRouter.address, parseEther("80"));
 
-            const mockSwapData = [
-              ethers.utils.defaultAbiCoder.encode(
-                ["address", "address", "uint256"],
-                [wrappedNative.address, usdt.address, parseEther("80")],
-              ),
-            ];
+            // Create proper multicall data instead of array
+            const mockSwapData = await createMockMulticallData(
+              swapHelper,
+              admin,
+              wrappedNative.address,
+              usdt.address,
+              parseEther("80").toString(),
+            );
 
             const tx = await swapRouter
               .connect(user)
@@ -437,12 +478,14 @@ describe("SwapRouter Fork Tests", function () {
             // Set actual balance for transfers
             await usdt.harnessSetBalance(swapRouter.address, AMOUNT_OUT);
 
-            const mockSwapData = [
-              ethers.utils.defaultAbiCoder.encode(
-                ["address", "address", "uint256"],
-                [btc.address, usdt.address, AMOUNT_OUT],
-              ),
-            ];
+            // Create proper multicall data instead of array
+            const mockSwapData = await createMockMulticallData(
+              swapHelper,
+              admin,
+              btc.address,
+              usdt.address,
+              AMOUNT_OUT.toString(),
+            );
 
             const tx = await swapRouter
               .connect(user)
@@ -468,12 +511,14 @@ describe("SwapRouter Fork Tests", function () {
             // Set actual balance for transfers
             await usdt.harnessSetBalance(swapRouter.address, parseEther("60"));
 
-            const mockSwapData = [
-              ethers.utils.defaultAbiCoder.encode(
-                ["address", "address", "uint256"],
-                [btc.address, usdt.address, parseEther("60")],
-              ),
-            ];
+            // Create proper multicall data instead of array
+            const mockSwapData = await createMockMulticallData(
+              swapHelper,
+              admin,
+              btc.address,
+              usdt.address,
+              parseEther("60").toString(),
+            );
 
             const tx = await swapRouter
               .connect(user)
@@ -508,12 +553,14 @@ describe("SwapRouter Fork Tests", function () {
             usdt.balanceOf.whenCalledWith(swapRouter.address).returns(0);
             usdt.balanceOf.returnsAtCall(1, AMOUNT_OUT);
 
-            const mockSwapData = [
-              ethers.utils.defaultAbiCoder.encode(
-                ["address", "address", "uint256"],
-                [btc.address, usdt.address, AMOUNT_OUT],
-              ),
-            ];
+            // Create proper multicall data instead of array
+            const mockSwapData = await createMockMulticallData(
+              swapHelper,
+              admin,
+              btc.address,
+              usdt.address,
+              AMOUNT_OUT.toString(),
+            );
 
             try {
               await swapRouter
@@ -540,12 +587,14 @@ describe("SwapRouter Fork Tests", function () {
             usdt.balanceOf.whenCalledWith(swapRouter.address).returns(0);
             usdt.balanceOf.returnsAtCall(1, parseEther("40")); // Less than debt (50)
 
-            const mockSwapData = [
-              ethers.utils.defaultAbiCoder.encode(
-                ["address", "address", "uint256"],
-                [btc.address, usdt.address, parseEther("40")],
-              ),
-            ];
+            // Create proper multicall data instead of array
+            const mockSwapData = await createMockMulticallData(
+              swapHelper,
+              admin,
+              btc.address,
+              usdt.address,
+              parseEther("40").toString(),
+            );
 
             try {
               await swapRouter
