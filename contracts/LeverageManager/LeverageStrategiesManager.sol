@@ -68,6 +68,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:oz-upgrades-unsafe-allow constructor
      */
     constructor(IComptroller _comptroller,  IProtocolShareReserve _protocolShareReserve, SwapHelper _swapHelper) {
+        if(address(_comptroller) == address(0) || address(_protocolShareReserve) == address(0) || address(_swapHelper) == address(0)) {
+            revert ZeroAddress();
+        }
+
         COMPTROLLER = _comptroller;
         protocolShareReserve = _protocolShareReserve;
         swapHelper = _swapHelper;
@@ -227,12 +231,13 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Flash loan callback entrypoint called by Comptroller.
+     * @notice Flash loan callback entrypoint called by Comptroller
+     * @dev Protected by nonReentrant modifier to prevent reentrancy attacks during flash loan execution
      * @param vTokens Array with the borrowed vToken market (single element)
      * @param amounts Array with the borrowed underlying amount (single element)
      * @param premiums Array with the flash loan fee amount (single element)
-     * @param initiator The address that initiated the flash loan (unused)
-     * @param onBehalf The user for whome debt will be opened
+     * @param initiator The address that initiated the flash loan (must be this contract)
+     * @param onBehalf The user for whom debt will be opened
      * @param param Encoded auxiliary data for the operation (e.g., swap multicall)
      * @return success Whether the execution succeeded
      * @return repayAmounts Amounts to approve for flash loan repayment
@@ -249,7 +254,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         address initiator,
         address onBehalf,
         bytes calldata param
-    ) external override returns (bool success, uint256[] memory repayAmounts) {
+    ) external override nonReentrant returns (bool success, uint256[] memory repayAmounts) {
         if (msg.sender != address(COMPTROLLER)) {
             revert UnauthorizedExecutor();
         }
@@ -284,20 +289,19 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     /**
      * @notice Executes the enter leveraged position operation during flash loan callback
      * @dev This function performs the following steps:
-     *      1. Swaps borrowed assets for collateral assets
-     *      2. Transfers user's seed collateral (if any) to this contract
-     *      3. Supplies all collateral to the Venus market on behalf of the user
-     *      4. Borrows the repayment amount on behalf of the user
-     *      5. Approves the borrowed asset for repayment to the flash loan
+     *      1. Swaps flash loaned borrowed assets for collateral assets
+     *      2. Supplies all collateral received from swap to the Venus market on behalf of the user
+     *      3. Borrows the repayment amount on behalf of the user
+     *      4. Approves the borrowed asset for repayment to the flash loan
      * @param onBehalf Address on whose behalf the operation is performed
      * @param borrowMarket The vToken market from which assets were borrowed
      * @param borrowedAssetAmount The amount of borrowed assets received from flash loan
      * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
      * @param swapCallData The encoded swap instructions for converting borrowed to collateral assets
-     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
+     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (fees only)
      * @custom:error TransferFromUserFailed if transferring seed borrowed assets from user fails
      * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
-     * @custom:error EnterLeveragePositionBorrowBehalfFailed if  borrow behalf operation fails
+     * @custom:error EnterLeveragePositionBorrowBehalfFailed if borrow behalf operation fails
      * @custom:error SwapCallFailed if token swap execution fails
      */
     function _executeEnterOperation(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
@@ -320,20 +324,19 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     /**
      * @notice Executes the enter leveraged position with borrowed assets operation during flash loan callback
      * @dev This function performs the following steps:
-     *      1. Transfers user's seed borrowed assets (if any) to this contract
-     *      2. Swaps the total borrowed assets (seed + flash loan) for collateral assets
-     *      3. Supplies all collateral to the Venus market on behalf of the user
-     *      4. Borrows the repayment amount on behalf of the user
-     *      5. Approves the borrowed asset for repayment to the flash loan
+     *      1. Swaps the total borrowed assets (seed + flash loan) for collateral assets
+     *      2. Supplies all collateral received from swap to the Venus market on behalf of the user
+     *      3. Borrows the repayment amount on behalf of the user
+     *      4. Approves the borrowed asset for repayment to the flash loan
      * @param onBehalf Address on whose behalf the operation is performed
      * @param borrowMarket The vToken market from which assets were borrowed
      * @param borrowedAssetAmount The amount of borrowed assets received from flash loan
      * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
      * @param swapCallData The encoded swap instructions for converting borrowed to collateral assets
-     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
+     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (fees only)
      * @custom:error TransferFromUserFailed if transferring seed borrowed assets from user fails
      * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
-     * @custom:error EnterLeveragePositionBorrowBehalfFailed if  borrow behalf operation fails
+     * @custom:error EnterLeveragePositionBorrowBehalfFailed if borrow behalf operation fails
      * @custom:error SwapCallFailed if token swap execution fails
      * @custom:error InsufficientAmountOutAfterSwap if collateral balance after swap is below minimum
      */
@@ -367,7 +370,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @param borrowedAssetAmountToRepayFromFlashLoan The amount borrowed via flash loan for debt repayment
      * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
      * @param swapCallData The encoded swap instructions for converting collateral to borrowed assets
-     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (principal + fees)
+     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay
      * @custom:error ExitLeveragePositionRepayFailed if repayment of borrowed assets fails
      * @custom:error ExitLeveragePositionRedeemFailed if redeem operations fail
      * @custom:error SwapCallFailed if token swap execution fails
@@ -411,9 +414,11 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @param tokenOut The output token to receive from the swap
      * @param minAmountOut The minimum acceptable amount of output tokens
      * @param param The encoded swap instructions/calldata for the SwapHelper
-     * @custom:error SwapCallFailed if the swap execution fails
+     * @return amountOut The actual amount of output tokens received from the swap
+     * @custom:error TokenSwapCallFailed if the swap execution fails
+     * @custom:error InsufficientAmountOutAfterSwap if the swap output is below the minimum required
      */
-    function _performSwap(IERC20Upgradeable tokenIn, uint256 amountIn, IERC20Upgradeable tokenOut, uint256 minAmountOut, bytes calldata param) internal nonReentrant returns (uint256 amountOut) {
+    function _performSwap(IERC20Upgradeable tokenIn, uint256 amountIn, IERC20Upgradeable tokenOut, uint256 minAmountOut, bytes calldata param) internal returns (uint256 amountOut) {
         tokenIn.safeTransfer(address(swapHelper), amountIn);
 
         uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
@@ -468,13 +473,14 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     /**
      * @notice Borrows assets on behalf of the user to repay the flash loan fee
      * @dev Borrows the total amount needed to repay the flash loan fee
-     *      and approves the borrowed asset for repayment to the flash loan fee.
+     *      and approves the borrowed asset for repayment to the flash loan.
+     * @param onBehalf Address on whose behalf assets will be borrowed
      * @param borrowMarket The vToken market from which assets will be borrowed
      * @param borrowedAsset The underlying asset being borrowed
      * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
-     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay 
+     * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (only fees)
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
-     * @custom:error EnterLeveragePositionBorrowBehalfFailed if  borrow behalf operation fails
+     * @custom:error EnterLeveragePositionBorrowBehalfFailed if borrow behalf operation fails
      */
     function _borrowAndRepayFlashLoanFee(address onBehalf, IVToken borrowMarket, IERC20Upgradeable borrowedAsset, uint256 borrowedAssetFees) internal returns (uint256 borrowedAssetAmountToRepay) {
         borrowedAssetAmountToRepay = borrowedAssetFees;
@@ -494,9 +500,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Checks that the caller is authorized to act on behalf of the specified user.
-     * @param user The address of the user for whom the action is being performed.
-     * @custom:error UnauthorizedCaller If caller is neither the user nor an approved delegate
+     * @notice Checks that the caller is authorized to act on behalf of the specified user
+     * @param user The address of the user for whom the action is being performed
+     * @custom:error UnauthorizedCaller if caller is neither the user nor an approved delegate
      */
     function _checkUserAuthorized(address user) internal view {
         if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
@@ -518,13 +524,13 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Ensures the `user` has entered the destination market before operations.
-     * @dev If `user` is already a member of `marketFrom` and not of `marketTo`,
-     *      this function calls Comptroller to enter `marketTo` on behalf of `user`.
-     * @param user The account for which membership is validated/updated.
-     * @param marketFrom The current vToken market the user participates in.
-     * @param marketTo The target vToken market the user must enter.
-     * @custom:error EnterMarketFailed When Comptroller.enterMarketBehalf returns a non-zero error code
+     * @notice Ensures the user has entered the destination market before operations
+     * @dev If user is already a member of marketFrom and not of marketTo,
+     *      this function calls Comptroller to enter marketTo on behalf of user
+     * @param user The account for which membership is validated/updated
+     * @param marketFrom The current vToken market the user participates in
+     * @param marketTo The target vToken market the user must enter
+     * @custom:error EnterMarketFailed when Comptroller.enterMarketBehalf returns a non-zero error code
      */
     function _validateAndEnterMarket(address user, IVToken marketFrom, IVToken marketTo) internal {
         if (COMPTROLLER.checkMembership(user, marketFrom) && !COMPTROLLER.checkMembership(user, marketTo)) {
@@ -534,9 +540,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @dev Ensures that the given market is listed in the Comptroller.
-     * @param market The vToken address to validate.
-     * @custom:error MarketNotListed If the market is not listed in Comptroller
+     * @dev Ensures that the given market is listed in the Comptroller
+     * @param market The vToken address to validate
+     * @custom:error MarketNotListed if the market is not listed in Comptroller
      */
     function _checkMarketListed(IVToken market) internal view {
         (bool isMarketListed, , ) = COMPTROLLER.markets(address(market));

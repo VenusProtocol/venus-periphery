@@ -275,6 +275,39 @@ describe("LeverageStrategiesManager", () => {
       expect(await leverageManager.swapHelper()).to.equal(swapHelper.address);
     });
 
+    it("should revert on deployment when comptroller address is zero", async () => {
+      const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
+      await expect(
+        LeverageStrategiesManagerFactory.deploy(
+          ethers.constants.AddressZero,
+          protocolShareReserve.address,
+          swapHelper.address,
+        ),
+      ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
+    });
+
+    it("should revert on deployment when protocolShareReserve address is zero", async () => {
+      const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
+      await expect(
+        LeverageStrategiesManagerFactory.deploy(
+          comptroller.address,
+          ethers.constants.AddressZero,
+          swapHelper.address,
+        ),
+      ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
+    });
+
+    it("should revert on deployment when swapHelper address is zero", async () => {
+      const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
+      await expect(
+        LeverageStrategiesManagerFactory.deploy(
+          comptroller.address,
+          protocolShareReserve.address,
+          ethers.constants.AddressZero,
+        ),
+      ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
+    });
+
     it("should initialize correctly", async () => {
       expect(leverageManager.address).to.satisfy(ethers.utils.isAddress);
 

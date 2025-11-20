@@ -63,6 +63,9 @@ interface ILeverageStrategiesManager {
     /// @custom:error MarketNotListed Provided vToken market is not listed in Comptroller
     error MarketNotListed(address market);
 
+    /// @custom:error ZeroAddress One of the required addresses is zero
+    error ZeroAddress();
+
     /// @notice Emitted when a user enters a leveraged position with collateral seed
     /// @param user The address of the user entering the position
     /// @param collateralMarket The vToken market used as collateral
