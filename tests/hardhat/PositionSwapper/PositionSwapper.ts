@@ -117,6 +117,8 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   const WBNBSwapHelperFactory = await ethers.getContractFactory("WBNBSwapHelper");
   const wBNBSwapHelper = await WBNBSwapHelperFactory.deploy(WBNB.address, positionSwapper.address);
 
+  await positionSwapper.setApprovedPair(vBNB.address, vWBNB.address, wBNBSwapHelper.address, true);
+
   return {
     comptroller,
     vBNB,

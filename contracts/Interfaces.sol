@@ -55,6 +55,8 @@ interface IComptroller {
 
     function enterMarkets(address[] calldata vTokens) external returns (uint256[] memory);
 
+    function enterMarket(address user, address vToken) external returns (uint256);
+
     function liquidationIncentiveMantissa() external view returns (uint256);
 
     function vaiController() external view returns (address);
@@ -72,6 +74,8 @@ interface IComptroller {
     function approvedDelegates(address borrower, address delegate) external view returns (bool);
 
     function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);
+
+    function checkMembership(address account, IVToken vToken) external view returns (bool);
 }
 
 interface IWBNB is IERC20Upgradeable {
