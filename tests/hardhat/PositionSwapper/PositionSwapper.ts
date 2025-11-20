@@ -520,9 +520,14 @@ describe("positionSwapper", () => {
     it("owner can sweep token and native; non-owner reverts", async () => {
       // Send some USDT to PositionSwapper
       await USDT.transfer(positionSwapper.address, parseUnits("1", 18));
-      // Send some native to PositionSwapper
+      
+      // Set the contract's native token balance using hardhat_setBalance
+      await ethers.provider.send("hardhat_setBalance", [
+        positionSwapper.address,
+        "0xDE0B6B3A7640000", // 1 ETH
+      ]);
+
       const [adminSigner, nonOwner] = await ethers.getSigners();
-      await adminSigner.sendTransaction({ to: positionSwapper.address, value: parseEther("0.001") });
 
       // Non-owner sweep attempts revert
       await expect(positionSwapper.connect(nonOwner).sweepToken(USDT.address)).to.be.reverted;
@@ -535,12 +540,13 @@ describe("positionSwapper", () => {
       expect(ownerUSDTAfter.sub(ownerUSDTBefore)).to.be.gte(parseUnits("1", 18));
 
       const ownerNativeBefore = await ethers.provider.getBalance(await adminSigner.getAddress());
-      const tx = await positionSwapper.connect(adminSigner).sweepNative();
-      const receipt = await tx.wait();
-      const gasSpent = receipt.gasUsed.mul(tx.gasPrice ?? 0);
+      await expect(positionSwapper.connect(adminSigner).sweepNative())
+        .to.emit(positionSwapper, "SweepNative")
+        .withArgs(await adminSigner.getAddress(), parseEther("1"));
+      
+      // Verify the balance was transferred to the owner
       const ownerNativeAfter = await ethers.provider.getBalance(await adminSigner.getAddress());
-      // After - Before + gas >= swept amount (approximate due to gas); ensure increased
-      expect(ownerNativeAfter.add(gasSpent)).to.be.gt(ownerNativeBefore);
+      expect(ownerNativeAfter).to.be.gt(ownerNativeBefore);
     });
   });
 

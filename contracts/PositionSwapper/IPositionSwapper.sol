@@ -109,6 +109,9 @@ interface IPositionSwapper {
     /// @custom:error InsufficientAmountOutAfterSwap Swap output lower than required minimum
     error InsufficientAmountOutAfterSwap();
 
+    /// @custom:error Thrown when unauthorized sender tries to send native tokens
+    error UnauthorizedNativeSender(address sender);
+
     // External functions
     /// @notice Allows the owner to sweep leftover ERC-20 tokens from the contract.
     /// @param token The token to sweep.

@@ -84,8 +84,14 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
     /**
      * @notice Accepts native tokens (e.g., BNB) sent to this contract.
+     * @dev Only allows WBNB or vBNB contract to send native tokens to prevent accidental transfers
+     * @custom:error UnauthorizedNativeSender If the Sender is not the WBNB or vBNB.
      */
-    receive() external payable {}
+    receive() external payable {
+        if (msg.sender != address(WRAPPED_NATIVE) && msg.sender != address(NATIVE_MARKET)) {
+            revert UnauthorizedNativeSender(msg.sender);
+        }
+    }
 
     /**
      * @notice Allows the owner to sweep leftover ERC-20 tokens from the contract.
