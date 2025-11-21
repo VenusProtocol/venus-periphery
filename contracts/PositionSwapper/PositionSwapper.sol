@@ -761,7 +761,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         // feeRate should be expressed as a scaled number, e.g. 9e14 for 0.09% (since 1e18 = 100%)
         //  FA = x / (1 - r)
         uint256 denominator = MANTISSA_ONE - feeRate;
-        flashLoanAmount = (requiredAmount * MANTISSA_ONE) / denominator;
+        flashLoanAmount = (requiredAmount * MANTISSA_ONE + denominator - 1) / denominator;
     }
 
     /**

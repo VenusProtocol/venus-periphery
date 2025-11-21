@@ -1,7 +1,7 @@
 import { FakeContract, smock } from "@defi-wonderland/smock";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
-import { BigNumber, constants, Contract, Signer, Wallet } from "ethers";
+import { BigNumber, Contract, Signer, Wallet, constants } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, network, upgrades } from "hardhat";
 
@@ -314,7 +314,14 @@ describe("positionSwapper", () => {
       // Swap Collateral
       await positionSwapper
         .connect(user1)
-        .swapCollateral(user1Address, vWBNB.address, vUSDT.address, constants.MaxUint256, parseUnits("11", 18), multicallData);
+        .swapCollateral(
+          user1Address,
+          vWBNB.address,
+          vUSDT.address,
+          constants.MaxUint256,
+          parseUnits("11", 18),
+          multicallData,
+        );
       expect(await vUSDT.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("12", 18));
       expect(await vWBNB.callStatic.balanceOfUnderlying(user1Address)).to.eq(parseUnits("0", 18));
     });
@@ -397,14 +404,7 @@ describe("positionSwapper", () => {
       // Swap only part of the debt; repay 2 USDT, open 3 BUSD
       await positionSwapper
         .connect(user1)
-        .swapDebt(
-          user1Address,
-          vUSDT.address,
-          vBUSD.address,
-          parseUnits("2", 18),
-          parseUnits("3", 18),
-          multicallData,
-        );
+        .swapDebt(user1Address, vUSDT.address, vBUSD.address, parseUnits("2", 18), parseUnits("3", 18), multicallData);
 
       expect(await vUSDT.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("1"));
       expect(await vBUSD.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("3"));
@@ -415,7 +415,7 @@ describe("positionSwapper", () => {
   describe("with flash loan fee", () => {
     beforeEach(async () => {
       // Set a small flash loan fee: 1% (1e16 mantissa)
-      await vWBNB.setFlashLoanFeeMantissa(parseUnits("0.01", 18), parseUnits("0.5", 18));
+      await vWBNB.setFlashLoanFeeMantissa(parseUnits("0.0009", 18), parseUnits("0.5", 18));
       await vBUSD.setFlashLoanFeeMantissa(parseUnits("0.01", 18), parseUnits("0.5", 18));
     });
 
@@ -471,15 +471,35 @@ describe("positionSwapper", () => {
   });
 
   describe("quoteFlashLoanAmount", () => {
-    it("should net the required amount after subtracting fee from quoted borrow", async () => {
-      const required = parseEther("100");
-      const fee = parseUnits("0.01", 18); // 1%
-      const quoted = await positionSwapper.quoteFlashLoanAmount(required, fee);
-      const feeAmount = quoted.mul(fee).div(parseUnits("1", 18));
-      const net = quoted.sub(feeAmount);
-      const tolerance = required.div(1_000_000);
-      expect(net).to.be.closeTo(required, tolerance);
-    });
+    const feeRates = [
+      parseUnits("0", 18),
+      parseUnits("0.000000000000000001", 18),
+      parseUnits("0.000000123456789123", 18),
+      parseUnits("0.0009", 18),
+      parseUnits("0.05", 18),
+      parseUnits("0.1", 18),
+      parseUnits("0.5", 18),
+    ];
+    const requiredValues = [
+      parseUnits("0", 18),
+      parseUnits("1", 18).sub(1),
+      parseUnits("1", 18).add(1),
+      parseUnits("1", 18),
+      parseUnits("123456789.123456789123456789", 18),
+      parseUnits("999999999.999999999999999999", 18),
+      parseUnits("3141592.653589793238", 18),
+    ];
+    for (let i = 0; i < feeRates.length; i++) {
+      it("should net the required amount after subtracting fee from quoted borrow", async () => {
+        await vWBNB.setFlashLoanFeeMantissa(feeRates[i], parseUnits("0.5", 18));
+        const required = requiredValues[i];
+        const FeeRate = await vWBNB.flashLoanFeeMantissa();
+        const quoted = await positionSwapper.quoteFlashLoanAmount(required, FeeRate);
+        const feeAmount = await vWBNB.callStatic.calculateFlashLoanFee(quoted);
+        const net = quoted.sub(feeAmount[0]);
+        expect(net).to.be.greaterThanOrEqual(required);
+      });
+    }
   });
 
   describe("access and validation", () => {
@@ -504,7 +524,9 @@ describe("positionSwapper", () => {
     it("should revert swapFullCollateral when no collateral balance", async () => {
       const swapData = "0x";
       await expect(
-        positionSwapper.connect(user1).swapCollateral(user1Address, vUSDT.address, vBUSD.address, constants.MaxUint256, 0, swapData),
+        positionSwapper
+          .connect(user1)
+          .swapCollateral(user1Address, vUSDT.address, vBUSD.address, constants.MaxUint256, 0, swapData),
       ).to.be.revertedWithCustomError(positionSwapper, "InsufficientCollateralBalance");
     });
 
@@ -520,7 +542,7 @@ describe("positionSwapper", () => {
     it("owner can sweep token and native; non-owner reverts", async () => {
       // Send some USDT to PositionSwapper
       await USDT.transfer(positionSwapper.address, parseUnits("1", 18));
-      
+
       // Set the contract's native token balance using hardhat_setBalance
       await ethers.provider.send("hardhat_setBalance", [
         positionSwapper.address,
@@ -543,7 +565,7 @@ describe("positionSwapper", () => {
       await expect(positionSwapper.connect(adminSigner).sweepNative())
         .to.emit(positionSwapper, "SweepNative")
         .withArgs(await adminSigner.getAddress(), parseEther("1"));
-      
+
       // Verify the balance was transferred to the owner
       const ownerNativeAfter = await ethers.provider.getBalance(await adminSigner.getAddress());
       expect(ownerNativeAfter).to.be.gt(ownerNativeBefore);
@@ -558,7 +580,9 @@ describe("positionSwapper", () => {
 
       const swapData = "0x";
       await expect(
-        positionSwapper.connect(user1).swapCollateral(user1Address, fakeFrom.address, fakeTo.address, constants.MaxUint256, 0, swapData),
+        positionSwapper
+          .connect(user1)
+          .swapCollateral(user1Address, fakeFrom.address, fakeTo.address, constants.MaxUint256, 0, swapData),
       ).to.be.revertedWithCustomError(positionSwapper, "MarketNotListed");
     });
 
