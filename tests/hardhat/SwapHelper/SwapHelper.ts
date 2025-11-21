@@ -54,13 +54,28 @@ describe("SwapHelper", () => {
       expect(await swapHelper.owner()).to.equal(ownerAddress);
     });
 
-    it("should allow owner to transfer ownership", async () => {
+    it("should allow owner to transfer ownership with two-step process", async () => {
+      // Step 1: Transfer ownership
       await swapHelper.connect(owner).transferOwnership(userAddress);
+      // Owner hasn't changed yet
+      expect(await swapHelper.owner()).to.equal(ownerAddress);
+      expect(await swapHelper.pendingOwner()).to.equal(userAddress);
+
+      // Step 2: Accept ownership
+      await swapHelper.connect(user1).acceptOwnership();
       expect(await swapHelper.owner()).to.equal(userAddress);
+      expect(await swapHelper.pendingOwner()).to.equal(constants.AddressZero);
     });
 
     it("should prevent non-owner from transferring ownership", async () => {
       await expect(swapHelper.connect(user1).transferOwnership(user2Address)).to.be.reverted;
+    });
+
+    it("should prevent non-pending-owner from accepting ownership", async () => {
+      await swapHelper.connect(owner).transferOwnership(userAddress);
+      await expect(swapHelper.connect(user2).acceptOwnership()).to.be.revertedWith(
+        "Ownable2Step: caller is not the new owner",
+      );
     });
   });
 
