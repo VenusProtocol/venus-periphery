@@ -120,6 +120,18 @@ interface ILeverageStrategiesManager {
         uint256 borrowedAmountToFlashLoan
     );
 
+    /// @notice Emitted when a user exits a leveraged position with single collateral asset
+    /// @param user The address of the user exiting the position
+    /// @param collateralMarket The vToken market used for both collateral and borrowed asset
+    /// @param collateralAmountToRedeem The amount of collateral being redeemed
+    /// @param collateralAmountToFlashLoan The amount being flash loaned
+    event LeveragedPositionExitedWithSingleCollateral(
+        address indexed user,
+        IVToken indexed collateralMarket,
+        uint256 collateralAmountToRedeem,
+        uint256 collateralAmountToFlashLoan
+    );
+
     /**
      * @notice Enters a leveraged position using only collateral provided by the user
      * @dev This function flash loans additional collateral assets, amplifying the user's supplied collateral
@@ -215,5 +227,28 @@ interface ILeverageStrategiesManager {
         uint256 borrowedAmountToFlashLoan,
         uint256 minAmountOutAfterSwap,
         bytes calldata swapData
+    ) external;
+
+    /**
+     * @notice Exits a leveraged position when collateral and borrowed assets are the same token
+     * @dev This function uses flash loans to temporarily repay debt, redeems collateral,
+     *      and repays the flash loan without requiring token swaps. Any dust amounts
+     *      are transferred to the protocol share reserve. This is more gas-efficient than
+     *      exitLeveragedPosition when dealing with single-asset positions.
+     * @param collateralMarket The vToken market for both collateral and borrowed asset
+     * @param collateralAmountToRedeem The amount of collateral to redeem from the market
+     * @param collateralAmountToFlashLoan The amount to borrow via flash loan for debt repayment
+     * @custom:emits LeveragedPositionExitedWithSingleCollateral
+     * @custom:error Unauthorized if caller is not user or approved delegate
+     * @custom:error MarketNotListed if the market is not listed in Comptroller
+     * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
+     * @custom:error ExitLeveragePositionRepayFailed if repay operation fails
+     * @custom:error ExitLeveragePositionRedeemFailed if redeem operation fails
+     * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds to repay flash loan
+     */
+    function exitLeveragedPositionWithSingleCollateral(
+        IVToken collateralMarket,
+        uint256 collateralAmountToRedeem,
+        uint256 collateralAmountToFlashLoan
     ) external;
 }

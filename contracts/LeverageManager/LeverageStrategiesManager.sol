@@ -39,7 +39,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         ENTER_WITH_COLLATERAL_SINGLE,
         ENTER_WITH_COLLATERAL,
         ENTER_WITH_BORROWED,
-        EXIT
+        EXIT,
+        EXIT_WITH_COLLATERAL_SINGLE
     }
 
     /// @dev Transient variable to track the current operation type during flash loan execution
@@ -271,6 +272,43 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkAccountSafe(msg.sender);
     }
 
+    /// @inheritdoc ILeverageStrategiesManager
+    function exitLeveragedPositionWithSingleCollateral(
+        IVToken _collateralMarket,
+        uint256 _collateralAmountToRedeem,
+        uint256 _collateralAmountToFlashLoan
+    ) external {
+        _checkMarketListed(_collateralMarket);
+        _checkUserAuthorized(msg.sender);
+
+        operationInitiator = msg.sender;
+        collateralMarket = _collateralMarket;
+        collateralAmount = _collateralAmountToRedeem;
+        operationType = OperationType.EXIT_WITH_COLLATERAL_SINGLE;
+
+        IVToken[] memory borrowedMarkets = new IVToken[](1);
+        borrowedMarkets[0] = _collateralMarket;
+        uint256[] memory flashLoanAmounts = new uint256[](1);
+        flashLoanAmounts[0] = _collateralAmountToFlashLoan;
+
+        COMPTROLLER.executeFlashLoan(
+            payable(msg.sender),
+            payable(address(this)),
+            borrowedMarkets,
+            flashLoanAmounts,
+            ""
+        );
+
+        emit LeveragedPositionExitedWithSingleCollateral(
+            msg.sender,
+            _collateralMarket,
+            _collateralAmountToRedeem,
+            _collateralAmountToFlashLoan
+        );
+
+        _checkAccountSafe(msg.sender);
+    }
+
     /**
      * @notice Flash loan callback entrypoint called by Comptroller
      * @dev Protected by nonReentrant modifier to prevent reentrancy attacks during flash loan execution
@@ -321,6 +359,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             repayAmounts[0] = _executeEnterWithBorrowedOperation(onBehalf, vTokens[0], amounts[0], premiums[0], param);
         } else if(operationType == OperationType.EXIT) {
             repayAmounts[0] = _executeExitOperation(onBehalf,vTokens[0], amounts[0], premiums[0], param);
+        } else if(operationType == OperationType.EXIT_WITH_COLLATERAL_SINGLE) {
+            repayAmounts[0] = _executeExitWithCollateralSingleOperation(onBehalf, vTokens[0], amounts[0], premiums[0]);
         } else {
             revert InvalidExecuteOperation();
         }
@@ -475,6 +515,47 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         }
 
        borrowedAsset.safeApprove(address(borrowMarket), borrowedAssetAmountToRepay);
+    }
+
+    /**
+     * @notice Executes the exit leveraged position with single collateral operation during flash loan callback
+     * @dev This function performs the following steps:
+     *      1. Uses flash loaned collateral to repay user's debt in the same market
+     *      2. Redeems specified amount of collateral from the Venus market
+     *      3. Approves the collateral asset for repayment to the flash loan
+     * @param onBehalf Address on whose behalf the operation is performed
+     * @param market The vToken market for both collateral and borrowed assets
+     * @param flashloanedCollateralAmount The amount borrowed via flash loan for debt repayment
+     * @param collateralAmountFees The fees to be paid on the flash loaned collateral amount
+     * @return collateralAssetAmountToRepay The total amount of collateral assets to repay
+     * @custom:error ExitLeveragePositionRepayFailed if repayment of borrowed assets fails
+     * @custom:error ExitLeveragePositionRedeemFailed if redeem operations fail
+     * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
+     */
+    function _executeExitWithCollateralSingleOperation(address onBehalf, IVToken market, uint256 flashloanedCollateralAmount, uint256 collateralAmountFees) internal returns (uint256 collateralAssetAmountToRepay) {
+        IERC20Upgradeable collateralAsset = IERC20Upgradeable(market.underlying());
+
+        collateralAsset.safeApprove(address(market), flashloanedCollateralAmount);
+        uint256 repaySuccess = market.repayBorrowBehalf(onBehalf, flashloanedCollateralAmount);
+
+        if (repaySuccess != 0) {
+            revert ExitLeveragePositionRepayFailed(repaySuccess);
+        }
+
+        uint256 collateralAmountToRedeem = collateralAmount;
+
+        uint256 redeemSuccess = market.redeemUnderlyingBehalf(onBehalf, collateralAmountToRedeem);
+        if (redeemSuccess != 0) {
+            revert ExitLeveragePositionRedeemFailed(redeemSuccess);
+        }
+
+        collateralAssetAmountToRepay = flashloanedCollateralAmount + collateralAmountFees;
+
+        if (collateralAsset.balanceOf(address(this)) < collateralAssetAmountToRepay) {
+            revert InsufficientFundsToRepayFlashloan();
+        }
+
+        collateralAsset.safeApprove(address(market), collateralAssetAmountToRepay);
     }
 
     /**
