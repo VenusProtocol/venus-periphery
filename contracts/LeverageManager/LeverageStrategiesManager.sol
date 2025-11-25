@@ -36,6 +36,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      */
     enum OperationType {
         NONE,
+        ENTER_WITH_COLLATERAL_SINGLE,
         ENTER_WITH_COLLATERAL,
         ENTER_WITH_BORROWED,
         EXIT
@@ -86,6 +87,46 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         __Ownable2Step_init();
         __ReentrancyGuard_init();
     }
+
+    /// @inheritdoc ILeverageStrategiesManager
+    function enterLeveragedPositionWithSingleCollateral(
+        IVToken _collateralMarket,
+        uint256 _collateralAmountSeed,
+        uint256 _collateralAmountToFlashLoan
+    ) external {
+        _checkMarketListed(_collateralMarket);
+        _checkUserAuthorized(msg.sender);
+        _checkAccountSafe(msg.sender);
+        _validateAndEnterMarket(msg.sender, _collateralMarket);
+        _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
+
+        operationInitiator = msg.sender;
+
+        operationType = OperationType.ENTER_WITH_COLLATERAL_SINGLE;
+
+        IVToken[] memory borrowedMarkets = new IVToken[](1);
+        borrowedMarkets[0] = _collateralMarket;
+        uint256[] memory flashLoanAmounts = new uint256[](1);
+        flashLoanAmounts[0] = _collateralAmountToFlashLoan;
+
+        COMPTROLLER.executeFlashLoan(
+            payable(msg.sender),
+            payable(address(this)),
+            borrowedMarkets,
+            flashLoanAmounts,
+            ""
+        );
+
+        emit LeveragedPositionEnteredWithSingleCollateral(
+            msg.sender,
+            _collateralMarket,
+            _collateralAmountSeed,
+            _collateralAmountToFlashLoan
+        );
+
+        _checkAccountSafe(msg.sender);
+    }
+
 
     /// @inheritdoc ILeverageStrategiesManager
     function enterLeveragedPositionWithCollateral(
@@ -272,8 +313,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         }
 
         repayAmounts = new uint256[](1);
-
-        if(operationType == OperationType.ENTER_WITH_COLLATERAL) {
+        if(operationType == OperationType.ENTER_WITH_COLLATERAL_SINGLE) {
+            repayAmounts[0] = _executeEnterWithCollateralSingleOperation(onBehalf, vTokens[0], amounts[0], premiums[0]);
+        } else if(operationType == OperationType.ENTER_WITH_COLLATERAL) {
             repayAmounts[0] = _executeEnterOperation(onBehalf, vTokens[0], amounts[0], premiums[0], param);
         } else if(operationType == OperationType.ENTER_WITH_BORROWED) {
             repayAmounts[0] = _executeEnterWithBorrowedOperation(onBehalf, vTokens[0], amounts[0], premiums[0], param);
@@ -284,6 +326,36 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         }
 
         return (true, repayAmounts);
+    }
+
+    /**
+     * @notice Executes the enter leveraged position with single collateral operation during flash loan callback
+     * @dev This function performs the following steps:
+     *      1. Combines flash loaned collateral with user's seed collateral
+     *      2. Supplies all collateral to the Venus market on behalf of the user
+     *      3. Borrows the repayment amount (fees) on behalf of the user
+     *      4. Approves the collateral asset for repayment to the flash loan
+     * @param onBehalf Address on whose behalf the operation is performed
+     * @param market The vToken market for the collateral asset
+     * @param flashloanedCollateralAmount The amount of collateral assets received from flash loan
+     * @param collateralAmountFees The fees to be paid on the flash loaned collateral amount
+     * @return collateralAssetAmountToRepay The total amount of collateral assets to repay (fees only)
+     * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
+     * @custom:error EnterLeveragePositionBorrowBehalfFailed if borrow behalf operation fails
+     * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
+     */
+    function _executeEnterWithCollateralSingleOperation(address onBehalf, IVToken market, uint256 flashloanedCollateralAmount, uint256 collateralAmountFees) internal returns (uint256 collateralAssetAmountToRepay) {
+        IERC20Upgradeable collateralAsset = IERC20Upgradeable(market.underlying());
+
+        uint256 totalCollateralAmountToMint = flashloanedCollateralAmount + collateralAmount;
+        collateralAsset.safeApprove(address(market), totalCollateralAmountToMint);
+
+        uint256 mintSuccess = market.mintBehalf(onBehalf, totalCollateralAmountToMint);
+        if (mintSuccess != 0) {
+            revert EnterLeveragePositionMintFailed(mintSuccess);
+        }
+
+        collateralAssetAmountToRepay = _borrowAndRepayFlashLoanFee(onBehalf, market, collateralAsset, collateralAmountFees);
     }
 
     /**

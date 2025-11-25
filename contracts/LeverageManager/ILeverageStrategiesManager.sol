@@ -66,6 +66,18 @@ interface ILeverageStrategiesManager {
     /// @custom:error ZeroAddress One of the required addresses is zero
     error ZeroAddress();
 
+    /// @notice Emitted when a user enters a leveraged position with single collateral asset
+    /// @param user The address of the user entering the position
+    /// @param collateralMarket The vToken market used as collateral
+    /// @param collateralAmountSeed The initial collateral amount provided by the user
+    /// @param collateralAmountToFlashLoan The amount being flash loaned
+    event LeveragedPositionEnteredWithSingleCollateral(
+        address indexed user,
+        IVToken indexed collateralMarket,
+        uint256 collateralAmountSeed,
+        uint256 collateralAmountToFlashLoan
+    );
+
     /// @notice Emitted when a user enters a leveraged position with collateral seed
     /// @param user The address of the user entering the position
     /// @param collateralMarket The vToken market used as collateral
@@ -107,6 +119,24 @@ interface ILeverageStrategiesManager {
         IVToken indexed borrowedMarket,
         uint256 borrowedAmountToFlashLoan
     );
+
+    /**
+     * @notice Enters a leveraged position using only collateral provided by the user
+     * @dev This function flash loans additional collateral assets, amplifying the user's supplied collateral
+     *     in the Venus protocol. The user must have delegated permission to this contract via the comptroller.
+     * @param collateralMarket The vToken market where collateral will be supplied
+     * @param collateralAmountSeed The initial amount of collateral the user provides (can be 0)
+     * @param collateralAmountToFlashLoan The amount to borrow via flash loan for leverage
+     * @custom:emits LeveragedPositionEntered
+     * @custom:error Unauthorized if caller is not user or approved delegate
+     * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
+     * @custom:error EnterLeveragePositionFailed if mint or borrow operations fail
+     */
+    function enterLeveragedPositionWithSingleCollateral(
+        IVToken collateralMarket,
+        uint256 collateralAmountSeed,
+        uint256 collateralAmountToFlashLoan
+    ) external;
 
     /**
      * @notice Enters a leveraged position by borrowing assets and converting them to collateral

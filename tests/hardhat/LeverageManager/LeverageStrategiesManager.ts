@@ -289,11 +289,7 @@ describe("LeverageStrategiesManager", () => {
     it("should revert on deployment when protocolShareReserve address is zero", async () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
-        LeverageStrategiesManagerFactory.deploy(
-          comptroller.address,
-          ethers.constants.AddressZero,
-          swapHelper.address,
-        ),
+        LeverageStrategiesManagerFactory.deploy(comptroller.address, ethers.constants.AddressZero, swapHelper.address),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
 
@@ -316,6 +312,151 @@ describe("LeverageStrategiesManager", () => {
 
     it("should revert if initialized twice", async () => {
       await expect(leverageManager.initialize()).to.be.rejectedWith("Initializable: contract is already initialized");
+    });
+  });
+
+  describe("enterLeveragedPositionWithSingleCollateral", () => {
+    it("should revert when collateral market is not listed", async () => {
+      const collateralAmountSeed = parseEther("0");
+      const collateralAmountToFlashLoan = parseEther("1");
+
+      await expect(
+        leverageManager
+          .connect(alice)
+          .enterLeveragedPositionWithSingleCollateral(
+            unlistedMarket.address,
+            collateralAmountSeed,
+            collateralAmountToFlashLoan,
+          ),
+      )
+        .to.be.revertedWithCustomError(leverageManager, "MarketNotListed")
+        .withArgs(unlistedMarket.address);
+    });
+
+    it("should revert when user has not set delegation", async () => {
+      const collateralAmountSeed = parseEther("0");
+      const collateralAmountToFlashLoan = parseEther("1");
+
+      await comptroller.connect(alice).updateDelegate(leverageManager.address, false);
+
+      await expect(
+        leverageManager
+          .connect(alice)
+          .enterLeveragedPositionWithSingleCollateral(
+            collateralMarket.address,
+            collateralAmountSeed,
+            collateralAmountToFlashLoan,
+          ),
+      ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
+    });
+
+    it("should revert when user did not approve enough collateral for transfer", async () => {
+      const collateralAmountSeed = parseEther("10");
+      const collateralAmountToFlashLoan = parseEther("1");
+
+      await collateral.connect(alice).approve(leverageManager.address, parseEther("1"));
+
+      await expect(
+        leverageManager
+          .connect(alice)
+          .enterLeveragedPositionWithSingleCollateral(
+            collateralMarket.address,
+            collateralAmountSeed,
+            collateralAmountToFlashLoan,
+          ),
+      ).to.be.rejectedWith("ERC20: insufficient allowance");
+
+      await collateral.connect(alice).approve(leverageManager.address, collateralAmountSeed);
+
+      await expect(
+        leverageManager
+          .connect(alice)
+          .enterLeveragedPositionWithSingleCollateral(
+            collateralMarket.address,
+            collateralAmountSeed,
+            collateralAmountToFlashLoan,
+          ),
+      ).to.be.rejectedWith("ERC20: transfer amount exceeds balance");
+    });
+
+    it("should enter leveraged position with single collateral successfully without seed", async () => {
+      const collateralAmountSeed = parseEther("0");
+      const collateralAmountToFlashLoan = parseEther("1");
+
+      const aliceCollateralBalanceBefore = await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress);
+
+      const enterLeveragedPositionTx = await leverageManager
+        .connect(alice)
+        .enterLeveragedPositionWithSingleCollateral(
+          collateralMarket.address,
+          collateralAmountSeed,
+          collateralAmountToFlashLoan,
+        );
+
+      const aliceCollateralBalanceAfter = await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress);
+      expect(aliceCollateralBalanceAfter).to.be.gt(aliceCollateralBalanceBefore);
+
+      // Check borrowed amount (should only be fees)
+      expect(await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress)).to.be.gt(0);
+
+      expect(enterLeveragedPositionTx)
+        .to.emit(leverageManager, "LeveragedPositionEnteredWithSingleCollateral")
+        .withArgs(aliceAddress, collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan);
+    });
+
+    it("should enter leveraged position with single collateral successfully with seed", async () => {
+      const collateralAmountSeed = parseEther("1");
+      const collateralAmountToFlashLoan = parseEther("2");
+
+      await collateral.transfer(aliceAddress, collateralAmountSeed);
+      await collateral.connect(alice).approve(leverageManager.address, collateralAmountSeed);
+
+      const aliceCollateralBalanceBefore = await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress);
+      const aliceCollateralTokenBalanceBefore = await collateral.balanceOf(aliceAddress);
+
+      const enterLeveragedPositionTx = await leverageManager
+        .connect(alice)
+        .enterLeveragedPositionWithSingleCollateral(
+          collateralMarket.address,
+          collateralAmountSeed,
+          collateralAmountToFlashLoan,
+        );
+
+      const aliceCollateralBalanceAfter = await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress);
+      const aliceCollateralTokenBalanceAfter = await collateral.balanceOf(aliceAddress);
+
+      // Check that seed amount was transferred from user
+      expect(aliceCollateralTokenBalanceBefore.sub(aliceCollateralTokenBalanceAfter)).to.equal(collateralAmountSeed);
+
+      // Check that collateral balance increased by more than seed (includes flash loan amount)
+      expect(aliceCollateralBalanceAfter.sub(aliceCollateralBalanceBefore)).to.be.gt(collateralAmountSeed);
+
+      // Check borrowed amount (should only be fees, or equal to flash loan in zero-fee environment)
+      const borrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+      expect(borrowBalance).to.be.gt(0);
+      expect(borrowBalance).to.be.lte(collateralAmountToFlashLoan); // Fees are less than or equal to flash loan amount
+
+      expect(enterLeveragedPositionTx)
+        .to.emit(leverageManager, "LeveragedPositionEnteredWithSingleCollateral")
+        .withArgs(aliceAddress, collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan);
+    });
+
+    it("should verify account is safe after entering leveraged position", async () => {
+      const collateralAmountSeed = parseEther("0");
+      const collateralAmountToFlashLoan = parseEther("1");
+
+      await leverageManager
+        .connect(alice)
+        .enterLeveragedPositionWithSingleCollateral(
+          collateralMarket.address,
+          collateralAmountSeed,
+          collateralAmountToFlashLoan,
+        );
+
+      // Account should be safe (no shortfall)
+      const [err, , shortfall] = await comptroller.getBorrowingPower(aliceAddress);
+      expect(err).to.equal(0);
+      expect(shortfall).to.equal(0);
     });
   });
 
@@ -392,7 +533,7 @@ describe("LeverageStrategiesManager", () => {
       ).to.be.revertedWithCustomError(leverageManager, "LeverageCausesLiquidation");
     });
 
-    it.skip("should revert when uses did not entered collateral market before and enterMarketBehalf fails ", async () => {
+    it.skip("should revert when uses did not entered collateral market before and enterMarketBehalf fails", async () => {
       // TODO: Setup comptroller to make enterMarketBehalf fail
       const expectedErrorCode = 1;
 
