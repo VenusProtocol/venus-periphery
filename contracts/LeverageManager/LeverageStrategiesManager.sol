@@ -83,7 +83,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         _checkUserDelegated();
         _checkAccountSafe(msg.sender);
-        
+
         _validateAndEnterMarket(msg.sender, _collateralMarket);
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
 
@@ -384,7 +384,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @notice Executes the enter leveraged position operation during flash loan callback
      * @dev This function performs the following steps:
      *      1. Swaps flash loaned borrowed assets for collateral assets
-     *      2. Supplies all collateral received from swap to the Venus market on behalf of the user
+     *      2. Supplies all collateral received from swap plus seed to the Venus market on behalf of the user
      *      3. Borrows the repayment amount on behalf of the user
      *      4. Approves the borrowed asset for repayment to the flash loan
      * @param onBehalf Address on whose behalf the operation is performed
@@ -393,10 +393,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
      * @param swapCallData The encoded swap instructions for converting borrowed to collateral assets
      * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (fees only)
-     * @custom:error TransferFromUserFailed if transferring seed borrowed assets from user fails
      * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
      * @custom:error EnterLeveragePositionBorrowBehalfFailed if borrow behalf operation fails
-     * @custom:error SwapCallFailed if token swap execution fails
+     * @custom:error TokenSwapCallFailed if token swap execution fails
+     * @custom:error InsufficientAmountOutAfterSwap if collateral balance after swap is below minimum
      */
     function _executeEnterOperation(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
@@ -428,10 +428,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @param borrowedAssetFees The fees to be paid on the borrowed asset amount
      * @param swapCallData The encoded swap instructions for converting borrowed to collateral assets
      * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay (fees only)
-     * @custom:error TransferFromUserFailed if transferring seed borrowed assets from user fails
      * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
      * @custom:error EnterLeveragePositionBorrowBehalfFailed if borrow behalf operation fails
-     * @custom:error SwapCallFailed if token swap execution fails
+     * @custom:error TokenSwapCallFailed if token swap execution fails
      * @custom:error InsufficientAmountOutAfterSwap if collateral balance after swap is below minimum
      */
     function _executeEnterWithBorrowedOperation(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
@@ -467,7 +466,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @return borrowedAssetAmountToRepay The total amount of borrowed assets to repay
      * @custom:error ExitLeveragePositionRepayFailed if repayment of borrowed assets fails
      * @custom:error ExitLeveragePositionRedeemFailed if redeem operations fail
-     * @custom:error SwapCallFailed if token swap execution fails
+     * @custom:error TokenSwapCallFailed if token swap execution fails
+     * @custom:error InsufficientAmountOutAfterSwap if swap output is below minimum required
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
      */
     function _executeExitOperation(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmountToRepayFromFlashLoan, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 borrowedAssetAmountToRepay) {
