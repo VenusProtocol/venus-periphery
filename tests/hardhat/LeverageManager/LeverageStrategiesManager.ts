@@ -347,7 +347,7 @@ describe("LeverageStrategiesManager", () => {
             collateralAmountSeed,
             collateralAmountToFlashLoan,
           ),
-      ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
+      ).to.be.revertedWithCustomError(leverageManager, "NotAnApprovedDelegate");
     });
 
     it("should revert when user did not approve enough collateral for transfer", async () => {
@@ -515,40 +515,7 @@ describe("LeverageStrategiesManager", () => {
           0, // minAmountCollateralAfterSwap
           swapData,
         ),
-      ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
-    });
-
-    it.skip("should revert when account is not safe before leverage", async () => {
-      // TODO: Setup comptroller to make account unsafe
-
-      await expect(
-        leverageManager.connect(alice).enterLeveragedPositionWithCollateral(
-          collateralMarket.address,
-          parseEther("0"),
-          borrowMarket.address,
-          parseEther("1"),
-          0, // minAmountCollateralAfterSwap
-          await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("3")),
-        ),
-      ).to.be.revertedWithCustomError(leverageManager, "LeverageCausesLiquidation");
-    });
-
-    it.skip("should revert when uses did not entered collateral market before and enterMarketBehalf fails", async () => {
-      // TODO: Setup comptroller to make enterMarketBehalf fail
-      const expectedErrorCode = 1;
-
-      await expect(
-        leverageManager.connect(alice).enterLeveragedPositionWithCollateral(
-          collateralMarket.address,
-          parseEther("0"),
-          borrowMarket.address,
-          parseEther("1"),
-          0, // minAmountCollateralAfterSwap
-          await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("3")),
-        ),
-      )
-        .to.be.revertedWithCustomError(leverageManager, "EnterMarketFailed")
-        .withArgs(expectedErrorCode);
+      ).to.be.revertedWithCustomError(leverageManager, "NotAnApprovedDelegate");
     });
 
     it("should revert when user did not approve enough collateral for transfer", async () => {
@@ -667,8 +634,6 @@ describe("LeverageStrategiesManager", () => {
           borrowedAmountToFlashLoan,
         );
     });
-
-    it.skip("should revert when account is not safe after entering leveraged position", async () => {});
   });
 
   describe("enterLeveragedPositionWithBorrowed", () => {
@@ -725,48 +690,7 @@ describe("LeverageStrategiesManager", () => {
           0, // minAmountCollateralAfterSwap
           swapData,
         ),
-      ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
-    });
-
-    it.skip("should revert when account is not safe before leverage", async () => {
-      const borrowedAmountToFlashLoan = parseEther("1");
-      const borrowedAmountSeed = parseEther("0");
-      const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("3"));
-
-      // TODO: Setup comptroller to make account unsafe
-
-      await expect(
-        leverageManager.connect(alice).enterLeveragedPositionWithBorrowed(
-          collateralMarket.address,
-          borrowMarket.address,
-          borrowedAmountSeed,
-          borrowedAmountToFlashLoan,
-          0, // minAmountCollateralAfterSwap
-          swapData,
-        ),
-      ).to.be.revertedWithCustomError(leverageManager, "LeverageCausesLiquidation");
-    });
-
-    it.skip("should revert when uses did not entered collateral market before and enterMarketBehalf fails ", async () => {
-      const borrowedAmountToFlashLoan = parseEther("1");
-      const borrowedAmountSeed = parseEther("0");
-      const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("3"));
-
-      // TODO: Setup comptroller to make enterMarketBehalf fail
-      const expectedErrorCode = 1;
-
-      await expect(
-        leverageManager.connect(alice).enterLeveragedPositionWithBorrowed(
-          collateralMarket.address,
-          borrowMarket.address,
-          borrowedAmountSeed,
-          borrowedAmountToFlashLoan,
-          0, // minAmountCollateralAfterSwap
-          swapData,
-        ),
-      )
-        .to.be.revertedWithCustomError(leverageManager, "EnterMarketFailed")
-        .withArgs(expectedErrorCode);
+      ).to.be.revertedWithCustomError(leverageManager, "NotAnApprovedDelegate");
     });
 
     it("should revert when swap fails", async () => {
@@ -885,8 +809,6 @@ describe("LeverageStrategiesManager", () => {
           borrowedAmountToFlashLoan,
         );
     });
-
-    it.skip("should revert when account is not safe after entering leveraged position", async () => {});
   });
 
   describe("exitLeveragedPosition", () => {
@@ -943,38 +865,83 @@ describe("LeverageStrategiesManager", () => {
           0, // minAmountBorrowedRepayAfterSwap
           swapData,
         ),
-      ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
+      ).to.be.revertedWithCustomError(leverageManager, "NotAnApprovedDelegate");
     });
 
-    it.skip("should revert when swap fails", async () => {
-      const repayAmount = parseEther("10");
-      const collateralAmountToRedeemForSwap = parseEther("1");
+    it("should revert when swap fails", async () => {
+      const borrowedAmountToFlashLoan = parseEther("1");
+      const collateralAmountSeed = parseEther("0");
 
-      const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("4"));
+      const enterSwapData = await createSwapMulticallData(
+        collateral,
+        leverageManager.address,
+        parseEther("1"),
+        admin,
+        ethers.utils.formatBytes32String("enter-swap-1"),
+      );
+
+      await leverageManager
+        .connect(alice)
+        .enterLeveragedPositionWithCollateral(
+          collateralMarket.address,
+          collateralAmountSeed,
+          borrowMarket.address,
+          borrowedAmountToFlashLoan,
+          parseEther("1"),
+          enterSwapData,
+        );
+
+      const borrowBalance = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+      const collateralAmountToRedeemForSwap = parseEther("1");
+      const exitSwapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("exit-swap-1"));
 
       await expect(
-        leverageManager.connect(alice).exitLeveragedPosition(
-          collateralMarket.address,
-          collateralAmountToRedeemForSwap,
-          borrowMarket.address,
-          repayAmount,
-          0, // minAmountBorrowedRepayAfterSwap
-          swapData,
-        ),
+        leverageManager
+          .connect(alice)
+          .exitLeveragedPosition(
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            borrowMarket.address,
+            borrowBalance,
+            0,
+            exitSwapData,
+          ),
       ).to.be.revertedWithCustomError(leverageManager, "TokenSwapCallFailed");
     });
 
-    it.skip("should revert when after swap is received less borrowed than minAmountBorrowedRepayAfterSwap", async () => {
-      const repayAmount = parseEther("1");
-      const collateralAmountToRedeemForSwap = parseEther("1");
-      const minAmountBorrowedRepayAfterSwap = parseEther("2");
+    it("should revert when after swap is received less borrowed than minAmountBorrowedRepayAfterSwap", async () => {
+      const borrowedAmountToFlashLoan = parseEther("1");
+      const collateralAmountSeed = parseEther("0");
 
-      const swapData = await createSwapMulticallData(
+      const enterSwapData = await createSwapMulticallData(
+        collateral,
+        leverageManager.address,
+        parseEther("1"),
+        admin,
+        ethers.utils.formatBytes32String("enter-swap-2"),
+      );
+
+      await leverageManager
+        .connect(alice)
+        .enterLeveragedPositionWithCollateral(
+          collateralMarket.address,
+          collateralAmountSeed,
+          borrowMarket.address,
+          borrowedAmountToFlashLoan,
+          parseEther("1"),
+          enterSwapData,
+        );
+
+      const borrowBalance = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+      const collateralAmountToRedeemForSwap = parseEther("1");
+      const minAmountBorrowedRepayAfterSwap = parseEther("3");
+
+      const exitSwapData = await createSwapMulticallData(
         borrow,
         leverageManager.address,
         parseEther("1"),
         admin,
-        ethers.utils.formatBytes32String("5"),
+        ethers.utils.formatBytes32String("exit-swap-2"),
       );
 
       await expect(
@@ -984,54 +951,101 @@ describe("LeverageStrategiesManager", () => {
             collateralMarket.address,
             collateralAmountToRedeemForSwap,
             borrowMarket.address,
-            repayAmount,
+            borrowBalance,
             minAmountBorrowedRepayAfterSwap,
-            swapData,
+            exitSwapData,
           ),
       ).to.be.revertedWithCustomError(leverageManager, "InsufficientAmountOutAfterSwap");
     });
 
-    it.skip("should transfer any leftover dust collateral to treasury", async () => {});
+    it("should exit leveraged position successfully", async () => {
+      const borrowedAmountToFlashLoan = parseEther("1");
+      const collateralAmountSeed = parseEther("0");
 
-    it.skip("should transfer any leftover dust borrowed to treasury", async () => {});
+      const enterSwapData = await createSwapMulticallData(
+        collateral,
+        leverageManager.address,
+        parseEther("1"),
+        admin,
+        ethers.utils.formatBytes32String("enter-swap-3"),
+      );
 
-    it.skip("should revert when account is not safe after exiting leveraged position", async () => {});
+      await leverageManager
+        .connect(alice)
+        .enterLeveragedPositionWithCollateral(
+          collateralMarket.address,
+          collateralAmountSeed,
+          borrowMarket.address,
+          borrowedAmountToFlashLoan,
+          parseEther("1"),
+          enterSwapData,
+        );
 
-    it.skip("should exit leveraged position successfully", async () => {});
+      const collateralBalanceAfterEnter = await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress);
+      const borrowBalanceAfterEnter = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+
+      const collateralAmountToRedeemForSwap = parseEther("0.5");
+      const repayAmount = borrowBalanceAfterEnter;
+
+      const exitSwapData = await createSwapMulticallData(
+        borrow,
+        leverageManager.address,
+        borrowBalanceAfterEnter.add(parseEther("0.1")), // Flash loan amount + premium
+        admin,
+        ethers.utils.formatBytes32String("exit-swap-3"),
+      );
+
+      const exitTx = await leverageManager
+        .connect(alice)
+        .exitLeveragedPosition(
+          collateralMarket.address,
+          collateralAmountToRedeemForSwap,
+          borrowMarket.address,
+          repayAmount,
+          0,
+          exitSwapData,
+        );
+
+      await expect(exitTx)
+        .to.emit(leverageManager, "LeveragedPositionExited")
+        .withArgs(
+          aliceAddress,
+          collateralMarket.address,
+          collateralAmountToRedeemForSwap,
+          borrowMarket.address,
+          repayAmount,
+        );
+
+      const collateralBalanceAfterExit = await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress);
+      const borrowBalanceAfterExit = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+
+      expect(collateralBalanceAfterExit).to.be.lt(collateralBalanceAfterEnter);
+      expect(borrowBalanceAfterExit).to.equal(0);
+    });
   });
 
   describe("exitLeveragedPositionWithSingleCollateral", () => {
     it("should revert when collateral market is not listed", async () => {
-      const collateralAmountToRedeem = parseEther("1");
       const collateralAmountToFlashLoan = parseEther("2");
 
       await expect(
         leverageManager
           .connect(alice)
-          .exitLeveragedPositionWithSingleCollateral(
-            unlistedMarket.address,
-            collateralAmountToRedeem,
-            collateralAmountToFlashLoan,
-          ),
+          .exitLeveragedPositionWithSingleCollateral(unlistedMarket.address, collateralAmountToFlashLoan),
       )
         .to.be.revertedWithCustomError(leverageManager, "MarketNotListed")
         .withArgs(unlistedMarket.address);
     });
 
     it("should revert when user has not set delegation", async () => {
-      const collateralAmountToRedeem = parseEther("1");
       const collateralAmountToFlashLoan = parseEther("2");
 
       await comptroller.connect(alice).updateDelegate(leverageManager.address, false);
       await expect(
         leverageManager
           .connect(alice)
-          .exitLeveragedPositionWithSingleCollateral(
-            collateralMarket.address,
-            collateralAmountToRedeem,
-            collateralAmountToFlashLoan,
-          ),
-      ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
+          .exitLeveragedPositionWithSingleCollateral(collateralMarket.address, collateralAmountToFlashLoan),
+      ).to.be.revertedWithCustomError(leverageManager, "NotAnApprovedDelegate");
     });
 
     it("should exit leveraged position with single collateral successfully", async () => {
@@ -1056,20 +1070,15 @@ describe("LeverageStrategiesManager", () => {
       const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
 
       // Now exit the position
-      const collateralAmountToRedeem = parseEther("1");
       const borrowedAmountToFlashLoan = borrowBalanceAfterEnter;
 
       await expect(
         leverageManager
           .connect(alice)
-          .exitLeveragedPositionWithSingleCollateral(
-            collateralMarket.address,
-            collateralAmountToRedeem,
-            borrowedAmountToFlashLoan,
-          ),
+          .exitLeveragedPositionWithSingleCollateral(collateralMarket.address, borrowedAmountToFlashLoan),
       )
         .to.emit(leverageManager, "LeveragedPositionExitedWithSingleCollateral")
-        .withArgs(aliceAddress, collateralMarket.address, collateralAmountToRedeem, borrowedAmountToFlashLoan);
+        .withArgs(aliceAddress, collateralMarket.address, borrowedAmountToFlashLoan);
 
       const collateralBalanceAfterExit = await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress);
       const borrowBalanceAfterExit = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
@@ -1107,11 +1116,7 @@ describe("LeverageStrategiesManager", () => {
 
       await leverageManager
         .connect(alice)
-        .exitLeveragedPositionWithSingleCollateral(
-          collateralMarket.address,
-          collateralAmountToRedeem,
-          collateralAmountToFlashLoanForExit,
-        );
+        .exitLeveragedPositionWithSingleCollateral(collateralMarket.address, collateralAmountToFlashLoanForExit);
     });
   });
 

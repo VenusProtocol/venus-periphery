@@ -27,22 +27,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     /// @notice The swap helper contract for executing token swaps during leverage operations
     SwapHelper public immutable swapHelper;
 
-    /**
-     * @notice Enumeration of operation types for flash loan callbacks
-     * @param NONE Default value indicating no operation set
-     * @param ENTER_WITH_COLLATERAL Operation for entering a leveraged position with collateral seed
-     * @param ENTER_WITH_BORROWED Operation for entering a leveraged position with borrowed asset seed
-     * @param EXIT Operation for exiting a leveraged position
-     */
-    enum OperationType {
-        NONE,
-        ENTER_WITH_COLLATERAL_SINGLE,
-        ENTER_WITH_COLLATERAL,
-        ENTER_WITH_BORROWED,
-        EXIT,
-        EXIT_WITH_COLLATERAL_SINGLE
-    }
-
     /// @dev Transient variable to track the current operation type during flash loan execution
     OperationType transient operationType;
 
@@ -96,13 +80,14 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         uint256 _collateralAmountToFlashLoan
     ) external {
         _checkMarketListed(_collateralMarket);
-        _checkUserAuthorized(msg.sender);
+
+        _checkUserDelegated();
         _checkAccountSafe(msg.sender);
+        
         _validateAndEnterMarket(msg.sender, _collateralMarket);
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
 
         operationInitiator = msg.sender;
-
         operationType = OperationType.ENTER_WITH_COLLATERAL_SINGLE;
 
         IVToken[] memory borrowedMarkets = new IVToken[](1);
@@ -141,7 +126,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkMarketListed(_collateralMarket);
         _checkMarketListed(_borrowedMarket);
 
-        _checkUserAuthorized(msg.sender);
+        _checkUserDelegated();
         _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
@@ -189,7 +174,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkMarketListed(_collateralMarket);
         _checkMarketListed(_borrowedMarket);
         
-        _checkUserAuthorized(msg.sender);
+        _checkUserDelegated();
         _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
@@ -237,7 +222,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkMarketListed(_collateralMarket);
         _checkMarketListed(_borrowedMarket);
 
-        _checkUserAuthorized(msg.sender);
+        _checkUserDelegated();
 
         operationInitiator = msg.sender;
         collateralMarket = _collateralMarket;
@@ -275,15 +260,13 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     /// @inheritdoc ILeverageStrategiesManager
     function exitLeveragedPositionWithSingleCollateral(
         IVToken _collateralMarket,
-        uint256 _collateralAmountToRedeem,
         uint256 _collateralAmountToFlashLoan
     ) external {
         _checkMarketListed(_collateralMarket);
-        _checkUserAuthorized(msg.sender);
+        _checkUserDelegated();
 
         operationInitiator = msg.sender;
         collateralMarket = _collateralMarket;
-        collateralAmount = _collateralAmountToRedeem;
         operationType = OperationType.EXIT_WITH_COLLATERAL_SINGLE;
 
         IVToken[] memory borrowedMarkets = new IVToken[](1);
@@ -302,7 +285,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         emit LeveragedPositionExitedWithSingleCollateral(
             msg.sender,
             _collateralMarket,
-            _collateralAmountToRedeem,
             _collateralAmountToFlashLoan
         );
 
@@ -542,7 +524,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             revert ExitLeveragePositionRepayFailed(repaySuccess);
         }
 
-        uint256 collateralAmountToRedeem = collateralAmount;
+        uint256 collateralAmountToRedeem = flashloanedCollateralAmount + collateralAmountFees;
 
         uint256 redeemSuccess = market.redeemUnderlyingBehalf(onBehalf, collateralAmountToRedeem);
         if (redeemSuccess != 0) {
@@ -653,13 +635,12 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Checks that the caller is authorized to act on behalf of the specified user
-     * @param user The address of the user for whom the action is being performed
-     * @custom:error UnauthorizedCaller if caller is neither the user nor an approved delegate
+     * @notice Checks if the caller authorized this contract as a delegate for them
+     * @custom:error NotAnApprovedDelegate if caller is neither the user nor an approved delegate
      */
-    function _checkUserAuthorized(address user) internal view {
-        if (user != msg.sender && !COMPTROLLER.approvedDelegates(user, msg.sender)) {
-            revert UnauthorizedCaller(msg.sender);
+    function _checkUserDelegated() internal view {
+        if (!COMPTROLLER.approvedDelegates(msg.sender, address(this))) {
+            revert NotAnApprovedDelegate();
         }
     }
 

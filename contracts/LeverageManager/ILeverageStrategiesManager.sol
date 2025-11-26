@@ -66,6 +66,9 @@ interface ILeverageStrategiesManager {
     /// @custom:error ZeroAddress One of the required addresses is zero
     error ZeroAddress();
 
+    /// @custom:error NotAnApprovedDelegate User has not approved this contract as a delegate
+    error NotAnApprovedDelegate();
+
     /// @notice Emitted when a user enters a leveraged position with single collateral asset
     /// @param user The address of the user entering the position
     /// @param collateralMarket The vToken market used as collateral
@@ -123,14 +126,28 @@ interface ILeverageStrategiesManager {
     /// @notice Emitted when a user exits a leveraged position with single collateral asset
     /// @param user The address of the user exiting the position
     /// @param collateralMarket The vToken market used for both collateral and borrowed asset
-    /// @param collateralAmountToRedeem The amount of collateral being redeemed
     /// @param collateralAmountToFlashLoan The amount being flash loaned
     event LeveragedPositionExitedWithSingleCollateral(
         address indexed user,
         IVToken indexed collateralMarket,
-        uint256 collateralAmountToRedeem,
         uint256 collateralAmountToFlashLoan
     );
+
+    /**
+     * @notice Enumeration of operation types for flash loan callbacks
+     * @param NONE Default value indicating no operation set
+     * @param ENTER_WITH_COLLATERAL Operation for entering a leveraged position with collateral seed
+     * @param ENTER_WITH_BORROWED Operation for entering a leveraged position with borrowed asset seed
+     * @param EXIT Operation for exiting a leveraged position
+     */
+    enum OperationType {
+        NONE,
+        ENTER_WITH_COLLATERAL_SINGLE,
+        ENTER_WITH_COLLATERAL,
+        ENTER_WITH_BORROWED,
+        EXIT,
+        EXIT_WITH_COLLATERAL_SINGLE
+    }
 
     /**
      * @notice Enters a leveraged position using only collateral provided by the user
@@ -236,7 +253,6 @@ interface ILeverageStrategiesManager {
      *      are transferred to the protocol share reserve. This is more gas-efficient than
      *      exitLeveragedPosition when dealing with single-asset positions.
      * @param collateralMarket The vToken market for both collateral and borrowed asset
-     * @param collateralAmountToRedeem The amount of collateral to redeem from the market
      * @param collateralAmountToFlashLoan The amount to borrow via flash loan for debt repayment
      * @custom:emits LeveragedPositionExitedWithSingleCollateral
      * @custom:error Unauthorized if caller is not user or approved delegate
@@ -248,7 +264,6 @@ interface ILeverageStrategiesManager {
      */
     function exitLeveragedPositionWithSingleCollateral(
         IVToken collateralMarket,
-        uint256 collateralAmountToRedeem,
         uint256 collateralAmountToFlashLoan
     ) external;
 }
