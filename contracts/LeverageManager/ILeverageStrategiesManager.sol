@@ -12,23 +12,20 @@ import { IVToken } from "../Interfaces.sol";
  *      to specific assets by borrowing against their collateral and reinvesting the borrowed funds.
  */
 interface ILeverageStrategiesManager {
-    /// @custom:error UnauthorizedCaller Caller is neither the user nor an approved delegate.
-    error UnauthorizedCaller(address account);
+    /// @custom:error MintBehalfFailed mintBehalf on a vToken market returned a non-zero error code
+    error MintBehalfFailed(uint256 errorCode);
 
-    /// @custom:error EnterLeveragePositionMintFailed mintBehalf on a vToken market returned a non-zero error code
-    error EnterLeveragePositionMintFailed(uint256 errorCode);
+    /// @custom:error BorrowBehalfFailed borrowBehalf on a vToken market returned a non-zero error code
+    error BorrowBehalfFailed(uint256 errorCode);
 
-    /// @custom:error EnterLeveragePositionBorrowBehalfFailed borrowBehalf on a vToken market returned a non-zero error code
-    error EnterLeveragePositionBorrowBehalfFailed(uint256 errorCode);
+    /// @custom:error RepayBehalfFailed repayBehalf on a vToken market returned a non-zero error code
+    error RepayBehalfFailed(uint256 errorCode);
 
-    /// @custom:error ExitLeveragePositionRepayFailed repayBehalf on a vToken market returned a non-zero error code
-    error ExitLeveragePositionRepayFailed(uint256 errorCode);
+    /// @custom:error RedeemBehalfFailed redeemBehalf on a vToken market returned a non-zero error code
+    error RedeemBehalfFailed(uint256 errorCode);
 
-    /// @custom:error ExitLeveragePositionRedeemFailed redeemBehalf on a vToken market returned a non-zero error code
-    error ExitLeveragePositionRedeemFailed(uint256 errorCode);
-
-    /// @custom:error LeverageCausesLiquidation Operation would put the account at risk (undercollateralized)
-    error LeverageCausesLiquidation();
+    /// @custom:error OperationCausesLiquidation Operation would put the account at risk (undercollateralized)
+    error OperationCausesLiquidation();
 
     /// @custom:error TokenSwapCallFailed Swap helper call reverted or returned false
     error TokenSwapCallFailed();
@@ -42,8 +39,8 @@ interface ILeverageStrategiesManager {
     /// @custom:error InvalidExecuteOperation Unknown operation type in flash loan callback
     error InvalidExecuteOperation();
 
-    /// @custom:error InsufficientAmountOutAfterSwap Swap output lower than required minimum
-    error InsufficientAmountOutAfterSwap();
+    /// @custom:error SlippageExceeded Swap output lower than required minimum
+    error SlippageExceeded();
 
     /// @custom:error InsufficientFundsToRepayFlashloan Not enough proceeds to repay flash loan plus fees
     error InsufficientFundsToRepayFlashloan();
@@ -53,9 +50,6 @@ interface ILeverageStrategiesManager {
 
     /// @custom:error OnBehalfMismatch Invalid onBehalf address in flash loan callback
     error OnBehalfMismatch();
-
-    /// @custom:error TransferFromUserFailed Failed to transfer tokens from user
-    error TransferFromUserFailed();
 
     /// @custom:error EnterMarketFailed Comptroller.enterMarketBehalf returned a non-zero error code
     error EnterMarketFailed(uint256 err);
@@ -69,12 +63,21 @@ interface ILeverageStrategiesManager {
     /// @custom:error NotAnApprovedDelegate User has not approved this contract as a delegate
     error NotAnApprovedDelegate();
 
+    /// @custom:error ZeroFlashLoanAmount Flash loan amount cannot be zero
+    error ZeroFlashLoanAmount();
+
+    /// @notice Emitted when dust amounts are transferred after a leverage operation
+    /// @param recipient The address receiving the dust (user or protocol share reserve)
+    /// @param token The underlying token address
+    /// @param amount The amount of dust transferred
+    event DustTransferred(address indexed recipient, address indexed token, uint256 amount);
+
     /// @notice Emitted when a user enters a leveraged position with single collateral asset
     /// @param user The address of the user entering the position
     /// @param collateralMarket The vToken market used as collateral
     /// @param collateralAmountSeed The initial collateral amount provided by the user
     /// @param collateralAmountToFlashLoan The amount being flash loaned
-    event LeveragedPositionEnteredWithSingleCollateral(
+    event SingleAssetLeverageEntered(
         address indexed user,
         IVToken indexed collateralMarket,
         uint256 collateralAmountSeed,
@@ -87,7 +90,7 @@ interface ILeverageStrategiesManager {
     /// @param collateralAmountSeed The initial collateral amount provided by the user
     /// @param borrowedMarket The vToken market being borrowed from
     /// @param borrowedAmountToFlashLoan The amount being flash loaned
-    event LeveragedPositionEnteredWithCollateral(
+    event LeverageEntered(
         address indexed user,
         IVToken indexed collateralMarket,
         uint256 collateralAmountSeed,
@@ -101,7 +104,7 @@ interface ILeverageStrategiesManager {
     /// @param borrowedMarket The vToken market being borrowed from
     /// @param borrowedAmountSeed The initial borrowed asset amount provided by the user
     /// @param borrowedAmountToFlashLoan The amount being flash loaned
-    event LeveragedPositionEnteredWithBorrowed(
+    event LeverageEnteredFromBorrow(
         address indexed user,
         IVToken indexed collateralMarket,
         IVToken indexed borrowedMarket,
@@ -115,7 +118,7 @@ interface ILeverageStrategiesManager {
     /// @param collateralAmountToRedeemForSwap The amount of collateral being redeemed for swap
     /// @param borrowedMarket The vToken market being repaid
     /// @param borrowedAmountToFlashLoan The amount being flash loaned
-    event LeveragedPositionExited(
+    event LeverageExited(
         address indexed user,
         IVToken indexed collateralMarket,
         uint256 collateralAmountToRedeemForSwap,
@@ -127,7 +130,7 @@ interface ILeverageStrategiesManager {
     /// @param user The address of the user exiting the position
     /// @param collateralMarket The vToken market used for both collateral and borrowed asset
     /// @param collateralAmountToFlashLoan The amount being flash loaned
-    event LeveragedPositionExitedWithSingleCollateral(
+    event SingleAssetLeverageExited(
         address indexed user,
         IVToken indexed collateralMarket,
         uint256 collateralAmountToFlashLoan
@@ -136,34 +139,38 @@ interface ILeverageStrategiesManager {
     /**
      * @notice Enumeration of operation types for flash loan callbacks
      * @param NONE Default value indicating no operation set
-     * @param ENTER_WITH_COLLATERAL Operation for entering a leveraged position with collateral seed
-     * @param ENTER_WITH_BORROWED Operation for entering a leveraged position with borrowed asset seed
-     * @param EXIT Operation for exiting a leveraged position
+     * @param ENTER_SINGLE_ASSET Operation for entering a leveraged position using single asset (no swap)
+     * @param ENTER_COLLATERAL Operation for entering a leveraged position with collateral seed
+     * @param ENTER_BORROW Operation for entering a leveraged position with borrowed asset seed
+     * @param EXIT_COLLATERAL Operation for exiting a leveraged position with swap
+     * @param EXIT_SINGLE_ASSET Operation for exiting a leveraged position using single asset (no swap)
      */
     enum OperationType {
         NONE,
-        ENTER_WITH_COLLATERAL_SINGLE,
-        ENTER_WITH_COLLATERAL,
-        ENTER_WITH_BORROWED,
-        EXIT,
-        EXIT_WITH_COLLATERAL_SINGLE
+        ENTER_SINGLE_ASSET,
+        ENTER_COLLATERAL,
+        ENTER_BORROW,
+        EXIT_COLLATERAL,
+        EXIT_SINGLE_ASSET
     }
 
     /**
      * @notice Enters a leveraged position using only collateral provided by the user
      * @dev This function flash loans additional collateral assets, amplifying the user's supplied collateral
-     *     in the Venus protocol. The user must have delegated permission to this contract via the comptroller.
+     *      in the Venus protocol. The user must have delegated permission to this contract via the comptroller.
+     *      Any remaining collateral dust after the operation is returned to the user.
      * @param collateralMarket The vToken market where collateral will be supplied
      * @param collateralAmountSeed The initial amount of collateral the user provides (can be 0)
      * @param collateralAmountToFlashLoan The amount to borrow via flash loan for leverage
-     * @custom:emits LeveragedPositionEnteredWithSingleCollateral
+     * @custom:emits SingleAssetLeverageEntered
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if the market is not listed in Comptroller
-     * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
-     * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
-     * @custom:error EnterLeveragePositionBorrowBehalfFailed if borrow behalf operation fails
+     * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
+     * @custom:error TransferFromUserFailed if seed amount transfer from user fails
+     * @custom:error MintBehalfFailed if mint behalf operation fails
+     * @custom:error BorrowBehalfFailed if borrow behalf operation fails
      */
-    function enterLeveragedPositionWithSingleCollateral(
+    function enterSingleAssetLeverage(
         IVToken collateralMarket,
         uint256 collateralAmountSeed,
         uint256 collateralAmountToFlashLoan
@@ -174,22 +181,24 @@ interface ILeverageStrategiesManager {
      * @dev This function uses flash loans to borrow assets, swaps them for collateral tokens,
      *      and supplies the collateral to the Venus protocol to amplify the user's position.
      *      The user must have delegated permission to this contract via the comptroller.
+     *      Any remaining dust (both collateral and borrowed assets) after the operation is returned to the user.
      * @param collateralMarket The vToken market where collateral will be supplied
      * @param collateralAmountSeed The initial amount of collateral the user provides (can be 0)
      * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan
      * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for leverage
      * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
      * @param swapData Bytes containing swap instructions for converting borrowed assets to collateral
-     * @custom:emits LeveragedPositionEnteredWithCollateral
+     * @custom:emits LeverageEntered
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if any market is not listed in Comptroller
-     * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
-     * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
-     * @custom:error EnterLeveragePositionBorrowBehalfFailed if borrow behalf operation fails
+     * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
+     * @custom:error TransferFromUserFailed if seed amount transfer from user fails
+     * @custom:error MintBehalfFailed if mint behalf operation fails
+     * @custom:error BorrowBehalfFailed if borrow behalf operation fails
      * @custom:error TokenSwapCallFailed if token swap execution fails
-     * @custom:error InsufficientAmountOutAfterSwap if collateral balance after swap is below minimum
+     * @custom:error SlippageExceeded if collateral balance after swap is below minimum
      */
-    function enterLeveragedPositionWithCollateral(
+    function enterLeverage(
         IVToken collateralMarket,
         uint256 collateralAmountSeed,
         IVToken borrowedMarket,
@@ -203,22 +212,24 @@ interface ILeverageStrategiesManager {
      * @dev This function uses flash loans to borrow additional assets, swaps the total borrowed amount
      *      for collateral tokens, and supplies the collateral to the Venus protocol to amplify the user's position.
      *      The user must have delegated permission to this contract via the comptroller.
+     *      Any remaining dust (both collateral and borrowed assets) after the operation is returned to the user.
      * @param collateralMarket The vToken market where collateral will be supplied
      * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan
      * @param borrowedAmountSeed The initial amount of borrowed assets the user provides (can be 0)
      * @param borrowedAmountToFlashLoan The additional amount to borrow via flash loan for leverage
      * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
      * @param swapData Bytes containing swap instructions for converting borrowed assets to collateral
-     * @custom:emits LeveragedPositionEnteredWithBorrowed
+     * @custom:emits LeverageEnteredFromBorrow
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if any market is not listed in Comptroller
-     * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
-     * @custom:error EnterLeveragePositionMintFailed if mint behalf operation fails
-     * @custom:error EnterLeveragePositionBorrowBehalfFailed if borrow behalf operation fails
+     * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
+     * @custom:error TransferFromUserFailed if seed amount transfer from user fails
+     * @custom:error MintBehalfFailed if mint behalf operation fails
+     * @custom:error BorrowBehalfFailed if borrow behalf operation fails
      * @custom:error TokenSwapCallFailed if token swap execution fails
-     * @custom:error InsufficientAmountOutAfterSwap if collateral balance after swap is below minimum
+     * @custom:error SlippageExceeded if collateral balance after swap is below minimum
      */
-    function enterLeveragedPositionWithBorrowed(
+    function enterLeverageFromBorrow(
         IVToken collateralMarket,
         IVToken borrowedMarket,
         uint256 borrowedAmountSeed,
@@ -230,25 +241,30 @@ interface ILeverageStrategiesManager {
     /**
      * @notice Exits a leveraged position by redeeming collateral and repaying borrowed assets
      * @dev This function uses flash loans to temporarily repay debt, redeems collateral,
-     *      swaps collateral for borrowed assets, and repays the flash loan. Any dust amounts
-     *      are transferred to the protocol share reserve.
+     *      swaps collateral for borrowed assets, and repays the flash loan. Any remaining
+     *      collateral dust is returned to the user, while borrowed asset dust is transferred
+     *      to the protocol share reserve.
+     *
+     *      NOTE: No pre-operation safety check is performed because exiting leverage reduces
+     *      debt exposure, which can only improve account health. Post-operation safety is
+     *      still validated to ensure the final position is healthy.
      * @param collateralMarket The vToken market from which collateral will be redeemed
      * @param collateralAmountToRedeemForSwap The amount of collateral to redeem and swap
      * @param borrowedMarket The vToken market where debt will be repaid via flash loan
      * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for debt repayment
      * @param minAmountOutAfterSwap The minimum amount of borrowed asset expected after swap (for slippage protection)
      * @param swapData Bytes containing swap instructions for converting collateral to borrowed assets
-     * @custom:emits LeveragedPositionExited
+     * @custom:emits LeverageExited
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if any market is not listed in Comptroller
-     * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
-     * @custom:error ExitLeveragePositionRepayFailed if repay operation fails
-     * @custom:error ExitLeveragePositionRedeemFailed if redeem operation fails
+     * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
+     * @custom:error RepayBehalfFailed if repay operation fails
+     * @custom:error RedeemBehalfFailed if redeem operation fails
      * @custom:error TokenSwapCallFailed if token swap execution fails
-     * @custom:error InsufficientAmountOutAfterSwap if swap output is below minimum required
+     * @custom:error SlippageExceeded if swap output is below minimum required
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds to repay flash loan
      */
-    function exitLeveragedPosition(
+    function exitLeverage(
         IVToken collateralMarket,
         uint256 collateralAmountToRedeemForSwap,
         IVToken borrowedMarket,
@@ -260,20 +276,24 @@ interface ILeverageStrategiesManager {
     /**
      * @notice Exits a leveraged position when collateral and borrowed assets are the same token
      * @dev This function uses flash loans to temporarily repay debt, redeems collateral,
-     *      and repays the flash loan without requiring token swaps. Any dust amounts
-     *      are transferred to the protocol share reserve. This is more gas-efficient than
-     *      exitLeveragedPosition when dealing with single-asset positions.
+     *      and repays the flash loan without requiring token swaps. This is more gas-efficient
+     *      than exitLeverage when dealing with single-asset positions. Any remaining collateral
+     *      dust after the operation is returned to the user.
+     *
+     *      NOTE: No pre-operation safety check is performed because exiting leverage reduces
+     *      debt exposure, which can only improve account health. Post-operation safety is
+     *      still validated to ensure the final position is healthy.
      * @param collateralMarket The vToken market for both collateral and borrowed asset
      * @param collateralAmountToFlashLoan The amount to borrow via flash loan for debt repayment
-     * @custom:emits LeveragedPositionExitedWithSingleCollateral
-     * @custom:error Unauthorized if caller is not user or approved delegate
+     * @custom:emits SingleAssetLeverageExited
+     * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if the market is not listed in Comptroller
-     * @custom:error LeverageCausesLiquidation if the operation would make the account unsafe
-     * @custom:error ExitLeveragePositionRepayFailed if repay operation fails
-     * @custom:error ExitLeveragePositionRedeemFailed if redeem operation fails
+     * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
+     * @custom:error RepayBehalfFailed if repay operation fails
+     * @custom:error RedeemBehalfFailed if redeem operation fails
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds to repay flash loan
      */
-    function exitLeveragedPositionWithSingleCollateral(
+    function exitSingleAssetLeverage(
         IVToken collateralMarket,
         uint256 collateralAmountToFlashLoan
     ) external;
