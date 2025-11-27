@@ -427,13 +427,17 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     function _handleEnterCollateral(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
 
-        IERC20Upgradeable collateralAsset = IERC20Upgradeable(collateralMarket.underlying());
-        uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, borrowedAssetAmount, collateralAsset, minAmountOutAfterSwap, swapCallData);
+        // Cache transient storage reads for variables used more than once to save gas 
+        IVToken _collateralMarket = collateralMarket;
+        uint256 _minAmountOutAfterSwap = minAmountOutAfterSwap;
+
+        IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
+        uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, borrowedAssetAmount, collateralAsset, _minAmountOutAfterSwap, swapCallData);
 
         uint256 collateralAmountToMint = swappedCollateralAmountOut + collateralAmount;
-        collateralAsset.forceApprove(address(collateralMarket), collateralAmountToMint);
+        collateralAsset.forceApprove(address(_collateralMarket), collateralAmountToMint);
 
-        uint256 err = collateralMarket.mintBehalf(onBehalf, collateralAmountToMint);
+        uint256 err = _collateralMarket.mintBehalf(onBehalf, collateralAmountToMint);
         if (err != SUCCESS) {
             revert MintBehalfFailed(err);
         }
@@ -461,15 +465,20 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      */
     function _handleEnterBorrow(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
-        IERC20Upgradeable collateralAsset = IERC20Upgradeable(collateralMarket.underlying());
+
+        // Cache transient storage reads for variables used more than once to save gas 
+        IVToken _collateralMarket = collateralMarket;
+        uint256 _minAmountOutAfterSwap = minAmountOutAfterSwap;
+
+        IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
 
         uint256 totalBorrowedAmountToSwap = borrowedAmountSeed + borrowedAssetAmount;
 
-        uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, totalBorrowedAmountToSwap, collateralAsset, minAmountOutAfterSwap, swapCallData);
+        uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, totalBorrowedAmountToSwap, collateralAsset, _minAmountOutAfterSwap, swapCallData);
 
-        collateralAsset.forceApprove(address(collateralMarket), swappedCollateralAmountOut);
+        collateralAsset.forceApprove(address(_collateralMarket), swappedCollateralAmountOut);
 
-        uint256 err = collateralMarket.mintBehalf(onBehalf, swappedCollateralAmountOut);
+        uint256 err = _collateralMarket.mintBehalf(onBehalf, swappedCollateralAmountOut);
         if (err != SUCCESS) {
             revert MintBehalfFailed(err);
         }
@@ -506,15 +515,18 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             revert RepayBehalfFailed(err);
         }
 
+        // Cache transient storage reads for variables used more than once to save gas 
+        IVToken _collateralMarket = collateralMarket;
         uint256 collateralAmountToRedeem = collateralAmount;
+        uint256 _minAmountOutAfterSwap = minAmountOutAfterSwap;
 
-        err = collateralMarket.redeemUnderlyingBehalf(onBehalf, collateralAmountToRedeem);
+        err = _collateralMarket.redeemUnderlyingBehalf(onBehalf, collateralAmountToRedeem);
         if (err != SUCCESS) {
             revert RedeemBehalfFailed(err);
         }
         
-        IERC20Upgradeable collateralAsset = IERC20Upgradeable(collateralMarket.underlying());
-        uint256 swappedBorrowedAmountOut = _performSwap(collateralAsset, collateralAmountToRedeem, borrowedAsset, minAmountOutAfterSwap, swapCallData);
+        IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
+        uint256 swappedBorrowedAmountOut = _performSwap(collateralAsset, collateralAmountToRedeem, borrowedAsset, _minAmountOutAfterSwap, swapCallData);
 
         flashLoanRepayAmount = borrowedAssetAmountToRepayFromFlashLoan + borrowedAssetFees;
 
@@ -641,8 +653,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         uint256 dustAmount = asset.balanceOf(address(this));
         if(dustAmount > 0) {
-            asset.safeTransfer(operationInitiator, dustAmount);
-            emit DustTransferred(operationInitiator, address(asset), dustAmount);
+            // Cache transient storage read to save gas
+            address _operationInitiator = operationInitiator;
+            asset.safeTransfer(_operationInitiator, dustAmount);
+            emit DustTransferred(_operationInitiator, address(asset), dustAmount);
         }
     }
 
