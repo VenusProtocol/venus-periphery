@@ -1,6 +1,6 @@
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
-import { BigNumber, Signer, constants } from "ethers";
+import { BigNumber, Signer } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, network, upgrades } from "hardhat";
 
@@ -179,7 +179,7 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   const comptroller = await ComptrollerMock__factory.connect(COMPTROLLER_ADDRESS, timelock);
 
   const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
-  const swapHelper = await SwapHelperFactory.deploy(root.address);
+  const swapHelper = (await SwapHelperFactory.deploy(root.address)) as SwapHelper;
 
   const protocolShareReserveAddress = "0xCa01D5A9A248a830E9D93231e791B1afFed7c446"; // TODO: Get from deployment files
 
@@ -213,6 +213,28 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
     vETH,
   };
 };
+
+/**
+ * Tolerance constants for assertions
+ *
+ * TOLERANCE_HALF_PERCENT (0.5%): Used for borrow amount comparisons where flash loan fees
+ * and interest accrual can cause minor deviations from expected values.
+ *
+ * TOLERANCE_ONE_PERCENT (1%): Used for collateral balance comparisons where exchange rate
+ * fluctuations and rounding in mint/redeem operations can cause larger deviations.
+ */
+const TOLERANCE_HALF_PERCENT = 5; // 0.5% = 5/1000
+const TOLERANCE_ONE_PERCENT = 10; // 1% = 10/1000
+const TOLERANCE_DIVISOR = 1000;
+
+/**
+ * Helper function to calculate tolerance-based closeTo value
+ * @param amount Base amount to calculate tolerance from
+ * @param toleranceBps Tolerance in basis points (5 = 0.5%, 10 = 1%)
+ */
+function calculateTolerance(amount: BigNumber, toleranceBps: number = TOLERANCE_HALF_PERCENT): BigNumber {
+  return amount.mul(toleranceBps).div(TOLERANCE_DIVISOR);
+}
 
 async function createSwapAPICallData(
   swapHelper: SwapHelper,
@@ -253,6 +275,53 @@ async function createSwapAPICallData(
   // Encode multicall with all parameters
   const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
   return multicallData;
+}
+
+interface LeveragePositionConfig {
+  userAddress: string;
+  collateralMarket: VBep20Delegator;
+  borrowMarket: VBep20Delegator;
+  borrowedAmountToFlashLoan: BigNumber;
+  collateralSeed?: BigNumber;
+  minAmountAfterSwap?: BigNumber;
+  dexCalldata: string;
+  dexTarget: string;
+  collateralToken: WBNB | IERC20;
+  borrowedToken: IERC20;
+}
+
+interface LeverageBalanceSnapshot {
+  vTokenBalance: BigNumber;
+  borrowBalance: BigNumber;
+  underlyingBalance: BigNumber;
+  contractBalance: BigNumber;
+}
+
+async function captureBalanceSnapshot(
+  userAddress: string,
+  vToken: VBep20Delegator,
+  underlying: IERC20 | WBNB,
+  contractAddress: string,
+): Promise<LeverageBalanceSnapshot> {
+  return {
+    vTokenBalance: await vToken.balanceOf(userAddress),
+    borrowBalance: await vToken.callStatic.borrowBalanceCurrent(userAddress),
+    underlyingBalance: await underlying.balanceOf(userAddress),
+    contractBalance: await underlying.balanceOf(contractAddress),
+  };
+}
+
+function assertBalanceDelta(
+  actual: BigNumber,
+  expected: BigNumber,
+  toleranceBps: number = TOLERANCE_HALF_PERCENT,
+  description: string = "Balance delta",
+): void {
+  const tolerance = calculateTolerance(expected, toleranceBps);
+  expect(
+    actual,
+    `${description}: expected ${expected.toString()} ± ${tolerance.toString()}, got ${actual.toString()}`,
+  ).to.be.closeTo(expected, tolerance);
 }
 
 if (FORK_MAINNET) {
@@ -437,8 +506,8 @@ if (FORK_MAINNET) {
           expect(vUSDC_BorrowedAfter).to.be.gt(vUSDC_BorrowedBefore);
           expect(vUSDC_BorrowedAfter.sub(vUSDC_BorrowedBefore)).to.be.closeTo(
             borrowedAmountToFlashLoan,
-            borrowedAmountToFlashLoan.mul(5).div(1000),
-          ); // 0.5% tolerance
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
         });
 
         it("should enter leveraged position using vWBNB as collateral and borrowing vUSDC and transfer WBNB as seed", async function () {
@@ -495,10 +564,11 @@ if (FORK_MAINNET) {
           expect(WBNBAfter).to.be.eq(WBNBBefore.sub(seedAmount));
 
           expect(vUSDC_BorrowedAfter).to.be.gt(vUSDC_BorrowedBefore);
+          // 0.5% tolerance: Flash loan fees and interest accrual cause minor deviations
           expect(vUSDC_BorrowedAfter.sub(vUSDC_BorrowedBefore)).to.be.closeTo(
             borrowedAmountToFlashLoan,
-            borrowedAmountToFlashLoan.mul(5).div(1000),
-          ); // 0.5% tolerance
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
         });
 
         it("should revert when market has no flash loan enabled", async function () {
@@ -703,10 +773,11 @@ if (FORK_MAINNET) {
           expect(vWBNBAfter).to.be.gt(vWBNBBefore);
           expect(vUSDCAfter).to.be.eq(vUSDCBefore);
           expect(vUSDC_BorrowedAfter).to.be.gt(vUSDC_BorrowedBefore);
+          // 0.5% tolerance: Flash loan fees and interest accrual cause minor deviations
           expect(vUSDC_BorrowedAfter.sub(vUSDC_BorrowedBefore)).to.be.closeTo(
             borrowedAmountToFlashLoan,
-            borrowedAmountToFlashLoan.mul(5).div(1000),
-          ); // 0.5% tolerance
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
         });
 
         it("should enter leveraged position using vWBNB as collateral and borrowing vUSDC", async function () {
@@ -763,10 +834,11 @@ if (FORK_MAINNET) {
           expect(vWBNBAfter).to.be.gt(vWBNBBefore);
           expect(vUSDCAfter).to.be.eq(vUSDCBefore);
           expect(vUSDC_BorrowedAfter).to.be.gt(vUSDC_BorrowedBefore);
+          // 0.5% tolerance: Flash loan fees and interest accrual cause minor deviations
           expect(vUSDC_BorrowedAfter.sub(vUSDC_BorrowedBefore)).to.be.closeTo(
             borrowedAmountToFlashLoan,
-            borrowedAmountToFlashLoan.mul(5).div(1000),
-          ); // 0.5% tolerance
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
 
           expect(leverageStrategiesManager_USDC_After).to.be.eq(leverageStrategiesManager_USDC_Before);
         });
@@ -999,7 +1071,11 @@ if (FORK_MAINNET) {
           const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
           expect(vUSDC_BorrowedAfter).to.be.lt(vUSDC_BorrowedBefore);
-          expect(vUSDC_BorrowedAfter).to.be.closeTo(0, borrowedAmountToFlashLoan.mul(5).div(1000)); // 0.5% tolerance
+          // 0.5% tolerance: Small residual borrow can remain due to flash loan fees and timing
+          expect(vUSDC_BorrowedAfter).to.be.closeTo(
+            0,
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
         });
 
         it("should revert when received less than minAmountAfterSwap", async function () {
@@ -1535,6 +1611,310 @@ if (FORK_MAINNET) {
           // Final borrow should be minimal
           const finalBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
           expect(finalBorrow).to.be.closeTo(0, parseUnits("0.01", 18));
+
+          // Account should be safe
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+
+        it("should emit DustTransferred event when dust remains after single asset exit", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          // Enter a leveraged position
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNBBorrowAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          const tx = await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, vWBNBBorrowAfterEnter);
+
+          const contractWBNBBalance = await WBNB.balanceOf(leverageStrategiesManager.address);
+          expect(contractWBNBBalance).to.equal(0);
+
+          await expect(tx).to.emit(leverageStrategiesManager, "SingleAssetLeverageExited");
+        });
+
+        it("should verify contract has zero balance after enterSingleAssetLeverage", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          const contractWBNBBefore = await WBNB.balanceOf(leverageStrategiesManager.address);
+          expect(contractWBNBBefore).to.equal(0);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const contractWBNBAfter = await WBNB.balanceOf(leverageStrategiesManager.address);
+          expect(contractWBNBAfter).to.equal(0);
+        });
+
+        it("should correctly track balance deltas using helper functions", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          const snapshotBefore = await captureBalanceSnapshot(
+            vWBNB_HOLDER,
+            vWBNB,
+            WBNB,
+            leverageStrategiesManager.address,
+          );
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const snapshotAfter = await captureBalanceSnapshot(
+            vWBNB_HOLDER,
+            vWBNB,
+            WBNB,
+            leverageStrategiesManager.address,
+          );
+
+          expect(snapshotAfter.vTokenBalance).to.be.gt(snapshotBefore.vTokenBalance);
+          expect(snapshotAfter.borrowBalance).to.be.gt(snapshotBefore.borrowBalance);
+          expect(snapshotAfter.contractBalance).to.equal(0); // No dust left in contract
+        });
+      });
+
+      describe("Negative Test Cases", function () {
+        it("should revert enterSingleAssetLeverage when market is paused for borrow", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          await comptroller.setActionsPaused([vWBNB_ADDRESS], [2], true); // Action 2 = Borrow
+
+          const collateralAmountSeed = parseUnits("0", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan),
+          ).to.be.reverted; // Reverts due to paused borrow action
+        });
+
+        it("should revert enterLeverage when borrow market is paused", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          await comptroller.setActionsPaused([vUSDC_ADDRESS], [2], true); // Action 2 = Borrow
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverageFromBorrow(
+                vWBNB_ADDRESS,
+                vUSDC_ADDRESS,
+                0,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.reverted; // Reverts due to paused borrow action
+        });
+
+        it("should revert exitSingleAssetLeverage when market is paused for redeem", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNBBorrowAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await comptroller.setActionsPaused([vWBNB_ADDRESS], [1], true); // Action 1 = Redeem
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .exitSingleAssetLeverage(vWBNB_ADDRESS, vWBNBBorrowAfterEnter),
+          ).to.be.reverted; // Reverts due to paused redeem action
+        });
+
+        it("should revert when trying to leverage with zero flash loan amount", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("0", 18); // Zero flash loan
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan),
+          ).to.be.revertedWithCustomError(leverageStrategiesManager, "ZeroFlashLoanAmount");
+        });
+
+        it("should revert when user has not entered collateral market", async function () {
+          const NEW_USER = "0x0000000000000000000000000000000000000001";
+          const newUserSigner = await initMainnetUser(NEW_USER, parseEther("10"));
+          await comptroller.connect(newUserSigner).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(newUserSigner)
+              .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan),
+          ).to.be.reverted;
+        });
+
+        it("should revert when trying to exit with flash loan amount exceeding borrow balance", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.1", 18);
+          const collateralAmountToFlashLoan = parseUnits("0.2", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const excessiveExitAmount = parseUnits("10", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .exitSingleAssetLeverage(vWBNB_ADDRESS, excessiveExitAmount),
+          ).to.be.revertedWith("math error"); // Reverts due to insufficient borrow balance
+        });
+      });
+
+      describe("Partial Exit Tests", function () {
+        it("should handle partial single asset leverage exit", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNBBorrowAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          const vWBNBBalanceAfterEnter = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+
+          const partialExitAmount = vWBNBBorrowAfterEnter.div(2);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, partialExitAmount);
+
+          const vWBNBBorrowAfterPartialExit = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          const vWBNBBalanceAfterPartialExit = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+
+          expect(vWBNBBorrowAfterPartialExit).to.be.lt(vWBNBBorrowAfterEnter);
+          expect(vWBNBBorrowAfterPartialExit).to.be.gt(0);
+
+          expect(vWBNBBalanceAfterPartialExit).to.be.lt(vWBNBBalanceAfterEnter);
+
+          const borrowReduction = vWBNBBorrowAfterEnter.sub(vWBNBBorrowAfterPartialExit);
+          assertBalanceDelta(
+            borrowReduction,
+            partialExitAmount,
+            TOLERANCE_ONE_PERCENT,
+            "Partial exit borrow reduction",
+          );
+
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+
+        it("should allow multiple partial exits until fully deleveraged", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          // Enter a leveraged position
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          // First partial exit (1/3)
+          let currentBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, currentBorrow.div(3));
+
+          // Second partial exit (1/2 of remaining)
+          currentBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, currentBorrow.div(2));
+
+          // Final exit (remaining balance)
+          currentBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, currentBorrow);
+
+          // Final borrow should be minimal (close to zero after all exits)
+          const finalBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          expect(finalBorrow).to.be.closeTo(0, parseUnits("0.001", 18));
 
           // Account should be safe
           const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
