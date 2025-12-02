@@ -131,6 +131,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -142,7 +143,7 @@ describe("SwapHelper", () => {
       const calls = [sweepData.data!];
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("1");
-      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      const signature = await owner._signTypedData(domain, types, { caller: userAddress, calls, deadline, salt });
       await swapHelper.connect(user1).multicall(calls, deadline, salt, signature);
       expect(await erc20.balanceOf(swapHelper.address)).to.equal(0);
       expect(await erc20.balanceOf(userAddress)).to.equal(amount);
@@ -167,6 +168,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -178,7 +180,7 @@ describe("SwapHelper", () => {
       const calls = [sweepData.data!];
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("2");
-      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      const signature = await owner._signTypedData(domain, types, { caller: userAddress, calls, deadline, salt });
 
       await expect(swapHelper.connect(user1).multicall(calls, deadline, salt, signature))
         .to.emit(swapHelper, "Swept")
@@ -241,6 +243,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -251,7 +254,7 @@ describe("SwapHelper", () => {
       const calls = [approveData.data!];
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("3");
-      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      const signature = await owner._signTypedData(domain, types, { caller: userAddress, calls, deadline, salt });
       await swapHelper.connect(user1).multicall(calls, deadline, salt, signature);
       expect(await erc20.allowance(swapHelper.address, spender)).to.equal(maxUint256);
     });
@@ -260,6 +263,7 @@ describe("SwapHelper", () => {
   describe("multicall", () => {
     const types = {
       Multicall: [
+        { name: "caller", type: "address" },
         { name: "calls", type: "bytes[]" },
         { name: "deadline", type: "uint256" },
         { name: "salt", type: "bytes32" },
@@ -275,6 +279,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -283,7 +288,7 @@ describe("SwapHelper", () => {
       const calls: string[] = [];
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("4");
-      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      const signature = await owner._signTypedData(domain, types, { caller: userAddress, calls, deadline, salt });
 
       await expect(swapHelper.connect(user1).multicall(calls, deadline, salt, signature)).to.be.revertedWithCustomError(
         swapHelper,
@@ -300,6 +305,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -309,7 +315,7 @@ describe("SwapHelper", () => {
       const calls = [sweepData.data!];
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("5");
-      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      const signature = await owner._signTypedData(domain, types, { caller: userAddress, calls, deadline, salt });
 
       const tx = await swapHelper.connect(user1).multicall(calls, deadline, salt, signature);
 
@@ -325,6 +331,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -334,7 +341,7 @@ describe("SwapHelper", () => {
       const calls = [sweepData.data!, sweepData.data!, sweepData.data!];
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("6");
-      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      const signature = await owner._signTypedData(domain, types, { caller: userAddress, calls, deadline, salt });
 
       const tx = await swapHelper.connect(user1).multicall(calls, deadline, salt, signature);
 
@@ -350,6 +357,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -359,7 +367,7 @@ describe("SwapHelper", () => {
       const calls = [sweepData.data!];
       const deadline = 1234;
       const salt = ethers.utils.formatBytes32String("7");
-      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      const signature = await owner._signTypedData(domain, types, { caller: userAddress, calls, deadline, salt });
       await expect(swapHelper.connect(user1).multicall(calls, deadline, salt, signature)).to.be.revertedWithCustomError(
         swapHelper,
         "DeadlineReached",
@@ -375,6 +383,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -384,7 +393,7 @@ describe("SwapHelper", () => {
       const calls = [sweepData.data!, sweepData.data!, sweepData.data!];
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("8");
-      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      const signature = await owner._signTypedData(domain, types, { caller: userAddress, calls, deadline, salt });
       await swapHelper.connect(user1).multicall(calls, deadline, salt, signature);
       expect(await erc20.balanceOf(swapHelper.address)).to.equal(0);
     });
@@ -398,6 +407,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -407,6 +417,7 @@ describe("SwapHelper", () => {
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("9");
       const signature = await owner._signTypedData(domain, types, {
+        caller: userAddress,
         // authorizing just one call, not 3
         calls: [sweepData.data!],
         deadline,
@@ -432,6 +443,7 @@ describe("SwapHelper", () => {
       };
       const types = {
         Multicall: [
+          { name: "caller", type: "address" },
           { name: "calls", type: "bytes[]" },
           { name: "deadline", type: "uint256" },
           { name: "salt", type: "bytes32" },
@@ -441,7 +453,7 @@ describe("SwapHelper", () => {
       const calls = [sweepData.data!];
       const deadline = maxUint256;
       const salt = ethers.utils.formatBytes32String("10");
-      const signature = await owner._signTypedData(domain, types, { calls, deadline, salt });
+      const signature = await owner._signTypedData(domain, types, { caller: userAddress, calls, deadline, salt });
 
       // First call should succeed
       await swapHelper.connect(user1).multicall(calls, deadline, salt, signature);
