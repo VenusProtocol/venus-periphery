@@ -38,8 +38,14 @@ extendConfig((config: HardhatConfig) => {
       ...config.external,
       deployments: {
         hardhat: [],
-        bsctestnet: ["node_modules/@venusprotocol/venus-protocol/deployments/bsctestnet"],
-        bscmainnet: ["node_modules/@venusprotocol/venus-protocol/deployments/bscmainnet"],
+        bsctestnet: [
+          "node_modules/@venusprotocol/venus-protocol/deployments/bsctestnet",
+          "node_modules/@venusprotocol/governance-contracts/deployments/bsctestnet",
+        ],
+        bscmainnet: [
+          "node_modules/@venusprotocol/venus-protocol/deployments/bscmainnet",
+          "node_modules/@venusprotocol/governance-contracts/deployments/bscmainnet",
+        ],
         unichainmainnet: ["node_modules/@venusprotocol/venus-protocol/deployments/unichainmainnet"],
       },
     };
@@ -47,6 +53,7 @@ extendConfig((config: HardhatConfig) => {
       config.external.deployments!.hardhat = [
         `./deployments/${process.env.HARDHAT_FORK_NETWORK}`,
         `node_modules/@venusprotocol/venus-protocol/deployments/${process.env.HARDHAT_FORK_NETWORK}`,
+        `node_modules/@venusprotocol/governance-contracts/deployments/${process.env.HARDHAT_FORK_NETWORK}`,
       ];
     }
   }
@@ -285,6 +292,9 @@ const config: HardhatUserConfig = {
     contracts: [
       {
         artifacts: "node_modules/@venusprotocol/venus-protocol/artifacts",
+      },
+      {
+        artifacts: "./node_modules/@venusprotocol/governance-contracts/artifacts",
       },
     ],
   },
