@@ -245,13 +245,17 @@ interface ILeverageStrategiesManager {
      *      collateral dust is returned to the user, while borrowed asset dust is transferred
      *      to the protocol share reserve.
      *
+     *      The flash loan amount can exceed actual debt to account for interest accrual
+     *      between transaction creation and mining. The contract caps repayment to actual
+     *      debt and uses leftover funds toward flash loan repayment.
+     *
      *      NOTE: No pre-operation safety check is performed because exiting leverage reduces
      *      debt exposure, which can only improve account health. Post-operation safety is
      *      still validated to ensure the final position is healthy.
      * @param collateralMarket The vToken market from which collateral will be redeemed
      * @param collateralAmountToRedeemForSwap The amount of collateral to redeem and swap
      * @param borrowedMarket The vToken market where debt will be repaid via flash loan
-     * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for debt repayment
+     * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for debt repayment (can exceed actual debt)
      * @param minAmountOutAfterSwap The minimum amount of borrowed asset expected after swap (for slippage protection)
      * @param swapData Bytes containing swap instructions for converting collateral to borrowed assets
      * @custom:emits LeverageExited
@@ -280,11 +284,15 @@ interface ILeverageStrategiesManager {
      *      than exitLeverage when dealing with single-asset positions. Any remaining collateral
      *      dust after the operation is returned to the user.
      *
+     *      The flash loan amount can exceed actual debt to account for interest accrual
+     *      between transaction creation and mining. The contract caps repayment to actual
+     *      debt and uses leftover funds toward flash loan repayment.
+     *
      *      NOTE: No pre-operation safety check is performed because exiting leverage reduces
      *      debt exposure, which can only improve account health. Post-operation safety is
      *      still validated to ensure the final position is healthy.
      * @param collateralMarket The vToken market for both collateral and borrowed asset
-     * @param collateralAmountToFlashLoan The amount to borrow via flash loan for debt repayment
+     * @param collateralAmountToFlashLoan The amount to borrow via flash loan for debt repayment (can exceed actual debt)
      * @custom:emits SingleAssetLeverageExited
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if the market is not listed in Comptroller

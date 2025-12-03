@@ -1664,6 +1664,71 @@ describe("LeverageStrategiesManager", () => {
           .withArgs(protocolShareReserve.address, borrow.address, dustTransferred);
         expect(await borrow.balanceOf(leverageManager.address)).to.equal(0);
       });
+
+      it("should handle flash loan amount exceeding actual debt in exitLeverage", async () => {
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const collateralAmountSeed = parseEther("0");
+
+        const enterSwapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("enter-swap-overpay"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .enterLeverage(
+            collateralMarket.address,
+            collateralAmountSeed,
+            borrowMarket.address,
+            borrowedAmountToFlashLoan,
+            parseEther("1"),
+            enterSwapData,
+          );
+
+        const borrowBalanceAfterEnter = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+
+        // Flash loan 10% more than actual debt to simulate UI offsetting interest accrual
+        const flashLoanWithBuffer = borrowBalanceAfterEnter.mul(110).div(100);
+        const collateralAmountToRedeemForSwap = parseEther("0.5");
+
+        const exitSwapData = await createSwapMulticallData(
+          borrow,
+          leverageManager.address,
+          flashLoanWithBuffer.add(parseEther("0.1")),
+          admin,
+          ethers.utils.formatBytes32String("exit-swap-overpay"),
+        );
+
+        const exitTx = await leverageManager
+          .connect(alice)
+          .exitLeverage(
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            borrowMarket.address,
+            flashLoanWithBuffer,
+            0,
+            exitSwapData,
+          );
+
+        await expect(exitTx)
+          .to.emit(leverageManager, "LeverageExited")
+          .withArgs(
+            aliceAddress,
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            borrowMarket.address,
+            flashLoanWithBuffer,
+          );
+
+        const borrowBalanceAfterExit = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(0);
+        expect(await borrow.balanceOf(leverageManager.address)).to.equal(0);
+      });
     });
   });
 
@@ -1933,6 +1998,36 @@ describe("LeverageStrategiesManager", () => {
         expect(contractCollateralBalance).to.equal(0);
 
         await expect(exitTx).to.emit(leverageManager, "SingleAssetLeverageExited");
+      });
+
+      it("should handle flash loan amount exceeding actual debt in exitSingleAssetLeverage", async () => {
+        const collateralAmountSeed = parseEther("1");
+        const collateralAmountToFlashLoan = parseEther("2");
+
+        await collateral.transfer(aliceAddress, collateralAmountSeed);
+        await collateral.connect(alice).approve(leverageManager.address, collateralAmountSeed);
+
+        await leverageManager
+          .connect(alice)
+          .enterSingleAssetLeverage(collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan);
+
+        const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+
+        // Flash loan 10% more than actual debt to simulate UI offsetting interest accrual
+        const flashLoanWithBuffer = borrowBalanceAfterEnter.mul(110).div(100);
+
+        const exitTx = await leverageManager
+          .connect(alice)
+          .exitSingleAssetLeverage(collateralMarket.address, flashLoanWithBuffer);
+
+        await expect(exitTx)
+          .to.emit(leverageManager, "SingleAssetLeverageExited")
+          .withArgs(aliceAddress, collateralMarket.address, flashLoanWithBuffer);
+
+        const borrowBalanceAfterExit = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(0);
       });
 
       it("should handle re-entering same market position after exiting", async () => {
