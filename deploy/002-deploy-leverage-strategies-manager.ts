@@ -38,8 +38,13 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   });
 
   const leverageStrategiesManager = await ethers.getContract("LeverageStrategiesManager");
+  const owner = await leverageStrategiesManager.owner();
 
-  if ((await leverageStrategiesManager.owner) === deployer) {
+  console.log(
+    `LeverageStrategiesManager verify arguments: ${leverageStrategiesManager.address} ${comptrollerDeployment.address} ${protocolShareReserveDeployment.address} ${swapHelperDeployment.address}`,
+  );
+
+  if (owner === deployer) {
     console.log("Transferring ownership to Normal Timelock ....");
     const tx = await leverageStrategiesManager.transferOwnership(timelock.address);
     await tx.wait();

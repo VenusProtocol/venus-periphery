@@ -489,10 +489,12 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     /**
      * @notice Executes the exit leveraged position operation during flash loan callback
      * @dev This function performs the following steps:
-     *      1. Uses borrowed assets to repay user's debt in the borrowed market
-     *      2. Redeems specified amount of collateral from the Venus market
-     *      3. Swaps collateral assets for borrowed assets
-     *      4. Approves the borrowed asset for repayment to the flash loan
+     *      1. Queries actual debt and caps repayment to min(flashLoanAmount, actualDebt)
+     *         to handle cases where UI flash loans slightly more than current debt
+     *      2. Repays user's debt (up to actual debt amount) in the borrowed market
+     *      3. Redeems specified amount of collateral from the Venus market
+     *      4. Swaps collateral assets for borrowed assets
+     *      5. Uses swap output plus any leftover flash loan funds to repay flash loan
      * @param onBehalf Address on whose behalf the operation is performed
      * @param borrowMarket The vToken market from which assets were borrowed via flash loan
      * @param borrowedAssetAmountToRepayFromFlashLoan The amount borrowed via flash loan for debt repayment
@@ -508,8 +510,11 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     function _handleExitCollateral(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmountToRepayFromFlashLoan, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
 
-        borrowedAsset.forceApprove(address(borrowMarket), borrowedAssetAmountToRepayFromFlashLoan);
-        uint256 err = borrowMarket.repayBorrowBehalf(onBehalf, borrowedAssetAmountToRepayFromFlashLoan);
+        uint256 borrowedTotalDebtAmount = borrowMarket.borrowBalanceCurrent(onBehalf);
+        uint256 repayAmount = borrowedAssetAmountToRepayFromFlashLoan > borrowedTotalDebtAmount ? borrowedTotalDebtAmount : borrowedAssetAmountToRepayFromFlashLoan;
+
+        borrowedAsset.forceApprove(address(borrowMarket), repayAmount);
+        uint256 err = borrowMarket.repayBorrowBehalf(onBehalf, repayAmount);
 
         if (err != SUCCESS) {
             revert RepayBehalfFailed(err);
@@ -518,7 +523,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         // Cache transient storage reads for variables used more than once to save gas 
         IVToken _collateralMarket = collateralMarket;
         uint256 collateralAmountToRedeem = collateralAmount;
-        uint256 _minAmountOutAfterSwap = minAmountOutAfterSwap;
 
         err = _collateralMarket.redeemUnderlyingBehalf(onBehalf, collateralAmountToRedeem);
         if (err != SUCCESS) {
@@ -526,7 +530,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         }
         
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
-        uint256 swappedBorrowedAmountOut = _performSwap(collateralAsset, collateralAmountToRedeem, borrowedAsset, _minAmountOutAfterSwap, swapCallData);
+        uint256 swappedBorrowedAmountOut = _performSwap(collateralAsset, collateralAmountToRedeem, borrowedAsset, minAmountOutAfterSwap, swapCallData);
 
         flashLoanRepayAmount = borrowedAssetAmountToRepayFromFlashLoan + borrowedAssetFees;
 
@@ -540,9 +544,11 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     /**
      * @notice Executes the exit leveraged position with single collateral operation during flash loan callback
      * @dev This function performs the following steps:
-     *      1. Uses flash loaned collateral to repay user's debt in the same market
-     *      2. Redeems specified amount of collateral from the Venus market
-     *      3. Approves the collateral asset for repayment to the flash loan
+     *      1. Queries actual debt and caps repayment to min(flashLoanAmount, actualDebt)
+     *         to handle cases where UI flash loans slightly more than current debt
+     *      2. Repays user's debt (up to actual debt amount) in the market
+     *      3. Redeems collateral needed to repay flash loan (flashLoanAmount + fees)
+     *      4. Approves the collateral asset for repayment to the flash loan
      * @param onBehalf Address on whose behalf the operation is performed
      * @param market The vToken market for both collateral and borrowed assets
      * @param flashloanedCollateralAmount The amount borrowed via flash loan for debt repayment
@@ -555,8 +561,11 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     function _handleExitSingleAsset(address onBehalf, IVToken market, uint256 flashloanedCollateralAmount, uint256 collateralAmountFees) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(market.underlying());
 
-        collateralAsset.forceApprove(address(market), flashloanedCollateralAmount);
-        uint256 err = market.repayBorrowBehalf(onBehalf, flashloanedCollateralAmount);
+        uint256 marketTotalDebtAmount = market.borrowBalanceCurrent(onBehalf);
+        uint256 repayAmount = flashloanedCollateralAmount > marketTotalDebtAmount ? marketTotalDebtAmount : flashloanedCollateralAmount;
+
+        collateralAsset.forceApprove(address(market), repayAmount);
+        uint256 err = market.repayBorrowBehalf(onBehalf, repayAmount);
 
         if (err != SUCCESS) {
             revert RepayBehalfFailed(err);
