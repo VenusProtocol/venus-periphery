@@ -214,6 +214,8 @@ describe("LeverageStrategiesManager", () => {
     await comptroller._setActionsPaused([collateralMarket.address], [2], false); // BORROW
     await comptroller._setActionsPaused([collateralMarket.address], [3], false); // REPAY
     await comptroller.setIsBorrowAllowed(0, collateralMarket.address, true);
+
+    await comptroller._setTreasuryData(admin.address, admin.address, 0);
   });
 
   async function createEmptySwapMulticallData(signer: Wallet, salt: string): Promise<string> {
@@ -312,7 +314,12 @@ describe("LeverageStrategiesManager", () => {
     it("should revert on deployment when protocolShareReserve address is zero", async () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
-        LeverageStrategiesManagerFactory.deploy(comptroller.address, ethers.constants.AddressZero, swapHelper.address, vBNBMarket.address),
+        LeverageStrategiesManagerFactory.deploy(
+          comptroller.address,
+          ethers.constants.AddressZero,
+          swapHelper.address,
+          vBNBMarket.address,
+        ),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
 
@@ -615,14 +622,16 @@ describe("LeverageStrategiesManager", () => {
         const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-collateral"));
 
         await expect(
-          leverageManager.connect(alice).enterLeverage(
-            vBNBMarket.address,
-            collateralAmountSeed,
-            borrowMarket.address,
-            borrowedAmountToFlashLoan,
-            0,
-            swapData,
-          ),
+          leverageManager
+            .connect(alice)
+            .enterLeverage(
+              vBNBMarket.address,
+              collateralAmountSeed,
+              borrowMarket.address,
+              borrowedAmountToFlashLoan,
+              0,
+              swapData,
+            ),
         ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
@@ -632,14 +641,16 @@ describe("LeverageStrategiesManager", () => {
         const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-borrow"));
 
         await expect(
-          leverageManager.connect(alice).enterLeverage(
-            collateralMarket.address,
-            collateralAmountSeed,
-            vBNBMarket.address,
-            borrowedAmountToFlashLoan,
-            0,
-            swapData,
-          ),
+          leverageManager
+            .connect(alice)
+            .enterLeverage(
+              collateralMarket.address,
+              collateralAmountSeed,
+              vBNBMarket.address,
+              borrowedAmountToFlashLoan,
+              0,
+              swapData,
+            ),
         ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
@@ -952,34 +963,44 @@ describe("LeverageStrategiesManager", () => {
       it("should revert when collateral market is vBNB", async () => {
         const borrowedAmountToFlashLoan = parseEther("1");
         const borrowedAmountSeed = parseEther("0");
-        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-collateral-fromborrow"));
+        const swapData = await createEmptySwapMulticallData(
+          admin,
+          ethers.utils.formatBytes32String("vbnb-collateral-fromborrow"),
+        );
 
         await expect(
-          leverageManager.connect(alice).enterLeverageFromBorrow(
-            vBNBMarket.address,
-            borrowMarket.address,
-            borrowedAmountSeed,
-            borrowedAmountToFlashLoan,
-            0,
-            swapData,
-          ),
+          leverageManager
+            .connect(alice)
+            .enterLeverageFromBorrow(
+              vBNBMarket.address,
+              borrowMarket.address,
+              borrowedAmountSeed,
+              borrowedAmountToFlashLoan,
+              0,
+              swapData,
+            ),
         ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
       it("should revert when borrow market is vBNB", async () => {
         const borrowedAmountToFlashLoan = parseEther("1");
         const borrowedAmountSeed = parseEther("0");
-        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-borrow-fromborrow"));
+        const swapData = await createEmptySwapMulticallData(
+          admin,
+          ethers.utils.formatBytes32String("vbnb-borrow-fromborrow"),
+        );
 
         await expect(
-          leverageManager.connect(alice).enterLeverageFromBorrow(
-            collateralMarket.address,
-            vBNBMarket.address,
-            borrowedAmountSeed,
-            borrowedAmountToFlashLoan,
-            0,
-            swapData,
-          ),
+          leverageManager
+            .connect(alice)
+            .enterLeverageFromBorrow(
+              collateralMarket.address,
+              vBNBMarket.address,
+              borrowedAmountSeed,
+              borrowedAmountToFlashLoan,
+              0,
+              swapData,
+            ),
         ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
@@ -1326,34 +1347,44 @@ describe("LeverageStrategiesManager", () => {
       it("should revert when collateral market is vBNB", async () => {
         const repayAmount = parseEther("1");
         const collateralAmountToRedeemForSwap = parseEther("0");
-        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-exit-collateral"));
+        const swapData = await createEmptySwapMulticallData(
+          admin,
+          ethers.utils.formatBytes32String("vbnb-exit-collateral"),
+        );
 
         await expect(
-          leverageManager.connect(alice).exitLeverage(
-            vBNBMarket.address,
-            collateralAmountToRedeemForSwap,
-            borrowMarket.address,
-            repayAmount,
-            0,
-            swapData,
-          ),
+          leverageManager
+            .connect(alice)
+            .exitLeverage(
+              vBNBMarket.address,
+              collateralAmountToRedeemForSwap,
+              borrowMarket.address,
+              repayAmount,
+              0,
+              swapData,
+            ),
         ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
       it("should revert when borrow market is vBNB", async () => {
         const repayAmount = parseEther("1");
         const collateralAmountToRedeemForSwap = parseEther("0");
-        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-exit-borrow"));
+        const swapData = await createEmptySwapMulticallData(
+          admin,
+          ethers.utils.formatBytes32String("vbnb-exit-borrow"),
+        );
 
         await expect(
-          leverageManager.connect(alice).exitLeverage(
-            collateralMarket.address,
-            collateralAmountToRedeemForSwap,
-            vBNBMarket.address,
-            repayAmount,
-            0,
-            swapData,
-          ),
+          leverageManager
+            .connect(alice)
+            .exitLeverage(
+              collateralMarket.address,
+              collateralAmountToRedeemForSwap,
+              vBNBMarket.address,
+              repayAmount,
+              0,
+              swapData,
+            ),
         ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
@@ -1873,6 +1904,203 @@ describe("LeverageStrategiesManager", () => {
         expect(await borrow.balanceOf(leverageManager.address)).to.equal(0);
       });
     });
+
+    describe("Treasury Percent Handling", () => {
+      it("should exit leveraged position successfully when treasuryPercent is zero", async () => {
+        expect(await comptroller.treasuryPercent()).to.equal(0);
+
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const collateralAmountSeed = parseEther("0");
+
+        const enterSwapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("enter-treasury-zero"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .enterLeverage(
+            collateralMarket.address,
+            collateralAmountSeed,
+            borrowMarket.address,
+            borrowedAmountToFlashLoan,
+            parseEther("1"),
+            enterSwapData,
+          );
+
+        const borrowBalanceAfterEnter = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterEnter).to.be.gt(0);
+
+        const collateralAmountToRedeemForSwap = parseEther("0.5");
+
+        const exitSwapData = await createSwapMulticallData(
+          borrow,
+          leverageManager.address,
+          borrowBalanceAfterEnter.add(parseEther("0.1")),
+          admin,
+          ethers.utils.formatBytes32String("exit-treasury-zero"),
+        );
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .exitLeverage(
+              collateralMarket.address,
+              collateralAmountToRedeemForSwap,
+              borrowMarket.address,
+              borrowBalanceAfterEnter,
+              0,
+              exitSwapData,
+            ),
+        )
+          .to.emit(leverageManager, "LeverageExited")
+          .withArgs(
+            aliceAddress,
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            borrowMarket.address,
+            borrowBalanceAfterEnter,
+          );
+
+        const borrowBalanceAfterExit = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+      });
+
+      it("should exit leveraged position successfully when treasuryPercent is nonzero", async () => {
+        const treasuryPercent = parseUnits("1", 16); // 1%
+        await comptroller._setTreasuryData(admin.address, admin.address, treasuryPercent);
+
+        expect(await comptroller.treasuryPercent()).to.equal(treasuryPercent);
+
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const collateralAmountSeed = parseEther("0");
+
+        const enterSwapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("enter-treasury-1pct"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .enterLeverage(
+            collateralMarket.address,
+            collateralAmountSeed,
+            borrowMarket.address,
+            borrowedAmountToFlashLoan,
+            parseEther("1"),
+            enterSwapData,
+          );
+
+        const borrowBalanceAfterEnter = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterEnter).to.be.gt(0);
+
+        const collateralAmountToRedeemForSwap = parseEther("0.5");
+
+        const exitSwapData = await createSwapMulticallData(
+          borrow,
+          leverageManager.address,
+          borrowBalanceAfterEnter.add(parseEther("0.1")),
+          admin,
+          ethers.utils.formatBytes32String("exit-treasury-1pct"),
+        );
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .exitLeverage(
+              collateralMarket.address,
+              collateralAmountToRedeemForSwap,
+              borrowMarket.address,
+              borrowBalanceAfterEnter,
+              0,
+              exitSwapData,
+            ),
+        )
+          .to.emit(leverageManager, "LeverageExited")
+          .withArgs(
+            aliceAddress,
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            borrowMarket.address,
+            borrowBalanceAfterEnter,
+          );
+
+        const borrowBalanceAfterExit = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+      });
+
+      it("should exit leveraged position successfully with high treasury percent (5%)", async () => {
+        const treasuryPercent = parseUnits("5", 16); // 5%
+        await comptroller._setTreasuryData(admin.address, admin.address, treasuryPercent);
+
+        expect(await comptroller.treasuryPercent()).to.equal(treasuryPercent);
+
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const collateralAmountSeed = parseEther("0");
+
+        const enterSwapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("enter-treasury-5pct"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .enterLeverage(
+            collateralMarket.address,
+            collateralAmountSeed,
+            borrowMarket.address,
+            borrowedAmountToFlashLoan,
+            parseEther("1"),
+            enterSwapData,
+          );
+
+        const borrowBalanceAfterEnter = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterEnter).to.be.gt(0);
+
+        const collateralAmountToRedeemForSwap = parseEther("0.5");
+
+        const exitSwapData = await createSwapMulticallData(
+          borrow,
+          leverageManager.address,
+          borrowBalanceAfterEnter.add(parseEther("0.1")),
+          admin,
+          ethers.utils.formatBytes32String("exit-treasury-5pct"),
+        );
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .exitLeverage(
+              collateralMarket.address,
+              collateralAmountToRedeemForSwap,
+              borrowMarket.address,
+              borrowBalanceAfterEnter,
+              0,
+              exitSwapData,
+            ),
+        )
+          .to.emit(leverageManager, "LeverageExited")
+          .withArgs(
+            aliceAddress,
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            borrowMarket.address,
+            borrowBalanceAfterEnter,
+          );
+
+        const borrowBalanceAfterExit = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+      });
+    });
   });
 
   describe("exitSingleAssetLeverage", () => {
@@ -2197,6 +2425,154 @@ describe("LeverageStrategiesManager", () => {
         await leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowBalance2);
 
         expect(await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress)).to.equal(0);
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(0);
+      });
+    });
+
+    describe("Treasury Percent Handling", () => {
+      it("should exit leveraged position successfully when treasuryPercent is zero", async () => {
+        expect(await comptroller.treasuryPercent()).to.equal(0);
+
+        const collateralAmountSeed = parseEther("1");
+        const collateralAmountToFlashLoan = parseEther("2");
+
+        await collateral.transfer(aliceAddress, collateralAmountSeed);
+        await collateral.connect(alice).approve(leverageManager.address, collateralAmountSeed);
+
+        await leverageManager
+          .connect(alice)
+          .enterSingleAssetLeverage(collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan);
+
+        const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterEnter).to.be.gt(0);
+
+        await expect(
+          leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowBalanceAfterEnter),
+        )
+          .to.emit(leverageManager, "SingleAssetLeverageExited")
+          .withArgs(aliceAddress, collateralMarket.address, borrowBalanceAfterEnter);
+
+        const borrowBalanceAfterExit = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+      });
+
+      it("should exit leveraged position successfully when treasuryPercent is nonzero", async () => {
+        const treasuryPercent = parseUnits("1", 16); // 1%
+        await comptroller._setTreasuryData(admin.address, admin.address, treasuryPercent);
+
+        expect(await comptroller.treasuryPercent()).to.equal(treasuryPercent);
+
+        const collateralAmountSeed = parseEther("1");
+        const collateralAmountToFlashLoan = parseEther("2");
+
+        await collateral.transfer(aliceAddress, collateralAmountSeed);
+        await collateral.connect(alice).approve(leverageManager.address, collateralAmountSeed);
+
+        await leverageManager
+          .connect(alice)
+          .enterSingleAssetLeverage(collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan);
+
+        const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterEnter).to.be.gt(0);
+
+        await expect(
+          leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowBalanceAfterEnter),
+        )
+          .to.emit(leverageManager, "SingleAssetLeverageExited")
+          .withArgs(aliceAddress, collateralMarket.address, borrowBalanceAfterEnter);
+
+        const borrowBalanceAfterExit = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+      });
+
+      it("should exit leveraged position successfully with high treasury percent (5%)", async () => {
+        const treasuryPercent = parseUnits("5", 16); // 5%
+        await comptroller._setTreasuryData(admin.address, admin.address, treasuryPercent);
+
+        expect(await comptroller.treasuryPercent()).to.equal(treasuryPercent);
+
+        const collateralAmountSeed = parseEther("1");
+        const collateralAmountToFlashLoan = parseEther("2");
+
+        await collateral.transfer(aliceAddress, collateralAmountSeed);
+        await collateral.connect(alice).approve(leverageManager.address, collateralAmountSeed);
+
+        await leverageManager
+          .connect(alice)
+          .enterSingleAssetLeverage(collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan);
+
+        const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterEnter).to.be.gt(0);
+
+        await expect(
+          leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowBalanceAfterEnter),
+        )
+          .to.emit(leverageManager, "SingleAssetLeverageExited")
+          .withArgs(aliceAddress, collateralMarket.address, borrowBalanceAfterEnter);
+
+        const borrowBalanceAfterExit = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+      });
+
+      it("should handle multiple enter/exit cycles with treasury percent enabled", async () => {
+        const treasuryPercent = parseUnits("2", 16); // 2%
+        await comptroller._setTreasuryData(admin.address, admin.address, treasuryPercent);
+
+        const collateralAmountSeed = parseEther("1");
+        await collateral.transfer(aliceAddress, collateralAmountSeed);
+        await collateral.connect(alice).approve(leverageManager.address, collateralAmountSeed);
+
+        await leverageManager
+          .connect(alice)
+          .enterSingleAssetLeverage(collateralMarket.address, collateralAmountSeed, parseEther("1"));
+
+        let borrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalance).to.be.gt(0);
+
+        await leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowBalance);
+        expect(await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress)).to.equal(0);
+
+        await leverageManager.connect(alice).enterSingleAssetLeverage(collateralMarket.address, 0, parseEther("1"));
+
+        borrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalance).to.be.gt(0);
+
+        await leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowBalance);
+        expect(await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress)).to.equal(0);
+
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(0);
+      });
+
+      it("should exit with flash loan buffer when treasury percent is nonzero", async () => {
+        const treasuryPercent = parseUnits("1", 16);
+        await comptroller._setTreasuryData(admin.address, admin.address, treasuryPercent);
+
+        const collateralAmountSeed = parseEther("1");
+        const collateralAmountToFlashLoan = parseEther("2");
+
+        await collateral.transfer(aliceAddress, collateralAmountSeed);
+        await collateral.connect(alice).approve(leverageManager.address, collateralAmountSeed);
+
+        await leverageManager
+          .connect(alice)
+          .enterSingleAssetLeverage(collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan);
+
+        const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+
+        // Flash loan 10% more than actual debt
+        const flashLoanWithBuffer = borrowBalanceAfterEnter.mul(110).div(100);
+
+        const exitTx = await leverageManager
+          .connect(alice)
+          .exitSingleAssetLeverage(collateralMarket.address, flashLoanWithBuffer);
+
+        await expect(exitTx)
+          .to.emit(leverageManager, "SingleAssetLeverageExited")
+          .withArgs(aliceAddress, collateralMarket.address, flashLoanWithBuffer);
+
+        const borrowBalanceAfterExit = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+
         expect(await collateral.balanceOf(leverageManager.address)).to.equal(0);
       });
     });
