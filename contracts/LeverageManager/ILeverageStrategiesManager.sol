@@ -258,8 +258,13 @@ interface ILeverageStrategiesManager {
      *      NOTE: No pre-operation safety check is performed because exiting leverage reduces
      *      debt exposure, which can only improve account health. Post-operation safety is
      *      still validated to ensure the final position is healthy.
+     *
+     *      IMPORTANT: If treasuryPercent() is nonzero, the user must provide a
+     *      collateralAmountToRedeemForSwap that accounts for the treasury fee. Only
+     *      (1 - treasuryPercent/1e18) of the redeemed amount is transferred to this contract.
+     *      Required gross amount = netAmountNeeded * 1e18 / (1e18 - treasuryPercent)
      * @param collateralMarket The vToken market from which collateral will be redeemed (must not be vBNB)
-     * @param collateralAmountToRedeemForSwap The amount of collateral to redeem and swap
+     * @param collateralAmountToRedeemForSwap The gross amount of collateral to redeem (must account for treasury fee if nonzero)
      * @param borrowedMarket The vToken market where debt will be repaid via flash loan (must not be vBNB)
      * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for debt repayment (can exceed actual debt)
      * @param minAmountOutAfterSwap The minimum amount of borrowed asset expected after swap (for slippage protection)
@@ -294,6 +299,10 @@ interface ILeverageStrategiesManager {
      *      The flash loan amount can exceed actual debt to account for interest accrual
      *      between transaction creation and mining. The contract caps repayment to actual
      *      debt and uses leftover funds toward flash loan repayment.
+     *
+     *      If treasuryPercent() is nonzero, the contract automatically adjusts the redeem
+     *      amount to ensure sufficient funds are received to repay the flash loan after the
+     *      treasury fee deduction.
      *
      *      NOTE: No pre-operation safety check is performed because exiting leverage reduces
      *      debt exposure, which can only improve account health. Post-operation safety is

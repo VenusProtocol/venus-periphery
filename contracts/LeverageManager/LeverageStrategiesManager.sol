@@ -21,6 +21,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     /// @dev Success return value for VToken operations (mint, borrow, repay, redeem)
     uint256 private constant SUCCESS = 0;
 
+    /// @dev Mantissa for fixed-point arithmetic (1e18 = 100%)
+    uint256 private constant MANTISSA_ONE = 1e18;
+
     /// @notice The Venus comptroller contract for market interactions and flash loans execution
     IComptroller public immutable COMPTROLLER;
     
@@ -496,9 +499,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      *      1. Queries actual debt and caps repayment to min(flashLoanAmount, actualDebt)
      *         to handle cases where UI flash loans slightly more than current debt
      *      2. Repays user's debt (up to actual debt amount) in the borrowed market
-     *      3. Redeems specified amount of collateral from the Venus market
-     *      4. Swaps collateral assets for borrowed assets
-     *      5. Uses swap output plus any leftover flash loan funds to repay flash loan
+     *      3. Calculates redeem amount accounting for treasury fee (if any)
+     *      4. Redeems specified amount of collateral from the Venus market
+     *      5. Swaps actual received collateral (after treasury fee) for borrowed assets
+     *      6. Uses swap output plus any leftover flash loan funds to repay flash loan
      * @param onBehalf Address on whose behalf the operation is performed
      * @param borrowMarket The vToken market from which assets were borrowed via flash loan
      * @param borrowedAssetAmountToRepayFromFlashLoan The amount borrowed via flash loan for debt repayment
@@ -514,27 +518,37 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     function _handleExitCollateral(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmountToRepayFromFlashLoan, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
 
-        uint256 borrowedTotalDebtAmount = borrowMarket.borrowBalanceCurrent(onBehalf);
-        uint256 repayAmount = borrowedAssetAmountToRepayFromFlashLoan > borrowedTotalDebtAmount ? borrowedTotalDebtAmount : borrowedAssetAmountToRepayFromFlashLoan;
+        {
+            uint256 borrowedTotalDebtAmount = borrowMarket.borrowBalanceCurrent(onBehalf);
+            uint256 repayAmount = borrowedAssetAmountToRepayFromFlashLoan > borrowedTotalDebtAmount ? borrowedTotalDebtAmount : borrowedAssetAmountToRepayFromFlashLoan;
 
-        borrowedAsset.forceApprove(address(borrowMarket), repayAmount);
-        uint256 err = borrowMarket.repayBorrowBehalf(onBehalf, repayAmount);
+            borrowedAsset.forceApprove(address(borrowMarket), repayAmount);
+            uint256 err = borrowMarket.repayBorrowBehalf(onBehalf, repayAmount);
 
-        if (err != SUCCESS) {
-            revert RepayBehalfFailed(err);
+            if (err != SUCCESS) {
+                revert RepayBehalfFailed(err);
+            }
         }
 
         // Cache transient storage reads for variables used more than once to save gas 
         IVToken _collateralMarket = collateralMarket;
         uint256 collateralAmountToRedeem = collateralAmount;
 
-        err = _collateralMarket.redeemUnderlyingBehalf(onBehalf, collateralAmountToRedeem);
-        if (err != SUCCESS) {
-            revert RedeemBehalfFailed(err);
+        {
+            uint256 treasuryPercent = COMPTROLLER.treasuryPercent();
+            uint256 redeemAmount = treasuryPercent > 0 
+                ? (collateralAmountToRedeem * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) / (MANTISSA_ONE - treasuryPercent)
+                : collateralAmountToRedeem;
+
+            uint256 err = _collateralMarket.redeemUnderlyingBehalf(onBehalf, redeemAmount);
+            if (err != SUCCESS) {
+                revert RedeemBehalfFailed(err);
+            }
         }
         
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
-        uint256 swappedBorrowedAmountOut = _performSwap(collateralAsset, collateralAmountToRedeem, borrowedAsset, minAmountOutAfterSwap, swapCallData);
+
+        uint256 swappedBorrowedAmountOut = _performSwap(collateralAsset, collateralAsset.balanceOf(address(this)), borrowedAsset, minAmountOutAfterSwap, swapCallData);
 
         flashLoanRepayAmount = borrowedAssetAmountToRepayFromFlashLoan + borrowedAssetFees;
 
@@ -551,8 +565,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      *      1. Queries actual debt and caps repayment to min(flashLoanAmount, actualDebt)
      *         to handle cases where UI flash loans slightly more than current debt
      *      2. Repays user's debt (up to actual debt amount) in the market
-     *      3. Redeems collateral needed to repay flash loan (flashLoanAmount + fees)
-     *      4. Approves the collateral asset for repayment to the flash loan
+     *      3. Calculates redeem amount accounting for treasury fee (if any)
+     *      4. Redeems collateral needed to repay flash loan (flashLoanAmount + fees)
+     *      5. Approves the collateral asset for repayment to the flash loan
      * @param onBehalf Address on whose behalf the operation is performed
      * @param market The vToken market for both collateral and borrowed assets
      * @param flashloanedCollateralAmount The amount borrowed via flash loan for debt repayment
@@ -577,7 +592,12 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         flashLoanRepayAmount = flashloanedCollateralAmount + collateralAmountFees;
 
-        err = market.redeemUnderlyingBehalf(onBehalf, flashLoanRepayAmount);
+        uint256 treasuryPercent = COMPTROLLER.treasuryPercent();
+        uint256 redeemAmount = treasuryPercent > 0 
+            ? (flashLoanRepayAmount * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) / (MANTISSA_ONE - treasuryPercent)
+            : flashLoanRepayAmount;
+
+        err = market.redeemUnderlyingBehalf(onBehalf, redeemAmount);
         if (err != SUCCESS) {
             revert RedeemBehalfFailed(err);
         }

@@ -83,6 +83,8 @@ interface IComptroller {
         address account
     ) external view returns (uint256 error, uint256 liquidity, uint256 shortfall);
 
+    function treasuryPercent() external view returns (uint256);
+
     function executeFlashLoan(
         address payable onBehalf,
         address payable receiver,
