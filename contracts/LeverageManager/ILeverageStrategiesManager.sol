@@ -24,8 +24,8 @@ interface ILeverageStrategiesManager {
     /// @custom:error RedeemBehalfFailed redeemBehalf on a vToken market returned a non-zero error code
     error RedeemBehalfFailed(uint256 errorCode);
 
-    /// @custom:error OperationCausesLiquidation Operation would put the account at risk (undercollateralized)
-    error OperationCausesLiquidation();
+    /// @custom:error OperationCausesLiquidation Operation would put the account at risk (undercollateralized) returns a non-zero error code from getBorrowingPower
+    error OperationCausesLiquidation(uint256 errorCode);
 
     /// @custom:error TokenSwapCallFailed Swap helper call reverted or returned false
     error TokenSwapCallFailed();
@@ -301,8 +301,5 @@ interface ILeverageStrategiesManager {
      * @custom:error RedeemBehalfFailed if redeem operation fails
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds to repay flash loan
      */
-    function exitSingleAssetLeverage(
-        IVToken collateralMarket,
-        uint256 collateralAmountToFlashLoan
-    ) external;
+    function exitSingleAssetLeverage(IVToken collateralMarket, uint256 collateralAmountToFlashLoan) external;
 }

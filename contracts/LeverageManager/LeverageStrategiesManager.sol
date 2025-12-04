@@ -718,7 +718,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      */
     function _checkAccountSafe(address user) internal view {
         (uint256 err, , uint256 shortfall) = COMPTROLLER.getBorrowingPower(user);
-        if (err != SUCCESS || shortfall > 0) revert OperationCausesLiquidation();
+        if (err != SUCCESS || shortfall > 0) revert OperationCausesLiquidation(err);
     }
 
     /**
