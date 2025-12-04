@@ -18,11 +18,12 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   );
 
   const swapHelperDeployment = await deployments.get("SwapHelper");
+  const vBNBDeployment = await deployments.get("vBNB");
 
   await deploy("LeverageStrategiesManager", {
     from: deployer,
     log: true,
-    args: [comptrollerDeployment.address, protocolShareReserveDeployment.address, swapHelperDeployment.address],
+    args: [comptrollerDeployment.address, protocolShareReserveDeployment.address, swapHelperDeployment.address, vBNBDeployment.address],
     proxy: {
       owner: network.name === "hardhat" ? deployer : timelock.address,
       proxyContract: "OptimizedTransparentUpgradeableProxy",
@@ -41,7 +42,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const owner = await leverageStrategiesManager.owner();
 
   console.log(
-    `LeverageStrategiesManager verify arguments: ${leverageStrategiesManager.address} ${comptrollerDeployment.address} ${protocolShareReserveDeployment.address} ${swapHelperDeployment.address}`,
+    `LeverageStrategiesManager verify arguments: ${leverageStrategiesManager.address} ${comptrollerDeployment.address} ${protocolShareReserveDeployment.address} ${swapHelperDeployment.address} ${vBNBDeployment.address}`,
   );
 
   if (owner === deployer) {

@@ -185,7 +185,7 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
 
   const leverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
   const leverageStrategiesManager = await upgrades.deployProxy(leverageStrategiesManagerFactory, [], {
-    constructorArgs: [comptroller.address, protocolShareReserveAddress, swapHelper.address],
+    constructorArgs: [comptroller.address, protocolShareReserveAddress, swapHelper.address, vBNB_ADDRESS],
     initializer: "initialize",
     unsafeAllow: ["state-variable-immutable"],
   });

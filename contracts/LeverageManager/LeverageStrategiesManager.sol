@@ -30,6 +30,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     /// @notice The swap helper contract for executing token swaps during leverage operations
     SwapHelper public immutable swapHelper;
 
+    /// @notice The vBNB market address (not supported for leverage operations)
+    IVToken public immutable vBNB;
+
     /// @dev Transient (EIP-1153): Cleared at transaction end. Tracks operation type during flash loan callback.
     OperationType transient operationType;
 
@@ -54,16 +57,18 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @param _comptroller The Venus comptroller contract address
      * @param _protocolShareReserve The protocol share reserve contract address
      * @param _swapHelper The swap helper contract address
+     * @param _vBNB The vBNB market address (not supported for leverage operations)
      * @custom:oz-upgrades-unsafe-allow constructor
      */
-    constructor(IComptroller _comptroller, IProtocolShareReserve _protocolShareReserve, SwapHelper _swapHelper) {
-        if(address(_comptroller) == address(0) || address(_protocolShareReserve) == address(0) || address(_swapHelper) == address(0)) {
+    constructor(IComptroller _comptroller, IProtocolShareReserve _protocolShareReserve, SwapHelper _swapHelper, IVToken _vBNB) {
+        if(address(_comptroller) == address(0) || address(_protocolShareReserve) == address(0) || address(_swapHelper) == address(0) || address(_vBNB) == address(0)) {
             revert ZeroAddress();
         }
 
         COMPTROLLER = _comptroller;
         protocolShareReserve = _protocolShareReserve;
         swapHelper = _swapHelper;
+        vBNB = _vBNB;
         _disableInitializers();
     }
 
@@ -83,7 +88,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         uint256 _collateralAmountToFlashLoan
     ) external {
         if (_collateralAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
-        _checkMarketListed(_collateralMarket);
+        _checkMarketSupported(_collateralMarket);
 
         _checkUserDelegated();
         _checkAccountSafe(msg.sender);
@@ -131,8 +136,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         bytes calldata _swapData
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
-        _checkMarketListed(_collateralMarket);
-        _checkMarketListed(_borrowedMarket);
+        _checkMarketSupported(_collateralMarket);
+        _checkMarketSupported(_borrowedMarket);
 
         _checkUserDelegated();
         _checkAccountSafe(msg.sender);
@@ -183,8 +188,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         bytes calldata _swapData
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
-        _checkMarketListed(_collateralMarket);
-        _checkMarketListed(_borrowedMarket);
+        _checkMarketSupported(_collateralMarket);
+        _checkMarketSupported(_borrowedMarket);
         
         _checkUserDelegated();
         _checkAccountSafe(msg.sender);
@@ -236,8 +241,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         bytes calldata _swapData 
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
-        _checkMarketListed(_collateralMarket);
-        _checkMarketListed(_borrowedMarket);
+        _checkMarketSupported(_collateralMarket);
+        _checkMarketSupported(_borrowedMarket);
 
         _checkUserDelegated();
 
@@ -282,7 +287,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         uint256 _collateralAmountToFlashLoan
     ) external {
         if (_collateralAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
-        _checkMarketListed(_collateralMarket);
+        _checkMarketSupported(_collateralMarket);
         _checkUserDelegated();
 
         operationInitiator = msg.sender;
@@ -736,12 +741,17 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @dev Ensures that the given market is listed in the Comptroller
+     * @dev Ensures that the given market is supported for leverage operations
+     * @dev A market must be listed in the Comptroller and must not be vBNB.
+     *      vBNB is excluded because it uses native BNB which requires special handling
+     *      that this contract does not support.
      * @param market The vToken address to validate
      * @custom:error MarketNotListed if the market is not listed in Comptroller
+     * @custom:error VBNBNotSupported if the market is vBNB
      */
-    function _checkMarketListed(IVToken market) internal view {
+    function _checkMarketSupported(IVToken market) internal view {
         (bool isMarketListed, , ) = COMPTROLLER.markets(address(market));
         if (!isMarketListed) revert MarketNotListed(address(market));
+        if (market == vBNB) revert VBNBNotSupported();
     }
 }

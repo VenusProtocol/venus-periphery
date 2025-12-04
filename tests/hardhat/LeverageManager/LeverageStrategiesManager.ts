@@ -28,6 +28,7 @@ type SetupFixture = {
   borrowMarket: VBep20Harness;
   borrow: EIP20Interface;
   unlistedMarket: VBep20Harness;
+  vBNBMarket: VBep20Harness;
 };
 
 async function deployVToken(
@@ -127,6 +128,17 @@ const setupFixture = async (): Promise<SetupFixture> => {
     false,
   );
 
+  // Deploy a vBNB mock (listed but used to test VBNBNotSupported error)
+  const { mockToken: vBNBUnderlying, vToken: vBNBMarket } = await deployVToken(
+    "BNB",
+    comptroller,
+    accessControl.address,
+    interestRateModel.address,
+    protocolShareReserve.address,
+    admin.address,
+    true,
+  );
+
   const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
   const swapHelper = (await SwapHelperFactory.deploy(admin.address)) as SwapHelper;
 
@@ -135,6 +147,7 @@ const setupFixture = async (): Promise<SetupFixture> => {
     comptroller.address,
     protocolShareReserve.address,
     swapHelper.address,
+    vBNBMarket.address,
   )) as LeverageStrategiesManager;
   await leverageManager.deployed();
 
@@ -152,6 +165,7 @@ const setupFixture = async (): Promise<SetupFixture> => {
     borrowMarket,
     borrow,
     unlistedMarket,
+    vBNBMarket,
   };
 };
 
@@ -169,6 +183,7 @@ describe("LeverageStrategiesManager", () => {
   let borrow: EIP20Interface;
   let protocolShareReserve: FakeContract<IProtocolShareReserve>;
   let unlistedMarket: VBep20Harness;
+  let vBNBMarket: VBep20Harness;
 
   beforeEach(async () => {
     [admin, alice, bob] = await ethers.getSigners();
@@ -182,6 +197,7 @@ describe("LeverageStrategiesManager", () => {
       collateral,
       borrow,
       unlistedMarket,
+      vBNBMarket,
     } = await loadFixture(setupFixture));
 
     await comptroller.connect(alice).updateDelegate(leverageManager.address, true);
@@ -288,6 +304,7 @@ describe("LeverageStrategiesManager", () => {
           ethers.constants.AddressZero,
           protocolShareReserve.address,
           swapHelper.address,
+          vBNBMarket.address,
         ),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
@@ -295,7 +312,7 @@ describe("LeverageStrategiesManager", () => {
     it("should revert on deployment when protocolShareReserve address is zero", async () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
-        LeverageStrategiesManagerFactory.deploy(comptroller.address, ethers.constants.AddressZero, swapHelper.address),
+        LeverageStrategiesManagerFactory.deploy(comptroller.address, ethers.constants.AddressZero, swapHelper.address, vBNBMarket.address),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
 
@@ -305,6 +322,19 @@ describe("LeverageStrategiesManager", () => {
         LeverageStrategiesManagerFactory.deploy(
           comptroller.address,
           protocolShareReserve.address,
+          ethers.constants.AddressZero,
+          vBNBMarket.address,
+        ),
+      ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
+    });
+
+    it("should revert on deployment when vBNB address is zero", async () => {
+      const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
+      await expect(
+        LeverageStrategiesManagerFactory.deploy(
+          comptroller.address,
+          protocolShareReserve.address,
+          swapHelper.address,
           ethers.constants.AddressZero,
         ),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
@@ -345,6 +375,17 @@ describe("LeverageStrategiesManager", () => {
         )
           .to.be.revertedWithCustomError(leverageManager, "MarketNotListed")
           .withArgs(unlistedMarket.address);
+      });
+
+      it("should revert when collateral market is vBNB", async () => {
+        const collateralAmountSeed = parseEther("0");
+        const collateralAmountToFlashLoan = parseEther("1");
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterSingleAssetLeverage(vBNBMarket.address, collateralAmountSeed, collateralAmountToFlashLoan),
+        ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
       it("should revert when user has not set delegation", async () => {
@@ -566,6 +607,40 @@ describe("LeverageStrategiesManager", () => {
         )
           .to.be.revertedWithCustomError(leverageManager, "MarketNotListed")
           .withArgs(unlistedMarket.address);
+      });
+
+      it("should revert when collateral market is vBNB", async () => {
+        const collateralAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-collateral"));
+
+        await expect(
+          leverageManager.connect(alice).enterLeverage(
+            vBNBMarket.address,
+            collateralAmountSeed,
+            borrowMarket.address,
+            borrowedAmountToFlashLoan,
+            0,
+            swapData,
+          ),
+        ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
+      });
+
+      it("should revert when borrow market is vBNB", async () => {
+        const collateralAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-borrow"));
+
+        await expect(
+          leverageManager.connect(alice).enterLeverage(
+            collateralMarket.address,
+            collateralAmountSeed,
+            vBNBMarket.address,
+            borrowedAmountToFlashLoan,
+            0,
+            swapData,
+          ),
+        ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
       it("should revert when borrow market is not listed", async () => {
@@ -872,6 +947,40 @@ describe("LeverageStrategiesManager", () => {
         )
           .to.be.revertedWithCustomError(leverageManager, "MarketNotListed")
           .withArgs(unlistedMarket.address);
+      });
+
+      it("should revert when collateral market is vBNB", async () => {
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const borrowedAmountSeed = parseEther("0");
+        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-collateral-fromborrow"));
+
+        await expect(
+          leverageManager.connect(alice).enterLeverageFromBorrow(
+            vBNBMarket.address,
+            borrowMarket.address,
+            borrowedAmountSeed,
+            borrowedAmountToFlashLoan,
+            0,
+            swapData,
+          ),
+        ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
+      });
+
+      it("should revert when borrow market is vBNB", async () => {
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const borrowedAmountSeed = parseEther("0");
+        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-borrow-fromborrow"));
+
+        await expect(
+          leverageManager.connect(alice).enterLeverageFromBorrow(
+            collateralMarket.address,
+            vBNBMarket.address,
+            borrowedAmountSeed,
+            borrowedAmountToFlashLoan,
+            0,
+            swapData,
+          ),
+        ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
       it("should revert when borrow market is not listed", async () => {
@@ -1212,6 +1321,40 @@ describe("LeverageStrategiesManager", () => {
         )
           .to.be.revertedWithCustomError(leverageManager, "MarketNotListed")
           .withArgs(unlistedMarket.address);
+      });
+
+      it("should revert when collateral market is vBNB", async () => {
+        const repayAmount = parseEther("1");
+        const collateralAmountToRedeemForSwap = parseEther("0");
+        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-exit-collateral"));
+
+        await expect(
+          leverageManager.connect(alice).exitLeverage(
+            vBNBMarket.address,
+            collateralAmountToRedeemForSwap,
+            borrowMarket.address,
+            repayAmount,
+            0,
+            swapData,
+          ),
+        ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
+      });
+
+      it("should revert when borrow market is vBNB", async () => {
+        const repayAmount = parseEther("1");
+        const collateralAmountToRedeemForSwap = parseEther("0");
+        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("vbnb-exit-borrow"));
+
+        await expect(
+          leverageManager.connect(alice).exitLeverage(
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            vBNBMarket.address,
+            repayAmount,
+            0,
+            swapData,
+          ),
+        ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
       it("should revert when borrow market is not listed", async () => {
@@ -1750,6 +1893,14 @@ describe("LeverageStrategiesManager", () => {
         )
           .to.be.revertedWithCustomError(leverageManager, "MarketNotListed")
           .withArgs(unlistedMarket.address);
+      });
+
+      it("should revert when collateral market is vBNB", async () => {
+        const collateralAmountToFlashLoan = parseEther("2");
+
+        await expect(
+          leverageManager.connect(alice).exitSingleAssetLeverage(vBNBMarket.address, collateralAmountToFlashLoan),
+        ).to.be.revertedWithCustomError(leverageManager, "VBNBNotSupported");
       });
 
       it("should revert when user has not set delegation", async () => {
