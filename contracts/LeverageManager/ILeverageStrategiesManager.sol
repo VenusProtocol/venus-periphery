@@ -57,6 +57,9 @@ interface ILeverageStrategiesManager {
     /// @custom:error MarketNotListed Provided vToken market is not listed in Comptroller
     error MarketNotListed(address market);
 
+    /// @custom:error VBNBNotSupported vBNB market is not supported for leverage operations
+    error VBNBNotSupported();
+
     /// @custom:error ZeroAddress One of the required addresses is zero
     error ZeroAddress();
 
@@ -159,12 +162,13 @@ interface ILeverageStrategiesManager {
      * @dev This function flash loans additional collateral assets, amplifying the user's supplied collateral
      *      in the Venus protocol. The user must have delegated permission to this contract via the comptroller.
      *      Any remaining collateral dust after the operation is returned to the user.
-     * @param collateralMarket The vToken market where collateral will be supplied
+     * @param collateralMarket The vToken market where collateral will be supplied (must not be vBNB)
      * @param collateralAmountSeed The initial amount of collateral the user provides (can be 0)
      * @param collateralAmountToFlashLoan The amount to borrow via flash loan for leverage
      * @custom:emits SingleAssetLeverageEntered
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if the market is not listed in Comptroller
+     * @custom:error VBNBNotSupported if the market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
      * @custom:error TransferFromUserFailed if seed amount transfer from user fails
      * @custom:error MintBehalfFailed if mint behalf operation fails
@@ -182,15 +186,16 @@ interface ILeverageStrategiesManager {
      *      and supplies the collateral to the Venus protocol to amplify the user's position.
      *      The user must have delegated permission to this contract via the comptroller.
      *      Any remaining dust (both collateral and borrowed assets) after the operation is returned to the user.
-     * @param collateralMarket The vToken market where collateral will be supplied
+     * @param collateralMarket The vToken market where collateral will be supplied (must not be vBNB)
      * @param collateralAmountSeed The initial amount of collateral the user provides (can be 0)
-     * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan
+     * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan (must not be vBNB)
      * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for leverage
      * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
      * @param swapData Bytes containing swap instructions for converting borrowed assets to collateral
      * @custom:emits LeverageEntered
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if any market is not listed in Comptroller
+     * @custom:error VBNBNotSupported if collateral or borrow market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
      * @custom:error TransferFromUserFailed if seed amount transfer from user fails
      * @custom:error MintBehalfFailed if mint behalf operation fails
@@ -213,8 +218,8 @@ interface ILeverageStrategiesManager {
      *      for collateral tokens, and supplies the collateral to the Venus protocol to amplify the user's position.
      *      The user must have delegated permission to this contract via the comptroller.
      *      Any remaining dust (both collateral and borrowed assets) after the operation is returned to the user.
-     * @param collateralMarket The vToken market where collateral will be supplied
-     * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan
+     * @param collateralMarket The vToken market where collateral will be supplied (must not be vBNB)
+     * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan (must not be vBNB)
      * @param borrowedAmountSeed The initial amount of borrowed assets the user provides (can be 0)
      * @param borrowedAmountToFlashLoan The additional amount to borrow via flash loan for leverage
      * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
@@ -222,6 +227,7 @@ interface ILeverageStrategiesManager {
      * @custom:emits LeverageEnteredFromBorrow
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if any market is not listed in Comptroller
+     * @custom:error VBNBNotSupported if collateral or borrow market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
      * @custom:error TransferFromUserFailed if seed amount transfer from user fails
      * @custom:error MintBehalfFailed if mint behalf operation fails
@@ -252,15 +258,16 @@ interface ILeverageStrategiesManager {
      *      NOTE: No pre-operation safety check is performed because exiting leverage reduces
      *      debt exposure, which can only improve account health. Post-operation safety is
      *      still validated to ensure the final position is healthy.
-     * @param collateralMarket The vToken market from which collateral will be redeemed
+     * @param collateralMarket The vToken market from which collateral will be redeemed (must not be vBNB)
      * @param collateralAmountToRedeemForSwap The amount of collateral to redeem and swap
-     * @param borrowedMarket The vToken market where debt will be repaid via flash loan
+     * @param borrowedMarket The vToken market where debt will be repaid via flash loan (must not be vBNB)
      * @param borrowedAmountToFlashLoan The amount to borrow via flash loan for debt repayment (can exceed actual debt)
      * @param minAmountOutAfterSwap The minimum amount of borrowed asset expected after swap (for slippage protection)
      * @param swapData Bytes containing swap instructions for converting collateral to borrowed assets
      * @custom:emits LeverageExited
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if any market is not listed in Comptroller
+     * @custom:error VBNBNotSupported if collateral or borrow market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
      * @custom:error RepayBehalfFailed if repay operation fails
      * @custom:error RedeemBehalfFailed if redeem operation fails
@@ -291,11 +298,12 @@ interface ILeverageStrategiesManager {
      *      NOTE: No pre-operation safety check is performed because exiting leverage reduces
      *      debt exposure, which can only improve account health. Post-operation safety is
      *      still validated to ensure the final position is healthy.
-     * @param collateralMarket The vToken market for both collateral and borrowed asset
+     * @param collateralMarket The vToken market for both collateral and borrowed asset (must not be vBNB)
      * @param collateralAmountToFlashLoan The amount to borrow via flash loan for debt repayment (can exceed actual debt)
      * @custom:emits SingleAssetLeverageExited
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if the market is not listed in Comptroller
+     * @custom:error VBNBNotSupported if the market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
      * @custom:error RepayBehalfFailed if repay operation fails
      * @custom:error RedeemBehalfFailed if redeem operation fails
