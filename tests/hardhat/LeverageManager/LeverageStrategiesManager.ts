@@ -145,7 +145,6 @@ const setupFixture = async (): Promise<SetupFixture> => {
   const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
   const leverageManager = (await LeverageStrategiesManagerFactory.deploy(
     comptroller.address,
-    protocolShareReserve.address,
     swapHelper.address,
     vBNBMarket.address,
   )) as LeverageStrategiesManager;
@@ -295,7 +294,6 @@ describe("LeverageStrategiesManager", () => {
 
     it("should deploy with correct immutable variables", async () => {
       expect(await leverageManager.COMPTROLLER()).to.equal(comptroller.address);
-      expect(await leverageManager.protocolShareReserve()).to.equal(protocolShareReserve.address);
       expect(await leverageManager.swapHelper()).to.equal(swapHelper.address);
     });
 
@@ -303,19 +301,6 @@ describe("LeverageStrategiesManager", () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
         LeverageStrategiesManagerFactory.deploy(
-          ethers.constants.AddressZero,
-          protocolShareReserve.address,
-          swapHelper.address,
-          vBNBMarket.address,
-        ),
-      ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
-    });
-
-    it("should revert on deployment when protocolShareReserve address is zero", async () => {
-      const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
-      await expect(
-        LeverageStrategiesManagerFactory.deploy(
-          comptroller.address,
           ethers.constants.AddressZero,
           swapHelper.address,
           vBNBMarket.address,
@@ -328,7 +313,6 @@ describe("LeverageStrategiesManager", () => {
       await expect(
         LeverageStrategiesManagerFactory.deploy(
           comptroller.address,
-          protocolShareReserve.address,
           ethers.constants.AddressZero,
           vBNBMarket.address,
         ),
@@ -340,7 +324,6 @@ describe("LeverageStrategiesManager", () => {
       await expect(
         LeverageStrategiesManagerFactory.deploy(
           comptroller.address,
-          protocolShareReserve.address,
           swapHelper.address,
           ethers.constants.AddressZero,
         ),
@@ -1662,7 +1645,7 @@ describe("LeverageStrategiesManager", () => {
         expect(borrowBalanceAfterExit).to.equal(0);
       });
 
-      it("should emit DustTransferred events for collateral to user and borrow to treasury", async () => {
+      it("should emit DustTransferred events for both collateral and borrow assets to user", async () => {
         const borrowedAmountToFlashLoan = parseEther("1");
         const collateralAmountSeed = parseEther("0");
 
@@ -1698,7 +1681,7 @@ describe("LeverageStrategiesManager", () => {
           ethers.utils.formatBytes32String("exit-swap-event"),
         );
 
-        const treasuryBorrowBalanceBefore = await borrow.balanceOf(protocolShareReserve.address);
+        const aliceBorrowBalanceBefore = await borrow.balanceOf(aliceAddress);
 
         const exitTx = await leverageManager
           .connect(alice)
@@ -1711,16 +1694,16 @@ describe("LeverageStrategiesManager", () => {
             exitSwapData,
           );
 
-        const treasuryBorrowBalanceAfter = await borrow.balanceOf(protocolShareReserve.address);
-        const dustAmount = treasuryBorrowBalanceAfter.sub(treasuryBorrowBalanceBefore);
+        const aliceBorrowBalanceAfter = await borrow.balanceOf(aliceAddress);
+        const dustAmount = aliceBorrowBalanceAfter.sub(aliceBorrowBalanceBefore);
 
-        // Verify DustTransferred event was emitted to treasury (protocol share reserve)
+        // Verify DustTransferred event was emitted to user (not treasury)
         await expect(exitTx)
           .to.emit(leverageManager, "DustTransferred")
-          .withArgs(protocolShareReserve.address, borrow.address, dustAmount);
+          .withArgs(aliceAddress, borrow.address, dustAmount);
       });
 
-      it("should transfer collateral dust to initiator and borrow dust to treasury after exiting", async () => {
+      it("should transfer both collateral and borrow dust to user after exiting", async () => {
         const borrowedAmountToFlashLoan = parseEther("1");
         const collateralAmountSeed = parseEther("0");
 
@@ -1756,7 +1739,7 @@ describe("LeverageStrategiesManager", () => {
           ethers.utils.formatBytes32String("exit-swap-dust"),
         );
 
-        const treasuryBorrowBalanceBefore = await borrow.balanceOf(protocolShareReserve.address);
+        const aliceBorrowBalanceBefore = await borrow.balanceOf(aliceAddress);
 
         await leverageManager
           .connect(alice)
@@ -1775,12 +1758,12 @@ describe("LeverageStrategiesManager", () => {
         expect(contractCollateralBalance).to.equal(0);
         expect(contractBorrowBalance).to.equal(0);
 
-        // Treasury should have received borrow dust
-        const treasuryBorrowBalanceAfter = await borrow.balanceOf(protocolShareReserve.address);
-        expect(treasuryBorrowBalanceAfter).to.be.gt(treasuryBorrowBalanceBefore);
+        // User should have received borrow dust (not treasury)
+        const aliceBorrowBalanceAfter = await borrow.balanceOf(aliceAddress);
+        expect(aliceBorrowBalanceAfter).to.be.gt(aliceBorrowBalanceBefore);
       });
 
-      it("should call protocolShareReserve.updateAssetsState when transferring dust to treasury", async () => {
+      it("should transfer borrow dust to user after exiting (not treasury)", async () => {
         const borrowedAmountToFlashLoan = parseEther("1");
         const collateralAmountSeed = parseEther("0");
 
@@ -1816,6 +1799,7 @@ describe("LeverageStrategiesManager", () => {
           ethers.utils.formatBytes32String("exit-swap-update-assets"),
         );
 
+        const aliceBorrowBalanceBefore = await borrow.balanceOf(aliceAddress);
         const treasuryBalanceBefore = await borrow.balanceOf(protocolShareReserve.address);
 
         const exitTx = await leverageManager
@@ -1829,13 +1813,17 @@ describe("LeverageStrategiesManager", () => {
             exitSwapData,
           );
 
+        const aliceBorrowBalanceAfter = await borrow.balanceOf(aliceAddress);
         const treasuryBalanceAfter = await borrow.balanceOf(protocolShareReserve.address);
-        const dustTransferred = treasuryBalanceAfter.sub(treasuryBalanceBefore);
+        const dustTransferred = aliceBorrowBalanceAfter.sub(aliceBorrowBalanceBefore);
 
         expect(dustTransferred).to.be.gt(0);
+        // Dust should go to user, not treasury
         await expect(exitTx)
           .to.emit(leverageManager, "DustTransferred")
-          .withArgs(protocolShareReserve.address, borrow.address, dustTransferred);
+          .withArgs(aliceAddress, borrow.address, dustTransferred);
+        // Treasury balance should remain unchanged
+        expect(treasuryBalanceAfter).to.equal(treasuryBalanceBefore);
         expect(await borrow.balanceOf(leverageManager.address)).to.equal(0);
       });
 

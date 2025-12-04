@@ -248,8 +248,9 @@ interface ILeverageStrategiesManager {
      * @notice Exits a leveraged position by redeeming collateral and repaying borrowed assets
      * @dev This function uses flash loans to temporarily repay debt, redeems collateral,
      *      swaps collateral for borrowed assets, and repays the flash loan. Any remaining
-     *      collateral dust is returned to the user, while borrowed asset dust is transferred
-     *      to the protocol share reserve.
+     *      dust (both collateral and borrowed assets) is returned to the user. This ensures
+     *      users who swap more than required as protection against price volatility receive
+     *      their excess tokens back.
      *
      *      The flash loan amount can exceed actual debt to account for interest accrual
      *      between transaction creation and mining. The contract caps repayment to actual

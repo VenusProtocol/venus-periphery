@@ -8,7 +8,6 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployer } = await getNamedAccounts();
 
   const comptrollerDeployment = await deployments.get("Unitroller");
-  const protocolShareReserveDeployment = await deployments.get("ProtocolShareReserve");
   const timelock = await deployments.get("NormalTimelock");
 
   // Explicitly mentioning Default Proxy Admin contract path to fetch it from hardhat-deploy instead of OpenZeppelin
@@ -23,7 +22,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   await deploy("LeverageStrategiesManager", {
     from: deployer,
     log: true,
-    args: [comptrollerDeployment.address, protocolShareReserveDeployment.address, swapHelperDeployment.address, vBNBDeployment.address],
+    args: [comptrollerDeployment.address, swapHelperDeployment.address, vBNBDeployment.address],
     proxy: {
       owner: network.name === "hardhat" ? deployer : timelock.address,
       proxyContract: "OptimizedTransparentUpgradeableProxy",
@@ -42,7 +41,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const owner = await leverageStrategiesManager.owner();
 
   console.log(
-    `LeverageStrategiesManager verify arguments: ${leverageStrategiesManager.address} ${comptrollerDeployment.address} ${protocolShareReserveDeployment.address} ${swapHelperDeployment.address} ${vBNBDeployment.address}`,
+    `LeverageStrategiesManager verify arguments: ${leverageStrategiesManager.address} ${comptrollerDeployment.address} ${swapHelperDeployment.address} ${vBNBDeployment.address}`,
   );
 
   if (owner === deployer) {
