@@ -113,8 +113,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             ""
         );
 
-        _transferDustToInitiator(_collateralMarket);
-
         _checkAccountSafe(msg.sender);
 
         emit SingleAssetLeverageEntered(
@@ -123,6 +121,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _collateralAmountSeed,
             _collateralAmountToFlashLoan
         );
+
+        _transferDustToInitiator(_collateralMarket);
     }
 
 
@@ -164,9 +164,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _swapData
         );
 
-        _transferDustToInitiator(_collateralMarket);
-        _transferDustToInitiator(_borrowedMarket);
-
         _checkAccountSafe(msg.sender);
 
         emit LeverageEntered(
@@ -176,6 +173,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _borrowedMarket,
             _borrowedAmountToFlashLoan
         );
+
+        _transferDustToInitiator(_collateralMarket);
+        _transferDustToInitiator(_borrowedMarket);
     }
 
     /// @inheritdoc ILeverageStrategiesManager
@@ -216,9 +216,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _swapData
         );
 
-        _transferDustToInitiator(_collateralMarket);
-        _transferDustToInitiator(_borrowedMarket);
-
         _checkAccountSafe(msg.sender);
 
         emit LeverageEnteredFromBorrow(
@@ -229,6 +226,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _borrowedAmountToFlashLoan
         );
 
+        _transferDustToInitiator(_collateralMarket);
+        _transferDustToInitiator(_borrowedMarket);
     }
 
     /// @inheritdoc ILeverageStrategiesManager
@@ -265,11 +264,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _swapData
         );
 
-        // Collateral dust → user (their original asset). Borrowed asset dust → treasury
-        // (swap favorable outcome accrues to protocol as revenue).
-        _transferDustToInitiator(_collateralMarket);
-        _transferDustToTreasury(_borrowedMarket);
-
         _checkAccountSafe(msg.sender);
 
         emit LeverageExited(
@@ -279,6 +273,11 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _borrowedMarket,
             _borrowedAmountToFlashLoan
         );
+
+        // Collateral dust → user (their original asset). Borrowed asset dust → treasury
+        // (swap favorable outcome accrues to protocol as revenue).
+        _transferDustToInitiator(_collateralMarket);
+        _transferDustToTreasury(_borrowedMarket);
     }
 
     /// @inheritdoc ILeverageStrategiesManager
@@ -307,8 +306,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             ""
         );
 
-        _transferDustToInitiator(_collateralMarket);
-
         _checkAccountSafe(msg.sender);
 
         emit SingleAssetLeverageExited(
@@ -316,6 +313,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _collateralMarket,
             _collateralAmountToFlashLoan
         );
+
+        _transferDustToInitiator(_collateralMarket);
     }
 
     /**
