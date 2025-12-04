@@ -5,7 +5,7 @@ import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/acc
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
-import { IVToken, IComptroller, IFlashLoanReceiver, IProtocolShareReserve } from "../Interfaces.sol";
+import { IVToken, IComptroller, IFlashLoanReceiver } from "../Interfaces.sol";
 import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
 
 import { ILeverageStrategiesManager } from "./ILeverageStrategiesManager.sol";
@@ -26,9 +26,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
     /// @notice The Venus comptroller contract for market interactions and flash loans execution
     IComptroller public immutable COMPTROLLER;
-    
-    /// @notice The protocol share reserve where dust amounts are transferred
-    IProtocolShareReserve public immutable protocolShareReserve;
     
     /// @notice The swap helper contract for executing token swaps during leverage operations
     SwapHelper public immutable swapHelper;
@@ -58,18 +55,16 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @notice Contract constructor
      * @dev Sets immutable variables and disables initializers for the implementation contract
      * @param _comptroller The Venus comptroller contract address
-     * @param _protocolShareReserve The protocol share reserve contract address
      * @param _swapHelper The swap helper contract address
      * @param _vBNB The vBNB market address (not supported for leverage operations)
      * @custom:oz-upgrades-unsafe-allow constructor
      */
-    constructor(IComptroller _comptroller, IProtocolShareReserve _protocolShareReserve, SwapHelper _swapHelper, IVToken _vBNB) {
-        if(address(_comptroller) == address(0) || address(_protocolShareReserve) == address(0) || address(_swapHelper) == address(0) || address(_vBNB) == address(0)) {
+    constructor(IComptroller _comptroller, SwapHelper _swapHelper, IVToken _vBNB) {
+        if(address(_comptroller) == address(0) || address(_swapHelper) == address(0) || address(_vBNB) == address(0)) {
             revert ZeroAddress();
         }
 
         COMPTROLLER = _comptroller;
-        protocolShareReserve = _protocolShareReserve;
         swapHelper = _swapHelper;
         vBNB = _vBNB;
         _disableInitializers();
@@ -277,10 +272,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _borrowedAmountToFlashLoan
         );
 
-        // Collateral dust → user (their original asset). Borrowed asset dust → treasury
-        // (swap favorable outcome accrues to protocol as revenue).
         _transferDustToInitiator(_collateralMarket);
-        _transferDustToTreasury(_borrowedMarket);
+        _transferDustToInitiator(_borrowedMarket);
     }
 
     /// @inheritdoc ILeverageStrategiesManager
@@ -655,23 +648,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         if(amount > 0) {
             IERC20Upgradeable token = IERC20Upgradeable(market.underlying());
             token.safeTransferFrom(user, address(this), amount);
-        }
-    }
-
-    /**
-     * @notice Transfers any remaining dust amounts to the protocol share reserve
-     * @dev This function cleans up small remaining balances after operations and
-     *      updates the protocol share reserve's asset state for proper accounting.
-     * @param market The vToken market whose underlying asset dust should be transferred
-     */
-    function _transferDustToTreasury(IVToken market) internal {
-        IERC20Upgradeable asset = IERC20Upgradeable(market.underlying());
-
-        uint256 dustAmount = asset.balanceOf(address(this));
-        if(dustAmount > 0) {
-            asset.safeTransfer(address(protocolShareReserve), dustAmount);
-            protocolShareReserve.updateAssetsState(address(COMPTROLLER), address(asset), IProtocolShareReserve.IncomeType.FLASHLOAN);
-            emit DustTransferred(address(protocolShareReserve), address(asset), dustAmount);
         }
     }
 
