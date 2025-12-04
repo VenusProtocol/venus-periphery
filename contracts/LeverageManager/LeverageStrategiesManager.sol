@@ -709,7 +709,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Checks if a `user` account remains safe after leverage operations
+     * @notice Checks if a `user` account is safe from liquidation 
      * @dev Verifies that the user's account has no liquidity shortfall and the comptroller
      *      returned no errors when calculating account liquidity. This ensures the account
      *      won't be immediately liquidatable after the leverage operation.
