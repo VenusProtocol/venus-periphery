@@ -165,6 +165,7 @@ const setupFixture = async (): Promise<SetupFixture> => {
     borrow,
     unlistedMarket,
     vBNBMarket,
+    interestRateModel,
   };
 };
 
@@ -183,6 +184,7 @@ describe("LeverageStrategiesManager", () => {
   let protocolShareReserve: FakeContract<IProtocolShareReserve>;
   let unlistedMarket: VBep20Harness;
   let vBNBMarket: VBep20Harness;
+  let interestRateModel: FakeContract<InterestRateModel>;
 
   beforeEach(async () => {
     [admin, alice, bob] = await ethers.getSigners();
@@ -197,6 +199,7 @@ describe("LeverageStrategiesManager", () => {
       borrow,
       unlistedMarket,
       vBNBMarket,
+      interestRateModel,
     } = await loadFixture(setupFixture));
 
     await comptroller.connect(alice).updateDelegate(leverageManager.address, true);
@@ -215,6 +218,7 @@ describe("LeverageStrategiesManager", () => {
     await comptroller.setIsBorrowAllowed(0, collateralMarket.address, true);
 
     await comptroller._setTreasuryData(admin.address, admin.address, 0);
+    interestRateModel.getBorrowRate.reset();
   });
 
   async function createEmptySwapMulticallData(signer: Wallet, salt: string): Promise<string> {
@@ -2133,7 +2137,6 @@ describe("LeverageStrategiesManager", () => {
       it("should exit leveraged position with single collateral successfully", async () => {
         const aliceAddress = await alice.getAddress();
 
-        // First enter a leveraged position with single collateral
         const collateralAmountSeed = parseEther("1");
         const collateralAmountToFlashLoan = parseEther("2");
 
@@ -2147,7 +2150,6 @@ describe("LeverageStrategiesManager", () => {
         const collateralBalanceAfterEnter = await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress);
         const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
 
-        // Now exit the position
         const borrowedAmountToFlashLoan = borrowBalanceAfterEnter;
 
         await expect(
@@ -2159,17 +2161,14 @@ describe("LeverageStrategiesManager", () => {
         const collateralBalanceAfterExit = await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress);
         const borrowBalanceAfterExit = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
 
-        // Collateral balance should decrease
         expect(collateralBalanceAfterExit).to.be.lt(collateralBalanceAfterEnter);
 
-        // Borrow balance should be 0 or minimal after exit
         expect(borrowBalanceAfterExit).to.equal(0);
       });
 
       it("should verify account is safe after exiting leveraged position", async () => {
         const aliceAddress = await alice.getAddress();
 
-        // First enter a leveraged position
         const collateralAmountSeed = parseEther("1");
         const collateralAmountToFlashLoan = parseEther("2");
 
@@ -2182,8 +2181,6 @@ describe("LeverageStrategiesManager", () => {
 
         const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
 
-        // Exit the position
-        const collateralAmountToRedeem = parseEther("1");
         const collateralAmountToFlashLoanForExit = borrowBalanceAfterEnter;
 
         await leverageManager
@@ -2194,7 +2191,6 @@ describe("LeverageStrategiesManager", () => {
       it("should transfer dust to initiator after exiting leveraged position", async () => {
         const aliceAddress = await alice.getAddress();
 
-        // First enter a leveraged position
         const collateralAmountSeed = parseEther("1");
         const collateralAmountToFlashLoan = parseEther("2");
 
@@ -2207,16 +2203,13 @@ describe("LeverageStrategiesManager", () => {
 
         const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
 
-        // Exit the position
         await leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowBalanceAfterEnter);
 
-        // Verify contract has zero balance after operation (dust transferred to initiator)
         const contractCollateralBalance = await collateral.balanceOf(leverageManager.address);
         expect(contractCollateralBalance).to.equal(0);
       });
 
       it("should allow entering and exiting leveraged position multiple times", async () => {
-        // First enter
         const collateralAmountToFlashLoan = parseEther("1");
         await leverageManager
           .connect(alice)
@@ -2225,13 +2218,11 @@ describe("LeverageStrategiesManager", () => {
         const borrowBalance1 = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         expect(borrowBalance1).to.be.gt(0);
 
-        // First exit
         await leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowBalance1);
 
         const borrowBalanceAfterExit1 = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         expect(borrowBalanceAfterExit1).to.equal(0);
 
-        // Second enter
         await leverageManager
           .connect(alice)
           .enterSingleAssetLeverage(collateralMarket.address, 0, collateralAmountToFlashLoan);
@@ -2239,13 +2230,11 @@ describe("LeverageStrategiesManager", () => {
         const borrowBalance2 = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         expect(borrowBalance2).to.be.gt(0);
 
-        // Second exit
         await leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowBalance2);
 
         const borrowBalanceAfterExit2 = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         expect(borrowBalanceAfterExit2).to.equal(0);
 
-        // Verify contract has zero balance after all operations
         const contractCollateralBalance = await collateral.balanceOf(leverageManager.address);
         expect(contractCollateralBalance).to.equal(0);
       });
@@ -2671,61 +2660,48 @@ describe("LeverageStrategiesManager", () => {
       it("should allow different users to perform leverage operations concurrently", async () => {
         const bobAddress = await bob.getAddress();
 
-        // Set up bob as delegate
         await comptroller.connect(bob).updateDelegate(leverageManager.address, true);
 
-        // Alice enters leverage
         await leverageManager.connect(alice).enterSingleAssetLeverage(collateralMarket.address, 0, parseEther("1"));
 
         const aliceBorrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         expect(aliceBorrowBalance).to.be.gt(0);
 
-        // Bob enters leverage in the same market
         await leverageManager.connect(bob).enterSingleAssetLeverage(collateralMarket.address, 0, parseEther("0.5"));
 
         const bobBorrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(bobAddress);
         expect(bobBorrowBalance).to.be.gt(0);
 
-        // Verify Alice's position is unchanged
         const aliceBorrowBalanceAfter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         expect(aliceBorrowBalanceAfter).to.equal(aliceBorrowBalance);
 
-        // Both users exit their positions
         await leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, aliceBorrowBalance);
         await leverageManager.connect(bob).exitSingleAssetLeverage(collateralMarket.address, bobBorrowBalance);
 
-        // Verify both positions are closed
         expect(await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress)).to.equal(0);
         expect(await collateralMarket.callStatic.borrowBalanceCurrent(bobAddress)).to.equal(0);
 
-        // Contract should have zero balance
         expect(await collateral.balanceOf(leverageManager.address)).to.equal(0);
       });
 
       it("should isolate transient storage between different user operations", async () => {
         const bobAddress = await bob.getAddress();
 
-        // Set up bob as delegate
         await comptroller.connect(bob).updateDelegate(leverageManager.address, true);
 
-        // Alice enters leverage with specific amount
         const aliceFlashLoanAmount = parseEther("2");
         await leverageManager
           .connect(alice)
           .enterSingleAssetLeverage(collateralMarket.address, 0, aliceFlashLoanAmount);
 
-        // Bob enters leverage with different amount
         const bobFlashLoanAmount = parseEther("1");
         await leverageManager.connect(bob).enterSingleAssetLeverage(collateralMarket.address, 0, bobFlashLoanAmount);
 
-        // Verify each user has their own distinct position
         const aliceBorrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         const bobBorrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(bobAddress);
 
-        // Alice's position should be larger than Bob's (more flash loan = more fees to borrow)
         expect(aliceBorrowBalance).to.be.gte(bobBorrowBalance);
 
-        // Clean up
         await leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, aliceBorrowBalance);
         await leverageManager.connect(bob).exitSingleAssetLeverage(collateralMarket.address, bobBorrowBalance);
       });
@@ -2734,7 +2710,6 @@ describe("LeverageStrategiesManager", () => {
 
   describe("EnterMarketFailed scenarios", () => {
     it("should succeed when user is already in the market via enterLeverage", async () => {
-      // Enter market first
       await comptroller.connect(alice).enterMarkets([collateralMarket.address]);
 
       const swapData = await createSwapMulticallData(
@@ -2745,7 +2720,6 @@ describe("LeverageStrategiesManager", () => {
         ethers.utils.formatBytes32String("already-in-market"),
       );
 
-      // Should not revert - user is already in market
       await expect(
         leverageManager
           .connect(alice)
@@ -2754,7 +2728,6 @@ describe("LeverageStrategiesManager", () => {
     });
 
     it("should succeed when user is already in the market via enterLeverageFromBorrow", async () => {
-      // Enter market first
       await comptroller.connect(alice).enterMarkets([collateralMarket.address]);
 
       const swapData = await createSwapMulticallData(
@@ -2765,7 +2738,6 @@ describe("LeverageStrategiesManager", () => {
         ethers.utils.formatBytes32String("already-in-market-borrow"),
       );
 
-      // Should not revert - user is already in market
       await expect(
         leverageManager
           .connect(alice)
@@ -2778,6 +2750,244 @@ describe("LeverageStrategiesManager", () => {
             swapData,
           ),
       ).to.emit(leverageManager, "LeverageEnteredFromBorrow");
+    });
+  });
+
+  describe("Interest Accrual before safety checks", () => {
+    describe("enterSingleAssetLeverage", () => {
+      it("should call accrueInterest on collateral market before safety check", async () => {
+        const collateralAmountSeed = parseEther("0");
+        const collateralAmountToFlashLoan = parseEther("1");
+
+        await collateralMarket.harnessFastForward(1000);
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterSingleAssetLeverage(collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan),
+        ).to.emit(leverageManager, "SingleAssetLeverageEntered");
+
+        expect(await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress)).to.be.gt(0);
+      });
+
+      it("should revert with AccrueInterestFailed when accrueInterest fails on collateral market", async () => {
+        const collateralAmountSeed = parseEther("0");
+        const collateralAmountToFlashLoan = parseEther("1");
+
+        await collateralMarket.harnessFastForward(1);
+
+        interestRateModel.getBorrowRate.reverts("INTEREST_RATE_MODEL_ERROR");
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterSingleAssetLeverage(collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan),
+        ).to.be.revertedWith("INTEREST_RATE_MODEL_ERROR");
+      });
+    });
+
+    describe("enterLeverage", () => {
+      it("should call accrueInterest on both collateral and borrow markets before safety check", async () => {
+        const collateralAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("accrue-both-markets"),
+        );
+
+        await collateralMarket.harnessFastForward(1000);
+        await borrowMarket.harnessFastForward(1000);
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterLeverage(
+              collateralMarket.address,
+              collateralAmountSeed,
+              borrowMarket.address,
+              borrowedAmountToFlashLoan,
+              parseEther("1"),
+              swapData,
+            ),
+        ).to.emit(leverageManager, "LeverageEntered");
+
+        expect(await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress)).to.be.gt(0);
+      });
+
+      it("should revert with AccrueInterestFailed when accrueInterest fails on collateral market", async () => {
+        const collateralAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("accrue-fail-collateral"),
+        );
+
+        await collateralMarket.harnessFastForward(1);
+
+        interestRateModel.getBorrowRate.reverts("INTEREST_RATE_MODEL_ERROR");
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterLeverage(
+              collateralMarket.address,
+              collateralAmountSeed,
+              borrowMarket.address,
+              borrowedAmountToFlashLoan,
+              parseEther("1"),
+              swapData,
+            ),
+        ).to.be.revertedWith("INTEREST_RATE_MODEL_ERROR");
+      });
+
+      it("should revert with AccrueInterestFailed when accrueInterest fails on borrow market", async () => {
+        const collateralAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("accrue-fail-borrow"),
+        );
+
+        await borrowMarket.harnessFastForward(1);
+
+        interestRateModel.getBorrowRate.reverts("INTEREST_RATE_MODEL_ERROR");
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterLeverage(
+              collateralMarket.address,
+              collateralAmountSeed,
+              borrowMarket.address,
+              borrowedAmountToFlashLoan,
+              parseEther("1"),
+              swapData,
+            ),
+        ).to.be.revertedWith("INTEREST_RATE_MODEL_ERROR");
+      });
+    });
+
+    describe("enterLeverageFromBorrow", () => {
+      it("should call accrueInterest on both collateral and borrow markets before safety check", async () => {
+        const borrowedAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("accrue-both-from-borrow"),
+        );
+
+        await collateralMarket.harnessFastForward(1000);
+        await borrowMarket.harnessFastForward(1000);
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterLeverageFromBorrow(
+              collateralMarket.address,
+              borrowMarket.address,
+              borrowedAmountSeed,
+              borrowedAmountToFlashLoan,
+              parseEther("1"),
+              swapData,
+            ),
+        ).to.emit(leverageManager, "LeverageEnteredFromBorrow");
+
+        expect(await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress)).to.be.gt(0);
+      });
+
+      it("should revert with AccrueInterestFailed when accrueInterest fails on collateral market", async () => {
+        const borrowedAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("accrue-fail-coll-fromborrow"),
+        );
+
+        await collateralMarket.harnessFastForward(1);
+
+        interestRateModel.getBorrowRate.reverts("INTEREST_RATE_MODEL_ERROR");
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterLeverageFromBorrow(
+              collateralMarket.address,
+              borrowMarket.address,
+              borrowedAmountSeed,
+              borrowedAmountToFlashLoan,
+              parseEther("1"),
+              swapData,
+            ),
+        ).to.be.revertedWith("INTEREST_RATE_MODEL_ERROR");
+      });
+
+      it("should revert with AccrueInterestFailed when accrueInterest fails on borrow market", async () => {
+        const borrowedAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("accrue-fail-borr-fromborrow"),
+        );
+
+        await borrowMarket.harnessFastForward(1);
+
+        interestRateModel.getBorrowRate.reverts("INTEREST_RATE_MODEL_ERROR");
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterLeverageFromBorrow(
+              collateralMarket.address,
+              borrowMarket.address,
+              borrowedAmountSeed,
+              borrowedAmountToFlashLoan,
+              parseEther("1"),
+              swapData,
+            ),
+        ).to.be.revertedWith("INTEREST_RATE_MODEL_ERROR");
+      });
+    });
+
+    describe("Interest accrual ensures accurate safety checks", () => {
+      it("should reflect accrued interest in safety check during enterSingleAssetLeverage", async () => {
+        await leverageManager.connect(alice).enterSingleAssetLeverage(collateralMarket.address, 0, parseEther("1"));
+
+        const borrowBalanceAfterEnter = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterEnter).to.be.gt(0);
+
+        await collateralMarket.harnessFastForward(10000);
+
+        await expect(
+          leverageManager.connect(alice).enterSingleAssetLeverage(collateralMarket.address, 0, parseEther("0.1")),
+        ).to.emit(leverageManager, "SingleAssetLeverageEntered");
+
+        const newBorrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(newBorrowBalance).to.be.gt(borrowBalanceAfterEnter);
+      });
     });
   });
 });
