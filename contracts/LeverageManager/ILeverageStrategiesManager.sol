@@ -69,6 +69,9 @@ interface ILeverageStrategiesManager {
     /// @custom:error ZeroFlashLoanAmount Flash loan amount cannot be zero
     error ZeroFlashLoanAmount();
 
+    /// @custom:error AccrueInterestFailed accrueInterest on a vToken market returned a non-zero error code
+    error AccrueInterestFailed(uint256 errorCode);
+
     /// @notice Emitted when dust amounts are transferred after a leverage operation
     /// @param recipient The address receiving the dust (user or protocol share reserve)
     /// @param token The underlying token address
@@ -167,6 +170,7 @@ interface ILeverageStrategiesManager {
      * @param collateralAmountToFlashLoan The amount to borrow via flash loan for leverage
      * @custom:emits SingleAssetLeverageEntered
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
+     * @custom:error AccrueInterestFailed if interest accrual fails on the collateral market
      * @custom:error MarketNotListed if the market is not listed in Comptroller
      * @custom:error VBNBNotSupported if the market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
@@ -194,6 +198,7 @@ interface ILeverageStrategiesManager {
      * @param swapData Bytes containing swap instructions for converting borrowed assets to collateral
      * @custom:emits LeverageEntered
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
+     * @custom:error AccrueInterestFailed if interest accrual fails on any market
      * @custom:error MarketNotListed if any market is not listed in Comptroller
      * @custom:error VBNBNotSupported if collateral or borrow market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
@@ -226,6 +231,7 @@ interface ILeverageStrategiesManager {
      * @param swapData Bytes containing swap instructions for converting borrowed assets to collateral
      * @custom:emits LeverageEnteredFromBorrow
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
+     * @custom:error AccrueInterestFailed if interest accrual fails on any market
      * @custom:error MarketNotListed if any market is not listed in Comptroller
      * @custom:error VBNBNotSupported if collateral or borrow market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe

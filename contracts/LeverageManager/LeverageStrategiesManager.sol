@@ -89,6 +89,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkMarketSupported(_collateralMarket);
 
         _checkUserDelegated();
+
+        _accrueInterest(_collateralMarket);
         _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
@@ -138,6 +140,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkMarketSupported(_borrowedMarket);
 
         _checkUserDelegated();
+
+        _accrueInterest(_collateralMarket);
+        _accrueInterest(_borrowedMarket);
         _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
@@ -190,6 +195,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkMarketSupported(_borrowedMarket);
         
         _checkUserDelegated();
+        
+        _accrueInterest(_collateralMarket);
+        _accrueInterest(_borrowedMarket);
         _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
@@ -706,6 +714,17 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         if (!COMPTROLLER.approvedDelegates(msg.sender, address(this))) {
             revert NotAnApprovedDelegate();
         }
+    }
+
+    /**
+     * @notice Accrues interest on a vToken market
+     * @dev Must be called before safety checks to ensure borrow balances reflect accumulated interest
+     * @param market The vToken market to accrue interest on
+     * @custom:error AccrueInterestFailed if the accrueInterest call returns a non-zero error code
+     */
+    function _accrueInterest(IVToken market) internal {
+        uint256 err = market.accrueInterest();
+        if (err != SUCCESS) revert AccrueInterestFailed(err);
     }
 
     /**
