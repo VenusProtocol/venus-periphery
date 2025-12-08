@@ -415,67 +415,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @param token Target token address
     /// @return price USD price in 18 decimals
     function _getUniswapV3Price(address pool, address token) internal view returns (uint256 price) {
-        if (pool == address(0)) revert InvalidPool();
-
-        IUniswapV3Pool v3Pool = IUniswapV3Pool(pool);
-        address token0 = v3Pool.token0();
-        address token1 = v3Pool.token1();
-
-        (uint160 sqrtPriceX96, , , , , , ) = v3Pool.slot0();
-
-        uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, FixedPoint96.Q96);
-
-        address targetToken = token;
-        address referenceToken;
-        bool targetIsToken0;
-
-        if (token == token0) {
-            targetIsToken0 = true;
-            referenceToken = token1;
-        } else if (token == token1) {
-            targetIsToken0 = false;
-            referenceToken = token0;
-        } else {
-            revert InvalidPool();
-        }
-
-        uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
-
-        uint8 targetDecimals = IERC20Metadata(targetToken).decimals();
-        uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
-        uint8 referencePriceDecimals = 36 - referenceDecimals;
-
-        // Step 1: Get how many target tokens you get per 1 reference token (scaled)
-        uint256 targetTokensPerReferenceToken;
-
-        if (targetIsToken0) {
-            // Target is token0, reference is token1
-            // targetTokensPerReferenceToken = 2^96 / priceX96 * 10^18
-            targetTokensPerReferenceToken = FullMath.mulDiv(FixedPoint96.Q96 * (10 ** EXP_SCALE), 1, priceX96);
-        } else {
-            // Target is token1, reference is token0
-            // targetTokensPerReferenceToken = priceX96 / 2^96 * 10^18
-            targetTokensPerReferenceToken = FullMath.mulDiv(priceX96 * (10 ** EXP_SCALE), 1, FixedPoint96.Q96);
-        }
-
-        // Step 2: Normalize reference price to 18 decimals
-        uint256 normalizedReferencePrice;
-        if (referencePriceDecimals > EXP_SCALE) {
-            normalizedReferencePrice = referencePrice / (10 ** (referencePriceDecimals - EXP_SCALE));
-        } else if (referencePriceDecimals < EXP_SCALE) {
-            normalizedReferencePrice = referencePrice * (10 ** (EXP_SCALE - referencePriceDecimals));
-        } else {
-            normalizedReferencePrice = referencePrice;
-        }
-
-        // Step 3: Calculate USD price per target token with decimal adjustment
-        // USD per target token = USD per reference token / (target tokens per reference token)
-        // Adjust for token decimal differences
-        price = FullMath.mulDiv(
-            normalizedReferencePrice * (10 ** targetDecimals),
-            (10 ** EXP_SCALE),
-            targetTokensPerReferenceToken * (10 ** referenceDecimals)
-        );
+        return _getV3StylePrice(pool, token, DEX.UNISWAP_V3);
     }
 
     /// @notice Get token price from PancakeSwap V3 pool
@@ -483,13 +423,35 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @param token Target token address
     /// @return price USD price in 18 decimals
     function _getPancakeSwapV3Price(address pool, address token) internal view returns (uint256 price) {
+        return _getV3StylePrice(pool, token, DEX.PANCAKESWAP_V3);
+    }
+
+    /// @notice Generic function to get token price from any V3-style DEX pool
+    /// @dev Uses the appropriate interface based on the DEX type
+    /// @param pool The DEX pool address
+    /// @param token Target token address
+    /// @param dexType The type of DEX (UNISWAP_V3 or PANCAKESWAP_V3)
+    /// @return price USD price in 18 decimals
+    function _getV3StylePrice(address pool, address token, DEX dexType) internal view returns (uint256 price) {
         if (pool == address(0)) revert InvalidPool();
 
-        IPancakeV3Pool v3Pool = IPancakeV3Pool(pool);
-        address token0 = v3Pool.token0();
-        address token1 = v3Pool.token1();
+        address token0;
+        address token1;
+        uint160 sqrtPriceX96;
 
-        (uint160 sqrtPriceX96, , , , , , ) = v3Pool.slot0();
+        if (dexType == DEX.UNISWAP_V3) {
+            IUniswapV3Pool v3Pool = IUniswapV3Pool(pool);
+            token0 = v3Pool.token0();
+            token1 = v3Pool.token1();
+            (sqrtPriceX96, , , , , , ) = v3Pool.slot0();
+        } else if (dexType == DEX.PANCAKESWAP_V3) {
+            IPancakeV3Pool v3Pool = IPancakeV3Pool(pool);
+            token0 = v3Pool.token0();
+            token1 = v3Pool.token1();
+            (sqrtPriceX96, , , , , , ) = v3Pool.slot0();
+        } else {
+            revert UnsupportedDEX();
+        }
         uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, FixedPoint96.Q96);
 
         address targetToken = token;
@@ -511,20 +473,14 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
         uint8 referencePriceDecimals = 36 - referenceDecimals;
 
-        // Step 1: Get how many target tokens you get per 1 reference token (scaled)
         uint256 targetTokensPerReferenceToken;
 
         if (targetIsToken0) {
-            // Target is token0, reference is token1
-            // targetTokensPerReferenceToken = 2^96 / priceX96 * 10^18
             targetTokensPerReferenceToken = FullMath.mulDiv(FixedPoint96.Q96 * (10 ** EXP_SCALE), 1, priceX96);
         } else {
-            // Target is token1, reference is token0
-            // targetTokensPerReferenceToken = priceX96 / 2^96 * 10^18
             targetTokensPerReferenceToken = FullMath.mulDiv(priceX96 * (10 ** EXP_SCALE), 1, FixedPoint96.Q96);
         }
 
-        // Step 2: Normalize reference price to 18 decimals
         uint256 normalizedReferencePrice;
         if (referencePriceDecimals > EXP_SCALE) {
             normalizedReferencePrice = referencePrice / (10 ** (referencePriceDecimals - EXP_SCALE));
@@ -534,9 +490,6 @@ contract PriceDeviationSentinel is AccessControlledV8 {
             normalizedReferencePrice = referencePrice;
         }
 
-        // Step 3: Calculate USD price per target token with decimal adjustment
-        // USD per target token = USD per reference token / (target tokens per reference token)
-        // Adjust for token decimal differences
         price = FullMath.mulDiv(
             normalizedReferencePrice * (10 ** targetDecimals),
             (10 ** EXP_SCALE),
