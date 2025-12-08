@@ -168,12 +168,15 @@ interface ILeverageStrategiesManager {
      * @dev This function flash loans additional collateral assets, amplifying the user's supplied collateral
      *      in the Venus protocol. The user must have delegated permission to this contract via the comptroller.
      *      Any remaining collateral dust after the operation is returned to the user.
+     *
+     *      Before safety checks, interest is accrued on ALL markets the user has entered to ensure
+     *      accurate liquidity calculations.
      * @param collateralMarket The vToken market where collateral will be supplied (must not be vBNB)
      * @param collateralAmountSeed The initial amount of collateral the user provides (can be 0)
      * @param collateralAmountToFlashLoan The amount to borrow via flash loan for leverage
      * @custom:emits SingleAssetLeverageEntered
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
-     * @custom:error AccrueInterestFailed if interest accrual fails on the collateral market
+     * @custom:error AccrueInterestFailed if interest accrual fails on any user market
      * @custom:error MarketNotListed if the market is not listed in Comptroller
      * @custom:error VBNBNotSupported if the market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
@@ -193,6 +196,9 @@ interface ILeverageStrategiesManager {
      *      and supplies the collateral to the Venus protocol to amplify the user's position.
      *      The user must have delegated permission to this contract via the comptroller.
      *      Any remaining dust (both collateral and borrowed assets) after the operation is returned to the user.
+     *
+     *      Before safety checks, interest is accrued on ALL markets the user has entered to ensure
+     *      accurate liquidity calculations.
      * @param collateralMarket The vToken market where collateral will be supplied (must not be vBNB)
      * @param collateralAmountSeed The initial amount of collateral the user provides (can be 0)
      * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan (must not be vBNB)
@@ -202,7 +208,7 @@ interface ILeverageStrategiesManager {
      * @custom:emits LeverageEntered
      * @custom:error IdenticalMarkets if collateral and borrow markets are the same
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
-     * @custom:error AccrueInterestFailed if interest accrual fails on any market
+     * @custom:error AccrueInterestFailed if interest accrual fails on any user market
      * @custom:error MarketNotListed if any market is not listed in Comptroller
      * @custom:error VBNBNotSupported if collateral or borrow market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe
@@ -227,6 +233,9 @@ interface ILeverageStrategiesManager {
      *      for collateral tokens, and supplies the collateral to the Venus protocol to amplify the user's position.
      *      The user must have delegated permission to this contract via the comptroller.
      *      Any remaining dust (both collateral and borrowed assets) after the operation is returned to the user.
+     *
+     *      Before safety checks, interest is accrued on ALL markets the user has entered to ensure
+     *      accurate liquidity calculations.
      * @param collateralMarket The vToken market where collateral will be supplied (must not be vBNB)
      * @param borrowedMarket The vToken market from which assets will be borrowed via flash loan (must not be vBNB)
      * @param borrowedAmountSeed The initial amount of borrowed assets the user provides (can be 0)
@@ -236,7 +245,7 @@ interface ILeverageStrategiesManager {
      * @custom:emits LeverageEnteredFromBorrow
      * @custom:error IdenticalMarkets if collateral and borrow markets are the same
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
-     * @custom:error AccrueInterestFailed if interest accrual fails on any market
+     * @custom:error AccrueInterestFailed if interest accrual fails on any user market
      * @custom:error MarketNotListed if any market is not listed in Comptroller
      * @custom:error VBNBNotSupported if collateral or borrow market is vBNB
      * @custom:error OperationCausesLiquidation if the operation would make the account unsafe

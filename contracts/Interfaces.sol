@@ -79,6 +79,8 @@ interface IComptroller {
 
     function checkMembership(address account, IVToken vToken) external view returns (bool);
 
+    function getAssetsIn(address account) external view returns (IVToken[] memory);
+
     function getBorrowingPower(
         address account
     ) external view returns (uint256 error, uint256 liquidity, uint256 shortfall);

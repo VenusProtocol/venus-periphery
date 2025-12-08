@@ -304,33 +304,21 @@ describe("LeverageStrategiesManager", () => {
     it("should revert on deployment when comptroller address is zero", async () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
-        LeverageStrategiesManagerFactory.deploy(
-          ethers.constants.AddressZero,
-          swapHelper.address,
-          vBNBMarket.address,
-        ),
+        LeverageStrategiesManagerFactory.deploy(ethers.constants.AddressZero, swapHelper.address, vBNBMarket.address),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
 
     it("should revert on deployment when swapHelper address is zero", async () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
-        LeverageStrategiesManagerFactory.deploy(
-          comptroller.address,
-          ethers.constants.AddressZero,
-          vBNBMarket.address,
-        ),
+        LeverageStrategiesManagerFactory.deploy(comptroller.address, ethers.constants.AddressZero, vBNBMarket.address),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
 
     it("should revert on deployment when vBNB address is zero", async () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
-        LeverageStrategiesManagerFactory.deploy(
-          comptroller.address,
-          swapHelper.address,
-          ethers.constants.AddressZero,
-        ),
+        LeverageStrategiesManagerFactory.deploy(comptroller.address, swapHelper.address, ethers.constants.AddressZero),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
 
@@ -3038,6 +3026,28 @@ describe("LeverageStrategiesManager", () => {
 
         const newBorrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         expect(newBorrowBalance).to.be.gt(borrowBalanceAfterEnter);
+      });
+
+      it("should accrue interest on all user markets before safety check", async () => {
+        // User first enters a position in borrowMarket (third party market)
+        await borrow.faucet(parseEther("10"));
+        await borrow.transfer(aliceAddress, parseEther("5"));
+        await borrow.connect(alice).approve(borrowMarket.address, parseEther("5"));
+        await borrowMarket.connect(alice).mint(parseEther("5"));
+
+        await comptroller.connect(alice).enterMarkets([borrowMarket.address]);
+
+        await borrowMarket.harnessFastForward(10000);
+
+        const collateralAmountToFlashLoan = parseEther("1");
+
+        await expect(
+          leverageManager
+            .connect(alice)
+            .enterSingleAssetLeverage(collateralMarket.address, 0, collateralAmountToFlashLoan),
+        )
+          .to.emit(borrowMarket, "AccrueInterest")
+          .to.emit(leverageManager, "SingleAssetLeverageEntered");
       });
     });
   });

@@ -90,10 +90,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         _checkUserDelegated();
 
-        _accrueInterest(_collateralMarket);
-
         _validateAndEnterMarket(msg.sender, _collateralMarket);
-        _checkAccountSafe(msg.sender);
+        _ensureAccountLiquidityValid(msg.sender);
 
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
 
@@ -114,7 +112,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             ""
         );
 
-        _checkAccountSafe(msg.sender);
+        _ensureNotLiquidatable(msg.sender);
 
         emit SingleAssetLeverageEntered(
             msg.sender,
@@ -143,11 +141,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         _checkUserDelegated();
 
-        _accrueInterest(_collateralMarket);
-        _accrueInterest(_borrowedMarket);
-
         _validateAndEnterMarket(msg.sender, _collateralMarket);
-        _checkAccountSafe(msg.sender);
+        _ensureAccountLiquidityValid(msg.sender);
 
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
         
@@ -170,7 +165,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _swapData
         );
 
-        _checkAccountSafe(msg.sender);
+        _ensureNotLiquidatable(msg.sender);
 
         emit LeverageEntered(
             msg.sender,
@@ -200,11 +195,8 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         
         _checkUserDelegated();
         
-        _accrueInterest(_collateralMarket);
-        _accrueInterest(_borrowedMarket);
-
         _validateAndEnterMarket(msg.sender, _collateralMarket);
-        _checkAccountSafe(msg.sender);
+        _ensureAccountLiquidityValid(msg.sender);
 
         _transferSeedAmountFromUser(_borrowedMarket, msg.sender, _borrowedAmountSeed);
 
@@ -227,7 +219,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _swapData
         );
 
-        _checkAccountSafe(msg.sender);
+        _ensureNotLiquidatable(msg.sender);
 
         emit LeverageEnteredFromBorrow(
             msg.sender,
@@ -276,7 +268,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             _swapData
         );
 
-        _checkAccountSafe(msg.sender);
+        _ensureNotLiquidatable(msg.sender);
 
         emit LeverageExited(
             msg.sender,
@@ -316,7 +308,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             ""
         );
 
-        _checkAccountSafe(msg.sender);
+        _ensureNotLiquidatable(msg.sender);
 
         emit SingleAssetLeverageExited(
             msg.sender,
@@ -723,25 +715,39 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Accrues interest on a vToken market
-     * @dev Must be called before safety checks to ensure borrow balances reflect accumulated interest
-     * @param market The vToken market to accrue interest on
-     * @custom:error AccrueInterestFailed if the accrueInterest call returns a non-zero error code
+     * @notice Ensures account liquidity is valid by accruing interest and checking for shortfall
+     * @dev This function performs two critical steps before leverage operations:
+     *      1. Accrues interest on ALL markets the user has entered to ensure accurate borrow balances
+     *      2. Verifies the account has no liquidity shortfall (safe from liquidation)
+     *      The getBorrowingPower check uses getAccountSnapshot which returns stored (not current)
+     *      borrow balances, so interest must be accrued first for accurate liquidity calculation.
+     * @param user The address of the user to validate
+     * @custom:error AccrueInterestFailed if accrueInterest fails on any market
+     * @custom:error OperationCausesLiquidation if the account has a liquidity shortfall
      */
-    function _accrueInterest(IVToken market) internal {
-        uint256 err = market.accrueInterest();
-        if (err != SUCCESS) revert AccrueInterestFailed(err);
+    function _ensureAccountLiquidityValid(address user) internal {
+        IVToken[] memory userAssets = COMPTROLLER.getAssetsIn(user);
+        uint256 length = userAssets.length;
+        for (uint256 i; i < length; ) {
+            uint256 accrueErr = userAssets[i].accrueInterest();
+            if (accrueErr != SUCCESS) revert AccrueInterestFailed(accrueErr);
+            unchecked {
+                ++i;
+            }
+        }
+
+        _ensureNotLiquidatable(user);
     }
 
     /**
-     * @notice Checks if a `user` account is safe from liquidation 
+     * @notice Reverts if user account has liquidity shortfall (is liquidatable) 
      * @dev Verifies that the user's account has no liquidity shortfall and the comptroller
      *      returned no errors when calculating account liquidity. This ensures the account
      *      won't be immediately liquidatable after the leverage operation.
      * @param user The address to check account safety for
      * @custom:error OperationCausesLiquidation if the account has a liquidity shortfall or comptroller error
      */
-    function _checkAccountSafe(address user) internal view {
+    function _ensureNotLiquidatable(address user) internal view {
         (uint256 err, , uint256 shortfall) = COMPTROLLER.getBorrowingPower(user);
         if (err != SUCCESS || shortfall > 0) revert OperationCausesLiquidation(err);
     }
