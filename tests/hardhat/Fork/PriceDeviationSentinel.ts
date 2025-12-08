@@ -1,17 +1,14 @@
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
-import { parseEther } from "ethers/lib/utils";
+import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import {
-  ComptrollerMock,
   ComptrollerMock__factory,
   IAccessControlManagerV8,
   IAccessControlManagerV8__factory,
   PriceDeviationSentinel,
-  VToken,
-  VToken__factory,
 } from "../../../typechain";
 import { forking, initMainnetUser } from "./utils";
 
@@ -20,14 +17,14 @@ const NORMAL_TIMELOCK = "0x939bD8d64c0A9583A7Dcea9933f7b21697ab6396";
 const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
 const TRX_ADDRESS = "0xCE7de646e7208a4Ef112cb6ed5038FA6cC6b12e3";
 const AAVE_ADDRESS = "0xfb6115445Bff7b52FeB98650C87f44907E58f802";
+const ORACLE = "0x6592b5DE802159F3E74B2486b091D11a8256ab8A";
+const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
 
 const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 
 type SetupMarketFixture = {
   timelock: SignerWithAddress;
   priceDeviationSentinel: PriceDeviationSentinel;
-  coreComptroller: ComptrollerMock;
-  vUSDe: VToken;
 };
 
 const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
@@ -35,13 +32,20 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   const coreComptroller = ComptrollerMock__factory.connect(COMPTROLLER_ADDRESS, timelock);
 
   const priceDeviationSentinelFactory = await ethers.getContractFactory("PriceDeviationSentinel");
-  const priceDeviationSentinel = await priceDeviationSentinelFactory.connect(timelock).deploy(COMPTROLLER_ADDRESS);
-  await priceDeviationSentinel.deployed();
+  const priceDeviationSentinel = await upgrades.deployProxy(priceDeviationSentinelFactory, [ACM], {
+    constructorArgs: [COMPTROLLER_ADDRESS, ORACLE],
+    // To allow the usage constructor & internal functions that might change storage
+    unsafeAllow: ["constructor", "internal-function-storage"],
+  });
 
   const acm = IAccessControlManagerV8__factory.connect(ACM, timelock) as IAccessControlManagerV8;
   await acm
     .connect(timelock)
-    .giveCallPermission(coreComptroller.address, "_setActionsPaused(address[],uint8[],bool)", priceDeviationSentinel.address);
+    .giveCallPermission(
+      coreComptroller.address,
+      "_setActionsPaused(address[],uint8[],bool)",
+      priceDeviationSentinel.address,
+    );
   await acm
     .connect(timelock)
     .giveCallPermission(
@@ -49,11 +53,17 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
       "setCollateralFactor(uint96,address,uint256,uint256)",
       priceDeviationSentinel.address,
     );
+  await acm
+    .connect(timelock)
+    .giveCallPermission(
+      priceDeviationSentinel.address,
+      "setTokenConfig(address,(uint8,uint8,address))",
+      NORMAL_TIMELOCK,
+    );
 
   return {
     timelock,
     priceDeviationSentinel,
-    coreComptroller,
   };
 };
 
@@ -67,21 +77,29 @@ if (FORK_MAINNET) {
     describe("PriceDeviationSentinel", () => {
       beforeEach(async () => {
         ({ priceDeviationSentinel, timelock } = await loadFixture(setupMarketFixture));
-
         // setTokenConfig for TRX
-        await priceDeviationSentinel
-          .connect(timelock)
-          .setTokenConfig(TRX_ADDRESS, {
-            deviation: 10,
-            dex: 1,
-            pool: "0xF683113764E4499c473aCd38Fc4b37E71554E4aD"
-          });
+        await priceDeviationSentinel.connect(timelock).setTokenConfig(TRX_ADDRESS, {
+          deviation: 10,
+          dex: 1,
+          pool: "0xF683113764E4499c473aCd38Fc4b37E71554E4aD",
+        });
+
+        await priceDeviationSentinel.connect(timelock).setTokenConfig(USDT_ADDRESS, {
+          deviation: 10,
+          dex: 1,
+          pool: "0x172fcD41E0913e95784454622d1c3724f546f849",
+        });
       });
 
       describe("check DEX prices", () => {
         it("check TRX price", async () => {
           const price = await priceDeviationSentinel["getDexPrice(address)"](TRX_ADDRESS);
-          console.log("TRX DEX Price:", ethers.utils.formatUnits(price, 18));
+          expect(price).to.be.equal(parseUnits("0.287615712885971478", 18));
+        });
+
+        it("check USDT price", async () => {
+          const price = await priceDeviationSentinel["getDexPrice(address)"](USDT_ADDRESS);
+          expect(price).to.be.equal(parseUnits("0.999676428802385649", 18));
         });
       });
     });

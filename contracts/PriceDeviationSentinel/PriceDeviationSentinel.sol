@@ -59,9 +59,11 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     uint8 public constant EXP_SCALE = 18;
 
     /// @notice Address of the Core Pool Comptroller
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     ICorePoolComptroller public immutable CORE_POOL_COMPTROLLER;
 
     /// @notice Resilient Oracle for getting reference prices
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     ResilientOracleInterface public immutable RESILIENT_ORACLE;
 
     /// @notice Mapping of token addresses to their DEX configuration
@@ -329,12 +331,11 @@ contract PriceDeviationSentinel is AccessControlledV8 {
                     bool poolIsListed,
                     uint256 collateralFactorMantissa, // isVenus
                     ,
-                    uint256 liquidationThresholdMantissa, // liquidationIncentiveMantissa // marketPoolId
+                    uint256 liquidationThresholdMantissa, // liquidationIncentiveMantissa // marketPoolId // isBorrowAllowed
                     ,
                     ,
 
-                ) = // isBorrowAllowed
-                    CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+                ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
 
                 if (poolIsListed) {
                     // Store original values for this pool ID
@@ -360,7 +361,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
                     0,
                     marketData.liquidationThresholdMantissa
                 );
-                emit CollateralFactorUpdated(address(market), marketData.collateralFactorMantissa, 0);
+                emit CollateralFactorUpdated(address(market), 0, marketData.collateralFactorMantissa, 0);
             }
         }
     }
@@ -402,7 +403,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
             // Isolated pool
             uint256 originalLT = state.originalLT;
             IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
-            emit CollateralFactorUpdated(address(market), 0, originalCF);
+            emit CollateralFactorUpdated(address(market), 0, 0, originalCF);
             state.originalCF = 0;
             state.originalLT = 0;
             state.cfModified = false;
@@ -442,20 +443,39 @@ contract PriceDeviationSentinel is AccessControlledV8 {
 
         uint8 targetDecimals = IERC20Metadata(targetToken).decimals();
         uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
+        uint8 referencePriceDecimals = 36 - referenceDecimals;
+
+        // Step 1: Get how many target tokens you get per 1 reference token (scaled)
+        uint256 targetTokensPerReferenceToken;
 
         if (targetIsToken0) {
-            price = FullMath.mulDiv(
-                referencePrice * (10 ** targetDecimals),
-                FixedPoint96.Q96,
-                priceX96 * (10 ** referenceDecimals)
-            );
+            // Target is token0, reference is token1
+            // targetTokensPerReferenceToken = 2^96 / priceX96 * 10^18
+            targetTokensPerReferenceToken = FullMath.mulDiv(FixedPoint96.Q96 * (10 ** EXP_SCALE), 1, priceX96);
         } else {
-            price = FullMath.mulDiv(
-                referencePrice * priceX96 * (10 ** targetDecimals),
-                1,
-                FixedPoint96.Q96 * (10 ** referenceDecimals)
-            );
+            // Target is token1, reference is token0
+            // targetTokensPerReferenceToken = priceX96 / 2^96 * 10^18
+            targetTokensPerReferenceToken = FullMath.mulDiv(priceX96 * (10 ** EXP_SCALE), 1, FixedPoint96.Q96);
         }
+
+        // Step 2: Normalize reference price to 18 decimals
+        uint256 normalizedReferencePrice;
+        if (referencePriceDecimals > EXP_SCALE) {
+            normalizedReferencePrice = referencePrice / (10 ** (referencePriceDecimals - EXP_SCALE));
+        } else if (referencePriceDecimals < EXP_SCALE) {
+            normalizedReferencePrice = referencePrice * (10 ** (EXP_SCALE - referencePriceDecimals));
+        } else {
+            normalizedReferencePrice = referencePrice;
+        }
+
+        // Step 3: Calculate USD price per target token with decimal adjustment
+        // USD per target token = USD per reference token / (target tokens per reference token)
+        // Adjust for token decimal differences
+        price = FullMath.mulDiv(
+            normalizedReferencePrice * (10 ** targetDecimals),
+            (10 ** EXP_SCALE),
+            targetTokensPerReferenceToken * (10 ** referenceDecimals)
+        );
     }
 
     /// @notice Get token price from PancakeSwap V3 pool
@@ -470,7 +490,6 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         address token1 = v3Pool.token1();
 
         (uint160 sqrtPriceX96, , , , , , ) = v3Pool.slot0();
-
         uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, FixedPoint96.Q96);
 
         address targetToken = token;
@@ -488,14 +507,40 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         }
 
         uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
-
         uint8 targetDecimals = IERC20Metadata(targetToken).decimals();
         uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
+        uint8 referencePriceDecimals = 36 - referenceDecimals;
+
+        // Step 1: Get how many target tokens you get per 1 reference token (scaled)
+        uint256 targetTokensPerReferenceToken;
 
         if (targetIsToken0) {
-            price = FullMath.mulDiv(referencePrice * (10 ** targetDecimals), FixedPoint96.Q96, priceX96 * (10 ** referenceDecimals));
+            // Target is token0, reference is token1
+            // targetTokensPerReferenceToken = 2^96 / priceX96 * 10^18
+            targetTokensPerReferenceToken = FullMath.mulDiv(FixedPoint96.Q96 * (10 ** EXP_SCALE), 1, priceX96);
         } else {
-            price = FullMath.mulDiv(referencePrice * priceX96 * (10 ** targetDecimals), 1, FixedPoint96.Q96 * (10 ** referenceDecimals));
+            // Target is token1, reference is token0
+            // targetTokensPerReferenceToken = priceX96 / 2^96 * 10^18
+            targetTokensPerReferenceToken = FullMath.mulDiv(priceX96 * (10 ** EXP_SCALE), 1, FixedPoint96.Q96);
         }
+
+        // Step 2: Normalize reference price to 18 decimals
+        uint256 normalizedReferencePrice;
+        if (referencePriceDecimals > EXP_SCALE) {
+            normalizedReferencePrice = referencePrice / (10 ** (referencePriceDecimals - EXP_SCALE));
+        } else if (referencePriceDecimals < EXP_SCALE) {
+            normalizedReferencePrice = referencePrice * (10 ** (EXP_SCALE - referencePriceDecimals));
+        } else {
+            normalizedReferencePrice = referencePrice;
+        }
+
+        // Step 3: Calculate USD price per target token with decimal adjustment
+        // USD per target token = USD per reference token / (target tokens per reference token)
+        // Adjust for token decimal differences
+        price = FullMath.mulDiv(
+            normalizedReferencePrice * (10 ** targetDecimals),
+            (10 ** EXP_SCALE),
+            targetTokensPerReferenceToken * (10 ** referenceDecimals)
+        );
     }
 }
