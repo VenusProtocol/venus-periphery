@@ -72,6 +72,9 @@ interface ILeverageStrategiesManager {
     /// @custom:error AccrueInterestFailed accrueInterest on a vToken market returned a non-zero error code
     error AccrueInterestFailed(uint256 errorCode);
 
+    /// @custom:error IdenticalMarkets Collateral and borrow markets cannot be the same
+    error IdenticalMarkets();
+
     /// @notice Emitted when dust amounts are transferred after a leverage operation
     /// @param recipient The address receiving the dust (user or protocol share reserve)
     /// @param token The underlying token address
@@ -197,6 +200,7 @@ interface ILeverageStrategiesManager {
      * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
      * @param swapData Bytes containing swap instructions for converting borrowed assets to collateral
      * @custom:emits LeverageEntered
+     * @custom:error IdenticalMarkets if collateral and borrow markets are the same
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error AccrueInterestFailed if interest accrual fails on any market
      * @custom:error MarketNotListed if any market is not listed in Comptroller
@@ -230,6 +234,7 @@ interface ILeverageStrategiesManager {
      * @param minAmountOutAfterSwap The minimum amount of collateral expected after swap (for slippage protection)
      * @param swapData Bytes containing swap instructions for converting borrowed assets to collateral
      * @custom:emits LeverageEnteredFromBorrow
+     * @custom:error IdenticalMarkets if collateral and borrow markets are the same
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error AccrueInterestFailed if interest accrual fails on any market
      * @custom:error MarketNotListed if any market is not listed in Comptroller
@@ -277,6 +282,7 @@ interface ILeverageStrategiesManager {
      * @param minAmountOutAfterSwap The minimum amount of borrowed asset expected after swap (for slippage protection)
      * @param swapData Bytes containing swap instructions for converting collateral to borrowed assets
      * @custom:emits LeverageExited
+     * @custom:error IdenticalMarkets if collateral and borrow markets are the same
      * @custom:error NotAnApprovedDelegate if caller has not delegated to this contract
      * @custom:error MarketNotListed if any market is not listed in Comptroller
      * @custom:error VBNBNotSupported if collateral or borrow market is vBNB

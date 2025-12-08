@@ -137,6 +137,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         bytes calldata _swapData
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
+        if (_collateralMarket == _borrowedMarket) revert IdenticalMarkets();
         _checkMarketSupported(_collateralMarket);
         _checkMarketSupported(_borrowedMarket);
 
@@ -193,6 +194,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         bytes calldata _swapData
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
+        if (_collateralMarket == _borrowedMarket) revert IdenticalMarkets();
         _checkMarketSupported(_collateralMarket);
         _checkMarketSupported(_borrowedMarket);
         
@@ -249,6 +251,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         bytes calldata _swapData 
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
+        if (_collateralMarket == _borrowedMarket) revert IdenticalMarkets();
         _checkMarketSupported(_collateralMarket);
         _checkMarketSupported(_borrowedMarket);
 
