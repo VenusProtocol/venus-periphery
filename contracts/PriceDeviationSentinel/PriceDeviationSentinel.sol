@@ -51,6 +51,9 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Maximum allowed price deviation in percentage (e.g., 10 = 10%)
     uint8 public constant MAX_DEVIATION = 100;
 
+    /// @notice Scale for 18 decimal calculations
+    uint8 public constant EXP_SCALE = 18;
+
     /// @notice Address of the Core Pool Comptroller
     ICorePoolComptroller public immutable CORE_POOL_COMPTROLLER;
 
@@ -185,13 +188,25 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         address underlyingToken = market.underlying();
         DeviationConfig memory config = tokenConfigs[underlyingToken];
         
-        oraclePrice = RESILIENT_ORACLE.getPrice(underlyingToken);
+        uint256 oraclePriceRaw = RESILIENT_ORACLE.getPrice(underlyingToken);
         dexPrice = getDexPrice(config, underlyingToken);
         
-        if (oraclePrice == 0) {
+        if (oraclePriceRaw == 0) {
             hasDeviation = true;
             deviationPercent = type(uint256).max;
+            oraclePrice = 0;
             return (hasDeviation, oraclePrice, dexPrice, deviationPercent);
+        }
+        
+        uint8 tokenDecimals = IERC20Metadata(underlyingToken).decimals();
+        uint8 oracleDecimals = 36 - tokenDecimals;
+        
+        if (oracleDecimals > EXP_SCALE) {
+            oraclePrice = oraclePriceRaw / (10 ** (oracleDecimals - EXP_SCALE));
+        } else if (oracleDecimals < EXP_SCALE) {
+            oraclePrice = oraclePriceRaw * (10 ** (EXP_SCALE - oracleDecimals));
+        } else {
+            oraclePrice = oraclePriceRaw;
         }
         
         uint256 priceDiff;
@@ -340,7 +355,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Get USD price of a token from DEX
     /// @param config Deviation configuration containing DEX type and pool info
     /// @param token Token address to get price for
-    /// @return price USD price in resilient oracle format (36 - token decimals)
+    /// @return price USD price in 18 decimals
     function getDexPrice(DeviationConfig memory config, address token) public view returns (uint256 price) {
         if (config.dex == DEX.UNISWAP_V3) {
             return _getUniswapV3Price(config.pool, token);
@@ -354,7 +369,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Get token price from Uniswap V3 pool
     /// @param pool Uniswap V3 pool address
     /// @param token Target token address
-    /// @return price USD price in resilient oracle format
+    /// @return price USD price in 18 decimals
     function _getUniswapV3Price(address pool, address token) internal view returns (uint256 price) {
         if (pool == address(0)) revert InvalidPool();
 
@@ -390,19 +405,12 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         } else {
             price = FullMath.mulDiv(referencePrice * priceX96 * (10 ** targetDecimals), 1, FixedPoint96.Q96 * (10 ** referenceDecimals));
         }
-        
-        uint8 oracleDecimals = 36 - targetDecimals;
-        if (oracleDecimals > 18) {
-            price = price * (10 ** (oracleDecimals - 18));
-        } else if (oracleDecimals < 18) {
-            price = price / (10 ** (18 - oracleDecimals));
-        }
     }
 
     /// @notice Get token price from PancakeSwap V2 pair
     /// @param pair PancakeSwap V2 pair address
     /// @param token Target token address
-    /// @return price USD price in resilient oracle format
+    /// @return price USD price in 18 decimals
     function _getPancakeSwapV2Price(address pair, address token) internal view returns (uint256 price) {
         if (pair == address(0)) revert InvalidPool();
 
@@ -437,12 +445,5 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
         
         price = (referenceReserve * referencePrice * (10 ** targetDecimals)) / (targetReserve * (10 ** referenceDecimals));
-        
-        uint8 oracleDecimals = 36 - targetDecimals;
-        if (oracleDecimals > 18) {
-            price = price * (10 ** (oracleDecimals - 18));
-        } else if (oracleDecimals < 18) {
-            price = price / (10 ** (18 - oracleDecimals));
-        }
     }
 }
