@@ -660,6 +660,23 @@ describe("LeverageStrategiesManager", () => {
           .withArgs(unlistedMarket.address);
       });
 
+      it("should revert when collateral and borrow markets are identical", async () => {
+        const collateralAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("identical"));
+
+        await expect(
+          leverageManager.connect(alice).enterLeverage(
+            collateralMarket.address,
+            collateralAmountSeed,
+            collateralMarket.address, // same as collateral market
+            borrowedAmountToFlashLoan,
+            0,
+            swapData,
+          ),
+        ).to.be.revertedWithCustomError(leverageManager, "IdenticalMarkets");
+      });
+
       it("should revert when user has not set delegation", async () => {
         const collateralAmountSeed = parseEther("0");
         const borrowedAmountToFlashLoan = parseEther("1");
@@ -1008,6 +1025,23 @@ describe("LeverageStrategiesManager", () => {
         )
           .to.be.revertedWithCustomError(leverageManager, "MarketNotListed")
           .withArgs(unlistedMarket.address);
+      });
+
+      it("should revert when collateral and borrow markets are identical", async () => {
+        const borrowedAmountSeed = parseEther("0");
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("identical"));
+
+        await expect(
+          leverageManager.connect(alice).enterLeverageFromBorrow(
+            collateralMarket.address,
+            collateralMarket.address, // same as collateral market
+            borrowedAmountSeed,
+            borrowedAmountToFlashLoan,
+            0,
+            swapData,
+          ),
+        ).to.be.revertedWithCustomError(leverageManager, "IdenticalMarkets");
       });
 
       it("should revert when user has not set delegation", async () => {
@@ -1392,6 +1426,23 @@ describe("LeverageStrategiesManager", () => {
         )
           .to.be.revertedWithCustomError(leverageManager, "MarketNotListed")
           .withArgs(unlistedMarket.address);
+      });
+
+      it("should revert when collateral and borrow markets are identical", async () => {
+        const repayAmount = parseEther("1");
+        const collateralAmountToRedeemForSwap = parseEther("0");
+        const swapData = await createEmptySwapMulticallData(admin, ethers.utils.formatBytes32String("identical"));
+
+        await expect(
+          leverageManager.connect(alice).exitLeverage(
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            collateralMarket.address, // same as collateral market
+            repayAmount,
+            0,
+            swapData,
+          ),
+        ).to.be.revertedWithCustomError(leverageManager, "IdenticalMarkets");
       });
 
       it("should revert when user has not set delegation", async () => {
