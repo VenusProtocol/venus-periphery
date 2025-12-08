@@ -39,13 +39,17 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice State tracking for market modifications by this contract
     /// @param isPaused True if borrow is paused for this market by this contract
     /// @param cfModified True if collateral factor was modified by this contract
-    /// @param originalCF Original collateral factor before modification
-    /// @param originalLT Original liquidation threshold before modification
+    /// @param originalCF Original collateral factor before modification (for IL pools)
+    /// @param originalLT Original liquidation threshold before modification (for IL pools)
+    /// @param poolCFs Mapping of pool ID to original collateral factor (for core pool)
+    /// @param poolLTs Mapping of pool ID to original liquidation threshold (for core pool)
     struct MarketState {
         bool isPaused;
         bool cfModified;
         uint256 originalCF;
         uint256 originalLT;
+        mapping(uint96 => uint256) poolCFs;
+        mapping(uint96 => uint256) poolLTs;
     }
 
     /// @notice Maximum allowed price deviation in percentage (e.g., 10 = 10%)
@@ -61,13 +65,13 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     ResilientOracleInterface public immutable RESILIENT_ORACLE;
 
     /// @notice Mapping of token addresses to their DEX configuration
-    mapping (address => DeviationConfig) public tokenConfigs;
+    mapping(address => DeviationConfig) public tokenConfigs;
 
     /// @notice Mapping of trusted keeper addresses
-    mapping (address => bool) public trustedKeepers;
+    mapping(address => bool) public trustedKeepers;
 
     /// @notice Mapping to track market state changes made by this contract
-    mapping (address => MarketState) public marketStates;
+    mapping(address => MarketState) public marketStates;
 
     /// @notice Emitted when a token's deviation configuration is updated
     /// @param token The token address
@@ -78,16 +82,23 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @param keeper The keeper address
     /// @param isTrusted Whether the keeper is trusted
     event TrustedKeeperUpdated(address indexed keeper, bool isTrusted);
-    
+
     /// @notice Emitted when borrow is paused for a market
     /// @param market The market address
     event BorrowPaused(address indexed market);
-    
+
     /// @notice Emitted when borrow is unpaused for a market
     /// @param market The market address
     event BorrowUnpaused(address indexed market);
-    
-    /// @notice Emitted when collateral factor is updated
+
+    /// @notice Emitted when collateral factor is updated for core pool
+    /// @param market The market address
+    /// @param poolId The pool ID (emode group)
+    /// @param oldCF The old collateral factor
+    /// @param newCF The new collateral factor
+    event CollateralFactorUpdated(address indexed market, uint96 indexed poolId, uint256 oldCF, uint256 newCF);
+
+    /// @notice Emitted when collateral factor is updated for isolated pool
     /// @param market The market address
     /// @param oldCF The old collateral factor
     /// @param newCF The new collateral factor
@@ -95,28 +106,28 @@ contract PriceDeviationSentinel is AccessControlledV8 {
 
     /// @notice Thrown when deviation is set to zero
     error ZeroDeviation();
-    
+
     /// @notice Thrown when deviation exceeds maximum allowed
     error ExceedsMaxDeviation();
-    
+
     /// @notice Thrown when a zero address is provided
     error ZeroAddress();
-    
+
     /// @notice Thrown when an invalid pool address is provided
     error InvalidPool();
-    
+
     /// @notice Thrown when an unsupported DEX type is used
     error UnsupportedDEX();
-    
+
     /// @notice Thrown when price calculation fails
     error PriceCalculationError();
-    
+
     /// @notice Thrown when caller is not an authorized keeper
     error UnauthorizedKeeper();
-    
+
     /// @notice Thrown when market is not configured for monitoring
     error MarketNotConfigured();
-    
+
     /// @notice Thrown when comptroller operation fails
     /// @param errorCode The error code returned by the comptroller
     error ComptrollerError(uint256 errorCode);
@@ -140,9 +151,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
 
     /// @notice Initialize the contract
     /// @param accessControlManager_ Address of the access control manager
-    function initialize(
-        address accessControlManager_
-    ) external initializer {
+    function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
     }
 
@@ -173,65 +182,18 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         emit TokenConfigUpdated(token, config);
     }
 
-    /// @notice Check if there is a price deviation between DEX and oracle for a market
-    /// @param market The vToken market to check
-    /// @return hasDeviation True if deviation exceeds configured threshold
-    /// @return oraclePrice The price from resilient oracle
-    /// @return dexPrice The price from DEX
-    /// @return deviationPercent The percentage deviation (scaled by 100)
-    function checkPriceDeviation(IVToken market) public view returns (
-        bool hasDeviation,
-        uint256 oraclePrice,
-        uint256 dexPrice,
-        uint256 deviationPercent
-    ) {
-        address underlyingToken = market.underlying();
-        DeviationConfig memory config = tokenConfigs[underlyingToken];
-        
-        uint256 oraclePriceRaw = RESILIENT_ORACLE.getPrice(underlyingToken);
-        dexPrice = getDexPrice(config, underlyingToken);
-        
-        if (oraclePriceRaw == 0) {
-            hasDeviation = true;
-            deviationPercent = type(uint256).max;
-            oraclePrice = 0;
-            return (hasDeviation, oraclePrice, dexPrice, deviationPercent);
-        }
-        
-        uint8 tokenDecimals = IERC20Metadata(underlyingToken).decimals();
-        uint8 oracleDecimals = 36 - tokenDecimals;
-        
-        if (oracleDecimals > EXP_SCALE) {
-            oraclePrice = oraclePriceRaw / (10 ** (oracleDecimals - EXP_SCALE));
-        } else if (oracleDecimals < EXP_SCALE) {
-            oraclePrice = oraclePriceRaw * (10 ** (EXP_SCALE - oracleDecimals));
-        } else {
-            oraclePrice = oraclePriceRaw;
-        }
-        
-        uint256 priceDiff;
-        if (dexPrice > oraclePrice) {
-            priceDiff = dexPrice - oraclePrice;
-        } else {
-            priceDiff = oraclePrice - dexPrice;
-        }
-        
-        deviationPercent = (priceDiff * 100) / oraclePrice;
-        hasDeviation = deviationPercent > config.deviation;
-    }
-
     /// @notice Handle price deviation for a market by pausing or adjusting collateral factor
     /// @param market The vToken market to handle
     function handleDeviation(IVToken market) external onlyKeeper {
         address underlyingToken = market.underlying();
         DeviationConfig memory config = tokenConfigs[underlyingToken];
-        
+
         if (config.pool == address(0)) revert MarketNotConfigured();
-        
+
         (bool hasDeviation, uint256 oraclePrice, uint256 dexPrice, ) = checkPriceDeviation(market);
-        
+
         MarketState storage state = marketStates[address(market)];
-        
+
         if (hasDeviation) {
             if (dexPrice > oraclePrice) {
                 _pauseBorrow(market, IComptroller.Action.BORROW);
@@ -245,7 +207,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
                 _unpauseBorrow(market, IComptroller.Action.BORROW);
                 state.isPaused = false;
             }
-            
+
             if (state.cfModified) {
                 _restoreCollateralFactor(market);
                 state.cfModified = false;
@@ -253,103 +215,48 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         }
     }
 
-    /// @notice Pause borrow action for a market
-    /// @param market The market to pause borrow for
-    /// @param action The action to pause
-    function _pauseBorrow(IVToken market, IComptroller.Action action) internal {
-        IComptroller comptroller = market.comptroller();
-        
-        address[] memory markets = new address[](1);
-        markets[0] = address(market);
-        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = action;
-        
-        comptroller.setActionsPaused(markets, actions, true);
-        emit BorrowPaused(address(market));
-    }
+    /// @notice Check if there is a price deviation between DEX and oracle for a market
+    /// @param market The vToken market to check
+    /// @return hasDeviation True if deviation exceeds configured threshold
+    /// @return oraclePrice The price from resilient oracle
+    /// @return dexPrice The price from DEX
+    /// @return deviationPercent The percentage deviation (scaled by 100)
+    function checkPriceDeviation(
+        IVToken market
+    ) public view returns (bool hasDeviation, uint256 oraclePrice, uint256 dexPrice, uint256 deviationPercent) {
+        address underlyingToken = market.underlying();
+        DeviationConfig memory config = tokenConfigs[underlyingToken];
 
-    /// @notice Unpause borrow action for a market
-    /// @param market The market to unpause borrow for
-    /// @param action The action to unpause
-    function _unpauseBorrow(IVToken market, IComptroller.Action action) internal {
-        IComptroller comptroller = market.comptroller();
-        
-        address[] memory markets = new address[](1);
-        markets[0] = address(market);
-        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = action;
-        
-        comptroller.setActionsPaused(markets, actions, false);
-        emit BorrowUnpaused(address(market));
-    }
+        uint256 oraclePriceRaw = RESILIENT_ORACLE.getPrice(underlyingToken);
+        dexPrice = getDexPrice(config, underlyingToken);
 
-    /// @notice Set collateral factor to zero and store original value
-    /// @param market The market to modify
-    function _setCollateralFactorToZero(IVToken market) internal {
-        IComptroller comptroller = market.comptroller();
-        MarketState storage state = marketStates[address(market)];
-        
-        if (state.cfModified) return;
-        
-        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
-            (
-                bool isListed,
-                uint256 collateralFactorMantissa,
-                ,  // isVenus
-                uint256 liquidationThresholdMantissa,
-                ,  // liquidationIncentiveMantissa
-                ,  // marketPoolId
-                   // isBorrowAllowed
-            ) = ICorePoolComptroller(address(comptroller)).poolMarkets(0, address(market));
-            if (isListed) {
-                state.originalCF = collateralFactorMantissa;
-                state.originalLT = liquidationThresholdMantissa;
-                state.cfModified = true;
-                uint256 result = ICorePoolComptroller(address(comptroller)).setCollateralFactor(address(market), 0, liquidationThresholdMantissa);
-                if (result != 0) revert ComptrollerError(result);
-                emit CollateralFactorUpdated(address(market), collateralFactorMantissa, 0);
-            }
-        } else {
-            IILComptroller.Market memory marketData = IILComptroller(address(comptroller)).markets(address(market));
-            if (marketData.isListed) {
-                state.originalCF = marketData.collateralFactorMantissa;
-                state.originalLT = marketData.liquidationThresholdMantissa;
-                state.cfModified = true;
-                IILComptroller(address(comptroller)).setCollateralFactor(address(market), 0, marketData.liquidationThresholdMantissa);
-                emit CollateralFactorUpdated(address(market), marketData.collateralFactorMantissa, 0);
-            }
+        if (oraclePriceRaw == 0) {
+            hasDeviation = true;
+            deviationPercent = type(uint256).max;
+            oraclePrice = 0;
+            return (hasDeviation, oraclePrice, dexPrice, deviationPercent);
         }
-    }
 
-    /// @notice Restore original collateral factor
-    /// @param market The market to restore
-    function _restoreCollateralFactor(IVToken market) internal {
-        IComptroller comptroller = market.comptroller();
-        MarketState storage state = marketStates[address(market)];
-        
-        if (!state.cfModified) return;
-        
-        uint256 originalCF = state.originalCF;
-        
-        // Check if this is a core pool or isolated pool
-        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
-            // Core pool
-            uint256 originalLT = state.originalLT;
-            uint256 result = ICorePoolComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
-            if (result != 0) revert ComptrollerError(result);
-            emit CollateralFactorUpdated(address(market), 0, originalCF);
-            state.originalCF = 0;
-            state.originalLT = 0;
-            state.cfModified = false;
+        uint8 tokenDecimals = IERC20Metadata(underlyingToken).decimals();
+        uint8 oracleDecimals = 36 - tokenDecimals;
+
+        if (oracleDecimals > EXP_SCALE) {
+            oraclePrice = oraclePriceRaw / (10 ** (oracleDecimals - EXP_SCALE));
+        } else if (oracleDecimals < EXP_SCALE) {
+            oraclePrice = oraclePriceRaw * (10 ** (EXP_SCALE - oracleDecimals));
         } else {
-            // Isolated pool
-            uint256 originalLT = state.originalLT;
-            IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
-            emit CollateralFactorUpdated(address(market), 0, originalCF);
-            state.originalCF = 0;
-            state.originalLT = 0;
-            state.cfModified = false;
+            oraclePrice = oraclePriceRaw;
         }
+
+        uint256 priceDiff;
+        if (dexPrice > oraclePrice) {
+            priceDiff = dexPrice - oraclePrice;
+        } else {
+            priceDiff = oraclePrice - dexPrice;
+        }
+
+        deviationPercent = (priceDiff * 100) / oraclePrice;
+        hasDeviation = deviationPercent > config.deviation;
     }
 
     /// @notice Get USD price of a token from DEX
@@ -366,6 +273,133 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         }
     }
 
+    /// @notice Pause borrow action for a market
+    /// @param market The market to pause borrow for
+    /// @param action The action to pause
+    function _pauseBorrow(IVToken market, IComptroller.Action action) internal {
+        IComptroller comptroller = market.comptroller();
+
+        address[] memory markets = new address[](1);
+        markets[0] = address(market);
+        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
+        actions[0] = action;
+
+        comptroller.setActionsPaused(markets, actions, true);
+        emit BorrowPaused(address(market));
+    }
+
+    /// @notice Unpause borrow action for a market
+    /// @param market The market to unpause borrow for
+    /// @param action The action to unpause
+    function _unpauseBorrow(IVToken market, IComptroller.Action action) internal {
+        IComptroller comptroller = market.comptroller();
+
+        address[] memory markets = new address[](1);
+        markets[0] = address(market);
+        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
+        actions[0] = action;
+
+        comptroller.setActionsPaused(markets, actions, false);
+        emit BorrowUnpaused(address(market));
+    }
+
+    /// @notice Set collateral factor to zero and store original value
+    /// @param market The market to modify
+    function _setCollateralFactorToZero(IVToken market) internal {
+        IComptroller comptroller = market.comptroller();
+        MarketState storage state = marketStates[address(market)];
+
+        if (state.cfModified) return;
+
+        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
+            state.cfModified = true;
+
+            // Store original CF and LT for each emode group, then set to 0
+            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+                (
+                    bool poolIsListed,
+                    uint256 collateralFactorMantissa, // isVenus
+                    ,
+                    uint256 liquidationThresholdMantissa, // liquidationIncentiveMantissa // marketPoolId
+                    ,
+                    ,
+
+                ) = // isBorrowAllowed
+                    CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+
+                if (poolIsListed) {
+                    // Store original values for this pool ID
+                    state.poolCFs[i] = collateralFactorMantissa;
+                    state.poolLTs[i] = liquidationThresholdMantissa;
+
+                    // Set collateral factor to 0
+                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(i, address(market), 0, 0);
+                    if (result != 0) revert ComptrollerError(result);
+
+                    // Emit event for each pool ID
+                    emit CollateralFactorUpdated(address(market), i, collateralFactorMantissa, 0);
+                }
+            }
+        } else {
+            IILComptroller.Market memory marketData = IILComptroller(address(comptroller)).markets(address(market));
+            if (marketData.isListed) {
+                state.originalCF = marketData.collateralFactorMantissa;
+                state.originalLT = marketData.liquidationThresholdMantissa;
+                state.cfModified = true;
+                IILComptroller(address(comptroller)).setCollateralFactor(
+                    address(market),
+                    0,
+                    marketData.liquidationThresholdMantissa
+                );
+                emit CollateralFactorUpdated(address(market), marketData.collateralFactorMantissa, 0);
+            }
+        }
+    }
+
+    /// @notice Restore original collateral factor
+    /// @param market The market to restore
+    function _restoreCollateralFactor(IVToken market) internal {
+        IComptroller comptroller = market.comptroller();
+        MarketState storage state = marketStates[address(market)];
+
+        if (!state.cfModified) return;
+
+        uint256 originalCF = state.originalCF;
+
+        // Check if this is a core pool or isolated pool
+        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
+            // Core pool - restore original CF and LT for each emode group
+            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+                (bool poolIsListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+                if (poolIsListed) {
+                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(
+                        i,
+                        address(market),
+                        state.poolCFs[i],
+                        state.poolLTs[i]
+                    );
+                    if (result != 0) revert ComptrollerError(result);
+
+                    // Emit event for each pool ID
+                    emit CollateralFactorUpdated(address(market), i, 0, state.poolCFs[i]);
+
+                    // Clear stored values
+                    delete state.poolCFs[i];
+                    delete state.poolLTs[i];
+                }
+            }
+            state.cfModified = false;
+        } else {
+            // Isolated pool
+            uint256 originalLT = state.originalLT;
+            IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
+            emit CollateralFactorUpdated(address(market), 0, originalCF);
+            state.originalCF = 0;
+            state.originalLT = 0;
+            state.cfModified = false;
+        }
+    }
+
     /// @notice Get token price from Uniswap V3 pool
     /// @param pool Uniswap V3 pool address
     /// @param token Target token address
@@ -376,15 +410,15 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         IUniswapV3Pool v3Pool = IUniswapV3Pool(pool);
         address token0 = v3Pool.token0();
         address token1 = v3Pool.token1();
-        
+
         (uint160 sqrtPriceX96, , , , , , ) = v3Pool.slot0();
-        
+
         uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, FixedPoint96.Q96);
-        
+
         address targetToken = token;
         address referenceToken;
         bool targetIsToken0;
-        
+
         if (token == token0) {
             targetIsToken0 = true;
             referenceToken = token1;
@@ -394,16 +428,24 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         } else {
             revert InvalidPool();
         }
-        
+
         uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
-        
+
         uint8 targetDecimals = IERC20Metadata(targetToken).decimals();
         uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
-        
+
         if (targetIsToken0) {
-            price = FullMath.mulDiv(referencePrice * (10 ** targetDecimals), FixedPoint96.Q96, priceX96 * (10 ** referenceDecimals));
+            price = FullMath.mulDiv(
+                referencePrice * (10 ** targetDecimals),
+                FixedPoint96.Q96,
+                priceX96 * (10 ** referenceDecimals)
+            );
         } else {
-            price = FullMath.mulDiv(referencePrice * priceX96 * (10 ** targetDecimals), 1, FixedPoint96.Q96 * (10 ** referenceDecimals));
+            price = FullMath.mulDiv(
+                referencePrice * priceX96 * (10 ** targetDecimals),
+                1,
+                FixedPoint96.Q96 * (10 ** referenceDecimals)
+            );
         }
     }
 
@@ -417,16 +459,16 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         IPancakeV2Pair v2Pair = IPancakeV2Pair(pair);
         address token0 = v2Pair.token0();
         address token1 = v2Pair.token1();
-        
+
         (uint112 reserve0, uint112 reserve1, ) = v2Pair.getReserves();
-        
+
         if (reserve0 == 0 || reserve1 == 0) revert PriceCalculationError();
-        
+
         address targetToken = token;
         address referenceToken;
         uint256 targetReserve;
         uint256 referenceReserve;
-        
+
         if (token == token0) {
             targetReserve = uint256(reserve0);
             referenceReserve = uint256(reserve1);
@@ -438,12 +480,14 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         } else {
             revert InvalidPool();
         }
-        
+
         uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
-        
+
         uint8 targetDecimals = IERC20Metadata(targetToken).decimals();
         uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
-        
-        price = (referenceReserve * referencePrice * (10 ** targetDecimals)) / (targetReserve * (10 ** referenceDecimals));
+
+        price =
+            (referenceReserve * referencePrice * (10 ** targetDecimals)) /
+            (targetReserve * (10 ** referenceDecimals));
     }
 }

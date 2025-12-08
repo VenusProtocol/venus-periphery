@@ -1,9 +1,7 @@
 pragma solidity ^0.8.25;
 
-import { IComptroller } from "./IComptroller.sol";
-
 interface IILComptroller {
-  struct Market {
+    struct Market {
         bool isListed;
         uint256 collateralFactorMantissa;
         uint256 liquidationThresholdMantissa;

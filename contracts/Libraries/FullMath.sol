@@ -9,7 +9,7 @@ library FullMath {
             prod0 := mul(a, b)
             prod1 := sub(sub(mm, prod0), lt(mm, prod0))
         }
-        
+
         if (prod1 == 0) {
             require(denominator > 0);
             assembly {
@@ -17,25 +17,25 @@ library FullMath {
             }
             return result;
         }
-        
+
         require(denominator > prod1);
-        
+
         uint256 remainder;
         assembly {
             remainder := mulmod(a, b, denominator)
             prod1 := sub(prod1, gt(remainder, prod0))
             prod0 := sub(prod0, remainder)
         }
-        
+
         uint256 twos = denominator & (~denominator + 1);
         assembly {
             denominator := div(denominator, twos)
             prod0 := div(prod0, twos)
             twos := add(div(sub(0, twos), twos), 1)
         }
-        
+
         prod0 |= prod1 * twos;
-        
+
         uint256 inverse = (3 * denominator) ^ 2;
         inverse *= 2 - denominator * inverse;
         inverse *= 2 - denominator * inverse;
@@ -43,7 +43,7 @@ library FullMath {
         inverse *= 2 - denominator * inverse;
         inverse *= 2 - denominator * inverse;
         inverse *= 2 - denominator * inverse;
-        
+
         result = prod0 * inverse;
         return result;
     }
