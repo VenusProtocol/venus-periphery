@@ -7,7 +7,7 @@ import { IVToken } from "../Interfaces/IVToken.sol";
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { IPancakeV2Pair } from "../Interfaces/IPancakeV2Pair.sol";
+import { IPancakeV3Pool } from "../Interfaces/IPancakeV3Pool.sol";
 import { IUniswapV3Pool } from "../Interfaces/IUniswapV3Pool.sol";
 import { FixedPoint96 } from "../Libraries/FixedPoint96.sol";
 import { FullMath } from "../Libraries/FullMath.sol";
@@ -23,7 +23,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Supported DEX types for price fetching
     enum DEX {
         UNISWAP_V3,
-        PANCAKESWAP_V2
+        PANCAKESWAP_V3
     }
 
     /// @notice Configuration for price deviation monitoring
@@ -259,6 +259,15 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         hasDeviation = deviationPercent > config.deviation;
     }
 
+    /// @notice Get USD price of a token from DEX using stored configuration
+    /// @param token Token address to get price for
+    /// @return price USD price in 18 decimals
+    function getDexPrice(address token) public view returns (uint256 price) {
+        DeviationConfig memory config = tokenConfigs[token];
+        if (config.pool == address(0)) revert MarketNotConfigured();
+        return getDexPrice(config, token);
+    }
+
     /// @notice Get USD price of a token from DEX
     /// @param config Deviation configuration containing DEX type and pool info
     /// @param token Token address to get price for
@@ -266,8 +275,8 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     function getDexPrice(DeviationConfig memory config, address token) public view returns (uint256 price) {
         if (config.dex == DEX.UNISWAP_V3) {
             return _getUniswapV3Price(config.pool, token);
-        } else if (config.dex == DEX.PANCAKESWAP_V2) {
-            return _getPancakeSwapV2Price(config.pool, token);
+        } else if (config.dex == DEX.PANCAKESWAP_V3) {
+            return _getPancakeSwapV3Price(config.pool, token);
         } else {
             revert UnsupportedDEX();
         }
@@ -449,33 +458,30 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         }
     }
 
-    /// @notice Get token price from PancakeSwap V2 pair
-    /// @param pair PancakeSwap V2 pair address
+    /// @notice Get token price from PancakeSwap V3 pool
+    /// @param pool PancakeSwap V3 pool address
     /// @param token Target token address
     /// @return price USD price in 18 decimals
-    function _getPancakeSwapV2Price(address pair, address token) internal view returns (uint256 price) {
-        if (pair == address(0)) revert InvalidPool();
+    function _getPancakeSwapV3Price(address pool, address token) internal view returns (uint256 price) {
+        if (pool == address(0)) revert InvalidPool();
 
-        IPancakeV2Pair v2Pair = IPancakeV2Pair(pair);
-        address token0 = v2Pair.token0();
-        address token1 = v2Pair.token1();
+        IPancakeV3Pool v3Pool = IPancakeV3Pool(pool);
+        address token0 = v3Pool.token0();
+        address token1 = v3Pool.token1();
 
-        (uint112 reserve0, uint112 reserve1, ) = v2Pair.getReserves();
+        (uint160 sqrtPriceX96, , , , , , ) = v3Pool.slot0();
 
-        if (reserve0 == 0 || reserve1 == 0) revert PriceCalculationError();
+        uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, FixedPoint96.Q96);
 
         address targetToken = token;
         address referenceToken;
-        uint256 targetReserve;
-        uint256 referenceReserve;
+        bool targetIsToken0;
 
         if (token == token0) {
-            targetReserve = uint256(reserve0);
-            referenceReserve = uint256(reserve1);
+            targetIsToken0 = true;
             referenceToken = token1;
         } else if (token == token1) {
-            targetReserve = uint256(reserve1);
-            referenceReserve = uint256(reserve0);
+            targetIsToken0 = false;
             referenceToken = token0;
         } else {
             revert InvalidPool();
@@ -486,8 +492,10 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         uint8 targetDecimals = IERC20Metadata(targetToken).decimals();
         uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
 
-        price =
-            (referenceReserve * referencePrice * (10 ** targetDecimals)) /
-            (targetReserve * (10 ** referenceDecimals));
+        if (targetIsToken0) {
+            price = FullMath.mulDiv(referencePrice * (10 ** targetDecimals), FixedPoint96.Q96, priceX96 * (10 ** referenceDecimals));
+        } else {
+            price = FullMath.mulDiv(referencePrice * priceX96 * (10 ** targetDecimals), 1, FixedPoint96.Q96 * (10 ** referenceDecimals));
+        }
     }
 }
