@@ -91,9 +91,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkUserDelegated();
 
         _accrueInterest(_collateralMarket);
-        _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
+        _checkAccountSafe(msg.sender);
+
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
 
         operationInitiator = msg.sender;
@@ -143,9 +144,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         _accrueInterest(_collateralMarket);
         _accrueInterest(_borrowedMarket);
-        _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
+        _checkAccountSafe(msg.sender);
+
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
         
         operationInitiator = msg.sender;
@@ -198,9 +200,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         
         _accrueInterest(_collateralMarket);
         _accrueInterest(_borrowedMarket);
-        _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
+        _checkAccountSafe(msg.sender);
+
         _transferSeedAmountFromUser(_borrowedMarket, msg.sender, _borrowedAmountSeed);
 
         operationInitiator = msg.sender;
