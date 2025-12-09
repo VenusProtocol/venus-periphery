@@ -39,14 +39,16 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     }
 
     /// @notice State tracking for market modifications by this contract
-    /// @param isPaused True if borrow is paused for this market by this contract
+    /// @param borrowPaused True if borrow is paused for this market by this contract
+    /// @param supplyPaused True if supply is paused for this market by this contract
     /// @param cfModified True if collateral factor was modified by this contract
     /// @param originalCF Original collateral factor before modification (for IL pools)
     /// @param originalLT Original liquidation threshold before modification (for IL pools)
     /// @param poolCFs Mapping of pool ID to original collateral factor (for core pool)
     /// @param poolLTs Mapping of pool ID to original liquidation threshold (for core pool)
     struct MarketState {
-        bool isPaused;
+        bool borrowPaused;
+        bool supplyPaused;
         bool cfModified;
         uint256 originalCF;
         uint256 originalLT;
@@ -99,6 +101,14 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Emitted when borrow is unpaused for a market
     /// @param market The market address
     event BorrowUnpaused(address indexed market);
+
+    /// @notice Emitted when supply is paused for a market
+    /// @param market The market address
+    event SupplyPaused(address indexed market);
+
+    /// @notice Emitted when supply is unpaused for a market
+    /// @param market The market address
+    event SupplyUnpaused(address indexed market);
 
     /// @notice Emitted when collateral factor is updated for core pool
     /// @param market The market address
@@ -225,20 +235,27 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         if (hasDeviation) {
             if (dexPrice > oraclePrice) {
                 _pauseBorrow(market, IComptroller.Action.BORROW);
-                state.isPaused = true;
+                state.borrowPaused = true;
             } else {
                 _setCollateralFactorToZero(market);
+                _pauseSupply(market, IComptroller.Action.MINT);
                 state.cfModified = true;
+                state.supplyPaused = true;
             }
         } else {
-            if (state.isPaused) {
+            if (state.borrowPaused) {
                 _unpauseBorrow(market, IComptroller.Action.BORROW);
-                state.isPaused = false;
+                state.borrowPaused = false;
             }
 
             if (state.cfModified) {
                 _restoreCollateralFactor(market);
                 state.cfModified = false;
+            }
+
+            if (state.supplyPaused) {
+                _unpauseSupply(market, IComptroller.Action.MINT);
+                state.supplyPaused = false;
             }
         }
     }
@@ -338,6 +355,36 @@ contract PriceDeviationSentinel is AccessControlledV8 {
 
         comptroller.setActionsPaused(markets, actions, false);
         emit BorrowUnpaused(address(market));
+    }
+
+    /// @notice Pause supply action for a market
+    /// @param market The market to pause supply for
+    /// @param action The action to pause
+    function _pauseSupply(IVToken market, IComptroller.Action action) internal {
+        IComptroller comptroller = market.comptroller();
+
+        address[] memory markets = new address[](1);
+        markets[0] = address(market);
+        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
+        actions[0] = action;
+
+        comptroller.setActionsPaused(markets, actions, true);
+        emit SupplyPaused(address(market));
+    }
+
+    /// @notice Unpause supply action for a market
+    /// @param market The market to unpause supply for
+    /// @param action The action to unpause
+    function _unpauseSupply(IVToken market, IComptroller.Action action) internal {
+        IComptroller comptroller = market.comptroller();
+
+        address[] memory markets = new address[](1);
+        markets[0] = address(market);
+        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
+        actions[0] = action;
+
+        comptroller.setActionsPaused(markets, actions, false);
+        emit SupplyUnpaused(address(market));
     }
 
     /// @notice Set collateral factor to zero and store original value

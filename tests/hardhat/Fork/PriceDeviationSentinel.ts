@@ -170,6 +170,9 @@ if (FORK_MAINNET) {
           let data = await coreComptroller.poolMarkets(0, vWBNB);
           expect(data.collateralFactorMantissa).to.be.equal(0);
 
+          let isPaused = await coreComptroller.actionPaused(vWBNB, 0);
+          expect(isPaused).to.be.equal(true);
+
           await chainlinkOracle.connect(timelock).setDirectPrice(WBNB, parseUnits("900", 18));
 
           isDeviated = await priceDeviationSentinel.checkPriceDeviation(vWBNB);
@@ -179,6 +182,9 @@ if (FORK_MAINNET) {
 
           data = await coreComptroller.poolMarkets(0, vWBNB);
           expect(data.collateralFactorMantissa).to.be.not.equal(0);
+
+          isPaused = await coreComptroller.actionPaused(vWBNB, 0);
+          expect(isPaused).to.be.equal(false);
         });
 
         it("WBNB dex price higher than chainlink price", async () => {
