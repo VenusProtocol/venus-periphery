@@ -30,10 +30,12 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @param deviation Maximum allowed deviation percentage (e.g., 10 = 10%)
     /// @param dex The DEX type to fetch prices from
     /// @param pool The DEX pool address to fetch prices from
+    /// @param enabled Whether deviation monitoring is enabled for this token
     struct DeviationConfig {
         uint8 deviation;
         DEX dex;
         address pool;
+        bool enabled;
     }
 
     /// @notice State tracking for market modifications by this contract
@@ -79,6 +81,11 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @param token The token address
     /// @param config The new deviation configuration
     event TokenConfigUpdated(address indexed token, DeviationConfig config);
+
+    /// @notice Emitted when a token's monitoring status is changed
+    /// @param token The token address
+    /// @param enabled Whether monitoring is enabled
+    event TokenMonitoringStatusChanged(address indexed token, bool enabled);
 
     /// @notice Emitted when a keeper's trusted status is updated
     /// @param keeper The keeper address
@@ -130,6 +137,9 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Thrown when market is not configured for monitoring
     error MarketNotConfigured();
 
+    /// @notice Thrown when token monitoring is disabled
+    error TokenMonitoringDisabled();
+
     /// @notice Thrown when comptroller operation fails
     /// @param errorCode The error code returned by the comptroller
     error ComptrollerError(uint256 errorCode);
@@ -171,9 +181,9 @@ contract PriceDeviationSentinel is AccessControlledV8 {
 
     /// @notice Set deviation configuration for a token
     /// @param token Address of the token
-    /// @param config Deviation configuration containing threshold, DEX type, and pool address
+    /// @param config Deviation configuration containing threshold, DEX type, pool address, and enabled status
     function setTokenConfig(address token, DeviationConfig calldata config) external {
-        _checkAccessAllowed("setTokenConfig(address,(uint8,uint8,address))");
+        _checkAccessAllowed("setTokenConfig(address,(uint8,uint8,address,bool))");
 
         if (token == address(0)) revert ZeroAddress();
         if (config.pool == address(0)) revert ZeroAddress();
@@ -184,6 +194,21 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         emit TokenConfigUpdated(token, config);
     }
 
+    /// @notice Enable or disable deviation monitoring for a token
+    /// @param token Address of the token
+    /// @param enabled Whether to enable or disable monitoring
+    function setTokenMonitoringEnabled(address token, bool enabled) external {
+        _checkAccessAllowed("setTokenMonitoringEnabled(address,bool)");
+
+        if (token == address(0)) revert ZeroAddress();
+
+        DeviationConfig storage config = tokenConfigs[token];
+        if (config.pool == address(0)) revert MarketNotConfigured();
+
+        config.enabled = enabled;
+        emit TokenMonitoringStatusChanged(token, enabled);
+    }
+
     /// @notice Handle price deviation for a market by pausing or adjusting collateral factor
     /// @param market The vToken market to handle
     function handleDeviation(IVToken market) external onlyKeeper {
@@ -191,6 +216,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         DeviationConfig memory config = tokenConfigs[underlyingToken];
 
         if (config.pool == address(0)) revert MarketNotConfigured();
+        if (!config.enabled) revert TokenMonitoringDisabled();
 
         (bool hasDeviation, uint256 oraclePrice, uint256 dexPrice, ) = checkPriceDeviation(market);
 

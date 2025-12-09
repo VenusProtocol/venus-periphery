@@ -70,7 +70,7 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
     .connect(timelock)
     .giveCallPermission(
       priceDeviationSentinel.address,
-      "setTokenConfig(address,(uint8,uint8,address))",
+      "setTokenConfig(address,(uint8,uint8,address,bool))",
       NORMAL_TIMELOCK,
     );
   await acm
@@ -107,18 +107,21 @@ if (FORK_MAINNET) {
           deviation: 10,
           dex: 1,
           pool: "0xF683113764E4499c473aCd38Fc4b37E71554E4aD",
+          enabled: true,
         });
 
         await priceDeviationSentinel.connect(timelock).setTokenConfig(USDT, {
           deviation: 10,
           dex: 1,
           pool: "0x172fcD41E0913e95784454622d1c3724f546f849",
+          enabled: true,
         });
 
         await priceDeviationSentinel.connect(timelock).setTokenConfig(BTCB, {
           deviation: 10,
           dex: 0,
           pool: "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD",
+          enabled: true,
         });
       });
 
@@ -145,6 +148,7 @@ if (FORK_MAINNET) {
             deviation: 10,
             dex: 0,
             pool: "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD",
+            enabled: true,
           });
 
           await resilientOracle.connect(timelock).setTokenConfig({
