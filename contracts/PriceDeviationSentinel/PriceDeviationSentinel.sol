@@ -284,7 +284,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         }
 
         deviationPercent = (priceDiff * 100) / oraclePrice;
-        hasDeviation = deviationPercent > config.deviation;
+        hasDeviation = deviationPercent >= config.deviation;
     }
 
     /// @notice Get USD price of a token from DEX using stored configuration
