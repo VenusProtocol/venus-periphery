@@ -234,9 +234,15 @@ contract PriceDeviationSentinel is AccessControlledV8 {
 
         if (hasDeviation) {
             if (dexPrice > oraclePrice) {
+                // Early return if borrow is already paused
+                if (state.borrowPaused) return;
+                
                 _pauseBorrow(market, IComptroller.Action.BORROW);
                 state.borrowPaused = true;
             } else {
+                // Early return if CF is already modified and supply is already paused
+                if (state.cfModified && state.supplyPaused) return;
+                
                 _setCollateralFactorToZero(market);
                 _pauseSupply(market, IComptroller.Action.MINT);
                 state.cfModified = true;
