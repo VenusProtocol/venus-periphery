@@ -4,37 +4,22 @@ import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
 import { IILComptroller } from "../Interfaces/IILComptroller.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
-import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
+import { ResilientOracleInterface, OracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
-import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { IPancakeV3Pool } from "../Interfaces/IPancakeV3Pool.sol";
-import { IUniswapV3Pool } from "../Interfaces/IUniswapV3Pool.sol";
-import { FixedPoint96 } from "../Libraries/FixedPoint96.sol";
-import { FullMath } from "../Libraries/FullMath.sol";
 
 /**
  * @title PriceDeviationSentinel
  * @author Venus
- * @notice Sentinel that compares oracle and DEX prices (via keeper) and pauses
+ * @notice Sentinel that compares ResilientOracle and SentinelOracle prices (via keeper) and pauses
  *         specific actions (borrow, mint, collateral factor) per market when
  *         large deviations are detected.
  */
 contract PriceDeviationSentinel is AccessControlledV8 {
-    /// @notice Supported DEX types for price fetching
-    enum DEX {
-        UNISWAP_V3,
-        PANCAKESWAP_V3
-    }
-
     /// @notice Configuration for price deviation monitoring
     /// @param deviation Maximum allowed deviation percentage (e.g., 10 = 10%)
-    /// @param dex The DEX type to fetch prices from
-    /// @param pool The DEX pool address to fetch prices from
     /// @param enabled Whether deviation monitoring is enabled for this token
     struct DeviationConfig {
         uint8 deviation;
-        DEX dex;
-        address pool;
         bool enabled;
     }
 
@@ -59,9 +44,6 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Maximum allowed price deviation in percentage (e.g., 10 = 10%)
     uint8 public constant MAX_DEVIATION = 100;
 
-    /// @notice Scale for 18 decimal calculations
-    uint8 public constant EXP_SCALE = 18;
-
     /// @notice Address of the Core Pool Comptroller
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     ICorePoolComptroller public immutable CORE_POOL_COMPTROLLER;
@@ -69,6 +51,10 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Resilient Oracle for getting reference prices
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     ResilientOracleInterface public immutable RESILIENT_ORACLE;
+
+    /// @notice Sentinel Oracle for getting DEX prices
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    OracleInterface public immutable SENTINEL_ORACLE;
 
     /// @notice Mapping of token addresses to their DEX configuration
     mapping(address => DeviationConfig) public tokenConfigs;
@@ -132,15 +118,6 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Thrown when a zero address is provided
     error ZeroAddress();
 
-    /// @notice Thrown when an invalid pool address is provided
-    error InvalidPool();
-
-    /// @notice Thrown when an unsupported DEX type is used
-    error UnsupportedDEX();
-
-    /// @notice Thrown when price calculation fails
-    error PriceCalculationError();
-
     /// @notice Thrown when caller is not an authorized keeper
     error UnauthorizedKeeper();
 
@@ -162,9 +139,15 @@ contract PriceDeviationSentinel is AccessControlledV8 {
     /// @notice Constructor for PriceDeviationSentinel
     /// @param corePoolComptroller_ Address of the core pool comptroller
     /// @param resilientOracle_ Address of the resilient oracle
-    constructor(ICorePoolComptroller corePoolComptroller_, ResilientOracleInterface resilientOracle_) {
+    /// @param sentinelOracle_ Address of the sentinel oracle
+    constructor(
+        ICorePoolComptroller corePoolComptroller_,
+        ResilientOracleInterface resilientOracle_,
+        OracleInterface sentinelOracle_
+    ) {
         CORE_POOL_COMPTROLLER = corePoolComptroller_;
         RESILIENT_ORACLE = resilientOracle_;
+        SENTINEL_ORACLE = sentinelOracle_;
 
         // Note that the contract is upgradeable. Use initialize() or reinitializers
         // to set the state variables.
@@ -191,12 +174,11 @@ contract PriceDeviationSentinel is AccessControlledV8 {
 
     /// @notice Set deviation configuration for a token
     /// @param token Address of the token
-    /// @param config Deviation configuration containing threshold, DEX type, pool address, and enabled status
+    /// @param config Deviation configuration containing threshold and enabled status
     function setTokenConfig(address token, DeviationConfig calldata config) external {
-        _checkAccessAllowed("setTokenConfig(address,(uint8,uint8,address,bool))");
+        _checkAccessAllowed("setTokenConfig(address,(uint8,bool))");
 
         if (token == address(0)) revert ZeroAddress();
-        if (config.pool == address(0)) revert ZeroAddress();
         if (config.deviation == 0) revert ZeroDeviation();
         if (config.deviation > MAX_DEVIATION) revert ExceedsMaxDeviation();
 
@@ -213,7 +195,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         if (token == address(0)) revert ZeroAddress();
 
         DeviationConfig storage config = tokenConfigs[token];
-        if (config.pool == address(0)) revert MarketNotConfigured();
+        if (config.deviation == 0) revert MarketNotConfigured();
 
         config.enabled = enabled;
         emit TokenMonitoringStatusChanged(token, enabled);
@@ -225,24 +207,24 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         address underlyingToken = market.underlying();
         DeviationConfig memory config = tokenConfigs[underlyingToken];
 
-        if (config.pool == address(0)) revert MarketNotConfigured();
+        if (config.deviation == 0) revert MarketNotConfigured();
         if (!config.enabled) revert TokenMonitoringDisabled();
 
-        (bool hasDeviation, uint256 oraclePrice, uint256 dexPrice, ) = checkPriceDeviation(market);
+        (bool hasDeviation, uint256 oraclePrice, uint256 sentinelPrice, ) = checkPriceDeviation(market);
 
         MarketState storage state = marketStates[address(market)];
 
         if (hasDeviation) {
-            if (dexPrice > oraclePrice) {
+            if (sentinelPrice > oraclePrice) {
                 // Early return if borrow is already paused
                 if (state.borrowPaused) return;
-                
+
                 _pauseBorrow(market, IComptroller.Action.BORROW);
                 state.borrowPaused = true;
             } else {
                 // Early return if CF is already modified and supply is already paused
                 if (state.cfModified && state.supplyPaused) return;
-                
+
                 _setCollateralFactorToZero(market);
                 _pauseSupply(market, IComptroller.Action.MINT);
                 state.cfModified = true;
@@ -266,71 +248,37 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         }
     }
 
-    /// @notice Check if there is a price deviation between DEX and oracle for a market
+    /// @notice Check if there is a price deviation between resilient oracle and sentinel oracle for a market
     /// @param market The vToken market to check
     /// @return hasDeviation True if deviation exceeds configured threshold
     /// @return oraclePrice The price from resilient oracle
-    /// @return dexPrice The price from DEX
+    /// @return sentinelPrice The price from sentinel oracle
     /// @return deviationPercent The percentage deviation (scaled by 100)
     function checkPriceDeviation(
         IVToken market
-    ) public view returns (bool hasDeviation, uint256 oraclePrice, uint256 dexPrice, uint256 deviationPercent) {
+    ) public view returns (bool hasDeviation, uint256 oraclePrice, uint256 sentinelPrice, uint256 deviationPercent) {
         address underlyingToken = market.underlying();
         DeviationConfig memory config = tokenConfigs[underlyingToken];
 
-        uint256 oraclePriceRaw = RESILIENT_ORACLE.getPrice(underlyingToken);
-        dexPrice = getDexPrice(config, underlyingToken);
+        oraclePrice = RESILIENT_ORACLE.getPrice(underlyingToken);
+        sentinelPrice = SENTINEL_ORACLE.getPrice(underlyingToken);
 
-        if (oraclePriceRaw == 0) {
+        if (oraclePrice == 0 || sentinelPrice == 0) {
             hasDeviation = true;
             deviationPercent = type(uint256).max;
-            oraclePrice = 0;
-            return (hasDeviation, oraclePrice, dexPrice, deviationPercent);
+            return (hasDeviation, oraclePrice, sentinelPrice, deviationPercent);
         }
 
-        uint8 tokenDecimals = IERC20Metadata(underlyingToken).decimals();
-        uint8 oracleDecimals = 36 - tokenDecimals;
-
-        if (oracleDecimals > EXP_SCALE) {
-            oraclePrice = oraclePriceRaw / (10 ** (oracleDecimals - EXP_SCALE));
-        } else if (oracleDecimals < EXP_SCALE) {
-            oraclePrice = oraclePriceRaw * (10 ** (EXP_SCALE - oracleDecimals));
-        } else {
-            oraclePrice = oraclePriceRaw;
-        }
-
+        // Both prices are already in (36 - tokenDecimals) format, so we can compare directly
         uint256 priceDiff;
-        if (dexPrice > oraclePrice) {
-            priceDiff = dexPrice - oraclePrice;
+        if (sentinelPrice > oraclePrice) {
+            priceDiff = sentinelPrice - oraclePrice;
         } else {
-            priceDiff = oraclePrice - dexPrice;
+            priceDiff = oraclePrice - sentinelPrice;
         }
 
         deviationPercent = (priceDiff * 100) / oraclePrice;
         hasDeviation = deviationPercent >= config.deviation;
-    }
-
-    /// @notice Get USD price of a token from DEX using stored configuration
-    /// @param token Token address to get price for
-    /// @return price USD price in 18 decimals
-    function getDexPrice(address token) public view returns (uint256 price) {
-        DeviationConfig memory config = tokenConfigs[token];
-        if (config.pool == address(0)) revert MarketNotConfigured();
-        return getDexPrice(config, token);
-    }
-
-    /// @notice Get USD price of a token from DEX
-    /// @param config Deviation configuration containing DEX type and pool info
-    /// @param token Token address to get price for
-    /// @return price USD price in 18 decimals
-    function getDexPrice(DeviationConfig memory config, address token) public view returns (uint256 price) {
-        if (config.dex == DEX.UNISWAP_V3) {
-            return _getUniswapV3Price(config.pool, token);
-        } else if (config.dex == DEX.PANCAKESWAP_V3) {
-            return _getPancakeSwapV3Price(config.pool, token);
-        } else {
-            revert UnsupportedDEX();
-        }
     }
 
     /// @notice Pause borrow action for a market
@@ -487,92 +435,5 @@ contract PriceDeviationSentinel is AccessControlledV8 {
             state.originalLT = 0;
             state.cfModified = false;
         }
-    }
-
-    /// @notice Get token price from Uniswap V3 pool
-    /// @param pool Uniswap V3 pool address
-    /// @param token Target token address
-    /// @return price USD price in 18 decimals
-    function _getUniswapV3Price(address pool, address token) internal view returns (uint256 price) {
-        return _getV3StylePrice(pool, token, DEX.UNISWAP_V3);
-    }
-
-    /// @notice Get token price from PancakeSwap V3 pool
-    /// @param pool PancakeSwap V3 pool address
-    /// @param token Target token address
-    /// @return price USD price in 18 decimals
-    function _getPancakeSwapV3Price(address pool, address token) internal view returns (uint256 price) {
-        return _getV3StylePrice(pool, token, DEX.PANCAKESWAP_V3);
-    }
-
-    /// @notice Generic function to get token price from any V3-style DEX pool
-    /// @dev Uses the appropriate interface based on the DEX type
-    /// @param pool The DEX pool address
-    /// @param token Target token address
-    /// @param dexType The type of DEX (UNISWAP_V3 or PANCAKESWAP_V3)
-    /// @return price USD price in 18 decimals
-    function _getV3StylePrice(address pool, address token, DEX dexType) internal view returns (uint256 price) {
-        if (pool == address(0)) revert InvalidPool();
-
-        address token0;
-        address token1;
-        uint160 sqrtPriceX96;
-
-        if (dexType == DEX.UNISWAP_V3) {
-            IUniswapV3Pool v3Pool = IUniswapV3Pool(pool);
-            token0 = v3Pool.token0();
-            token1 = v3Pool.token1();
-            (sqrtPriceX96, , , , , , ) = v3Pool.slot0();
-        } else if (dexType == DEX.PANCAKESWAP_V3) {
-            IPancakeV3Pool v3Pool = IPancakeV3Pool(pool);
-            token0 = v3Pool.token0();
-            token1 = v3Pool.token1();
-            (sqrtPriceX96, , , , , , ) = v3Pool.slot0();
-        } else {
-            revert UnsupportedDEX();
-        }
-        uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, FixedPoint96.Q96);
-
-        address targetToken = token;
-        address referenceToken;
-        bool targetIsToken0;
-
-        if (token == token0) {
-            targetIsToken0 = true;
-            referenceToken = token1;
-        } else if (token == token1) {
-            targetIsToken0 = false;
-            referenceToken = token0;
-        } else {
-            revert InvalidPool();
-        }
-
-        uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
-        uint8 targetDecimals = IERC20Metadata(targetToken).decimals();
-        uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
-        uint8 referencePriceDecimals = 36 - referenceDecimals;
-
-        uint256 targetTokensPerReferenceToken;
-
-        if (targetIsToken0) {
-            targetTokensPerReferenceToken = FullMath.mulDiv(FixedPoint96.Q96 * (10 ** EXP_SCALE), 1, priceX96);
-        } else {
-            targetTokensPerReferenceToken = FullMath.mulDiv(priceX96 * (10 ** EXP_SCALE), 1, FixedPoint96.Q96);
-        }
-
-        uint256 normalizedReferencePrice;
-        if (referencePriceDecimals > EXP_SCALE) {
-            normalizedReferencePrice = referencePrice / (10 ** (referencePriceDecimals - EXP_SCALE));
-        } else if (referencePriceDecimals < EXP_SCALE) {
-            normalizedReferencePrice = referencePrice * (10 ** (EXP_SCALE - referencePriceDecimals));
-        } else {
-            normalizedReferencePrice = referencePrice;
-        }
-
-        price = FullMath.mulDiv(
-            normalizedReferencePrice * (10 ** targetDecimals),
-            (10 ** EXP_SCALE),
-            targetTokensPerReferenceToken * (10 ** referenceDecimals)
-        );
     }
 }

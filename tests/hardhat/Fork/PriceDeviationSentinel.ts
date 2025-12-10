@@ -11,9 +11,12 @@ import {
   ComptrollerMock__factory,
   IAccessControlManagerV8,
   IAccessControlManagerV8__factory,
+  PancakeSwapOracle,
   PriceDeviationSentinel,
   ResilientOracle,
   ResilientOracle__factory,
+  SentinelOracle,
+  UniswapOracle,
 } from "../../../typechain";
 import { forking, initMainnetUser } from "./utils";
 
@@ -36,6 +39,9 @@ type SetupMarketFixture = {
   coreComptroller: ComptrollerMock;
   chainlinkOracle: ChainlinkOracle;
   resilientOracle: ResilientOracle;
+  sentinelOracle: SentinelOracle;
+  pancakeSwapOracle: PancakeSwapOracle;
+  uniswapOracle: UniswapOracle;
 };
 
 const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
@@ -44,10 +50,30 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   const chainlinkOracle = ChainlinkOracle__factory.connect(CHAINLINK_ORACLE, timelock);
   const resilientOracle = ResilientOracle__factory.connect(ORACLE, timelock);
 
+  // Deploy PancakeSwap Oracle
+  const pancakeSwapOracleFactory = await ethers.getContractFactory("PancakeSwapOracle");
+  const pancakeSwapOracle = (await upgrades.deployProxy(pancakeSwapOracleFactory, [ACM], {
+    constructorArgs: [ORACLE],
+    unsafeAllow: ["constructor", "internal-function-storage"],
+  })) as PancakeSwapOracle;
+
+  // Deploy Uniswap Oracle
+  const uniswapOracleFactory = await ethers.getContractFactory("UniswapOracle");
+  const uniswapOracle = (await upgrades.deployProxy(uniswapOracleFactory, [ACM], {
+    constructorArgs: [ORACLE],
+    unsafeAllow: ["constructor", "internal-function-storage"],
+  })) as UniswapOracle;
+
+  // Deploy Sentinel Oracle
+  const sentinelOracleFactory = await ethers.getContractFactory("SentinelOracle");
+  const sentinelOracle = (await upgrades.deployProxy(sentinelOracleFactory, [ACM], {
+    unsafeAllow: ["constructor", "internal-function-storage"],
+  })) as SentinelOracle;
+
+  // Deploy Price Deviation Sentinel
   const priceDeviationSentinelFactory = await ethers.getContractFactory("PriceDeviationSentinel");
   const priceDeviationSentinel = await upgrades.deployProxy(priceDeviationSentinelFactory, [ACM], {
-    constructorArgs: [COMPTROLLER, ORACLE],
-    // To allow the usage constructor & internal functions that might change storage
+    constructorArgs: [COMPTROLLER, ORACLE, sentinelOracle.address],
     unsafeAllow: ["constructor", "internal-function-storage"],
   });
 
@@ -68,14 +94,19 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
     );
   await acm
     .connect(timelock)
-    .giveCallPermission(
-      priceDeviationSentinel.address,
-      "setTokenConfig(address,(uint8,uint8,address,bool))",
-      NORMAL_TIMELOCK,
-    );
+    .giveCallPermission(priceDeviationSentinel.address, "setTokenConfig(address,(uint8,bool))", NORMAL_TIMELOCK);
   await acm
     .connect(timelock)
     .giveCallPermission(priceDeviationSentinel.address, "setTrustedKeeper(address,bool)", NORMAL_TIMELOCK);
+  await acm
+    .connect(timelock)
+    .giveCallPermission(sentinelOracle.address, "setTokenOracleConfig(address,address)", NORMAL_TIMELOCK);
+  await acm
+    .connect(timelock)
+    .giveCallPermission(pancakeSwapOracle.address, "setPoolConfig(address,address)", NORMAL_TIMELOCK);
+  await acm
+    .connect(timelock)
+    .giveCallPermission(uniswapOracle.address, "setPoolConfig(address,address)", NORMAL_TIMELOCK);
 
   await priceDeviationSentinel.connect(timelock).setTrustedKeeper(timelock.address, true);
 
@@ -85,6 +116,9 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
     coreComptroller,
     chainlinkOracle,
     resilientOracle,
+    sentinelOracle,
+    pancakeSwapOracle,
+    uniswapOracle,
   };
 };
 
@@ -97,47 +131,66 @@ if (FORK_MAINNET) {
     let coreComptroller: ComptrollerMock;
     let chainlinkOracle: ChainlinkOracle;
     let resilientOracle: ResilientOracle;
+    let sentinelOracle: SentinelOracle;
+    let pancakeSwapOracle: PancakeSwapOracle;
+    let uniswapOracle: UniswapOracle;
 
     describe("PriceDeviationSentinel", () => {
       beforeEach(async () => {
-        ({ priceDeviationSentinel, timelock, coreComptroller, chainlinkOracle, resilientOracle } = await loadFixture(
-          setupMarketFixture,
-        ));
+        ({
+          priceDeviationSentinel,
+          timelock,
+          coreComptroller,
+          chainlinkOracle,
+          resilientOracle,
+          sentinelOracle,
+          pancakeSwapOracle,
+          uniswapOracle,
+        } = await loadFixture(setupMarketFixture));
+
+        // Configure PancakeSwap pools
+        await pancakeSwapOracle.connect(timelock).setPoolConfig(TRX, "0xF683113764E4499c473aCd38Fc4b37E71554E4aD");
+        await pancakeSwapOracle.connect(timelock).setPoolConfig(USDT, "0x172fcD41E0913e95784454622d1c3724f546f849");
+
+        // Configure Uniswap pools
+        await uniswapOracle.connect(timelock).setPoolConfig(BTCB, "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD");
+        await uniswapOracle.connect(timelock).setPoolConfig(WBNB, "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD");
+
+        // Configure SentinelOracle to use appropriate DEX oracles
+        await sentinelOracle.connect(timelock).setTokenOracleConfig(TRX, pancakeSwapOracle.address);
+        await sentinelOracle.connect(timelock).setTokenOracleConfig(USDT, pancakeSwapOracle.address);
+        await sentinelOracle.connect(timelock).setTokenOracleConfig(BTCB, uniswapOracle.address);
+        await sentinelOracle.connect(timelock).setTokenOracleConfig(WBNB, uniswapOracle.address);
+        // Configure PriceDeviationSentinel with simplified configs
         await priceDeviationSentinel.connect(timelock).setTokenConfig(TRX, {
           deviation: 10,
-          dex: 1,
-          pool: "0xF683113764E4499c473aCd38Fc4b37E71554E4aD",
           enabled: true,
         });
 
         await priceDeviationSentinel.connect(timelock).setTokenConfig(USDT, {
           deviation: 10,
-          dex: 1,
-          pool: "0x172fcD41E0913e95784454622d1c3724f546f849",
           enabled: true,
         });
 
         await priceDeviationSentinel.connect(timelock).setTokenConfig(BTCB, {
           deviation: 10,
-          dex: 0,
-          pool: "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD",
           enabled: true,
         });
       });
 
-      describe("check DEX prices", () => {
-        it("check TRX price", async () => {
-          const price = await priceDeviationSentinel["getDexPrice(address)"](TRX);
-          expect(price).to.be.equal(parseUnits("0.287615712885971478", 18));
+      describe("check Sentinel Oracle prices", () => {
+        it("check TRX price from PancakeSwap", async () => {
+          const price = await sentinelOracle.getPrice(TRX);
+          expect(price).to.be.equal(parseUnits("0.287615712885971478", 30));
         });
 
-        it("check USDT price", async () => {
-          const price = await priceDeviationSentinel["getDexPrice(address)"](USDT);
+        it("check USDT price from PancakeSwap", async () => {
+          const price = await sentinelOracle.getPrice(USDT);
           expect(price).to.be.equal(parseUnits("0.999676428802385649", 18));
         });
 
-        it("check BTCB price", async () => {
-          const price = await priceDeviationSentinel["getDexPrice(address)"](BTCB);
+        it("check BTCB price from Uniswap", async () => {
+          const price = await sentinelOracle.getPrice(BTCB);
           expect(price).to.be.equal(parseUnits("91784.949423700465674501", 18));
         });
       });
@@ -146,8 +199,6 @@ if (FORK_MAINNET) {
         beforeEach(async () => {
           await priceDeviationSentinel.connect(timelock).setTokenConfig(WBNB, {
             deviation: 10,
-            dex: 0,
-            pool: "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD",
             enabled: true,
           });
 
@@ -159,7 +210,7 @@ if (FORK_MAINNET) {
           });
         });
 
-        it("WBNB dex price lower than chainlink price", async () => {
+        it("WBNB sentinel price lower than resilient oracle price", async () => {
           await chainlinkOracle.connect(timelock).setDirectPrice(WBNB, parseUnits("3000", 18));
 
           let isDeviated = await priceDeviationSentinel.checkPriceDeviation(vWBNB);
@@ -187,7 +238,7 @@ if (FORK_MAINNET) {
           expect(isPaused).to.be.equal(false);
         });
 
-        it("WBNB dex price higher than chainlink price", async () => {
+        it("WBNB sentinel price higher than resilient oracle price", async () => {
           await chainlinkOracle.connect(timelock).setDirectPrice(WBNB, parseUnits("300", 18));
 
           const isDeviated = await priceDeviationSentinel.checkPriceDeviation(vWBNB);
