@@ -1411,7 +1411,7 @@ if (FORK_MAINNET) {
           expect(vWBNBBorrowAfterExit).to.be.closeTo(0, parseUnits("0.001", 18));
         });
 
-        it("should revert when insufficient collateral to repay flash loan", async function () {
+        it("should cap redeem to user collateral balance when flash loan exceeds available collateral", async function () {
           const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
           await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
 
@@ -1426,14 +1426,16 @@ if (FORK_MAINNET) {
             .connect(vWBNB_HOLDER_SIGNER)
             .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoanEnter);
 
-          // Try to exit with a much larger flash loan than we can repay
-          const excessiveFlashLoanAmount = parseUnits("100", 18);
+          const vWBNB = VToken__factory.connect(vWBNB_ADDRESS, vWBNB_HOLDER_SIGNER);
+          const borrowBalanceAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
-          await expect(
-            leverageStrategiesManager
-              .connect(vWBNB_HOLDER_SIGNER)
-              .exitSingleAssetLeverage(vWBNB_ADDRESS, excessiveFlashLoanAmount),
-          ).to.be.reverted; // Will revert during redeem due to insufficient collateral
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, borrowBalanceAfterEnter);
+
+          const borrowBalanceAfterExit = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          expect(borrowBalanceAfterExit).to.be.closeTo(0, parseUnits("0.001", 18));
         });
 
         it("should verify account is safe after exiting leveraged position", async function () {
@@ -1808,7 +1810,7 @@ if (FORK_MAINNET) {
           ).to.be.reverted;
         });
 
-        it("should revert when flash loan amount exceeds redeemable collateral", async function () {
+        it("should handle exit when flash loan amount exceeds redeemable collateral by capping redeem", async function () {
           const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
           await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
 
@@ -1822,14 +1824,16 @@ if (FORK_MAINNET) {
             .connect(vWBNB_HOLDER_SIGNER)
             .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
 
-          // Flash loan amount far exceeds available collateral to redeem
-          const excessiveExitAmount = parseUnits("10", 18);
+          const vWBNB = VToken__factory.connect(vWBNB_ADDRESS, vWBNB_HOLDER_SIGNER);
+          const borrowBalanceAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
-          await expect(
-            leverageStrategiesManager
-              .connect(vWBNB_HOLDER_SIGNER)
-              .exitSingleAssetLeverage(vWBNB_ADDRESS, excessiveExitAmount),
-          ).to.be.revertedWith("math error");
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, borrowBalanceAfterEnter);
+
+          const borrowBalanceAfterExit = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          expect(borrowBalanceAfterExit).to.be.closeTo(0, parseUnits("0.001", 18));
         });
       });
 
