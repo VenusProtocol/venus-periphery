@@ -91,9 +91,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkUserDelegated();
 
         _accrueInterest(_collateralMarket);
-        _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
+        _checkAccountSafe(msg.sender);
+
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
 
         operationInitiator = msg.sender;
@@ -136,6 +137,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         bytes calldata _swapData
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
+        if (_collateralMarket == _borrowedMarket) revert IdenticalMarkets();
         _checkMarketSupported(_collateralMarket);
         _checkMarketSupported(_borrowedMarket);
 
@@ -143,9 +145,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         _accrueInterest(_collateralMarket);
         _accrueInterest(_borrowedMarket);
-        _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
+        _checkAccountSafe(msg.sender);
+
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
         
         operationInitiator = msg.sender;
@@ -191,6 +194,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         bytes calldata _swapData
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
+        if (_collateralMarket == _borrowedMarket) revert IdenticalMarkets();
         _checkMarketSupported(_collateralMarket);
         _checkMarketSupported(_borrowedMarket);
         
@@ -198,9 +202,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         
         _accrueInterest(_collateralMarket);
         _accrueInterest(_borrowedMarket);
-        _checkAccountSafe(msg.sender);
 
         _validateAndEnterMarket(msg.sender, _collateralMarket);
+        _checkAccountSafe(msg.sender);
+
         _transferSeedAmountFromUser(_borrowedMarket, msg.sender, _borrowedAmountSeed);
 
         operationInitiator = msg.sender;
@@ -246,6 +251,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         bytes calldata _swapData 
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
+        if (_collateralMarket == _borrowedMarket) revert IdenticalMarkets();
         _checkMarketSupported(_collateralMarket);
         _checkMarketSupported(_borrowedMarket);
 
@@ -567,8 +573,10 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      *         to handle cases where UI flash loans slightly more than current debt
      *      2. Repays user's debt (up to actual debt amount) in the market
      *      3. Calculates redeem amount accounting for treasury fee (if any)
-     *      4. Redeems collateral needed to repay flash loan (flashLoanAmount + fees)
-     *      5. Approves the collateral asset for repayment to the flash loan
+     *      4. Caps redeem amount to user's actual collateral balance to prevent revert
+     *         when user entered with zero seed (collateral equals borrowed amount)
+     *      5. Redeems collateral (up to user's balance) to repay flash loan
+     *      6. Approves the collateral asset for repayment to the flash loan
      * @param onBehalf Address on whose behalf the operation is performed
      * @param market The vToken market for both collateral and borrowed assets
      * @param flashloanedCollateralAmount The amount borrowed via flash loan for debt repayment
@@ -597,6 +605,11 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         uint256 redeemAmount = treasuryPercent > 0 
             ? (flashLoanRepayAmount * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) / (MANTISSA_ONE - treasuryPercent)
             : flashLoanRepayAmount;
+
+        uint256 userCollateralBalance = market.balanceOfUnderlying(onBehalf);
+        if (redeemAmount > userCollateralBalance) {
+            redeemAmount = userCollateralBalance;
+        }
 
         err = market.redeemUnderlyingBehalf(onBehalf, redeemAmount);
         if (err != SUCCESS) {
