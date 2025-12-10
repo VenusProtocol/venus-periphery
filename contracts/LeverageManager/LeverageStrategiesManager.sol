@@ -509,9 +509,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      *      3. Calculates redeem amount accounting for treasury fee (if any)
      *      4. Redeems specified amount of collateral from the Venus market
      *      5. Swaps actual received collateral (after treasury fee) for borrowed assets
-     *      6. Validates total borrowed asset balance (swap output + excess flash loan funds)
-     *         is sufficient to repay flash loan, then approves repayment
-     *
+     *      6. Uses swap output plus any leftover flash loan funds to repay flash loan
      * @param onBehalf Address on whose behalf the operation is performed
      * @param borrowMarket The vToken market from which assets were borrowed via flash loan
      * @param borrowedAssetAmountToRepayFromFlashLoan The amount borrowed via flash loan for debt repayment
@@ -557,15 +555,15 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
 
-        _performSwap(collateralAsset, collateralAsset.balanceOf(address(this)), borrowedAsset, minAmountOutAfterSwap, swapCallData);
+        uint256 swappedBorrowedAmountOut = _performSwap(collateralAsset, collateralAsset.balanceOf(address(this)), borrowedAsset, minAmountOutAfterSwap, swapCallData);
 
         flashLoanRepayAmount = borrowedAssetAmountToRepayFromFlashLoan + borrowedAssetFees;
 
-        if (borrowedAsset.balanceOf(address(this)) < flashLoanRepayAmount) {
+        if (swappedBorrowedAmountOut < flashLoanRepayAmount) {
             revert InsufficientFundsToRepayFlashloan();
         }
 
-        borrowedAsset.forceApprove(address(borrowMarket), flashLoanRepayAmount);
+       borrowedAsset.forceApprove(address(borrowMarket), flashLoanRepayAmount);
     }
 
     /**
