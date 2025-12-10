@@ -8,13 +8,13 @@ import { ResilientOracleInterface, OracleInterface } from "@venusprotocol/oracle
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
 /**
- * @title PriceDeviationSentinel
+ * @title DeviationSentinel
  * @author Venus
  * @notice Sentinel that compares ResilientOracle and SentinelOracle prices (via keeper) and pauses
  *         specific actions (borrow, mint, collateral factor) per market when
  *         large deviations are detected.
  */
-contract PriceDeviationSentinel is AccessControlledV8 {
+contract DeviationSentinel is AccessControlledV8 {
     /// @notice Configuration for price deviation monitoring
     /// @param deviation Maximum allowed deviation percentage (e.g., 10 = 10%)
     /// @param enabled Whether deviation monitoring is enabled for this token
@@ -136,7 +136,7 @@ contract PriceDeviationSentinel is AccessControlledV8 {
         _;
     }
 
-    /// @notice Constructor for PriceDeviationSentinel
+    /// @notice Constructor for DeviationSentinel
     /// @param corePoolComptroller_ Address of the core pool comptroller
     /// @param resilientOracle_ Address of the resilient oracle
     /// @param sentinelOracle_ Address of the sentinel oracle
