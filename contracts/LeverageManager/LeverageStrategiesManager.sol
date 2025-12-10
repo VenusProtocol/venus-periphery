@@ -3,7 +3,10 @@ pragma solidity 0.8.28;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import {
+    SafeERC20Upgradeable,
+    IERC20Upgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 import { IVToken, IComptroller, IFlashLoanReceiver } from "../Interfaces.sol";
 import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
@@ -15,7 +18,12 @@ import { ILeverageStrategiesManager } from "./ILeverageStrategiesManager.sol";
  * @author Venus Protocol
  * @notice Contract for managing leveraged positions using flash loans and token swaps
  */
-contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, IFlashLoanReceiver, ILeverageStrategiesManager {
+contract LeverageStrategiesManager is
+    Ownable2StepUpgradeable,
+    ReentrancyGuardUpgradeable,
+    IFlashLoanReceiver,
+    ILeverageStrategiesManager
+{
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @dev Success return value for VToken operations (mint, borrow, repay, redeem)
@@ -26,7 +34,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
     /// @notice The Venus comptroller contract for market interactions and flash loans execution
     IComptroller public immutable COMPTROLLER;
-    
+
     /// @notice The swap helper contract for executing token swaps during leverage operations
     SwapHelper public immutable swapHelper;
 
@@ -38,16 +46,16 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
     /// @dev Transient (EIP-1153): Cleared at transaction end. Stores msg.sender for flash loan callback context.
     address transient operationInitiator;
-    
+
     /// @dev Transient (EIP-1153): Cleared at transaction end. Stores collateral market for flash loan callback.
     IVToken transient collateralMarket;
-    
+
     /// @dev Transient (EIP-1153): Cleared at transaction end. Stores collateral seed (enter) or redeem amount (exit).
     uint256 transient collateralAmount;
-    
+
     /// @dev Transient (EIP-1153): Cleared at transaction end. Stores borrowed amount seed for enterLeverageFromBorrow.
     uint256 transient borrowedAmountSeed;
-    
+
     /// @dev Transient (EIP-1153): Cleared at transaction end. Stores minimum expected output after swap.
     uint256 transient minAmountOutAfterSwap;
 
@@ -60,7 +68,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:oz-upgrades-unsafe-allow constructor
      */
     constructor(IComptroller _comptroller, SwapHelper _swapHelper, IVToken _vBNB) {
-        if(address(_comptroller) == address(0) || address(_swapHelper) == address(0) || address(_vBNB) == address(0)) {
+        if (address(_comptroller) == address(0) || address(_swapHelper) == address(0) || address(_vBNB) == address(0)) {
             revert ZeroAddress();
         }
 
@@ -126,7 +134,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _transferDustToInitiator(_collateralMarket);
     }
 
-
     /// @inheritdoc ILeverageStrategiesManager
     function enterLeverage(
         IVToken _collateralMarket,
@@ -150,7 +157,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         _checkAccountSafe(msg.sender);
 
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
-        
+
         operationInitiator = msg.sender;
         collateralMarket = _collateralMarket;
         collateralAmount = _collateralAmountSeed;
@@ -197,9 +204,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         if (_collateralMarket == _borrowedMarket) revert IdenticalMarkets();
         _checkMarketSupported(_collateralMarket);
         _checkMarketSupported(_borrowedMarket);
-        
+
         _checkUserDelegated();
-        
+
         _accrueInterest(_collateralMarket);
         _accrueInterest(_borrowedMarket);
 
@@ -248,7 +255,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         IVToken _borrowedMarket,
         uint256 _borrowedAmountToFlashLoan,
         uint256 _minAmountOutAfterSwap,
-        bytes calldata _swapData 
+        bytes calldata _swapData
     ) external {
         if (_borrowedAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
         if (_collateralMarket == _borrowedMarket) revert IdenticalMarkets();
@@ -291,10 +298,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /// @inheritdoc ILeverageStrategiesManager
-    function exitSingleAssetLeverage(
-        IVToken _collateralMarket,
-        uint256 _collateralAmountToFlashLoan
-    ) external {
+    function exitSingleAssetLeverage(IVToken _collateralMarket, uint256 _collateralAmountToFlashLoan) external {
         if (_collateralAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
         _checkMarketSupported(_collateralMarket);
         _checkUserDelegated();
@@ -318,11 +322,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         _checkAccountSafe(msg.sender);
 
-        emit SingleAssetLeverageExited(
-            msg.sender,
-            _collateralMarket,
-            _collateralAmountToFlashLoan
-        );
+        emit SingleAssetLeverageExited(msg.sender, _collateralMarket, _collateralAmountToFlashLoan);
 
         _transferDustToInitiator(_collateralMarket);
     }
@@ -369,19 +369,19 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         // This contract only supports single-market flash loans
         if (vTokens.length != 1 || amounts.length != 1 || premiums.length != 1) {
-            revert FlashLoanAssetOrAmountMismatch(); 
+            revert FlashLoanAssetOrAmountMismatch();
         }
 
         repayAmounts = new uint256[](1);
-        if(operationType == OperationType.ENTER_SINGLE_ASSET) {
+        if (operationType == OperationType.ENTER_SINGLE_ASSET) {
             repayAmounts[0] = _handleEnterSingleAsset(onBehalf, vTokens[0], amounts[0], premiums[0]);
-        } else if(operationType == OperationType.ENTER_COLLATERAL) {
+        } else if (operationType == OperationType.ENTER_COLLATERAL) {
             repayAmounts[0] = _handleEnterCollateral(onBehalf, vTokens[0], amounts[0], premiums[0], param);
-        } else if(operationType == OperationType.ENTER_BORROW) {
+        } else if (operationType == OperationType.ENTER_BORROW) {
             repayAmounts[0] = _handleEnterBorrow(onBehalf, vTokens[0], amounts[0], premiums[0], param);
-        } else if(operationType == OperationType.EXIT_COLLATERAL) {
-            repayAmounts[0] = _handleExitCollateral(onBehalf,vTokens[0], amounts[0], premiums[0], param);
-        } else if(operationType == OperationType.EXIT_SINGLE_ASSET) {
+        } else if (operationType == OperationType.EXIT_COLLATERAL) {
+            repayAmounts[0] = _handleExitCollateral(onBehalf, vTokens[0], amounts[0], premiums[0], param);
+        } else if (operationType == OperationType.EXIT_SINGLE_ASSET) {
             repayAmounts[0] = _handleExitSingleAsset(onBehalf, vTokens[0], amounts[0], premiums[0]);
         } else {
             revert InvalidExecuteOperation();
@@ -406,7 +406,12 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:error BorrowBehalfFailed if borrow behalf operation fails
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
      */
-    function _handleEnterSingleAsset(address onBehalf, IVToken market, uint256 flashloanedCollateralAmount, uint256 collateralAmountFees) internal returns (uint256 flashLoanRepayAmount) {
+    function _handleEnterSingleAsset(
+        address onBehalf,
+        IVToken market,
+        uint256 flashloanedCollateralAmount,
+        uint256 collateralAmountFees
+    ) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(market.underlying());
 
         uint256 totalCollateralAmountToMint = flashloanedCollateralAmount + collateralAmount;
@@ -438,15 +443,27 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:error TokenSwapCallFailed if token swap execution fails
      * @custom:error SlippageExceeded if collateral balance after swap is below minimum
      */
-    function _handleEnterCollateral(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 flashLoanRepayAmount) {
+    function _handleEnterCollateral(
+        address onBehalf,
+        IVToken borrowMarket,
+        uint256 borrowedAssetAmount,
+        uint256 borrowedAssetFees,
+        bytes calldata swapCallData
+    ) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
 
-        // Cache transient storage reads for variables used more than once to save gas 
+        // Cache transient storage reads for variables used more than once to save gas
         IVToken _collateralMarket = collateralMarket;
         uint256 _minAmountOutAfterSwap = minAmountOutAfterSwap;
 
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
-        uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, borrowedAssetAmount, collateralAsset, _minAmountOutAfterSwap, swapCallData);
+        uint256 swappedCollateralAmountOut = _performSwap(
+            borrowedAsset,
+            borrowedAssetAmount,
+            collateralAsset,
+            _minAmountOutAfterSwap,
+            swapCallData
+        );
 
         uint256 collateralAmountToMint = swappedCollateralAmountOut + collateralAmount;
         collateralAsset.forceApprove(address(_collateralMarket), collateralAmountToMint);
@@ -477,10 +494,16 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:error TokenSwapCallFailed if token swap execution fails
      * @custom:error SlippageExceeded if collateral balance after swap is below minimum
      */
-    function _handleEnterBorrow(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmount, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 flashLoanRepayAmount) {
+    function _handleEnterBorrow(
+        address onBehalf,
+        IVToken borrowMarket,
+        uint256 borrowedAssetAmount,
+        uint256 borrowedAssetFees,
+        bytes calldata swapCallData
+    ) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
 
-        // Cache transient storage reads for variables used more than once to save gas 
+        // Cache transient storage reads for variables used more than once to save gas
         IVToken _collateralMarket = collateralMarket;
         uint256 _minAmountOutAfterSwap = minAmountOutAfterSwap;
 
@@ -488,7 +511,13 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
 
         uint256 totalBorrowedAmountToSwap = borrowedAmountSeed + borrowedAssetAmount;
 
-        uint256 swappedCollateralAmountOut = _performSwap(borrowedAsset, totalBorrowedAmountToSwap, collateralAsset, _minAmountOutAfterSwap, swapCallData);
+        uint256 swappedCollateralAmountOut = _performSwap(
+            borrowedAsset,
+            totalBorrowedAmountToSwap,
+            collateralAsset,
+            _minAmountOutAfterSwap,
+            swapCallData
+        );
 
         collateralAsset.forceApprove(address(_collateralMarket), swappedCollateralAmountOut);
 
@@ -524,12 +553,20 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:error SlippageExceeded if swap output is below minimum required
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
      */
-    function _handleExitCollateral(address onBehalf, IVToken borrowMarket, uint256 borrowedAssetAmountToRepayFromFlashLoan, uint256 borrowedAssetFees, bytes calldata swapCallData) internal returns (uint256 flashLoanRepayAmount) {
+    function _handleExitCollateral(
+        address onBehalf,
+        IVToken borrowMarket,
+        uint256 borrowedAssetAmountToRepayFromFlashLoan,
+        uint256 borrowedAssetFees,
+        bytes calldata swapCallData
+    ) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
 
         {
             uint256 borrowedTotalDebtAmount = borrowMarket.borrowBalanceCurrent(onBehalf);
-            uint256 repayAmount = borrowedAssetAmountToRepayFromFlashLoan > borrowedTotalDebtAmount ? borrowedTotalDebtAmount : borrowedAssetAmountToRepayFromFlashLoan;
+            uint256 repayAmount = borrowedAssetAmountToRepayFromFlashLoan > borrowedTotalDebtAmount
+                ? borrowedTotalDebtAmount
+                : borrowedAssetAmountToRepayFromFlashLoan;
 
             borrowedAsset.forceApprove(address(borrowMarket), repayAmount);
             uint256 err = borrowMarket.repayBorrowBehalf(onBehalf, repayAmount);
@@ -539,14 +576,15 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
             }
         }
 
-        // Cache transient storage reads for variables used more than once to save gas 
+        // Cache transient storage reads for variables used more than once to save gas
         IVToken _collateralMarket = collateralMarket;
         uint256 collateralAmountToRedeem = collateralAmount;
 
         {
             uint256 treasuryPercent = COMPTROLLER.treasuryPercent();
-            uint256 redeemAmount = treasuryPercent > 0 
-                ? (collateralAmountToRedeem * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) / (MANTISSA_ONE - treasuryPercent)
+            uint256 redeemAmount = treasuryPercent > 0
+                ? (collateralAmountToRedeem * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) /
+                    (MANTISSA_ONE - treasuryPercent)
                 : collateralAmountToRedeem;
 
             uint256 err = _collateralMarket.redeemUnderlyingBehalf(onBehalf, redeemAmount);
@@ -554,10 +592,16 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
                 revert RedeemBehalfFailed(err);
             }
         }
-        
+
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
 
-        _performSwap(collateralAsset, collateralAsset.balanceOf(address(this)), borrowedAsset, minAmountOutAfterSwap, swapCallData);
+        _performSwap(
+            collateralAsset,
+            collateralAsset.balanceOf(address(this)),
+            borrowedAsset,
+            minAmountOutAfterSwap,
+            swapCallData
+        );
 
         flashLoanRepayAmount = borrowedAssetAmountToRepayFromFlashLoan + borrowedAssetFees;
 
@@ -588,11 +632,18 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:error RedeemBehalfFailed if redeem operations fail
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
      */
-    function _handleExitSingleAsset(address onBehalf, IVToken market, uint256 flashloanedCollateralAmount, uint256 collateralAmountFees) internal returns (uint256 flashLoanRepayAmount) {
+    function _handleExitSingleAsset(
+        address onBehalf,
+        IVToken market,
+        uint256 flashloanedCollateralAmount,
+        uint256 collateralAmountFees
+    ) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(market.underlying());
 
         uint256 marketTotalDebtAmount = market.borrowBalanceCurrent(onBehalf);
-        uint256 repayAmount = flashloanedCollateralAmount > marketTotalDebtAmount ? marketTotalDebtAmount : flashloanedCollateralAmount;
+        uint256 repayAmount = flashloanedCollateralAmount > marketTotalDebtAmount
+            ? marketTotalDebtAmount
+            : flashloanedCollateralAmount;
 
         collateralAsset.forceApprove(address(market), repayAmount);
         uint256 err = market.repayBorrowBehalf(onBehalf, repayAmount);
@@ -604,8 +655,9 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         flashLoanRepayAmount = flashloanedCollateralAmount + collateralAmountFees;
 
         uint256 treasuryPercent = COMPTROLLER.treasuryPercent();
-        uint256 redeemAmount = treasuryPercent > 0 
-            ? (flashLoanRepayAmount * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) / (MANTISSA_ONE - treasuryPercent)
+        uint256 redeemAmount = treasuryPercent > 0
+            ? (flashLoanRepayAmount * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) /
+                (MANTISSA_ONE - treasuryPercent)
             : flashLoanRepayAmount;
 
         uint256 userCollateralBalance = market.balanceOfUnderlying(onBehalf);
@@ -638,20 +690,26 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:error TokenSwapCallFailed if the swap execution fails
      * @custom:error SlippageExceeded if the swap output is below the minimum required
      */
-    function _performSwap(IERC20Upgradeable tokenIn, uint256 amountIn, IERC20Upgradeable tokenOut, uint256 minAmountOut, bytes calldata param) internal returns (uint256 amountOut) {
+    function _performSwap(
+        IERC20Upgradeable tokenIn,
+        uint256 amountIn,
+        IERC20Upgradeable tokenOut,
+        uint256 minAmountOut,
+        bytes calldata param
+    ) internal returns (uint256 amountOut) {
         tokenIn.safeTransfer(address(swapHelper), amountIn);
 
         uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
 
-        (bool success,) = address(swapHelper).call(param);
-        if(!success) {
+        (bool success, ) = address(swapHelper).call(param);
+        if (!success) {
             revert TokenSwapCallFailed();
         }
 
         uint256 tokenOutBalanceAfter = tokenOut.balanceOf(address(this));
 
         amountOut = tokenOutBalanceAfter - tokenOutBalanceBefore;
-        if(amountOut < minAmountOut) {
+        if (amountOut < minAmountOut) {
             revert SlippageExceeded();
         }
 
@@ -668,7 +726,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:error TransferFromUserFailed if the transferred amount does not match the expected amount
      */
     function _transferSeedAmountFromUser(IVToken market, address user, uint256 amount) internal {
-        if(amount > 0) {
+        if (amount > 0) {
             IERC20Upgradeable token = IERC20Upgradeable(market.underlying());
             token.safeTransferFrom(user, address(this), amount);
         }
@@ -684,7 +742,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
         IERC20Upgradeable asset = IERC20Upgradeable(market.underlying());
 
         uint256 dustAmount = asset.balanceOf(address(this));
-        if(dustAmount > 0) {
+        if (dustAmount > 0) {
             // Cache transient storage read to save gas
             address _operationInitiator = operationInitiator;
             asset.safeTransfer(_operationInitiator, dustAmount);
@@ -704,7 +762,12 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
      * @custom:error BorrowBehalfFailed if borrow behalf operation fails
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds are available to repay the flash loan
      */
-    function _borrowAndRepayFlashLoanFee(address onBehalf, IVToken borrowMarket, IERC20Upgradeable borrowedAsset, uint256 borrowedAssetFees) internal returns (uint256 flashLoanRepayAmount) {
+    function _borrowAndRepayFlashLoanFee(
+        address onBehalf,
+        IVToken borrowMarket,
+        IERC20Upgradeable borrowedAsset,
+        uint256 borrowedAssetFees
+    ) internal returns (uint256 flashLoanRepayAmount) {
         flashLoanRepayAmount = borrowedAssetFees;
 
         uint256 marketBalanceBeforeBorrow = borrowedAsset.balanceOf(address(borrowMarket));
@@ -722,16 +785,6 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Checks if the caller has delegated this contract in the Comptroller
-     * @custom:error NotAnApprovedDelegate if caller has not approved this contract as delegate
-     */
-    function _checkUserDelegated() internal view {
-        if (!COMPTROLLER.approvedDelegates(msg.sender, address(this))) {
-            revert NotAnApprovedDelegate();
-        }
-    }
-
-    /**
      * @notice Accrues interest on a vToken market
      * @dev Must be called before safety checks to ensure borrow balances reflect accumulated interest
      * @param market The vToken market to accrue interest on
@@ -743,7 +796,31 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Checks if a `user` account is safe from liquidation 
+     * @notice Ensures the user has entered the market before operations
+     * @dev If user is not a member of market the function calls Comptroller to enter market on behalf of user
+     * @param user The account for which membership is validated/updated
+     * @param market The vToken market the user must enter
+     * @custom:error EnterMarketFailed when Comptroller.enterMarketBehalf returns a non-zero error code
+     */
+    function _validateAndEnterMarket(address user, IVToken market) internal {
+        if (!COMPTROLLER.checkMembership(user, market)) {
+            uint256 err = COMPTROLLER.enterMarketBehalf(user, address(market));
+            if (err != SUCCESS) revert EnterMarketFailed(err);
+        }
+    }
+
+    /**
+     * @notice Checks if the caller has delegated this contract in the Comptroller
+     * @custom:error NotAnApprovedDelegate if caller has not approved this contract as delegate
+     */
+    function _checkUserDelegated() internal view {
+        if (!COMPTROLLER.approvedDelegates(msg.sender, address(this))) {
+            revert NotAnApprovedDelegate();
+        }
+    }
+
+    /**
+     * @notice Checks if a `user` account is safe from liquidation
      * @dev Verifies that the user's account has no liquidity shortfall and the comptroller
      *      returned no errors when calculating account liquidity. This ensures the account
      *      won't be immediately liquidatable after the leverage operation.
@@ -756,21 +833,7 @@ contract LeverageStrategiesManager is Ownable2StepUpgradeable, ReentrancyGuardUp
     }
 
     /**
-     * @notice Ensures the user has entered the market before operations
-     * @dev If user is not a member of market the function calls Comptroller to enter market on behalf of user
-     * @param user The account for which membership is validated/updated
-     * @param market The vToken market the user must enter 
-     * @custom:error EnterMarketFailed when Comptroller.enterMarketBehalf returns a non-zero error code
-     */
-    function _validateAndEnterMarket(address user, IVToken market) internal {
-        if (!COMPTROLLER.checkMembership(user, market)) {
-            uint256 err = COMPTROLLER.enterMarketBehalf(user, address(market));
-            if (err != SUCCESS) revert EnterMarketFailed(err);
-        }
-    }
-
-    /**
-     * @dev Ensures that the given market is supported for leverage operations
+     * @notice Ensures that the given market is supported for leverage operations
      * @dev A market must be listed in the Comptroller and must not be vBNB.
      *      vBNB is excluded because it uses native BNB which requires special handling
      *      that this contract does not support.

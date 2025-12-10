@@ -814,7 +814,6 @@ describe("LeverageStrategiesManager", () => {
           swapData,
         );
 
-        // TODO: Check final positions
         expect(await collateralMarket.callStatic.balanceOfUnderlying(aliceAddress)).to.be.gt(
           aliceCollateralBalanceBefore,
         );
@@ -824,8 +823,8 @@ describe("LeverageStrategiesManager", () => {
           .withArgs(
             aliceAddress,
             collateralMarket.address,
-            borrowMarket.address,
             collateralAmountSeed,
+            borrowMarket.address,
             borrowedAmountToFlashLoan,
           );
       });

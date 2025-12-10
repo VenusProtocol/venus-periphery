@@ -20,15 +20,12 @@ import {
   VBep20Delegator,
   VBep20Delegator__factory,
   VToken__factory,
-  VTreasury,
-  VTreasury__factory,
   WBNB,
   WBNB__factory,
 } from "../../../typechain";
 import { forking, initMainnetUser } from "./utils";
 
 const NORMAL_TIMELOCK = "0x939bD8d64c0A9583A7Dcea9933f7b21697ab6396";
-const VTREASURY = "0xf322942f644a996a617bd29c16bd7d231d9f35e9";
 const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
 const COMPTROLLER_ADDRESS = "0xfd36e2c2a6789db23113685031d7f16329158384";
 const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
@@ -41,10 +38,7 @@ const vUSDC_ADDRESS = "0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8";
 const vETH_ADDRESS = "0xf508fCD89b8bd15579dc79A6827cB4686A3592c8";
 
 // Random Mainnet Users
-const vBNB_HOLDER = "0x7DD0c8CeDA0dCc86E71AE6D30E505c3d30072dC8";
-const vBNB_BORROWER = "0x680258C252F543Db74b3e8A16345403B2E80125A";
 const vWBNB_HOLDER = "0x16C5433742ACCBB84Fa471A9a76352199Ba4c197";
-const vETH_BORROWER = "0x335545620C08cE96DfC83dFcC8C91E02235E5C28";
 const USDC_WHALE = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
 
 const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
@@ -154,7 +148,6 @@ async function upgradeVTokens(timelock: Signer) {
 async function setMaxStalePeriod() {
   const REDSTONE = "0x8455EFA4D7Ff63b8BFD96AdD889483Ea7d39B70a";
   const CHAINLINK = "0x1B2103441A0A108daD8848D8F5d790e4D402921F";
-  const BINANCE = "0x594810b741d136f1960141C0d8Fb4a91bE78A820";
   const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseUnits("2"));
 
   const redStoneOracle = ChainlinkOracle__factory.connect(REDSTONE, timelock);
@@ -275,19 +268,6 @@ async function createSwapAPICallData(
   return multicallData;
 }
 
-interface LeveragePositionConfig {
-  userAddress: string;
-  collateralMarket: VBep20Delegator;
-  borrowMarket: VBep20Delegator;
-  borrowedAmountToFlashLoan: BigNumber;
-  collateralSeed?: BigNumber;
-  minAmountAfterSwap?: BigNumber;
-  dexCalldata: string;
-  dexTarget: string;
-  collateralToken: WBNB | IERC20;
-  borrowedToken: IERC20;
-}
-
 interface LeverageBalanceSnapshot {
   vTokenBalance: BigNumber;
   borrowBalance: BigNumber;
@@ -332,10 +312,8 @@ if (FORK_MAINNET) {
       let comptroller: ComptrollerMock;
       let WBNB: WBNB;
       let USDC: IERC20;
-      let vBNB: VBNB;
       let vWBNB: VBep20Delegator;
       let vUSDC: VBep20Delegator;
-      let vETH: VBep20Delegator;
       let timelock: Signer;
 
       before(async function () {
@@ -346,7 +324,7 @@ if (FORK_MAINNET) {
       });
 
       beforeEach(async function () {
-        ({ leverageStrategiesManager, comptroller, vBNB, vWBNB, vUSDC, vETH, swapHelper, WBNB, USDC } =
+        ({ leverageStrategiesManager, comptroller, vWBNB, vUSDC, swapHelper, WBNB, USDC } =
           await loadFixture(setupMarketFixture));
         await comptroller.setWhiteListFlashLoanAccount(leverageStrategiesManager.address, true);
       });
@@ -495,9 +473,9 @@ if (FORK_MAINNET) {
           const vUSDCAfter = await vUSDC.balanceOf(vWBNB_HOLDER);
           const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
-          expect(tx)
+          await expect(tx)
             .to.emit(leverageStrategiesManager, "LeverageEntered")
-            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, borrowedAmountToFlashLoan);
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, 0, vUSDC_ADDRESS, borrowedAmountToFlashLoan);
 
           expect(vWBNBAfter).to.be.gt(vWBNBBefore);
           expect(vUSDCAfter).to.be.eq(vUSDCBefore);
@@ -553,9 +531,9 @@ if (FORK_MAINNET) {
           const vUSDCAfter = await vUSDC.balanceOf(vWBNB_HOLDER);
           const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
-          expect(tx)
+          await expect(tx)
             .to.emit(leverageStrategiesManager, "LeverageEntered")
-            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, borrowedAmountToFlashLoan);
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, seedAmount, vUSDC_ADDRESS, borrowedAmountToFlashLoan);
 
           expect(vWBNBAfter).to.be.gt(vWBNBBefore);
           expect(vUSDCAfter).to.be.eq(vUSDCBefore);
@@ -591,10 +569,6 @@ if (FORK_MAINNET) {
             USDC_ADDRESS,
             WBNB_ADDRESS,
           );
-
-          const vWBNBBefore = await vWBNB.balanceOf(vWBNB_HOLDER);
-          const vUSDCBefore = await vUSDC.balanceOf(vWBNB_HOLDER);
-          const vUSDC_BorrowedBefore = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
           await expect(
             leverageStrategiesManager
@@ -764,9 +738,9 @@ if (FORK_MAINNET) {
           const vUSDCAfter = await vUSDC.balanceOf(vWBNB_HOLDER);
           const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
-          expect(tx)
+          await expect(tx)
             .to.emit(leverageStrategiesManager, "LeverageEnteredFromBorrow")
-            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, borrowedAmountToFlashLoan);
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, 0, borrowedAmountToFlashLoan);
 
           expect(vWBNBAfter).to.be.gt(vWBNBBefore);
           expect(vUSDCAfter).to.be.eq(vUSDCBefore);
@@ -825,9 +799,9 @@ if (FORK_MAINNET) {
           const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
           const leverageStrategiesManager_USDC_After = await USDC.balanceOf(leverageStrategiesManager.address);
 
-          expect(tx)
+          await expect(tx)
             .to.emit(leverageStrategiesManager, "LeverageEnteredFromBorrow")
-            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, borrowedAmountToFlashLoan);
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, borrowedAmountSeed, borrowedAmountToFlashLoan);
 
           expect(vWBNBAfter).to.be.gt(vWBNBBefore);
           expect(vUSDCAfter).to.be.eq(vUSDCBefore);
@@ -1260,7 +1234,7 @@ if (FORK_MAINNET) {
           const vWBNBBalanceAfter = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
           const vWBNBBorrowAfter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
-          expect(tx)
+          await expect(tx)
             .to.emit(leverageStrategiesManager, "SingleAssetLeverageEntered")
             .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
 
@@ -1298,7 +1272,7 @@ if (FORK_MAINNET) {
           const vWBNBBorrowAfter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
           const wbnbBalanceAfter = await WBNB.balanceOf(vWBNB_HOLDER);
 
-          expect(tx)
+          await expect(tx)
             .to.emit(leverageStrategiesManager, "SingleAssetLeverageEntered")
             .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
 
@@ -1400,7 +1374,7 @@ if (FORK_MAINNET) {
           const vWBNBBalanceAfterExit = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
           const vWBNBBorrowAfterExit = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
-          expect(tx)
+          await expect(tx)
             .to.emit(leverageStrategiesManager, "SingleAssetLeverageExited")
             .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, collateralAmountToFlashLoanExit);
 
@@ -1539,7 +1513,6 @@ if (FORK_MAINNET) {
           const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
           await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
 
-          const initialCollateralBalance = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
           const initialBorrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
 
           // Enter leverage
