@@ -4,7 +4,7 @@ import { Signer, Wallet } from "ethers";
 import { _TypedDataEncoder, parseUnits } from "ethers/lib/utils";
 import { ethers, network } from "hardhat";
 
-import { FaucetToken, SwapHelper, WBNB } from "../../../typechain";
+import { FaucetToken, SwapHelper } from "../../../typechain";
 
 const { constants } = ethers;
 
@@ -17,7 +17,6 @@ describe("SwapHelper", () => {
   let userAddress: string;
   let user2Address: string;
   let swapHelper: SwapHelper;
-  let wBNB: WBNB;
   let erc20: FaucetToken;
 
   beforeEach(async () => {
@@ -28,9 +27,6 @@ describe("SwapHelper", () => {
     ownerAddress = await owner.getAddress();
     userAddress = await user1.getAddress();
     user2Address = await user2.getAddress();
-
-    const WBNBFactory = await ethers.getContractFactory("WBNB");
-    wBNB = (await WBNBFactory.deploy()) as WBNB;
 
     const ERC20Factory = await ethers.getContractFactory("FaucetToken");
     erc20 = (await ERC20Factory.deploy(parseUnits("10000", 18), "Test Token", 18, "TEST")) as FaucetToken;
@@ -261,15 +257,6 @@ describe("SwapHelper", () => {
   });
 
   describe("multicall", () => {
-    const types = {
-      Multicall: [
-        { name: "caller", type: "address" },
-        { name: "calls", type: "bytes[]" },
-        { name: "deadline", type: "uint256" },
-        { name: "salt", type: "bytes32" },
-      ],
-    };
-
     it("should revert if calls array is empty", async () => {
       const domain = {
         chainId: network.config.chainId,

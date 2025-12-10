@@ -1,6 +1,6 @@
 {
   "name": "@venusprotocol/venus-periphery",
-  "version": "1.0.0",
+  "version": "1.1.0-dev.2",
   "description": "",
   "files": [
     "artifacts",
@@ -81,7 +81,7 @@
     "@venusprotocol/isolated-pools": "^4.3.0",
     "@venusprotocol/oracle": "^2.13.0",
     "@venusprotocol/protocol-reserve": "^3.3.0",
-    "@venusprotocol/venus-protocol": "10.0.0",
+    "@venusprotocol/venus-protocol": "^10.0.0",
     "bignumber.js": "9.0.0",
     "chai": "^4.3.6",
     "dotenv": "^10.0.0",
