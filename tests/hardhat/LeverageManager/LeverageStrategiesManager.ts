@@ -304,33 +304,21 @@ describe("LeverageStrategiesManager", () => {
     it("should revert on deployment when comptroller address is zero", async () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
-        LeverageStrategiesManagerFactory.deploy(
-          ethers.constants.AddressZero,
-          swapHelper.address,
-          vBNBMarket.address,
-        ),
+        LeverageStrategiesManagerFactory.deploy(ethers.constants.AddressZero, swapHelper.address, vBNBMarket.address),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
 
     it("should revert on deployment when swapHelper address is zero", async () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
-        LeverageStrategiesManagerFactory.deploy(
-          comptroller.address,
-          ethers.constants.AddressZero,
-          vBNBMarket.address,
-        ),
+        LeverageStrategiesManagerFactory.deploy(comptroller.address, ethers.constants.AddressZero, vBNBMarket.address),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
 
     it("should revert on deployment when vBNB address is zero", async () => {
       const LeverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
       await expect(
-        LeverageStrategiesManagerFactory.deploy(
-          comptroller.address,
-          swapHelper.address,
-          ethers.constants.AddressZero,
-        ),
+        LeverageStrategiesManagerFactory.deploy(comptroller.address, swapHelper.address, ethers.constants.AddressZero),
       ).to.be.revertedWithCustomError(LeverageStrategiesManagerFactory, "ZeroAddress");
     });
 
@@ -1942,6 +1930,77 @@ describe("LeverageStrategiesManager", () => {
 
         const borrowBalanceAfterExit = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         expect(borrowBalanceAfterExit).to.equal(0);
+
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(0);
+        expect(await borrow.balanceOf(leverageManager.address)).to.equal(0);
+      });
+
+      it("should use excess flash loan funds to cover repayment when swap output is insufficient", async () => {
+        const borrowedAmountToFlashLoan = parseEther("1");
+        const collateralAmountSeed = parseEther("0");
+
+        const enterSwapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("enter-excess-test"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .enterLeverage(
+            collateralMarket.address,
+            collateralAmountSeed,
+            borrowMarket.address,
+            borrowedAmountToFlashLoan,
+            parseEther("1"),
+            enterSwapData,
+          );
+
+        const borrowBalanceAfterEnter = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+
+        const flashLoanWithLargeBuffer = borrowBalanceAfterEnter.mul(150).div(100);
+
+        const collateralAmountToRedeemForSwap = parseEther("0.3");
+        const swapOutputAmount = parseEther("0.6"); // Less than flashLoanWithLargeBuffer but enough with excess
+
+        const exitSwapData = await createSwapMulticallData(
+          borrow,
+          leverageManager.address,
+          swapOutputAmount,
+          admin,
+          ethers.utils.formatBytes32String("exit-excess-test"),
+        );
+
+        const aliceBorrowBalanceBefore = await borrow.balanceOf(aliceAddress);
+
+        const exitTx = await leverageManager
+          .connect(alice)
+          .exitLeverage(
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            borrowMarket.address,
+            flashLoanWithLargeBuffer,
+            0,
+            exitSwapData,
+          );
+
+        await expect(exitTx)
+          .to.emit(leverageManager, "LeverageExited")
+          .withArgs(
+            aliceAddress,
+            collateralMarket.address,
+            collateralAmountToRedeemForSwap,
+            borrowMarket.address,
+            flashLoanWithLargeBuffer,
+          );
+
+        const borrowBalanceAfterExit = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+        expect(borrowBalanceAfterExit).to.equal(0);
+
+        const aliceBorrowBalanceAfter = await borrow.balanceOf(aliceAddress);
+        expect(aliceBorrowBalanceAfter).to.be.gt(aliceBorrowBalanceBefore);
 
         expect(await collateral.balanceOf(leverageManager.address)).to.equal(0);
         expect(await borrow.balanceOf(leverageManager.address)).to.equal(0);
