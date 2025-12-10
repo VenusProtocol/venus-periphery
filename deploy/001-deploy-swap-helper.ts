@@ -8,9 +8,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deploy } = deployments;
   const { deployer } = await getNamedAccounts();
 
-  console.log(
-    `Deploying SwapHelper on ${network.name} network with WBNB address: ${nativeTokenWrapper} and backend signer: ${BACKEND_SIGNER_ADDRESS}`,
-  );
+  console.log(`Deploying SwapHelper on ${network.name} network with backend signer: ${BACKEND_SIGNER_ADDRESS}`);
 
   await deploy("SwapHelper", {
     from: deployer,
