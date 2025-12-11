@@ -3197,28 +3197,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@venusprotocol/oracle@file:../oracle/venusprotocol-oracle-2.15.0-dev.4.tgz::locator=%40venusprotocol%2Fvenus-periphery%40workspace%3A.":
-  version: 2.15.0-dev.4
-  resolution: "@venusprotocol/oracle@file:../oracle/venusprotocol-oracle-2.15.0-dev.4.tgz::locator=%40venusprotocol%2Fvenus-periphery%40workspace%3A."
-  dependencies:
-    "@chainlink/contracts": ^0.5.1
-    "@defi-wonderland/smock": 2.4.0
-    "@nomicfoundation/hardhat-network-helpers": ^1.0.8
-    "@openzeppelin/contracts": ^4.6.0
-    "@openzeppelin/contracts-upgradeable": ^4.7.3
-    "@venusprotocol/governance-contracts": ^2.13.0
-    "@venusprotocol/solidity-utilities": ^2.0.0
-    "@venusprotocol/venus-protocol": ^9.7.0
-    ethers: ^5.6.8
-    hardhat: 2.22.18
-    hardhat-deploy: ^0.12.4
-    module-alias: ^2.2.2
-    patch-package: ^8.0.0
-    solidity-docgen: ^0.6.0-beta.29
-  checksum: 21400563598e0938a8a2322bb865d833ee8113468a0fb1c4efec8a94f89e8f1e5e34f23463a4446f59fa2a3a500d0c29e1f1a2644ad80dca3d75e2aa88ced82f
-  languageName: node
-  linkType: hard
-
 "@venusprotocol/oracle@npm:^2.11.0":
   version: 2.11.0
   resolution: "@venusprotocol/oracle@npm:2.11.0"
@@ -3259,6 +3237,28 @@ __metadata:
     patch-package: ^8.0.0
     solidity-docgen: ^0.6.0-beta.29
   checksum: e10a6b303cb2d41f158fdae300d030f9fb506e0d389414a7b94fdada89bd322ad3e452a8b929a8e42602dd93e380916bbc86c9ba58fdf5178d38fbbb71edadb8
+  languageName: node
+  linkType: hard
+
+"@venusprotocol/oracle@npm:^2.13.0":
+  version: 2.13.0
+  resolution: "@venusprotocol/oracle@npm:2.13.0"
+  dependencies:
+    "@chainlink/contracts": ^0.5.1
+    "@defi-wonderland/smock": 2.4.0
+    "@nomicfoundation/hardhat-network-helpers": ^1.0.8
+    "@openzeppelin/contracts": ^4.6.0
+    "@openzeppelin/contracts-upgradeable": ^4.7.3
+    "@venusprotocol/governance-contracts": ^2.9.0
+    "@venusprotocol/solidity-utilities": ^2.0.0
+    "@venusprotocol/venus-protocol": ^9.7.0
+    ethers: ^5.6.8
+    hardhat: 2.22.18
+    hardhat-deploy: ^0.12.4
+    module-alias: ^2.2.2
+    patch-package: ^8.0.0
+    solidity-docgen: ^0.6.0-beta.29
+  checksum: 55ac455e24b0ff32719c584683ed7066ec9fc1254036b86977cad4eb06cea9558ef109cedd9cdd48a793836ac3cc5852a7e137e5ce3e3fc8b9c3ea7b2783eb69
   languageName: node
   linkType: hard
 
@@ -3450,7 +3450,7 @@ __metadata:
     "@typescript-eslint/parser": ^5.27.1
     "@venusprotocol/governance-contracts": ^2.12.0
     "@venusprotocol/isolated-pools": ^4.3.0
-    "@venusprotocol/oracle": "file:../oracle/venusprotocol-oracle-2.15.0-dev.4.tgz"
+    "@venusprotocol/oracle": ^2.13.0
     "@venusprotocol/protocol-reserve": ^3.3.0
     "@venusprotocol/solidity-utilities": 2.0.3
     "@venusprotocol/venus-protocol": 10.1.0-dev.6
