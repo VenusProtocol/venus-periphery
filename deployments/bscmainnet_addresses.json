@@ -1,5 +1,7 @@
 {
   "name": "bscmainnet",
   "chainId": "56",
-  "addresses": {}
+  "addresses": {
+    "SwapHelper": "0xe1a3b4189F56Cf38747BE79348b8664Ef18cCFd1"
+  }
 }
