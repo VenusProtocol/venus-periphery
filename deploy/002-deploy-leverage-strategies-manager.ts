@@ -19,6 +19,8 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const swapHelperDeployment = await deployments.get("SwapHelper");
   const vBNBDeployment = await deployments.get("vBNB");
 
+  console.log(`Deploying LeverageStrategiesManager on ${network.name} network with Comptroller: ${comptrollerDeployment.address}, SwapHelper: ${swapHelperDeployment.address}, vBNB: ${vBNBDeployment.address}`);
+
   await deploy("LeverageStrategiesManager", {
     from: deployer,
     log: true,
