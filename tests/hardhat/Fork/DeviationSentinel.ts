@@ -136,7 +136,7 @@ if (FORK_MAINNET) {
     let uniswapOracle: UniswapOracle;
 
     describe("DeviationSentinel", () => {
-      beforeEach(async () => {
+      before(async () => {
         ({
           deviationSentinel,
           timelock,
@@ -161,6 +161,7 @@ if (FORK_MAINNET) {
         await sentinelOracle.connect(timelock).setTokenOracleConfig(USDT, pancakeSwapOracle.address);
         await sentinelOracle.connect(timelock).setTokenOracleConfig(BTCB, uniswapOracle.address);
         await sentinelOracle.connect(timelock).setTokenOracleConfig(WBNB, uniswapOracle.address);
+
         // Configure DeviationSentinel with simplified configs
         await deviationSentinel.connect(timelock).setTokenConfig(TRX, {
           deviation: 10,
@@ -196,7 +197,7 @@ if (FORK_MAINNET) {
       });
 
       describe("check price deviation", () => {
-        beforeEach(async () => {
+        before(async () => {
           await deviationSentinel.connect(timelock).setTokenConfig(WBNB, {
             deviation: 10,
             enabled: true,
@@ -207,6 +208,20 @@ if (FORK_MAINNET) {
             oracles: [CHAINLINK_ORACLE, ethers.constants.AddressZero, ethers.constants.AddressZero],
             enableFlagsForOracles: [true, false, false],
             cachingEnabled: false,
+          });
+
+          let tokenConfig = await chainlinkOracle.tokenConfigs(BTCB);
+          await chainlinkOracle.connect(timelock).setTokenConfig({
+            asset: BTCB,
+            feed: tokenConfig.feed,
+            maxStalePeriod: 25 * 60 * 60,
+          });
+
+          tokenConfig = await chainlinkOracle.tokenConfigs(WBNB);
+          await chainlinkOracle.connect(timelock).setTokenConfig({
+            asset: WBNB,
+            feed: tokenConfig.feed,
+            maxStalePeriod: 25 * 60 * 60,
           });
         });
 
