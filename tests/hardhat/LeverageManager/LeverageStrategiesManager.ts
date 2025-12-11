@@ -118,7 +118,7 @@ const setupFixture = async (): Promise<SetupFixture> => {
     admin.address,
   );
 
-  const { mockToken, vToken: unlistedMarket } = await deployVToken(
+  const { vToken: unlistedMarket } = await deployVToken(
     "UNLISTED",
     comptroller,
     accessControl.address,
@@ -129,7 +129,7 @@ const setupFixture = async (): Promise<SetupFixture> => {
   );
 
   // Deploy a vBNB mock (listed but used to test VBNBNotSupported error)
-  const { mockToken: vBNBUnderlying, vToken: vBNBMarket } = await deployVToken(
+  const { vToken: vBNBMarket } = await deployVToken(
     "BNB",
     comptroller,
     accessControl.address,
@@ -231,6 +231,7 @@ describe("LeverageStrategiesManager", () => {
     };
     const types = {
       Multicall: [
+        { name: "caller", type: "address" },
         { name: "calls", type: "bytes[]" },
         { name: "deadline", type: "uint256" },
         { name: "salt", type: "bytes32" },
@@ -241,7 +242,7 @@ describe("LeverageStrategiesManager", () => {
 
     const deadline = "17627727131762772187";
     const saltValue = salt || ethers.utils.formatBytes32String(Math.random().toString());
-    const signature = await signer._signTypedData(domain, types, { calls, deadline, salt: saltValue });
+    const signature = await signer._signTypedData(domain, types, { caller: leverageManager.address, calls, deadline, salt: saltValue });
 
     // Encode multicall with all parameters
     const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
@@ -275,6 +276,7 @@ describe("LeverageStrategiesManager", () => {
     };
     const types = {
       Multicall: [
+        { name: "caller", type: "address" },
         { name: "calls", type: "bytes[]" },
         { name: "deadline", type: "uint256" },
         { name: "salt", type: "bytes32" },
@@ -283,7 +285,7 @@ describe("LeverageStrategiesManager", () => {
     const calls = [sweepData];
     const deadline = "17627727131762772187";
     const saltValue = salt || ethers.utils.formatBytes32String(Math.random().toString());
-    const signature = await signer._signTypedData(domain, types, { calls, deadline, salt: saltValue });
+    const signature = await signer._signTypedData(domain, types, { caller: leverageManager.address, calls, deadline, salt: saltValue });
 
     // Encode multicall with all parameters
     const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
@@ -436,7 +438,7 @@ describe("LeverageStrategiesManager", () => {
         // Check borrowed amount (should only be fees)
         expect(await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress)).to.be.gt(0);
 
-        expect(enterLeveragedPositionTx)
+        await expect(enterLeveragedPositionTx)
           .to.emit(leverageManager, "SingleAssetLeverageEntered")
           .withArgs(aliceAddress, collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan);
       });
@@ -469,7 +471,7 @@ describe("LeverageStrategiesManager", () => {
         expect(borrowBalance).to.be.gt(0);
         expect(borrowBalance).to.be.lte(collateralAmountToFlashLoan); // Fees are less than or equal to flash loan amount
 
-        expect(enterLeveragedPositionTx)
+        await expect(enterLeveragedPositionTx)
           .to.emit(leverageManager, "SingleAssetLeverageEntered")
           .withArgs(aliceAddress, collateralMarket.address, collateralAmountSeed, collateralAmountToFlashLoan);
       });
@@ -818,7 +820,7 @@ describe("LeverageStrategiesManager", () => {
           aliceCollateralBalanceBefore,
         );
 
-        expect(enterLeveragedPositionWithCollateralTx)
+        await expect(enterLeveragedPositionWithCollateralTx)
           .to.emit(leverageManager, "LeverageEntered")
           .withArgs(
             aliceAddress,
@@ -1576,6 +1578,7 @@ describe("LeverageStrategiesManager", () => {
         };
         const types = {
           Multicall: [
+            { name: "caller", type: "address" },
             { name: "calls", type: "bytes[]" },
             { name: "deadline", type: "uint256" },
             { name: "salt", type: "bytes32" },
@@ -1583,6 +1586,7 @@ describe("LeverageStrategiesManager", () => {
         };
         const clearSalt = ethers.utils.formatBytes32String("clear-leftover");
         const clearSig = await admin._signTypedData(domain, types, {
+          caller: admin.address,
           calls: [clearSweepData],
           deadline: "17627727131762772187",
           salt: clearSalt,
@@ -1597,6 +1601,7 @@ describe("LeverageStrategiesManager", () => {
 
         const saltValue = ethers.utils.formatBytes32String("exit-swap-insufficient");
         const signature = await admin._signTypedData(domain, types, {
+          caller: leverageManager.address,
           calls: [sweepData],
           deadline: "17627727131762772187",
           salt: saltValue,
