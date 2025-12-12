@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.28;
 
-import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import {
+    SafeERC20Upgradeable,
+    IERC20Upgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import { AddressUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
 import { EIP712 } from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -24,7 +27,8 @@ contract SwapHelper is EIP712, Ownable2Step, ReentrancyGuard {
 
     /// @notice EIP-712 typehash for Multicall struct used in signature verification
     /// @dev keccak256("Multicall(address caller,bytes[] calls,uint256 deadline,bytes32 salt)")
-    bytes32 internal constant MULTICALL_TYPEHASH = keccak256("Multicall(address caller,bytes[] calls,uint256 deadline,bytes32 salt)");
+    bytes32 internal constant MULTICALL_TYPEHASH =
+        keccak256("Multicall(address caller,bytes[] calls,uint256 deadline,bytes32 salt)");
 
     /// @notice Address authorized to sign multicall operations
     /// @dev Can be updated by contract owner via setBackendSigner
@@ -239,14 +243,21 @@ contract SwapHelper is EIP712, Ownable2Step, ReentrancyGuard {
     /// @return EIP-712 typed data hash for signature verification
     /// @dev Hashes each call individually, then encodes with MULTICALL_TYPEHASH, caller, deadline, and salt
     /// @dev Uses EIP-712 _hashTypedDataV4 for domain-separated hashing
-    function _hashMulticall(address caller, bytes[] calldata calls, uint256 deadline, bytes32 salt) internal view returns (bytes32) {
+    function _hashMulticall(
+        address caller,
+        bytes[] calldata calls,
+        uint256 deadline,
+        bytes32 salt
+    ) internal view returns (bytes32) {
         bytes32[] memory callHashes = new bytes32[](calls.length);
         for (uint256 i = 0; i < calls.length; i++) {
             callHashes[i] = keccak256(calls[i]);
         }
         return
             _hashTypedDataV4(
-                keccak256(abi.encode(MULTICALL_TYPEHASH, caller, keccak256(abi.encodePacked(callHashes)), deadline, salt))
+                keccak256(
+                    abi.encode(MULTICALL_TYPEHASH, caller, keccak256(abi.encodePacked(callHashes)), deadline, salt)
+                )
             );
     }
 }
