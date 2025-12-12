@@ -20,13 +20,10 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     skipIfAlreadyDeployed: true,
   });
 
-  
   const swapHelper = await ethers.getContract("SwapHelper");
   const owner = await swapHelper.owner();
 
-  console.log(
-    `swapHelper verify arguments: ${swapHelper.address} ${BACKEND_SIGNER_ADDRESS}`,
-  );
+  console.log(`swapHelper verify arguments: ${swapHelper.address} ${BACKEND_SIGNER_ADDRESS}`);
 
   if (owner === deployer) {
     console.log("Transferring ownership to Normal Timelock ....");

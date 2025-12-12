@@ -242,7 +242,12 @@ describe("LeverageStrategiesManager", () => {
 
     const deadline = "17627727131762772187";
     const saltValue = salt || ethers.utils.formatBytes32String(Math.random().toString());
-    const signature = await signer._signTypedData(domain, types, { caller: leverageManager.address, calls, deadline, salt: saltValue });
+    const signature = await signer._signTypedData(domain, types, {
+      caller: leverageManager.address,
+      calls,
+      deadline,
+      salt: saltValue,
+    });
 
     // Encode multicall with all parameters
     const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
@@ -285,7 +290,12 @@ describe("LeverageStrategiesManager", () => {
     const calls = [sweepData];
     const deadline = "17627727131762772187";
     const saltValue = salt || ethers.utils.formatBytes32String(Math.random().toString());
-    const signature = await signer._signTypedData(domain, types, { caller: leverageManager.address, calls, deadline, salt: saltValue });
+    const signature = await signer._signTypedData(domain, types, {
+      caller: leverageManager.address,
+      calls,
+      deadline,
+      salt: saltValue,
+    });
 
     // Encode multicall with all parameters
     const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
