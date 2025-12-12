@@ -57,6 +57,8 @@ contract UniswapOracle is AccessControlledV8 {
     /// @notice Set pool configuration for a token
     /// @param token Address of the token
     /// @param pool Address of the Uniswap V3 pool
+    /// @custom:event Emits PoolConfigUpdated event
+    /// @custom:error ZeroAddress is thrown when token or pool address is zero
     function setPoolConfig(address token, address pool) external {
         _checkAccessAllowed("setPoolConfig(address,address)");
 
@@ -70,6 +72,7 @@ contract UniswapOracle is AccessControlledV8 {
     /// @notice Get the price of an asset from Uniswap V3
     /// @param asset Address of the asset
     /// @return price Price in (36 - asset decimals) format, same as ResilientOracle
+    /// @custom:error TokenNotConfigured is thrown when asset has no pool configured
     function getPrice(address asset) external view returns (uint256 price) {
         address pool = tokenPools[asset];
         if (pool == address(0)) revert TokenNotConfigured();
@@ -81,6 +84,7 @@ contract UniswapOracle is AccessControlledV8 {
     /// @param pool Uniswap V3 pool address
     /// @param token Target token address
     /// @return price Price in (36 - token decimals) format
+    /// @custom:error InvalidPool is thrown when pool address is zero or token not in pool
     function _getUniswapV3Price(address pool, address token) internal view returns (uint256 price) {
         if (pool == address(0)) revert InvalidPool();
 

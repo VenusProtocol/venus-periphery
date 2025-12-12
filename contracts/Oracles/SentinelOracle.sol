@@ -46,6 +46,8 @@ contract SentinelOracle is AccessControlledV8 {
     /// @notice Set oracle configuration for a token
     /// @param token Address of the token
     /// @param oracle Address of the DEX oracle to use
+    /// @custom:event Emits TokenOracleConfigUpdated event
+    /// @custom:error ZeroAddress is thrown when token or oracle address is zero
     function setTokenOracleConfig(address token, address oracle) external {
         _checkAccessAllowed("setTokenOracleConfig(address,address)");
 
@@ -59,6 +61,7 @@ contract SentinelOracle is AccessControlledV8 {
     /// @notice Get the price of an asset from the configured DEX oracle
     /// @param asset Address of the asset
     /// @return price Price in (36 - asset decimals) format, same as ResilientOracle
+    /// @custom:error TokenNotConfigured is thrown when asset has no oracle configured
     function getPrice(address asset) external view returns (uint256 price) {
         TokenConfig memory config = tokenConfigs[asset];
         if (config.oracle == address(0)) revert TokenNotConfigured();

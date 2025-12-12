@@ -163,6 +163,8 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Set trusted status for a keeper
     /// @param keeper Address of the keeper
     /// @param isTrusted Whether the keeper should be trusted
+    /// @custom:event Emits TrustedKeeperUpdated event
+    /// @custom:error ZeroAddress is thrown when keeper address is zero
     function setTrustedKeeper(address keeper, bool isTrusted) external {
         _checkAccessAllowed("setTrustedKeeper(address,bool)");
 
@@ -175,6 +177,10 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Set deviation configuration for a token
     /// @param token Address of the token
     /// @param config Deviation configuration containing threshold and enabled status
+    /// @custom:event Emits TokenConfigUpdated event
+    /// @custom:error ZeroAddress is thrown when token address is zero
+    /// @custom:error ZeroDeviation is thrown when deviation is set to zero
+    /// @custom:error ExceedsMaxDeviation is thrown when deviation exceeds MAX_DEVIATION
     function setTokenConfig(address token, DeviationConfig calldata config) external {
         _checkAccessAllowed("setTokenConfig(address,(uint8,bool))");
 
@@ -189,6 +195,9 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Enable or disable deviation monitoring for a token
     /// @param token Address of the token
     /// @param enabled Whether to enable or disable monitoring
+    /// @custom:event Emits TokenMonitoringStatusChanged event
+    /// @custom:error ZeroAddress is thrown when token address is zero
+    /// @custom:error MarketNotConfigured is thrown when token has no deviation config
     function setTokenMonitoringEnabled(address token, bool enabled) external {
         _checkAccessAllowed("setTokenMonitoringEnabled(address,bool)");
 
@@ -203,6 +212,15 @@ contract DeviationSentinel is AccessControlledV8 {
 
     /// @notice Handle price deviation for a market by pausing or adjusting collateral factor
     /// @param market The vToken market to handle
+    /// @custom:event Emits BorrowPaused when borrow is paused due to high sentinel price
+    /// @custom:event Emits BorrowUnpaused when borrow is unpaused after deviation resolved
+    /// @custom:event Emits SupplyPaused when supply is paused due to low sentinel price
+    /// @custom:event Emits SupplyUnpaused when supply is unpaused after deviation resolved
+    /// @custom:event Emits CollateralFactorUpdated when collateral factor is modified
+    /// @custom:error UnauthorizedKeeper is thrown when caller is not a trusted keeper
+    /// @custom:error MarketNotConfigured is thrown when market's underlying token has no deviation config
+    /// @custom:error TokenMonitoringDisabled is thrown when monitoring is disabled for the token
+    /// @custom:error ComptrollerError is thrown when comptroller operation fails
     function handleDeviation(IVToken market) external onlyKeeper {
         address underlyingToken = market.underlying();
         DeviationConfig memory config = tokenConfigs[underlyingToken];
