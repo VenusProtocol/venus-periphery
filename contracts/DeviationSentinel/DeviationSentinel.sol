@@ -388,7 +388,12 @@ contract DeviationSentinel is AccessControlledV8 {
                     state.poolLTs[i] = liquidationThresholdMantissa;
 
                     // Set collateral factor to 0, keep liquidation threshold unchanged
-                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(i, address(market), 0, liquidationThresholdMantissa);
+                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(
+                        i,
+                        address(market),
+                        0,
+                        liquidationThresholdMantissa
+                    );
                     if (result != 0) revert ComptrollerError(result);
 
                     // Emit event for each pool ID
@@ -444,10 +449,12 @@ contract DeviationSentinel is AccessControlledV8 {
             state.cfModified = false;
         } else {
             // Isolated pool
-            uint256 originalCF = state.originalCF;
-            uint256 originalLT = state.originalLT;
-            IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
-            emit CollateralFactorUpdated(address(market), 0, 0, originalCF);
+            IILComptroller(address(comptroller)).setCollateralFactor(
+                address(market),
+                state.originalCF,
+                state.originalLT
+            );
+            emit CollateralFactorUpdated(address(market), 0, 0, state.originalCF);
             state.originalCF = 0;
             state.originalLT = 0;
             state.cfModified = false;
