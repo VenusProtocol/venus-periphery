@@ -1,3 +1,4 @@
+import { ethers } from "hardhat";
 import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 
@@ -8,7 +9,9 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deploy } = deployments;
   const { deployer } = await getNamedAccounts();
 
-  console.log(`Deploying SwapHelper on ${network.name} network with backend signer: ${BACKEND_SIGNER_ADDRESS}`);
+  const timelock = await deployments.get("NormalTimelock");
+
+  console.log(`Deploying SwapHelper on ${network.name} network with Backend Signer Address: ${BACKEND_SIGNER_ADDRESS}`);
 
   await deploy("SwapHelper", {
     from: deployer,
@@ -16,6 +19,18 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     log: true,
     skipIfAlreadyDeployed: true,
   });
+
+  const swapHelper = await ethers.getContract("SwapHelper");
+  const owner = await swapHelper.owner();
+
+  console.log(`swapHelper verify arguments: ${swapHelper.address} ${BACKEND_SIGNER_ADDRESS}`);
+
+  if (owner === deployer) {
+    console.log("Transferring ownership to Normal Timelock ....");
+    const tx = await swapHelper.transferOwnership(timelock.address);
+    await tx.wait();
+    console.log("Ownership transferred to Normal Timelock");
+  }
 };
 
 func.tags = ["SwapHelper"];

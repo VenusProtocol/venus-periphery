@@ -244,6 +244,7 @@ async function createSwapAPICallData(
   };
   const types = {
     Multicall: [
+      { name: "caller", type: "address" },
       { name: "calls", type: "bytes[]" },
       { name: "deadline", type: "uint256" },
       { name: "salt", type: "bytes32" },
@@ -261,7 +262,12 @@ async function createSwapAPICallData(
   const saltValue = ethers.utils.formatBytes32String(Math.random().toString());
 
   const [root] = await ethers.getSigners();
-  const signature = await root._signTypedData(domain, types, { calls, deadline, salt: saltValue });
+  const signature = await root._signTypedData(domain, types, {
+    caller: positionSwapper,
+    calls,
+    deadline,
+    salt: saltValue,
+  });
 
   // Encode multicall with all parameters
   const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
