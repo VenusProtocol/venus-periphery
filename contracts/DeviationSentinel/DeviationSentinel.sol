@@ -373,7 +373,7 @@ contract DeviationSentinel is AccessControlledV8 {
             // Store original CF and LT for each emode group, then set to 0
             for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
                 (
-                    bool poolIsListed,
+                    bool isListed,
                     uint256 collateralFactorMantissa, // isVenus
                     ,
                     uint256 liquidationThresholdMantissa, // liquidationIncentiveMantissa // marketPoolId // isBorrowAllowed
@@ -382,7 +382,7 @@ contract DeviationSentinel is AccessControlledV8 {
 
                 ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
 
-                if (poolIsListed) {
+                if (isListed) {
                     // Store original values for this pool ID
                     state.poolCFs[i] = collateralFactorMantissa;
                     state.poolLTs[i] = liquidationThresholdMantissa;
@@ -425,8 +425,8 @@ contract DeviationSentinel is AccessControlledV8 {
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
             // Core pool - restore original CF and LT for each emode group
             for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
-                (bool poolIsListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
-                if (poolIsListed) {
+                (bool isListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+                if (isListed) {
                     uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(
                         i,
                         address(market),
