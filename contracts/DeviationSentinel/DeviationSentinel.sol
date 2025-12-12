@@ -419,8 +419,6 @@ contract DeviationSentinel is AccessControlledV8 {
 
         if (!state.cfModified) return;
 
-        uint256 originalCF = state.originalCF;
-
         // Check if this is a core pool or isolated pool
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
             // Core pool - restore original CF and LT for each emode group
@@ -446,6 +444,7 @@ contract DeviationSentinel is AccessControlledV8 {
             state.cfModified = false;
         } else {
             // Isolated pool
+            uint256 originalCF = state.originalCF;
             uint256 originalLT = state.originalLT;
             IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
             emit CollateralFactorUpdated(address(market), 0, 0, originalCF);
