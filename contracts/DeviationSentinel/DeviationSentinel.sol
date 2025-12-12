@@ -387,8 +387,8 @@ contract DeviationSentinel is AccessControlledV8 {
                     state.poolCFs[i] = collateralFactorMantissa;
                     state.poolLTs[i] = liquidationThresholdMantissa;
 
-                    // Set collateral factor to 0
-                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(i, address(market), 0, 0);
+                    // Set collateral factor to 0, keep liquidation threshold unchanged
+                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(i, address(market), 0, liquidationThresholdMantissa);
                     if (result != 0) revert ComptrollerError(result);
 
                     // Emit event for each pool ID
