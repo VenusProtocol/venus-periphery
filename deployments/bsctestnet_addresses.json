@@ -2,6 +2,18 @@
   "name": "bsctestnet",
   "chainId": "97",
   "addresses": {
-    "SwapHelper": "0x55Fa097cA59BAc70C1ba488BEb11A5F6bf7019Eb"
+    "DeviationSentinel": "0xBBA47F508f089A3aB4515BA78a4D7bAa002a37A4",
+    "DeviationSentinel_Implementation": "0x0Baf2aD0136D88EbfA4Be8Dd81448F96CF3569D3",
+    "DeviationSentinel_Proxy": "0xBBA47F508f089A3aB4515BA78a4D7bAa002a37A4",
+    "PancakeSwapOracle": "0xBDb25F4D7c11979C98d830c4c2C6e9FbA0c2cBC9",
+    "PancakeSwapOracle_Implementation": "0xd0c5c6d4d1A00C80D9E50B84F0DD5f57B6f23047",
+    "PancakeSwapOracle_Proxy": "0xBDb25F4D7c11979C98d830c4c2C6e9FbA0c2cBC9",
+    "SentinelOracle": "0x60e322C3418EcAEA5E6859551c299c968adc9816",
+    "SentinelOracle_Implementation": "0x1AAADE04A970043756D90e11af57e03A3A10E2c4",
+    "SentinelOracle_Proxy": "0x60e322C3418EcAEA5E6859551c299c968adc9816",
+    "SwapHelper": "0x55Fa097cA59BAc70C1ba488BEb11A5F6bf7019Eb",
+    "UniswapOracle": "0xb1c97b14dE87928845FCf0016b48B3a61aa3e1AD",
+    "UniswapOracle_Implementation": "0x5dff09a6D241eac6ccc63A7665CaC6eff55b38E7",
+    "UniswapOracle_Proxy": "0xb1c97b14dE87928845FCf0016b48B3a61aa3e1AD"
   }
 }
