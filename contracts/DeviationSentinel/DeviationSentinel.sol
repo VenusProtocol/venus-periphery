@@ -146,6 +146,9 @@ contract DeviationSentinel is AccessControlledV8 {
         OracleInterface sentinelOracle_
     ) {
         CORE_POOL_COMPTROLLER = corePoolComptroller_;
+
+        if (address(resilientOracle_) == address(0)) revert ZeroAddress();
+        if (address(sentinelOracle_) == address(0)) revert ZeroAddress();
         RESILIENT_ORACLE = resilientOracle_;
         SENTINEL_ORACLE = sentinelOracle_;
 

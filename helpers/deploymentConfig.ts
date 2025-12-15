@@ -14,7 +14,10 @@ import { contracts as governanceUnichainmainnet } from "@venusprotocol/governanc
 import { contracts as governanceUnichainsepolia } from "@venusprotocol/governance-contracts/deployments/unichainsepolia.json";
 import { contracts as governanceZkSyncMainnet } from "@venusprotocol/governance-contracts/deployments/zksyncmainnet.json";
 import { contracts as governanceZkSyncSepolia } from "@venusprotocol/governance-contracts/deployments/zksyncsepolia.json";
+import { contracts as oracleBscMainnet } from "@venusprotocol/oracle/deployments/bscmainnet.json";
+import { contracts as oracleBscTestnet } from "@venusprotocol/oracle/deployments/bsctestnet.json";
 import { Wallet } from "ethers";
+import { DeploymentsExtension } from "hardhat-deploy/dist/types";
 
 export type NetworkConfig = {
   hardhat: DeploymentConfig;
@@ -66,10 +69,12 @@ export const preconfiguredAddresses = {
   bsctestnet: {
     NormalTimelock: governanceBscTestnet.NormalTimelock.address,
     AccessControlManager: governanceBscTestnet.AccessControlManager.address,
+    ResilientOracle: oracleBscTestnet.ResilientOracle.address,
   },
   bscmainnet: {
     NormalTimelock: governanceBscMainnet.NormalTimelock.address,
     AccessControlManager: governanceBscMainnet.AccessControlManager.address,
+    ResilientOracle: oracleBscMainnet.ResilientOracle.address,
   },
   sepolia: {
     NormalTimelock: governanceSepolia.NormalTimelock.address,
@@ -225,3 +230,12 @@ export async function getConfig(networkName: string): Promise<DeploymentConfig> 
       throw new Error(`config for network ${networkName} is not available.`);
   }
 }
+
+export const getContractAddressOrNullAddress = async (deployments: DeploymentsExtension, name: string) => {
+  try {
+    return (await deployments.get(name)).address;
+  } catch (e) {
+    console.error(`${name} not found returning null address`);
+    return "0x0000000000000000000000000000000000000000";
+  }
+};

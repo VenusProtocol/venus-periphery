@@ -1,0 +1,1263 @@
+{
+  "address": "0x0Baf2aD0136D88EbfA4Be8Dd81448F96CF3569D3",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "contract ICorePoolComptroller",
+          "name": "corePoolComptroller_",
+          "type": "address"
+        },
+        {
+          "internalType": "contract ResilientOracleInterface",
+          "name": "resilientOracle_",
+          "type": "address"
+        },
+        {
+          "internalType": "contract OracleInterface",
+          "name": "sentinelOracle_",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "errorCode",
+          "type": "uint256"
+        }
+      ],
+      "name": "ComptrollerError",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ExceedsMaxDeviation",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "MarketNotConfigured",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "TokenMonitoringDisabled",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "sender",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "calledContract",
+          "type": "address"
+        },
+        {
+          "internalType": "string",
+          "name": "methodSignature",
+          "type": "string"
+        }
+      ],
+      "name": "Unauthorized",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "UnauthorizedKeeper",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroAddress",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroDeviation",
+      "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "BorrowPaused",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "BorrowUnpaused",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "uint96",
+          "name": "poolId",
+          "type": "uint96"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "oldCF",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "newCF",
+          "type": "uint256"
+        }
+      ],
+      "name": "CollateralFactorUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "oldCF",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "newCF",
+          "type": "uint256"
+        }
+      ],
+      "name": "CollateralFactorUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint8",
+          "name": "version",
+          "type": "uint8"
+        }
+      ],
+      "name": "Initialized",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "oldAccessControlManager",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "newAccessControlManager",
+          "type": "address"
+        }
+      ],
+      "name": "NewAccessControlManager",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "previousOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "OwnershipTransferStarted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "previousOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "OwnershipTransferred",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "SupplyPaused",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "SupplyUnpaused",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint8",
+              "name": "deviation",
+              "type": "uint8"
+            },
+            {
+              "internalType": "bool",
+              "name": "enabled",
+              "type": "bool"
+            }
+          ],
+          "indexed": false,
+          "internalType": "struct DeviationSentinel.DeviationConfig",
+          "name": "config",
+          "type": "tuple"
+        }
+      ],
+      "name": "TokenConfigUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "enabled",
+          "type": "bool"
+        }
+      ],
+      "name": "TokenMonitoringStatusChanged",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "keeper",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "isTrusted",
+          "type": "bool"
+        }
+      ],
+      "name": "TrustedKeeperUpdated",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "CORE_POOL_COMPTROLLER",
+      "outputs": [
+        {
+          "internalType": "contract ICorePoolComptroller",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "MAX_DEVIATION",
+      "outputs": [
+        {
+          "internalType": "uint8",
+          "name": "",
+          "type": "uint8"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "RESILIENT_ORACLE",
+      "outputs": [
+        {
+          "internalType": "contract ResilientOracleInterface",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "SENTINEL_ORACLE",
+      "outputs": [
+        {
+          "internalType": "contract OracleInterface",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "acceptOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "accessControlManager",
+      "outputs": [
+        {
+          "internalType": "contract IAccessControlManagerV8",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IVToken",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "checkPriceDeviation",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "hasDeviation",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256",
+          "name": "oraclePrice",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "sentinelPrice",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "deviationPercent",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IVToken",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "handleDeviation",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "accessControlManager_",
+          "type": "address"
+        }
+      ],
+      "name": "initialize",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "marketStates",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "borrowPaused",
+          "type": "bool"
+        },
+        {
+          "internalType": "bool",
+          "name": "supplyPaused",
+          "type": "bool"
+        },
+        {
+          "internalType": "bool",
+          "name": "cfModified",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256",
+          "name": "originalCF",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "originalLT",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "owner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "pendingOwner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "renounceOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "accessControlManager_",
+          "type": "address"
+        }
+      ],
+      "name": "setAccessControlManager",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint8",
+              "name": "deviation",
+              "type": "uint8"
+            },
+            {
+              "internalType": "bool",
+              "name": "enabled",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct DeviationSentinel.DeviationConfig",
+          "name": "config",
+          "type": "tuple"
+        }
+      ],
+      "name": "setTokenConfig",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "enabled",
+          "type": "bool"
+        }
+      ],
+      "name": "setTokenMonitoringEnabled",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "keeper",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "isTrusted",
+          "type": "bool"
+        }
+      ],
+      "name": "setTrustedKeeper",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "tokenConfigs",
+      "outputs": [
+        {
+          "internalType": "uint8",
+          "name": "deviation",
+          "type": "uint8"
+        },
+        {
+          "internalType": "bool",
+          "name": "enabled",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "transferOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "trustedKeepers",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "transactionHash": "0x26e6e29fbb490d01096ae30ded9c70a35ca3a7e37d09bf920d7de2896977ca1a",
+  "receipt": {
+    "to": null,
+    "from": "0xa3553AF80A3274695f62dB5d7F57126221e605A7",
+    "contractAddress": "0x0Baf2aD0136D88EbfA4Be8Dd81448F96CF3569D3",
+    "transactionIndex": 0,
+    "gasUsed": "2190820",
+    "logsBloom": "0x00000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000080000000000000000000000000000000000000000000000400000008000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "blockHash": "0x45be6462a421234a4a5b404f7dd644cd40994268322311220223a83949780d4d",
+    "transactionHash": "0x26e6e29fbb490d01096ae30ded9c70a35ca3a7e37d09bf920d7de2896977ca1a",
+    "logs": [
+      {
+        "transactionIndex": 0,
+        "blockNumber": 78690597,
+        "transactionHash": "0x26e6e29fbb490d01096ae30ded9c70a35ca3a7e37d09bf920d7de2896977ca1a",
+        "address": "0x0Baf2aD0136D88EbfA4Be8Dd81448F96CF3569D3",
+        "topics": [
+          "0x7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498"
+        ],
+        "data": "0x00000000000000000000000000000000000000000000000000000000000000ff",
+        "logIndex": 0,
+        "blockHash": "0x45be6462a421234a4a5b404f7dd644cd40994268322311220223a83949780d4d"
+      }
+    ],
+    "blockNumber": 78690597,
+    "cumulativeGasUsed": "2190820",
+    "status": 1,
+    "byzantium": true
+  },
+  "args": [
+    "0x94d1820b2D1c7c7452A163983Dc888CEC546b77D",
+    "0x3cD69251D04A28d887Ac14cbe2E14c52F3D57823",
+    "0x60e322C3418EcAEA5E6859551c299c968adc9816"
+  ],
+  "numDeployments": 1,
+  "solcInputHash": "e6889dc57345ebb405dde4ed06759d94",
+  "metadata": "{\"compiler\":{\"version\":\"0.8.25+commit.b61c2a91\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"contract ICorePoolComptroller\",\"name\":\"corePoolComptroller_\",\"type\":\"address\"},{\"internalType\":\"contract ResilientOracleInterface\",\"name\":\"resilientOracle_\",\"type\":\"address\"},{\"internalType\":\"contract OracleInterface\",\"name\":\"sentinelOracle_\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"errorCode\",\"type\":\"uint256\"}],\"name\":\"ComptrollerError\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"ExceedsMaxDeviation\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"MarketNotConfigured\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"TokenMonitoringDisabled\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"sender\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"calledContract\",\"type\":\"address\"},{\"internalType\":\"string\",\"name\":\"methodSignature\",\"type\":\"string\"}],\"name\":\"Unauthorized\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"UnauthorizedKeeper\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"ZeroAddress\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"ZeroDeviation\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"BorrowPaused\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"BorrowUnpaused\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"uint96\",\"name\":\"poolId\",\"type\":\"uint96\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"oldCF\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"newCF\",\"type\":\"uint256\"}],\"name\":\"CollateralFactorUpdated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"oldCF\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"newCF\",\"type\":\"uint256\"}],\"name\":\"CollateralFactorUpdated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint8\",\"name\":\"version\",\"type\":\"uint8\"}],\"name\":\"Initialized\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"oldAccessControlManager\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"newAccessControlManager\",\"type\":\"address\"}],\"name\":\"NewAccessControlManager\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"OwnershipTransferStarted\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"OwnershipTransferred\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"SupplyPaused\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"SupplyUnpaused\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"components\":[{\"internalType\":\"uint8\",\"name\":\"deviation\",\"type\":\"uint8\"},{\"internalType\":\"bool\",\"name\":\"enabled\",\"type\":\"bool\"}],\"indexed\":false,\"internalType\":\"struct DeviationSentinel.DeviationConfig\",\"name\":\"config\",\"type\":\"tuple\"}],\"name\":\"TokenConfigUpdated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"bool\",\"name\":\"enabled\",\"type\":\"bool\"}],\"name\":\"TokenMonitoringStatusChanged\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"keeper\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"bool\",\"name\":\"isTrusted\",\"type\":\"bool\"}],\"name\":\"TrustedKeeperUpdated\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"CORE_POOL_COMPTROLLER\",\"outputs\":[{\"internalType\":\"contract ICorePoolComptroller\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"MAX_DEVIATION\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"RESILIENT_ORACLE\",\"outputs\":[{\"internalType\":\"contract ResilientOracleInterface\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"SENTINEL_ORACLE\",\"outputs\":[{\"internalType\":\"contract OracleInterface\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"acceptOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"accessControlManager\",\"outputs\":[{\"internalType\":\"contract IAccessControlManagerV8\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"contract IVToken\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"checkPriceDeviation\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"hasDeviation\",\"type\":\"bool\"},{\"internalType\":\"uint256\",\"name\":\"oraclePrice\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"sentinelPrice\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"deviationPercent\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"contract IVToken\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"handleDeviation\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"accessControlManager_\",\"type\":\"address\"}],\"name\":\"initialize\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"marketStates\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"borrowPaused\",\"type\":\"bool\"},{\"internalType\":\"bool\",\"name\":\"supplyPaused\",\"type\":\"bool\"},{\"internalType\":\"bool\",\"name\":\"cfModified\",\"type\":\"bool\"},{\"internalType\":\"uint256\",\"name\":\"originalCF\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"originalLT\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"owner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"pendingOwner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"renounceOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"accessControlManager_\",\"type\":\"address\"}],\"name\":\"setAccessControlManager\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"components\":[{\"internalType\":\"uint8\",\"name\":\"deviation\",\"type\":\"uint8\"},{\"internalType\":\"bool\",\"name\":\"enabled\",\"type\":\"bool\"}],\"internalType\":\"struct DeviationSentinel.DeviationConfig\",\"name\":\"config\",\"type\":\"tuple\"}],\"name\":\"setTokenConfig\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"enabled\",\"type\":\"bool\"}],\"name\":\"setTokenMonitoringEnabled\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"keeper\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"isTrusted\",\"type\":\"bool\"}],\"name\":\"setTrustedKeeper\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"tokenConfigs\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"deviation\",\"type\":\"uint8\"},{\"internalType\":\"bool\",\"name\":\"enabled\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"transferOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"trustedKeepers\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"}],\"devdoc\":{\"author\":\"Venus\",\"errors\":{\"ComptrollerError(uint256)\":[{\"params\":{\"errorCode\":\"The error code returned by the comptroller\"}}]},\"events\":{\"BorrowPaused(address)\":{\"params\":{\"market\":\"The market address\"}},\"BorrowUnpaused(address)\":{\"params\":{\"market\":\"The market address\"}},\"CollateralFactorUpdated(address,uint256,uint256)\":{\"params\":{\"market\":\"The market address\",\"newCF\":\"The new collateral factor\",\"oldCF\":\"The old collateral factor\"}},\"CollateralFactorUpdated(address,uint96,uint256,uint256)\":{\"params\":{\"market\":\"The market address\",\"newCF\":\"The new collateral factor\",\"oldCF\":\"The old collateral factor\",\"poolId\":\"The pool ID (emode group)\"}},\"Initialized(uint8)\":{\"details\":\"Triggered when the contract has been initialized or reinitialized.\"},\"SupplyPaused(address)\":{\"params\":{\"market\":\"The market address\"}},\"SupplyUnpaused(address)\":{\"params\":{\"market\":\"The market address\"}},\"TokenConfigUpdated(address,(uint8,bool))\":{\"params\":{\"config\":\"The new deviation configuration\",\"token\":\"The token address\"}},\"TokenMonitoringStatusChanged(address,bool)\":{\"params\":{\"enabled\":\"Whether monitoring is enabled\",\"token\":\"The token address\"}},\"TrustedKeeperUpdated(address,bool)\":{\"params\":{\"isTrusted\":\"Whether the keeper is trusted\",\"keeper\":\"The keeper address\"}}},\"kind\":\"dev\",\"methods\":{\"acceptOwnership()\":{\"details\":\"The new owner accepts the ownership transfer.\"},\"checkPriceDeviation(address)\":{\"params\":{\"market\":\"The vToken market to check\"},\"returns\":{\"deviationPercent\":\"The percentage deviation (scaled by 100)\",\"hasDeviation\":\"True if deviation exceeds configured threshold\",\"oraclePrice\":\"The price from resilient oracle\",\"sentinelPrice\":\"The price from sentinel oracle\"}},\"constructor\":{\"params\":{\"corePoolComptroller_\":\"Address of the core pool comptroller\",\"resilientOracle_\":\"Address of the resilient oracle\",\"sentinelOracle_\":\"Address of the sentinel oracle\"}},\"handleDeviation(address)\":{\"custom:error\":\"UnauthorizedKeeper is thrown when caller is not a trusted keeperMarketNotConfigured is thrown when market's underlying token has no deviation configTokenMonitoringDisabled is thrown when monitoring is disabled for the tokenComptrollerError is thrown when comptroller operation fails\",\"custom:event\":\"Emits BorrowPaused when borrow is paused due to high sentinel priceEmits BorrowUnpaused when borrow is unpaused after deviation resolvedEmits SupplyPaused when supply is paused due to low sentinel priceEmits SupplyUnpaused when supply is unpaused after deviation resolvedEmits CollateralFactorUpdated when collateral factor is modified\",\"params\":{\"market\":\"The vToken market to handle\"}},\"initialize(address)\":{\"params\":{\"accessControlManager_\":\"Address of the access control manager\"}},\"owner()\":{\"details\":\"Returns the address of the current owner.\"},\"pendingOwner()\":{\"details\":\"Returns the address of the pending owner.\"},\"renounceOwnership()\":{\"details\":\"Leaves the contract without owner. It will not be possible to call `onlyOwner` functions. Can only be called by the current owner. NOTE: Renouncing ownership will leave the contract without an owner, thereby disabling any functionality that is only available to the owner.\"},\"setAccessControlManager(address)\":{\"custom:access\":\"Only Governance\",\"custom:event\":\"Emits NewAccessControlManager event\",\"details\":\"Admin function to set address of AccessControlManager\",\"params\":{\"accessControlManager_\":\"The new address of the AccessControlManager\"}},\"setTokenConfig(address,(uint8,bool))\":{\"custom:error\":\"ZeroAddress is thrown when token address is zeroZeroDeviation is thrown when deviation is set to zeroExceedsMaxDeviation is thrown when deviation exceeds MAX_DEVIATION\",\"custom:event\":\"Emits TokenConfigUpdated event\",\"params\":{\"config\":\"Deviation configuration containing threshold and enabled status\",\"token\":\"Address of the token\"}},\"setTokenMonitoringEnabled(address,bool)\":{\"custom:error\":\"ZeroAddress is thrown when token address is zeroMarketNotConfigured is thrown when token has no deviation config\",\"custom:event\":\"Emits TokenMonitoringStatusChanged event\",\"params\":{\"enabled\":\"Whether to enable or disable monitoring\",\"token\":\"Address of the token\"}},\"setTrustedKeeper(address,bool)\":{\"custom:error\":\"ZeroAddress is thrown when keeper address is zero\",\"custom:event\":\"Emits TrustedKeeperUpdated event\",\"params\":{\"isTrusted\":\"Whether the keeper should be trusted\",\"keeper\":\"Address of the keeper\"}},\"transferOwnership(address)\":{\"details\":\"Starts the ownership transfer of the contract to a new account. Replaces the pending transfer if there is one. Can only be called by the current owner.\"}},\"stateVariables\":{\"CORE_POOL_COMPTROLLER\":{\"custom:oz-upgrades-unsafe-allow\":\"state-variable-immutable\"},\"RESILIENT_ORACLE\":{\"custom:oz-upgrades-unsafe-allow\":\"state-variable-immutable\"},\"SENTINEL_ORACLE\":{\"custom:oz-upgrades-unsafe-allow\":\"state-variable-immutable\"}},\"title\":\"DeviationSentinel\",\"version\":1},\"userdoc\":{\"errors\":{\"ComptrollerError(uint256)\":[{\"notice\":\"Thrown when comptroller operation fails\"}],\"ExceedsMaxDeviation()\":[{\"notice\":\"Thrown when deviation exceeds maximum allowed\"}],\"MarketNotConfigured()\":[{\"notice\":\"Thrown when market is not configured for monitoring\"}],\"TokenMonitoringDisabled()\":[{\"notice\":\"Thrown when token monitoring is disabled\"}],\"Unauthorized(address,address,string)\":[{\"notice\":\"Thrown when the action is prohibited by AccessControlManager\"}],\"UnauthorizedKeeper()\":[{\"notice\":\"Thrown when caller is not an authorized keeper\"}],\"ZeroAddress()\":[{\"notice\":\"Thrown when a zero address is provided\"}],\"ZeroDeviation()\":[{\"notice\":\"Thrown when deviation is set to zero\"}]},\"events\":{\"BorrowPaused(address)\":{\"notice\":\"Emitted when borrow is paused for a market\"},\"BorrowUnpaused(address)\":{\"notice\":\"Emitted when borrow is unpaused for a market\"},\"CollateralFactorUpdated(address,uint256,uint256)\":{\"notice\":\"Emitted when collateral factor is updated for isolated pool\"},\"CollateralFactorUpdated(address,uint96,uint256,uint256)\":{\"notice\":\"Emitted when collateral factor is updated for core pool\"},\"NewAccessControlManager(address,address)\":{\"notice\":\"Emitted when access control manager contract address is changed\"},\"SupplyPaused(address)\":{\"notice\":\"Emitted when supply is paused for a market\"},\"SupplyUnpaused(address)\":{\"notice\":\"Emitted when supply is unpaused for a market\"},\"TokenConfigUpdated(address,(uint8,bool))\":{\"notice\":\"Emitted when a token's deviation configuration is updated\"},\"TokenMonitoringStatusChanged(address,bool)\":{\"notice\":\"Emitted when a token's monitoring status is changed\"},\"TrustedKeeperUpdated(address,bool)\":{\"notice\":\"Emitted when a keeper's trusted status is updated\"}},\"kind\":\"user\",\"methods\":{\"CORE_POOL_COMPTROLLER()\":{\"notice\":\"Address of the Core Pool Comptroller\"},\"MAX_DEVIATION()\":{\"notice\":\"Maximum allowed price deviation in percentage (e.g., 10 = 10%)\"},\"RESILIENT_ORACLE()\":{\"notice\":\"Resilient Oracle for getting reference prices\"},\"SENTINEL_ORACLE()\":{\"notice\":\"Sentinel Oracle for getting DEX prices\"},\"accessControlManager()\":{\"notice\":\"Returns the address of the access control manager contract\"},\"checkPriceDeviation(address)\":{\"notice\":\"Check if there is a price deviation between resilient oracle and sentinel oracle for a market\"},\"constructor\":{\"notice\":\"Constructor for DeviationSentinel\"},\"handleDeviation(address)\":{\"notice\":\"Handle price deviation for a market by pausing or adjusting collateral factor\"},\"initialize(address)\":{\"notice\":\"Initialize the contract\"},\"marketStates(address)\":{\"notice\":\"Mapping to track market state changes made by this contract\"},\"setAccessControlManager(address)\":{\"notice\":\"Sets the address of AccessControlManager\"},\"setTokenConfig(address,(uint8,bool))\":{\"notice\":\"Set deviation configuration for a token\"},\"setTokenMonitoringEnabled(address,bool)\":{\"notice\":\"Enable or disable deviation monitoring for a token\"},\"setTrustedKeeper(address,bool)\":{\"notice\":\"Set trusted status for a keeper\"},\"tokenConfigs(address)\":{\"notice\":\"Mapping of token addresses to their DEX configuration\"},\"trustedKeepers(address)\":{\"notice\":\"Mapping of trusted keeper addresses\"}},\"notice\":\"Sentinel that compares ResilientOracle and SentinelOracle prices (via keeper) and pauses         specific actions (borrow, mint, collateral factor) per market when         large deviations are detected.\",\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/DeviationSentinel/DeviationSentinel.sol\":\"DeviationSentinel\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\",\"useLiteralContent\":true},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[]},\"sources\":{\"@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (access/Ownable2Step.sol)\\n\\npragma solidity ^0.8.0;\\n\\nimport \\\"./OwnableUpgradeable.sol\\\";\\nimport {Initializable} from \\\"../proxy/utils/Initializable.sol\\\";\\n\\n/**\\n * @dev Contract module which provides access control mechanism, where\\n * there is an account (an owner) that can be granted exclusive access to\\n * specific functions.\\n *\\n * By default, the owner account will be the one that deploys the contract. This\\n * can later be changed with {transferOwnership} and {acceptOwnership}.\\n *\\n * This module is used through inheritance. It will make available all functions\\n * from parent (Ownable).\\n */\\nabstract contract Ownable2StepUpgradeable is Initializable, OwnableUpgradeable {\\n    address private _pendingOwner;\\n\\n    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);\\n\\n    function __Ownable2Step_init() internal onlyInitializing {\\n        __Ownable_init_unchained();\\n    }\\n\\n    function __Ownable2Step_init_unchained() internal onlyInitializing {\\n    }\\n    /**\\n     * @dev Returns the address of the pending owner.\\n     */\\n    function pendingOwner() public view virtual returns (address) {\\n        return _pendingOwner;\\n    }\\n\\n    /**\\n     * @dev Starts the ownership transfer of the contract to a new account. Replaces the pending transfer if there is one.\\n     * Can only be called by the current owner.\\n     */\\n    function transferOwnership(address newOwner) public virtual override onlyOwner {\\n        _pendingOwner = newOwner;\\n        emit OwnershipTransferStarted(owner(), newOwner);\\n    }\\n\\n    /**\\n     * @dev Transfers ownership of the contract to a new account (`newOwner`) and deletes any pending owner.\\n     * Internal function without access restriction.\\n     */\\n    function _transferOwnership(address newOwner) internal virtual override {\\n        delete _pendingOwner;\\n        super._transferOwnership(newOwner);\\n    }\\n\\n    /**\\n     * @dev The new owner accepts the ownership transfer.\\n     */\\n    function acceptOwnership() public virtual {\\n        address sender = _msgSender();\\n        require(pendingOwner() == sender, \\\"Ownable2Step: caller is not the new owner\\\");\\n        _transferOwnership(sender);\\n    }\\n\\n    /**\\n     * @dev This empty reserved space is put in place to allow future versions to add new\\n     * variables without shifting down storage in the inheritance chain.\\n     * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps\\n     */\\n    uint256[49] private __gap;\\n}\\n\",\"keccak256\":\"0x9140dabc466abab21b48b72dbda26736b1183a310d0e677d3719d201df026510\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (access/Ownable.sol)\\n\\npragma solidity ^0.8.0;\\n\\nimport \\\"../utils/ContextUpgradeable.sol\\\";\\nimport {Initializable} from \\\"../proxy/utils/Initializable.sol\\\";\\n\\n/**\\n * @dev Contract module which provides a basic access control mechanism, where\\n * there is an account (an owner) that can be granted exclusive access to\\n * specific functions.\\n *\\n * By default, the owner account will be the one that deploys the contract. This\\n * can later be changed with {transferOwnership}.\\n *\\n * This module is used through inheritance. It will make available the modifier\\n * `onlyOwner`, which can be applied to your functions to restrict their use to\\n * the owner.\\n */\\nabstract contract OwnableUpgradeable is Initializable, ContextUpgradeable {\\n    address private _owner;\\n\\n    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);\\n\\n    /**\\n     * @dev Initializes the contract setting the deployer as the initial owner.\\n     */\\n    function __Ownable_init() internal onlyInitializing {\\n        __Ownable_init_unchained();\\n    }\\n\\n    function __Ownable_init_unchained() internal onlyInitializing {\\n        _transferOwnership(_msgSender());\\n    }\\n\\n    /**\\n     * @dev Throws if called by any account other than the owner.\\n     */\\n    modifier onlyOwner() {\\n        _checkOwner();\\n        _;\\n    }\\n\\n    /**\\n     * @dev Returns the address of the current owner.\\n     */\\n    function owner() public view virtual returns (address) {\\n        return _owner;\\n    }\\n\\n    /**\\n     * @dev Throws if the sender is not the owner.\\n     */\\n    function _checkOwner() internal view virtual {\\n        require(owner() == _msgSender(), \\\"Ownable: caller is not the owner\\\");\\n    }\\n\\n    /**\\n     * @dev Leaves the contract without owner. It will not be possible to call\\n     * `onlyOwner` functions. Can only be called by the current owner.\\n     *\\n     * NOTE: Renouncing ownership will leave the contract without an owner,\\n     * thereby disabling any functionality that is only available to the owner.\\n     */\\n    function renounceOwnership() public virtual onlyOwner {\\n        _transferOwnership(address(0));\\n    }\\n\\n    /**\\n     * @dev Transfers ownership of the contract to a new account (`newOwner`).\\n     * Can only be called by the current owner.\\n     */\\n    function transferOwnership(address newOwner) public virtual onlyOwner {\\n        require(newOwner != address(0), \\\"Ownable: new owner is the zero address\\\");\\n        _transferOwnership(newOwner);\\n    }\\n\\n    /**\\n     * @dev Transfers ownership of the contract to a new account (`newOwner`).\\n     * Internal function without access restriction.\\n     */\\n    function _transferOwnership(address newOwner) internal virtual {\\n        address oldOwner = _owner;\\n        _owner = newOwner;\\n        emit OwnershipTransferred(oldOwner, newOwner);\\n    }\\n\\n    /**\\n     * @dev This empty reserved space is put in place to allow future versions to add new\\n     * variables without shifting down storage in the inheritance chain.\\n     * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps\\n     */\\n    uint256[49] private __gap;\\n}\\n\",\"keccak256\":\"0x359a1ab89b46b9aba7bcad3fb651924baf4893d15153049b9976b0fc9be1358e\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (proxy/utils/Initializable.sol)\\n\\npragma solidity ^0.8.2;\\n\\nimport \\\"../../utils/AddressUpgradeable.sol\\\";\\n\\n/**\\n * @dev This is a base contract to aid in writing upgradeable contracts, or any kind of contract that will be deployed\\n * behind a proxy. Since proxied contracts do not make use of a constructor, it's common to move constructor logic to an\\n * external initializer function, usually called `initialize`. It then becomes necessary to protect this initializer\\n * function so it can only be called once. The {initializer} modifier provided by this contract will have this effect.\\n *\\n * The initialization functions use a version number. Once a version number is used, it is consumed and cannot be\\n * reused. This mechanism prevents re-execution of each \\\"step\\\" but allows the creation of new initialization steps in\\n * case an upgrade adds a module that needs to be initialized.\\n *\\n * For example:\\n *\\n * [.hljs-theme-light.nopadding]\\n * ```solidity\\n * contract MyToken is ERC20Upgradeable {\\n *     function initialize() initializer public {\\n *         __ERC20_init(\\\"MyToken\\\", \\\"MTK\\\");\\n *     }\\n * }\\n *\\n * contract MyTokenV2 is MyToken, ERC20PermitUpgradeable {\\n *     function initializeV2() reinitializer(2) public {\\n *         __ERC20Permit_init(\\\"MyToken\\\");\\n *     }\\n * }\\n * ```\\n *\\n * TIP: To avoid leaving the proxy in an uninitialized state, the initializer function should be called as early as\\n * possible by providing the encoded function call as the `_data` argument to {ERC1967Proxy-constructor}.\\n *\\n * CAUTION: When used with inheritance, manual care must be taken to not invoke a parent initializer twice, or to ensure\\n * that all initializers are idempotent. This is not verified automatically as constructors are by Solidity.\\n *\\n * [CAUTION]\\n * ====\\n * Avoid leaving a contract uninitialized.\\n *\\n * An uninitialized contract can be taken over by an attacker. This applies to both a proxy and its implementation\\n * contract, which may impact the proxy. To prevent the implementation contract from being used, you should invoke\\n * the {_disableInitializers} function in the constructor to automatically lock it when it is deployed:\\n *\\n * [.hljs-theme-light.nopadding]\\n * ```\\n * /// @custom:oz-upgrades-unsafe-allow constructor\\n * constructor() {\\n *     _disableInitializers();\\n * }\\n * ```\\n * ====\\n */\\nabstract contract Initializable {\\n    /**\\n     * @dev Indicates that the contract has been initialized.\\n     * @custom:oz-retyped-from bool\\n     */\\n    uint8 private _initialized;\\n\\n    /**\\n     * @dev Indicates that the contract is in the process of being initialized.\\n     */\\n    bool private _initializing;\\n\\n    /**\\n     * @dev Triggered when the contract has been initialized or reinitialized.\\n     */\\n    event Initialized(uint8 version);\\n\\n    /**\\n     * @dev A modifier that defines a protected initializer function that can be invoked at most once. In its scope,\\n     * `onlyInitializing` functions can be used to initialize parent contracts.\\n     *\\n     * Similar to `reinitializer(1)`, except that functions marked with `initializer` can be nested in the context of a\\n     * constructor.\\n     *\\n     * Emits an {Initialized} event.\\n     */\\n    modifier initializer() {\\n        bool isTopLevelCall = !_initializing;\\n        require(\\n            (isTopLevelCall && _initialized < 1) || (!AddressUpgradeable.isContract(address(this)) && _initialized == 1),\\n            \\\"Initializable: contract is already initialized\\\"\\n        );\\n        _initialized = 1;\\n        if (isTopLevelCall) {\\n            _initializing = true;\\n        }\\n        _;\\n        if (isTopLevelCall) {\\n            _initializing = false;\\n            emit Initialized(1);\\n        }\\n    }\\n\\n    /**\\n     * @dev A modifier that defines a protected reinitializer function that can be invoked at most once, and only if the\\n     * contract hasn't been initialized to a greater version before. In its scope, `onlyInitializing` functions can be\\n     * used to initialize parent contracts.\\n     *\\n     * A reinitializer may be used after the original initialization step. This is essential to configure modules that\\n     * are added through upgrades and that require initialization.\\n     *\\n     * When `version` is 1, this modifier is similar to `initializer`, except that functions marked with `reinitializer`\\n     * cannot be nested. If one is invoked in the context of another, execution will revert.\\n     *\\n     * Note that versions can jump in increments greater than 1; this implies that if multiple reinitializers coexist in\\n     * a contract, executing them in the right order is up to the developer or operator.\\n     *\\n     * WARNING: setting the version to 255 will prevent any future reinitialization.\\n     *\\n     * Emits an {Initialized} event.\\n     */\\n    modifier reinitializer(uint8 version) {\\n        require(!_initializing && _initialized < version, \\\"Initializable: contract is already initialized\\\");\\n        _initialized = version;\\n        _initializing = true;\\n        _;\\n        _initializing = false;\\n        emit Initialized(version);\\n    }\\n\\n    /**\\n     * @dev Modifier to protect an initialization function so that it can only be invoked by functions with the\\n     * {initializer} and {reinitializer} modifiers, directly or indirectly.\\n     */\\n    modifier onlyInitializing() {\\n        require(_initializing, \\\"Initializable: contract is not initializing\\\");\\n        _;\\n    }\\n\\n    /**\\n     * @dev Locks the contract, preventing any future reinitialization. This cannot be part of an initializer call.\\n     * Calling this in the constructor of a contract will prevent that contract from being initialized or reinitialized\\n     * to any version. It is recommended to use this to lock implementation contracts that are designed to be called\\n     * through proxies.\\n     *\\n     * Emits an {Initialized} event the first time it is successfully executed.\\n     */\\n    function _disableInitializers() internal virtual {\\n        require(!_initializing, \\\"Initializable: contract is initializing\\\");\\n        if (_initialized != type(uint8).max) {\\n            _initialized = type(uint8).max;\\n            emit Initialized(type(uint8).max);\\n        }\\n    }\\n\\n    /**\\n     * @dev Returns the highest version that has been initialized. See {reinitializer}.\\n     */\\n    function _getInitializedVersion() internal view returns (uint8) {\\n        return _initialized;\\n    }\\n\\n    /**\\n     * @dev Returns `true` if the contract is currently initializing. See {onlyInitializing}.\\n     */\\n    function _isInitializing() internal view returns (bool) {\\n        return _initializing;\\n    }\\n}\\n\",\"keccak256\":\"0x89be10e757d242e9b18d5a32c9fbe2019f6d63052bbe46397a430a1d60d7f794\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (token/ERC20/IERC20.sol)\\n\\npragma solidity ^0.8.0;\\n\\n/**\\n * @dev Interface of the ERC20 standard as defined in the EIP.\\n */\\ninterface IERC20Upgradeable {\\n    /**\\n     * @dev Emitted when `value` tokens are moved from one account (`from`) to\\n     * another (`to`).\\n     *\\n     * Note that `value` may be zero.\\n     */\\n    event Transfer(address indexed from, address indexed to, uint256 value);\\n\\n    /**\\n     * @dev Emitted when the allowance of a `spender` for an `owner` is set by\\n     * a call to {approve}. `value` is the new allowance.\\n     */\\n    event Approval(address indexed owner, address indexed spender, uint256 value);\\n\\n    /**\\n     * @dev Returns the amount of tokens in existence.\\n     */\\n    function totalSupply() external view returns (uint256);\\n\\n    /**\\n     * @dev Returns the amount of tokens owned by `account`.\\n     */\\n    function balanceOf(address account) external view returns (uint256);\\n\\n    /**\\n     * @dev Moves `amount` tokens from the caller's account to `to`.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * Emits a {Transfer} event.\\n     */\\n    function transfer(address to, uint256 amount) external returns (bool);\\n\\n    /**\\n     * @dev Returns the remaining number of tokens that `spender` will be\\n     * allowed to spend on behalf of `owner` through {transferFrom}. This is\\n     * zero by default.\\n     *\\n     * This value changes when {approve} or {transferFrom} are called.\\n     */\\n    function allowance(address owner, address spender) external view returns (uint256);\\n\\n    /**\\n     * @dev Sets `amount` as the allowance of `spender` over the caller's tokens.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * IMPORTANT: Beware that changing an allowance with this method brings the risk\\n     * that someone may use both the old and the new allowance by unfortunate\\n     * transaction ordering. One possible solution to mitigate this race\\n     * condition is to first reduce the spender's allowance to 0 and set the\\n     * desired value afterwards:\\n     * https://github.com/ethereum/EIPs/issues/20#issuecomment-263524729\\n     *\\n     * Emits an {Approval} event.\\n     */\\n    function approve(address spender, uint256 amount) external returns (bool);\\n\\n    /**\\n     * @dev Moves `amount` tokens from `from` to `to` using the\\n     * allowance mechanism. `amount` is then deducted from the caller's\\n     * allowance.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * Emits a {Transfer} event.\\n     */\\n    function transferFrom(address from, address to, uint256 amount) external returns (bool);\\n}\\n\",\"keccak256\":\"0x0e1f0f5f62f67a881cd1a9597acbc0a5e4071f3c2c10449a183b922ae7272e3f\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (utils/Address.sol)\\n\\npragma solidity ^0.8.1;\\n\\n/**\\n * @dev Collection of functions related to the address type\\n */\\nlibrary AddressUpgradeable {\\n    /**\\n     * @dev Returns true if `account` is a contract.\\n     *\\n     * [IMPORTANT]\\n     * ====\\n     * It is unsafe to assume that an address for which this function returns\\n     * false is an externally-owned account (EOA) and not a contract.\\n     *\\n     * Among others, `isContract` will return false for the following\\n     * types of addresses:\\n     *\\n     *  - an externally-owned account\\n     *  - a contract in construction\\n     *  - an address where a contract will be created\\n     *  - an address where a contract lived, but was destroyed\\n     *\\n     * Furthermore, `isContract` will also return true if the target contract within\\n     * the same transaction is already scheduled for destruction by `SELFDESTRUCT`,\\n     * which only has an effect at the end of a transaction.\\n     * ====\\n     *\\n     * [IMPORTANT]\\n     * ====\\n     * You shouldn't rely on `isContract` to protect against flash loan attacks!\\n     *\\n     * Preventing calls from contracts is highly discouraged. It breaks composability, breaks support for smart wallets\\n     * like Gnosis Safe, and does not provide security since it can be circumvented by calling from a contract\\n     * constructor.\\n     * ====\\n     */\\n    function isContract(address account) internal view returns (bool) {\\n        // This method relies on extcodesize/address.code.length, which returns 0\\n        // for contracts in construction, since the code is only stored at the end\\n        // of the constructor execution.\\n\\n        return account.code.length > 0;\\n    }\\n\\n    /**\\n     * @dev Replacement for Solidity's `transfer`: sends `amount` wei to\\n     * `recipient`, forwarding all available gas and reverting on errors.\\n     *\\n     * https://eips.ethereum.org/EIPS/eip-1884[EIP1884] increases the gas cost\\n     * of certain opcodes, possibly making contracts go over the 2300 gas limit\\n     * imposed by `transfer`, making them unable to receive funds via\\n     * `transfer`. {sendValue} removes this limitation.\\n     *\\n     * https://consensys.net/diligence/blog/2019/09/stop-using-soliditys-transfer-now/[Learn more].\\n     *\\n     * IMPORTANT: because control is transferred to `recipient`, care must be\\n     * taken to not create reentrancy vulnerabilities. Consider using\\n     * {ReentrancyGuard} or the\\n     * https://solidity.readthedocs.io/en/v0.8.0/security-considerations.html#use-the-checks-effects-interactions-pattern[checks-effects-interactions pattern].\\n     */\\n    function sendValue(address payable recipient, uint256 amount) internal {\\n        require(address(this).balance >= amount, \\\"Address: insufficient balance\\\");\\n\\n        (bool success, ) = recipient.call{value: amount}(\\\"\\\");\\n        require(success, \\\"Address: unable to send value, recipient may have reverted\\\");\\n    }\\n\\n    /**\\n     * @dev Performs a Solidity function call using a low level `call`. A\\n     * plain `call` is an unsafe replacement for a function call: use this\\n     * function instead.\\n     *\\n     * If `target` reverts with a revert reason, it is bubbled up by this\\n     * function (like regular Solidity function calls).\\n     *\\n     * Returns the raw returned data. To convert to the expected return value,\\n     * use https://solidity.readthedocs.io/en/latest/units-and-global-variables.html?highlight=abi.decode#abi-encoding-and-decoding-functions[`abi.decode`].\\n     *\\n     * Requirements:\\n     *\\n     * - `target` must be a contract.\\n     * - calling `target` with `data` must not revert.\\n     *\\n     * _Available since v3.1._\\n     */\\n    function functionCall(address target, bytes memory data) internal returns (bytes memory) {\\n        return functionCallWithValue(target, data, 0, \\\"Address: low-level call failed\\\");\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`], but with\\n     * `errorMessage` as a fallback revert reason when `target` reverts.\\n     *\\n     * _Available since v3.1._\\n     */\\n    function functionCall(\\n        address target,\\n        bytes memory data,\\n        string memory errorMessage\\n    ) internal returns (bytes memory) {\\n        return functionCallWithValue(target, data, 0, errorMessage);\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`],\\n     * but also transferring `value` wei to `target`.\\n     *\\n     * Requirements:\\n     *\\n     * - the calling contract must have an ETH balance of at least `value`.\\n     * - the called Solidity function must be `payable`.\\n     *\\n     * _Available since v3.1._\\n     */\\n    function functionCallWithValue(address target, bytes memory data, uint256 value) internal returns (bytes memory) {\\n        return functionCallWithValue(target, data, value, \\\"Address: low-level call with value failed\\\");\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCallWithValue-address-bytes-uint256-}[`functionCallWithValue`], but\\n     * with `errorMessage` as a fallback revert reason when `target` reverts.\\n     *\\n     * _Available since v3.1._\\n     */\\n    function functionCallWithValue(\\n        address target,\\n        bytes memory data,\\n        uint256 value,\\n        string memory errorMessage\\n    ) internal returns (bytes memory) {\\n        require(address(this).balance >= value, \\\"Address: insufficient balance for call\\\");\\n        (bool success, bytes memory returndata) = target.call{value: value}(data);\\n        return verifyCallResultFromTarget(target, success, returndata, errorMessage);\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`],\\n     * but performing a static call.\\n     *\\n     * _Available since v3.3._\\n     */\\n    function functionStaticCall(address target, bytes memory data) internal view returns (bytes memory) {\\n        return functionStaticCall(target, data, \\\"Address: low-level static call failed\\\");\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-string-}[`functionCall`],\\n     * but performing a static call.\\n     *\\n     * _Available since v3.3._\\n     */\\n    function functionStaticCall(\\n        address target,\\n        bytes memory data,\\n        string memory errorMessage\\n    ) internal view returns (bytes memory) {\\n        (bool success, bytes memory returndata) = target.staticcall(data);\\n        return verifyCallResultFromTarget(target, success, returndata, errorMessage);\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`],\\n     * but performing a delegate call.\\n     *\\n     * _Available since v3.4._\\n     */\\n    function functionDelegateCall(address target, bytes memory data) internal returns (bytes memory) {\\n        return functionDelegateCall(target, data, \\\"Address: low-level delegate call failed\\\");\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-string-}[`functionCall`],\\n     * but performing a delegate call.\\n     *\\n     * _Available since v3.4._\\n     */\\n    function functionDelegateCall(\\n        address target,\\n        bytes memory data,\\n        string memory errorMessage\\n    ) internal returns (bytes memory) {\\n        (bool success, bytes memory returndata) = target.delegatecall(data);\\n        return verifyCallResultFromTarget(target, success, returndata, errorMessage);\\n    }\\n\\n    /**\\n     * @dev Tool to verify that a low level call to smart-contract was successful, and revert (either by bubbling\\n     * the revert reason or using the provided one) in case of unsuccessful call or if target was not a contract.\\n     *\\n     * _Available since v4.8._\\n     */\\n    function verifyCallResultFromTarget(\\n        address target,\\n        bool success,\\n        bytes memory returndata,\\n        string memory errorMessage\\n    ) internal view returns (bytes memory) {\\n        if (success) {\\n            if (returndata.length == 0) {\\n                // only check isContract if the call was successful and the return data is empty\\n                // otherwise we already know that it was a contract\\n                require(isContract(target), \\\"Address: call to non-contract\\\");\\n            }\\n            return returndata;\\n        } else {\\n            _revert(returndata, errorMessage);\\n        }\\n    }\\n\\n    /**\\n     * @dev Tool to verify that a low level call was successful, and revert if it wasn't, either by bubbling the\\n     * revert reason or using the provided one.\\n     *\\n     * _Available since v4.3._\\n     */\\n    function verifyCallResult(\\n        bool success,\\n        bytes memory returndata,\\n        string memory errorMessage\\n    ) internal pure returns (bytes memory) {\\n        if (success) {\\n            return returndata;\\n        } else {\\n            _revert(returndata, errorMessage);\\n        }\\n    }\\n\\n    function _revert(bytes memory returndata, string memory errorMessage) private pure {\\n        // Look for revert reason and bubble it up if present\\n        if (returndata.length > 0) {\\n            // The easiest way to bubble the revert reason is using memory via assembly\\n            /// @solidity memory-safe-assembly\\n            assembly {\\n                let returndata_size := mload(returndata)\\n                revert(add(32, returndata), returndata_size)\\n            }\\n        } else {\\n            revert(errorMessage);\\n        }\\n    }\\n}\\n\",\"keccak256\":\"0x9c80f545915582e63fe206c6ce27cbe85a86fc10b9cd2a0e8c9488fb7c2ee422\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/utils/ContextUpgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.4) (utils/Context.sol)\\n\\npragma solidity ^0.8.0;\\nimport {Initializable} from \\\"../proxy/utils/Initializable.sol\\\";\\n\\n/**\\n * @dev Provides information about the current execution context, including the\\n * sender of the transaction and its data. While these are generally available\\n * via msg.sender and msg.data, they should not be accessed in such a direct\\n * manner, since when dealing with meta-transactions the account sending and\\n * paying for execution may not be the actual sender (as far as an application\\n * is concerned).\\n *\\n * This contract is only required for intermediate, library-like contracts.\\n */\\nabstract contract ContextUpgradeable is Initializable {\\n    function __Context_init() internal onlyInitializing {\\n    }\\n\\n    function __Context_init_unchained() internal onlyInitializing {\\n    }\\n    function _msgSender() internal view virtual returns (address) {\\n        return msg.sender;\\n    }\\n\\n    function _msgData() internal view virtual returns (bytes calldata) {\\n        return msg.data;\\n    }\\n\\n    function _contextSuffixLength() internal view virtual returns (uint256) {\\n        return 0;\\n    }\\n\\n    /**\\n     * @dev This empty reserved space is put in place to allow future versions to add new\\n     * variables without shifting down storage in the inheritance chain.\\n     * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps\\n     */\\n    uint256[50] private __gap;\\n}\\n\",\"keccak256\":\"0x75097e35253e7fb282ee4d7f27a80eaacfa759923185bf17302a89cbc059c5ef\",\"license\":\"MIT\"},\"@openzeppelin/contracts/access/IAccessControl.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts v4.4.1 (access/IAccessControl.sol)\\n\\npragma solidity ^0.8.0;\\n\\n/**\\n * @dev External interface of AccessControl declared to support ERC165 detection.\\n */\\ninterface IAccessControl {\\n    /**\\n     * @dev Emitted when `newAdminRole` is set as ``role``'s admin role, replacing `previousAdminRole`\\n     *\\n     * `DEFAULT_ADMIN_ROLE` is the starting admin for all roles, despite\\n     * {RoleAdminChanged} not being emitted signaling this.\\n     *\\n     * _Available since v3.1._\\n     */\\n    event RoleAdminChanged(bytes32 indexed role, bytes32 indexed previousAdminRole, bytes32 indexed newAdminRole);\\n\\n    /**\\n     * @dev Emitted when `account` is granted `role`.\\n     *\\n     * `sender` is the account that originated the contract call, an admin role\\n     * bearer except when using {AccessControl-_setupRole}.\\n     */\\n    event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender);\\n\\n    /**\\n     * @dev Emitted when `account` is revoked `role`.\\n     *\\n     * `sender` is the account that originated the contract call:\\n     *   - if using `revokeRole`, it is the admin role bearer\\n     *   - if using `renounceRole`, it is the role bearer (i.e. `account`)\\n     */\\n    event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender);\\n\\n    /**\\n     * @dev Returns `true` if `account` has been granted `role`.\\n     */\\n    function hasRole(bytes32 role, address account) external view returns (bool);\\n\\n    /**\\n     * @dev Returns the admin role that controls `role`. See {grantRole} and\\n     * {revokeRole}.\\n     *\\n     * To change a role's admin, use {AccessControl-_setRoleAdmin}.\\n     */\\n    function getRoleAdmin(bytes32 role) external view returns (bytes32);\\n\\n    /**\\n     * @dev Grants `role` to `account`.\\n     *\\n     * If `account` had not been already granted `role`, emits a {RoleGranted}\\n     * event.\\n     *\\n     * Requirements:\\n     *\\n     * - the caller must have ``role``'s admin role.\\n     */\\n    function grantRole(bytes32 role, address account) external;\\n\\n    /**\\n     * @dev Revokes `role` from `account`.\\n     *\\n     * If `account` had been granted `role`, emits a {RoleRevoked} event.\\n     *\\n     * Requirements:\\n     *\\n     * - the caller must have ``role``'s admin role.\\n     */\\n    function revokeRole(bytes32 role, address account) external;\\n\\n    /**\\n     * @dev Revokes `role` from the calling account.\\n     *\\n     * Roles are often managed via {grantRole} and {revokeRole}: this function's\\n     * purpose is to provide a mechanism for accounts to lose their privileges\\n     * if they are compromised (such as when a trusted device is misplaced).\\n     *\\n     * If the calling account had been granted `role`, emits a {RoleRevoked}\\n     * event.\\n     *\\n     * Requirements:\\n     *\\n     * - the caller must be `account`.\\n     */\\n    function renounceRole(bytes32 role, address account) external;\\n}\\n\",\"keccak256\":\"0x59ce320a585d7e1f163cd70390a0ef2ff9cec832e2aa544293a00692465a7a57\",\"license\":\"MIT\"},\"@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity 0.8.25;\\n\\nimport \\\"@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol\\\";\\nimport \\\"@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol\\\";\\n\\nimport \\\"./IAccessControlManagerV8.sol\\\";\\n\\n/**\\n * @title AccessControlledV8\\n * @author Venus\\n * @notice This contract is helper between access control manager and actual contract. This contract further inherited by other contract (using solidity 0.8.13)\\n * to integrate access controlled mechanism. It provides initialise methods and verifying access methods.\\n */\\nabstract contract AccessControlledV8 is Initializable, Ownable2StepUpgradeable {\\n    /// @notice Access control manager contract\\n    IAccessControlManagerV8 internal _accessControlManager;\\n\\n    /**\\n     * @dev This empty reserved space is put in place to allow future versions to add new\\n     * variables without shifting down storage in the inheritance chain.\\n     * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps\\n     */\\n    uint256[49] private __gap;\\n\\n    /// @notice Emitted when access control manager contract address is changed\\n    event NewAccessControlManager(address oldAccessControlManager, address newAccessControlManager);\\n\\n    /// @notice Thrown when the action is prohibited by AccessControlManager\\n    error Unauthorized(address sender, address calledContract, string methodSignature);\\n\\n    function __AccessControlled_init(address accessControlManager_) internal onlyInitializing {\\n        __Ownable2Step_init();\\n        __AccessControlled_init_unchained(accessControlManager_);\\n    }\\n\\n    function __AccessControlled_init_unchained(address accessControlManager_) internal onlyInitializing {\\n        _setAccessControlManager(accessControlManager_);\\n    }\\n\\n    /**\\n     * @notice Sets the address of AccessControlManager\\n     * @dev Admin function to set address of AccessControlManager\\n     * @param accessControlManager_ The new address of the AccessControlManager\\n     * @custom:event Emits NewAccessControlManager event\\n     * @custom:access Only Governance\\n     */\\n    function setAccessControlManager(address accessControlManager_) external onlyOwner {\\n        _setAccessControlManager(accessControlManager_);\\n    }\\n\\n    /**\\n     * @notice Returns the address of the access control manager contract\\n     */\\n    function accessControlManager() external view returns (IAccessControlManagerV8) {\\n        return _accessControlManager;\\n    }\\n\\n    /**\\n     * @dev Internal function to set address of AccessControlManager\\n     * @param accessControlManager_ The new address of the AccessControlManager\\n     */\\n    function _setAccessControlManager(address accessControlManager_) internal {\\n        require(address(accessControlManager_) != address(0), \\\"invalid acess control manager address\\\");\\n        address oldAccessControlManager = address(_accessControlManager);\\n        _accessControlManager = IAccessControlManagerV8(accessControlManager_);\\n        emit NewAccessControlManager(oldAccessControlManager, accessControlManager_);\\n    }\\n\\n    /**\\n     * @notice Reverts if the call is not allowed by AccessControlManager\\n     * @param signature Method signature\\n     */\\n    function _checkAccessAllowed(string memory signature) internal view {\\n        bool isAllowedToCall = _accessControlManager.isAllowedToCall(msg.sender, signature);\\n\\n        if (!isAllowedToCall) {\\n            revert Unauthorized(msg.sender, address(this), signature);\\n        }\\n    }\\n}\\n\",\"keccak256\":\"0xfe0fd441c84ac907cabc88db69ef04f6d7532d770c7e6a1dfe6e7d6305debb49\",\"license\":\"BSD-3-Clause\"},\"@venusprotocol/governance-contracts/contracts/Governance/IAccessControlManagerV8.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\nimport \\\"@openzeppelin/contracts/access/IAccessControl.sol\\\";\\n\\n/**\\n * @title IAccessControlManagerV8\\n * @author Venus\\n * @notice Interface implemented by the `AccessControlManagerV8` contract.\\n */\\ninterface IAccessControlManagerV8 is IAccessControl {\\n    function giveCallPermission(address contractAddress, string calldata functionSig, address accountToPermit) external;\\n\\n    function revokeCallPermission(\\n        address contractAddress,\\n        string calldata functionSig,\\n        address accountToRevoke\\n    ) external;\\n\\n    function isAllowedToCall(address account, string calldata functionSig) external view returns (bool);\\n\\n    function hasPermission(\\n        address account,\\n        address contractAddress,\\n        string calldata functionSig\\n    ) external view returns (bool);\\n}\\n\",\"keccak256\":\"0xaa29b098440d0b3a131c5ecdf25ce548790c1b5ac7bf9b5c0264b6af6f7a1e0b\",\"license\":\"BSD-3-Clause\"},\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\ninterface OracleInterface {\\n    function getPrice(address asset) external view returns (uint256);\\n}\\n\\ninterface ResilientOracleInterface is OracleInterface {\\n    function updatePrice(address vToken) external;\\n\\n    function updateAssetPrice(address asset) external;\\n\\n    function getUnderlyingPrice(address vToken) external view returns (uint256);\\n}\\n\\ninterface BoundValidatorInterface {\\n    function validatePriceWithAnchorPrice(\\n        address asset,\\n        uint256 reporterPrice,\\n        uint256 anchorPrice\\n    ) external view returns (bool);\\n}\\n\",\"keccak256\":\"0xd3bbb7c9eef19e8f467342df6034ef95399a00964646fb8c82b438968ae3a8c0\",\"license\":\"BSD-3-Clause\"},\"contracts/DeviationSentinel/DeviationSentinel.sol\":{\"content\":\"pragma solidity ^0.8.25;\\n\\nimport { ICorePoolComptroller } from \\\"../Interfaces/ICorePoolComptroller.sol\\\";\\nimport { IILComptroller } from \\\"../Interfaces/IILComptroller.sol\\\";\\nimport { IComptroller } from \\\"../Interfaces/IComptroller.sol\\\";\\nimport { IVToken } from \\\"../Interfaces/IVToken.sol\\\";\\nimport { ResilientOracleInterface, OracleInterface } from \\\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\\\";\\nimport { AccessControlledV8 } from \\\"@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol\\\";\\n\\n/**\\n * @title DeviationSentinel\\n * @author Venus\\n * @notice Sentinel that compares ResilientOracle and SentinelOracle prices (via keeper) and pauses\\n *         specific actions (borrow, mint, collateral factor) per market when\\n *         large deviations are detected.\\n */\\ncontract DeviationSentinel is AccessControlledV8 {\\n    /// @notice Configuration for price deviation monitoring\\n    /// @param deviation Maximum allowed deviation percentage (e.g., 10 = 10%)\\n    /// @param enabled Whether deviation monitoring is enabled for this token\\n    struct DeviationConfig {\\n        uint8 deviation;\\n        bool enabled;\\n    }\\n\\n    /// @notice State tracking for market modifications by this contract\\n    /// @param borrowPaused True if borrow is paused for this market by this contract\\n    /// @param supplyPaused True if supply is paused for this market by this contract\\n    /// @param cfModified True if collateral factor was modified by this contract\\n    /// @param originalCF Original collateral factor before modification (for IL pools)\\n    /// @param originalLT Original liquidation threshold before modification (for IL pools)\\n    /// @param poolCFs Mapping of pool ID to original collateral factor (for core pool)\\n    /// @param poolLTs Mapping of pool ID to original liquidation threshold (for core pool)\\n    struct MarketState {\\n        bool borrowPaused;\\n        bool supplyPaused;\\n        bool cfModified;\\n        uint256 originalCF;\\n        uint256 originalLT;\\n        mapping(uint96 => uint256) poolCFs;\\n        mapping(uint96 => uint256) poolLTs;\\n    }\\n\\n    /// @notice Maximum allowed price deviation in percentage (e.g., 10 = 10%)\\n    uint8 public constant MAX_DEVIATION = 100;\\n\\n    /// @notice Address of the Core Pool Comptroller\\n    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable\\n    ICorePoolComptroller public immutable CORE_POOL_COMPTROLLER;\\n\\n    /// @notice Resilient Oracle for getting reference prices\\n    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable\\n    ResilientOracleInterface public immutable RESILIENT_ORACLE;\\n\\n    /// @notice Sentinel Oracle for getting DEX prices\\n    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable\\n    OracleInterface public immutable SENTINEL_ORACLE;\\n\\n    /// @notice Mapping of token addresses to their DEX configuration\\n    mapping(address => DeviationConfig) public tokenConfigs;\\n\\n    /// @notice Mapping of trusted keeper addresses\\n    mapping(address => bool) public trustedKeepers;\\n\\n    /// @notice Mapping to track market state changes made by this contract\\n    mapping(address => MarketState) public marketStates;\\n\\n    /// @notice Emitted when a token's deviation configuration is updated\\n    /// @param token The token address\\n    /// @param config The new deviation configuration\\n    event TokenConfigUpdated(address indexed token, DeviationConfig config);\\n\\n    /// @notice Emitted when a token's monitoring status is changed\\n    /// @param token The token address\\n    /// @param enabled Whether monitoring is enabled\\n    event TokenMonitoringStatusChanged(address indexed token, bool enabled);\\n\\n    /// @notice Emitted when a keeper's trusted status is updated\\n    /// @param keeper The keeper address\\n    /// @param isTrusted Whether the keeper is trusted\\n    event TrustedKeeperUpdated(address indexed keeper, bool isTrusted);\\n\\n    /// @notice Emitted when borrow is paused for a market\\n    /// @param market The market address\\n    event BorrowPaused(address indexed market);\\n\\n    /// @notice Emitted when borrow is unpaused for a market\\n    /// @param market The market address\\n    event BorrowUnpaused(address indexed market);\\n\\n    /// @notice Emitted when supply is paused for a market\\n    /// @param market The market address\\n    event SupplyPaused(address indexed market);\\n\\n    /// @notice Emitted when supply is unpaused for a market\\n    /// @param market The market address\\n    event SupplyUnpaused(address indexed market);\\n\\n    /// @notice Emitted when collateral factor is updated for core pool\\n    /// @param market The market address\\n    /// @param poolId The pool ID (emode group)\\n    /// @param oldCF The old collateral factor\\n    /// @param newCF The new collateral factor\\n    event CollateralFactorUpdated(address indexed market, uint96 indexed poolId, uint256 oldCF, uint256 newCF);\\n\\n    /// @notice Emitted when collateral factor is updated for isolated pool\\n    /// @param market The market address\\n    /// @param oldCF The old collateral factor\\n    /// @param newCF The new collateral factor\\n    event CollateralFactorUpdated(address indexed market, uint256 oldCF, uint256 newCF);\\n\\n    /// @notice Thrown when deviation is set to zero\\n    error ZeroDeviation();\\n\\n    /// @notice Thrown when deviation exceeds maximum allowed\\n    error ExceedsMaxDeviation();\\n\\n    /// @notice Thrown when a zero address is provided\\n    error ZeroAddress();\\n\\n    /// @notice Thrown when caller is not an authorized keeper\\n    error UnauthorizedKeeper();\\n\\n    /// @notice Thrown when market is not configured for monitoring\\n    error MarketNotConfigured();\\n\\n    /// @notice Thrown when token monitoring is disabled\\n    error TokenMonitoringDisabled();\\n\\n    /// @notice Thrown when comptroller operation fails\\n    /// @param errorCode The error code returned by the comptroller\\n    error ComptrollerError(uint256 errorCode);\\n\\n    modifier onlyKeeper() {\\n        if (!trustedKeepers[msg.sender]) revert UnauthorizedKeeper();\\n        _;\\n    }\\n\\n    /// @notice Constructor for DeviationSentinel\\n    /// @param corePoolComptroller_ Address of the core pool comptroller\\n    /// @param resilientOracle_ Address of the resilient oracle\\n    /// @param sentinelOracle_ Address of the sentinel oracle\\n    constructor(\\n        ICorePoolComptroller corePoolComptroller_,\\n        ResilientOracleInterface resilientOracle_,\\n        OracleInterface sentinelOracle_\\n    ) {\\n        CORE_POOL_COMPTROLLER = corePoolComptroller_;\\n\\n        if (address(resilientOracle_) == address(0)) revert ZeroAddress();\\n        if (address(sentinelOracle_) == address(0)) revert ZeroAddress();\\n        RESILIENT_ORACLE = resilientOracle_;\\n        SENTINEL_ORACLE = sentinelOracle_;\\n\\n        // Note that the contract is upgradeable. Use initialize() or reinitializers\\n        // to set the state variables.\\n        _disableInitializers();\\n    }\\n\\n    /// @notice Initialize the contract\\n    /// @param accessControlManager_ Address of the access control manager\\n    function initialize(address accessControlManager_) external initializer {\\n        __AccessControlled_init(accessControlManager_);\\n    }\\n\\n    /// @notice Set trusted status for a keeper\\n    /// @param keeper Address of the keeper\\n    /// @param isTrusted Whether the keeper should be trusted\\n    /// @custom:event Emits TrustedKeeperUpdated event\\n    /// @custom:error ZeroAddress is thrown when keeper address is zero\\n    function setTrustedKeeper(address keeper, bool isTrusted) external {\\n        _checkAccessAllowed(\\\"setTrustedKeeper(address,bool)\\\");\\n\\n        if (keeper == address(0)) revert ZeroAddress();\\n\\n        trustedKeepers[keeper] = isTrusted;\\n        emit TrustedKeeperUpdated(keeper, isTrusted);\\n    }\\n\\n    /// @notice Set deviation configuration for a token\\n    /// @param token Address of the token\\n    /// @param config Deviation configuration containing threshold and enabled status\\n    /// @custom:event Emits TokenConfigUpdated event\\n    /// @custom:error ZeroAddress is thrown when token address is zero\\n    /// @custom:error ZeroDeviation is thrown when deviation is set to zero\\n    /// @custom:error ExceedsMaxDeviation is thrown when deviation exceeds MAX_DEVIATION\\n    function setTokenConfig(address token, DeviationConfig calldata config) external {\\n        _checkAccessAllowed(\\\"setTokenConfig(address,(uint8,bool))\\\");\\n\\n        if (token == address(0)) revert ZeroAddress();\\n        if (config.deviation == 0) revert ZeroDeviation();\\n        if (config.deviation > MAX_DEVIATION) revert ExceedsMaxDeviation();\\n\\n        tokenConfigs[token] = config;\\n        emit TokenConfigUpdated(token, config);\\n    }\\n\\n    /// @notice Enable or disable deviation monitoring for a token\\n    /// @param token Address of the token\\n    /// @param enabled Whether to enable or disable monitoring\\n    /// @custom:event Emits TokenMonitoringStatusChanged event\\n    /// @custom:error ZeroAddress is thrown when token address is zero\\n    /// @custom:error MarketNotConfigured is thrown when token has no deviation config\\n    function setTokenMonitoringEnabled(address token, bool enabled) external {\\n        _checkAccessAllowed(\\\"setTokenMonitoringEnabled(address,bool)\\\");\\n\\n        if (token == address(0)) revert ZeroAddress();\\n\\n        DeviationConfig storage config = tokenConfigs[token];\\n        if (config.deviation == 0) revert MarketNotConfigured();\\n\\n        config.enabled = enabled;\\n        emit TokenMonitoringStatusChanged(token, enabled);\\n    }\\n\\n    /// @notice Handle price deviation for a market by pausing or adjusting collateral factor\\n    /// @param market The vToken market to handle\\n    /// @custom:event Emits BorrowPaused when borrow is paused due to high sentinel price\\n    /// @custom:event Emits BorrowUnpaused when borrow is unpaused after deviation resolved\\n    /// @custom:event Emits SupplyPaused when supply is paused due to low sentinel price\\n    /// @custom:event Emits SupplyUnpaused when supply is unpaused after deviation resolved\\n    /// @custom:event Emits CollateralFactorUpdated when collateral factor is modified\\n    /// @custom:error UnauthorizedKeeper is thrown when caller is not a trusted keeper\\n    /// @custom:error MarketNotConfigured is thrown when market's underlying token has no deviation config\\n    /// @custom:error TokenMonitoringDisabled is thrown when monitoring is disabled for the token\\n    /// @custom:error ComptrollerError is thrown when comptroller operation fails\\n    function handleDeviation(IVToken market) external onlyKeeper {\\n        address underlyingToken = market.underlying();\\n        DeviationConfig memory config = tokenConfigs[underlyingToken];\\n\\n        if (config.deviation == 0) revert MarketNotConfigured();\\n        if (!config.enabled) revert TokenMonitoringDisabled();\\n\\n        (bool hasDeviation, uint256 oraclePrice, uint256 sentinelPrice, ) = checkPriceDeviation(market);\\n\\n        MarketState storage state = marketStates[address(market)];\\n\\n        if (hasDeviation) {\\n            if (sentinelPrice > oraclePrice) {\\n                // Early return if borrow is already paused\\n                if (state.borrowPaused) return;\\n\\n                _pauseBorrow(market, IComptroller.Action.BORROW);\\n                state.borrowPaused = true;\\n            } else {\\n                // Early return if CF is already modified and supply is already paused\\n                if (state.cfModified && state.supplyPaused) return;\\n\\n                _setCollateralFactorToZero(market);\\n                _pauseSupply(market, IComptroller.Action.MINT);\\n                state.cfModified = true;\\n                state.supplyPaused = true;\\n            }\\n        } else {\\n            if (state.borrowPaused) {\\n                _unpauseBorrow(market, IComptroller.Action.BORROW);\\n                state.borrowPaused = false;\\n            }\\n\\n            if (state.cfModified) {\\n                _restoreCollateralFactor(market);\\n                state.cfModified = false;\\n            }\\n\\n            if (state.supplyPaused) {\\n                _unpauseSupply(market, IComptroller.Action.MINT);\\n                state.supplyPaused = false;\\n            }\\n        }\\n    }\\n\\n    /// @notice Check if there is a price deviation between resilient oracle and sentinel oracle for a market\\n    /// @param market The vToken market to check\\n    /// @return hasDeviation True if deviation exceeds configured threshold\\n    /// @return oraclePrice The price from resilient oracle\\n    /// @return sentinelPrice The price from sentinel oracle\\n    /// @return deviationPercent The percentage deviation (scaled by 100)\\n    function checkPriceDeviation(\\n        IVToken market\\n    ) public view returns (bool hasDeviation, uint256 oraclePrice, uint256 sentinelPrice, uint256 deviationPercent) {\\n        address underlyingToken = market.underlying();\\n        DeviationConfig memory config = tokenConfigs[underlyingToken];\\n\\n        oraclePrice = RESILIENT_ORACLE.getPrice(underlyingToken);\\n        sentinelPrice = SENTINEL_ORACLE.getPrice(underlyingToken);\\n\\n        if (oraclePrice == 0 || sentinelPrice == 0) {\\n            hasDeviation = true;\\n            deviationPercent = type(uint256).max;\\n            return (hasDeviation, oraclePrice, sentinelPrice, deviationPercent);\\n        }\\n\\n        // Both prices are already in (36 - tokenDecimals) format, so we can compare directly\\n        uint256 priceDiff;\\n        if (sentinelPrice > oraclePrice) {\\n            priceDiff = sentinelPrice - oraclePrice;\\n        } else {\\n            priceDiff = oraclePrice - sentinelPrice;\\n        }\\n\\n        deviationPercent = (priceDiff * 100) / oraclePrice;\\n        hasDeviation = deviationPercent >= config.deviation;\\n    }\\n\\n    /// @notice Pause borrow action for a market\\n    /// @param market The market to pause borrow for\\n    /// @param action The action to pause\\n    function _pauseBorrow(IVToken market, IComptroller.Action action) internal {\\n        IComptroller comptroller = market.comptroller();\\n\\n        address[] memory markets = new address[](1);\\n        markets[0] = address(market);\\n        IComptroller.Action[] memory actions = new IComptroller.Action[](1);\\n        actions[0] = action;\\n\\n        comptroller.setActionsPaused(markets, actions, true);\\n        emit BorrowPaused(address(market));\\n    }\\n\\n    /// @notice Unpause borrow action for a market\\n    /// @param market The market to unpause borrow for\\n    /// @param action The action to unpause\\n    function _unpauseBorrow(IVToken market, IComptroller.Action action) internal {\\n        IComptroller comptroller = market.comptroller();\\n\\n        address[] memory markets = new address[](1);\\n        markets[0] = address(market);\\n        IComptroller.Action[] memory actions = new IComptroller.Action[](1);\\n        actions[0] = action;\\n\\n        comptroller.setActionsPaused(markets, actions, false);\\n        emit BorrowUnpaused(address(market));\\n    }\\n\\n    /// @notice Pause supply action for a market\\n    /// @param market The market to pause supply for\\n    /// @param action The action to pause\\n    function _pauseSupply(IVToken market, IComptroller.Action action) internal {\\n        IComptroller comptroller = market.comptroller();\\n\\n        address[] memory markets = new address[](1);\\n        markets[0] = address(market);\\n        IComptroller.Action[] memory actions = new IComptroller.Action[](1);\\n        actions[0] = action;\\n\\n        comptroller.setActionsPaused(markets, actions, true);\\n        emit SupplyPaused(address(market));\\n    }\\n\\n    /// @notice Unpause supply action for a market\\n    /// @param market The market to unpause supply for\\n    /// @param action The action to unpause\\n    function _unpauseSupply(IVToken market, IComptroller.Action action) internal {\\n        IComptroller comptroller = market.comptroller();\\n\\n        address[] memory markets = new address[](1);\\n        markets[0] = address(market);\\n        IComptroller.Action[] memory actions = new IComptroller.Action[](1);\\n        actions[0] = action;\\n\\n        comptroller.setActionsPaused(markets, actions, false);\\n        emit SupplyUnpaused(address(market));\\n    }\\n\\n    /// @notice Set collateral factor to zero and store original value\\n    /// @param market The market to modify\\n    function _setCollateralFactorToZero(IVToken market) internal {\\n        IComptroller comptroller = market.comptroller();\\n        MarketState storage state = marketStates[address(market)];\\n\\n        if (state.cfModified) return;\\n\\n        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {\\n            state.cfModified = true;\\n\\n            // Store original CF and LT for each emode group, then set to 0\\n            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {\\n                (\\n                    bool isListed,\\n                    uint256 collateralFactorMantissa, // isVenus\\n                    ,\\n                    uint256 liquidationThresholdMantissa, // liquidationIncentiveMantissa // marketPoolId // isBorrowAllowed\\n                    ,\\n                    ,\\n\\n                ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));\\n\\n                if (isListed) {\\n                    // Store original values for this pool ID\\n                    state.poolCFs[i] = collateralFactorMantissa;\\n                    state.poolLTs[i] = liquidationThresholdMantissa;\\n\\n                    // Set collateral factor to 0, keep liquidation threshold unchanged\\n                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(\\n                        i,\\n                        address(market),\\n                        0,\\n                        liquidationThresholdMantissa\\n                    );\\n                    if (result != 0) revert ComptrollerError(result);\\n\\n                    // Emit event for each pool ID\\n                    emit CollateralFactorUpdated(address(market), i, collateralFactorMantissa, 0);\\n                }\\n            }\\n        } else {\\n            IILComptroller.Market memory marketData = IILComptroller(address(comptroller)).markets(address(market));\\n            if (marketData.isListed) {\\n                state.originalCF = marketData.collateralFactorMantissa;\\n                state.originalLT = marketData.liquidationThresholdMantissa;\\n                state.cfModified = true;\\n                IILComptroller(address(comptroller)).setCollateralFactor(\\n                    address(market),\\n                    0,\\n                    marketData.liquidationThresholdMantissa\\n                );\\n                emit CollateralFactorUpdated(address(market), 0, marketData.collateralFactorMantissa, 0);\\n            }\\n        }\\n    }\\n\\n    /// @notice Restore original collateral factor\\n    /// @param market The market to restore\\n    function _restoreCollateralFactor(IVToken market) internal {\\n        IComptroller comptroller = market.comptroller();\\n        MarketState storage state = marketStates[address(market)];\\n\\n        if (!state.cfModified) return;\\n\\n        // Check if this is a core pool or isolated pool\\n        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {\\n            // Core pool - restore original CF and LT for each emode group\\n            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {\\n                (bool isListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));\\n                if (isListed) {\\n                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(\\n                        i,\\n                        address(market),\\n                        state.poolCFs[i],\\n                        state.poolLTs[i]\\n                    );\\n                    if (result != 0) revert ComptrollerError(result);\\n\\n                    // Emit event for each pool ID\\n                    emit CollateralFactorUpdated(address(market), i, 0, state.poolCFs[i]);\\n\\n                    // Clear stored values\\n                    delete state.poolCFs[i];\\n                    delete state.poolLTs[i];\\n                }\\n            }\\n            state.cfModified = false;\\n        } else {\\n            // Isolated pool\\n            IILComptroller(address(comptroller)).setCollateralFactor(\\n                address(market),\\n                state.originalCF,\\n                state.originalLT\\n            );\\n            emit CollateralFactorUpdated(address(market), 0, 0, state.originalCF);\\n            state.originalCF = 0;\\n            state.originalLT = 0;\\n            state.cfModified = false;\\n        }\\n    }\\n}\\n\",\"keccak256\":\"0x4399f0be3f3cbc690235f9c22417eeb568b0533964c80ae88240391f99119eb8\"},\"contracts/Interfaces/IComptroller.sol\":{\"content\":\"pragma solidity ^0.8.25;\\n\\nimport { ResilientOracleInterface } from \\\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\\\";\\n\\ninterface IComptroller {\\n    enum Action {\\n        MINT,\\n        REDEEM,\\n        BORROW,\\n        REPAY,\\n        SEIZE,\\n        LIQUIDATE,\\n        TRANSFER,\\n        ENTER_MARKET,\\n        EXIT_MARKET\\n    }\\n\\n    function setActionsPaused(address[] calldata markets_, Action[] calldata actions_, bool paused_) external;\\n\\n    function setMarketBorrowCaps(address[] calldata vTokens, uint256[] calldata newBorrowCaps) external;\\n\\n    function setMarketSupplyCaps(address[] calldata vTokens, uint256[] calldata newSupplyCaps) external;\\n\\n    function unlistMarket(address vToken) external returns (uint256);\\n\\n    function actionPaused(address market, Action action) external view returns (bool);\\n\\n    function markets(address) external view returns (bool, uint256, bool);\\n\\n    function oracle() external view returns (ResilientOracleInterface);\\n}\\n\",\"keccak256\":\"0x619a070d1e828eb6c064af9eb60de7b4697580119648ac9a8a2241554f20e10e\"},\"contracts/Interfaces/ICorePoolComptroller.sol\":{\"content\":\"pragma solidity ^0.8.25;\\n\\nimport { IComptroller } from \\\"./IComptroller.sol\\\";\\n\\ninterface ICorePoolComptroller is IComptroller {\\n    function setCollateralFactor(\\n        address vToken,\\n        uint256 newCollateralFactorMantissa,\\n        uint256 newLiquidationThresholdMantissa\\n    ) external returns (uint256);\\n\\n    function setCollateralFactor(\\n        uint96 poolId,\\n        address vToken,\\n        uint256 newCollateralFactorMantissa,\\n        uint256 newLiquidationThresholdMantissa\\n    ) external returns (uint256);\\n\\n    function removePoolMarket(uint96 poolId, address vToken) external;\\n\\n    function corePoolId() external view returns (uint96);\\n\\n    function poolMarkets(\\n        uint96 poolId,\\n        address vToken\\n    )\\n        external\\n        view\\n        returns (\\n            bool isListed,\\n            uint256 collateralFactorMantissa,\\n            bool isVenus,\\n            uint256 liquidationThresholdMantissa,\\n            uint256 liquidationIncentiveMantissa,\\n            uint96 marketPoolId,\\n            bool isBorrowAllowed\\n        );\\n\\n    function lastPoolId() external view returns (uint96);\\n}\\n\",\"keccak256\":\"0xa4c0bef056cdba16d0ef538d028d2d10a823d01f611df101717d80cc17f7a8b5\"},\"contracts/Interfaces/IILComptroller.sol\":{\"content\":\"pragma solidity ^0.8.25;\\n\\ninterface IILComptroller {\\n    struct Market {\\n        bool isListed;\\n        uint256 collateralFactorMantissa;\\n        uint256 liquidationThresholdMantissa;\\n    }\\n\\n    function setCollateralFactor(\\n        address vToken,\\n        uint256 newCollateralFactorMantissa,\\n        uint256 newLiquidationThresholdMantissa\\n    ) external;\\n\\n    function markets(address) external view returns (Market memory);\\n}\\n\",\"keccak256\":\"0x9b063549f27ad3d2ae6fa04d6be327f98c6efb9be4ca2b7c98bf52db68a8ed80\"},\"contracts/Interfaces/IVToken.sol\":{\"content\":\"pragma solidity ^0.8.25;\\n\\nimport { IERC20Upgradeable } from \\\"@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol\\\";\\nimport { IComptroller } from \\\"./IComptroller.sol\\\";\\n\\ninterface IVToken is IERC20Upgradeable {\\n    function accrueInterest() external returns (uint256);\\n\\n    function redeem(uint256 redeemTokens) external returns (uint256);\\n\\n    function redeemUnderlying(uint256 redeemAmount) external returns (uint256);\\n\\n    function borrowBalanceCurrent(address borrower) external returns (uint256);\\n\\n    function balanceOfUnderlying(address owner) external returns (uint256);\\n\\n    function seize(address liquidator, address borrower, uint seizeTokens) external returns (uint);\\n\\n    function mintBehalf(address receiver, uint mintAmount) external returns (uint);\\n\\n    function borrowBehalf(address borrower, uint borrowAmount) external returns (uint256);\\n\\n    function comptroller() external view returns (IComptroller);\\n\\n    function borrowBalanceStored(address account) external view returns (uint256);\\n\\n    function underlying() external view returns (address);\\n\\n    function exchangeRateStored() external view returns (uint256);\\n}\\n\",\"keccak256\":\"0xc2b6d77b2fc87337c76ece572f783259ae4fabf18bbce7b2f3f6dc573b46a4d1\"}},\"version\":1}",
+  "bytecode": "0x60e060405234801561000f575f80fd5b5060405161285b38038061285b83398101604081905261002e91610178565b6001600160a01b03808416608052821661005b5760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b0381166100825760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b0380831660a052811660c05261009d6100a5565b5050506101c2565b5f54610100900460ff16156101105760405162461bcd60e51b815260206004820152602760248201527f496e697469616c697a61626c653a20636f6e747261637420697320696e697469604482015266616c697a696e6760c81b606482015260840160405180910390fd5b5f5460ff9081161461015f575f805460ff191660ff9081179091556040519081527f7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb38474024989060200160405180910390a15b565b6001600160a01b0381168114610175575f80fd5b50565b5f805f6060848603121561018a575f80fd5b835161019581610161565b60208501519093506101a681610161565b60408501519092506101b781610161565b809150509250925092565b60805160a05160c05161261b6102405f395f81816101c0015261051b01525f81816102ef015261048e01525f818161039e0152818161112c0152818161118e01528181611201015281816112cb015281816113a7015281816119c2015281816119fc01528181611a7f01528181611b450152611c1b015261261b5ff3fe608060405234801561000f575f80fd5b5060043610610127575f3560e01c8063a348c9b3116100a9578063c4d66de81161006e578063c4d66de81461034f578063d92263e414610362578063e30c397814610375578063f2fde38b14610386578063fa7b81a014610399575f80fd5b8063a348c9b314610276578063a4edcd4c146102ea578063b05f233a14610311578063b4a0bdf31461032b578063ba707b7f1461033c575f80fd5b8063489e3773116100ef578063489e37731461022f578063715018a61461024257806379ba50971461024a5780638da5cb5b14610252578063955a9b2014610263575f80fd5b80630e32cb861461012b5780631a67d76c146101405780631b69dc5f1461017757806324c0ef12146101bb57806344626596146101fa575b5f80fd5b61013e6101393660046120a7565b6103c0565b005b61016261014e3660046120a7565b60ca6020525f908152604090205460ff1681565b60405190151581526020015b60405180910390f35b6101a26101853660046120a7565b60c96020525f908152604090205460ff8082169161010090041682565b6040805160ff909316835290151560208301520161016e565b6101e27f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b03909116815260200161016e565b61020d6102083660046120a7565b6103d4565b604080519415158552602085019390935291830152606082015260800161016e565b61013e61023d3660046120d6565b6105fb565b61013e6106db565b61013e6106ee565b6033546001600160a01b03166101e2565b61013e6102713660046120d6565b61076a565b6102b96102843660046120a7565b60cb6020525f908152604090208054600182015460029092015460ff8083169361010084048216936201000090049091169185565b60405161016e9594939291909415158552921515602085015290151560408401526060830152608082015260a00190565b6101e27f000000000000000000000000000000000000000000000000000000000000000081565b610319606481565b60405160ff909116815260200161016e565b6097546001600160a01b03166101e2565b61013e61034a36600461210d565b61082e565b61013e61035d3660046120a7565b610935565b61013e6103703660046120a7565b610a43565b6065546001600160a01b03166101e2565b61013e6103943660046120a7565b610c7a565b6101e27f000000000000000000000000000000000000000000000000000000000000000081565b6103c8610ceb565b6103d181610d45565b50565b5f805f805f856001600160a01b0316636f307dc36040518163ffffffff1660e01b8152600401602060405180830381865afa158015610415573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610439919061214b565b6001600160a01b038181165f81815260c9602090815260409182902082518084018452905460ff80821683526101009091041615159181019190915290516341976e0960e01b815260048101929092529293507f0000000000000000000000000000000000000000000000000000000000000000909116906341976e0990602401602060405180830381865afa1580156104d5573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906104f99190612166565b6040516341976e0960e01b81526001600160a01b0384811660048301529196507f0000000000000000000000000000000000000000000000000000000000000000909116906341976e0990602401602060405180830381865afa158015610562573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906105869190612166565b9350841580610593575083155b156105a757600195505f19925050506105f4565b5f858511156105c1576105ba8686612191565b90506105ce565b6105cb8587612191565b90505b856105da8260646121aa565b6105e491906121c1565b915160ff16821015965090925050505b9193509193565b61061c60405180606001604052806027815260200161257b60279139610e03565b6001600160a01b0382166106435760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b0382165f90815260c9602052604081208054909160ff909116900361068257604051639d5abc1360e01b815260040160405180910390fd5b805461ff0019166101008315159081029190911782556040519081526001600160a01b038416907f2ee122b659cb7e92ede8af7309b24d24f92473188b2f3fb6a199746f5fdc74949060200160405180910390a2505050565b6106e3610ceb565b6106ec5f610e9a565b565b60655433906001600160a01b031681146107615760405162461bcd60e51b815260206004820152602960248201527f4f776e61626c6532537465703a2063616c6c6572206973206e6f7420746865206044820152683732bb9037bbb732b960b91b60648201526084015b60405180910390fd5b6103d181610e9a565b6107a86040518060400160405280601e81526020017f736574547275737465644b656570657228616464726573732c626f6f6c290000815250610e03565b6001600160a01b0382166107cf5760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b0382165f81815260ca6020908152604091829020805460ff191685151590811790915591519182527f7e408cd3b78bfa9957ad0675d216841a1a928c24b49c36676e56d403e18b60b691015b60405180910390a25050565b61084f6040518060600160405280602481526020016125a260249139610e03565b6001600160a01b0382166108765760405163d92e233d60e01b815260040160405180910390fd5b61088360208201826121ee565b60ff165f036108a55760405163781269a760e01b815260040160405180910390fd5b60646108b460208301836121ee565b60ff1611156108d6576040516303d87e1560e61b815260040160405180910390fd5b6001600160a01b0382165f90815260c96020526040902081906108f98282612209565b905050816001600160a01b03167f335d6f66e9c9d01677ede2ab39cbf5da9eda7ca18bc0a732924da5ed9ec5b38982604051610822919061224e565b5f54610100900460ff161580801561095357505f54600160ff909116105b8061096c5750303b15801561096c57505f5460ff166001145b6109cf5760405162461bcd60e51b815260206004820152602e60248201527f496e697469616c697a61626c653a20636f6e747261637420697320616c72656160448201526d191e481a5b9a5d1a585b1a5e995960921b6064820152608401610758565b5f805460ff1916600117905580156109f0575f805461ff0019166101001790555b6109f982610eb3565b8015610a3f575f805461ff0019169055604051600181527f7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498906020015b60405180910390a15b5050565b335f90815260ca602052604090205460ff16610a72576040516377b1434760e01b815260040160405180910390fd5b5f816001600160a01b0316636f307dc36040518163ffffffff1660e01b8152600401602060405180830381865afa158015610aaf573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610ad3919061214b565b6001600160a01b0381165f90815260c96020908152604080832081518083019092525460ff808216808452610100909204161515928201929092529293509003610b3057604051639d5abc1360e01b815260040160405180910390fd5b8060200151610b525760405163ad6bd5c360e01b815260040160405180910390fd5b5f805f610b5e866103d4565b506001600160a01b0389165f90815260cb6020526040902092955090935091508315610c0c5782821115610bba57805460ff1615610b9f5750505050505050565b610baa876002610eea565b805460ff19166001178155610c71565b805462010000900460ff168015610bd757508054610100900460ff165b15610be55750505050505050565b610bee87611099565b610bf8875f6115d3565b805462ffff00191662010100178155610c71565b805460ff1615610c2a57610c21876002611782565b805460ff191681555b805462010000900460ff1615610c4e57610c4387611930565b805462ff0000191681555b8054610100900460ff1615610c7157610c67875f611e11565b805461ff00191681555b50505050505050565b610c82610ceb565b606580546001600160a01b0383166001600160a01b03199091168117909155610cb36033546001600160a01b031690565b6001600160a01b03167f38d16b8cac22d99fc7c124b9cd0de2d3fa1faef420bfe791d8c362d765e2270060405160405180910390a350565b6033546001600160a01b031633146106ec5760405162461bcd60e51b815260206004820181905260248201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e65726044820152606401610758565b6001600160a01b038116610da95760405162461bcd60e51b815260206004820152602560248201527f696e76616c696420616365737320636f6e74726f6c206d616e61676572206164604482015264647265737360d81b6064820152608401610758565b609780546001600160a01b038381166001600160a01b031983168117909355604080519190921680825260208201939093527f66fd58e82f7b31a2a5c30e0888f3093efe4e111b00cd2b0c31fe014601293aa09101610a36565b6097546040516318c5e8ab60e01b81525f916001600160a01b0316906318c5e8ab90610e3590339086906004016122ad565b602060405180830381865afa158015610e50573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610e7491906122d8565b905080610a3f57333083604051634a3fa29360e01b8152600401610758939291906122f3565b606580546001600160a01b03191690556103d181611fbf565b5f54610100900460ff16610ed95760405162461bcd60e51b815260040161075890612327565b610ee1612010565b6103d18161203e565b5f826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015610f27573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610f4b919061214b565b6040805160018082528183019092529192505f91906020808301908036833701905050905083815f81518110610f8357610f83612372565b6001600160a01b0392909216602092830291909101909101526040805160018082528183019092525f9181602001602082028036833701905050905083815f81518110610fd257610fd2612372565b60200260200101906008811115610feb57610feb612386565b90816008811115610ffe57610ffe612386565b905250604051630125551160e51b81526001600160a01b038416906324aaa22090611032908590859060019060040161239a565b5f604051808303815f87803b158015611049575f80fd5b505af115801561105b573d5f803e3d5ffd5b50506040516001600160a01b03881692507f372a173a55c3217bdab0e58a6cf1f1433fd2492f5366023323d13500f8d9b5ee91505f90a25050505050565b5f816001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa1580156110d6573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906110fa919061214b565b6001600160a01b0383165f90815260cb6020526040902080549192509062010000900460ff161561112a57505050565b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316826001600160a01b03160361149057805462ff000019166201000017815560408051633518d95360e21b815290515f916001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169163d463654c916004808201926020929091908290030181865afa1580156111d8573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906111fc919061245a565b90505b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031663a657e5796040518163ffffffff1660e01b8152600401602060405180830381865afa15801561125b573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061127f919061245a565b6001600160601b0316816001600160601b03161161148a57604051631849e08f60e11b81526001600160601b03821660048201526001600160a01b0385811660248301525f91829182917f000000000000000000000000000000000000000000000000000000000000000090911690633093c11e9060440160e060405180830381865afa158015611312573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906113369190612473565b505050935050925092508215611474576001600160601b0384165f81815260038701602090815260408083208690556004808a0190925280832085905551639159b17760e01b8152908101929092526001600160a01b038981166024840152604483018290526064830184905290917f000000000000000000000000000000000000000000000000000000000000000090911690639159b177906084016020604051808303815f875af11580156113ef573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906114139190612166565b905080156114375760405163255a0eef60e11b815260048101829052602401610758565b604080518481525f60208201526001600160601b038716916001600160a01b038b16915f805160206125c6833981519152910160405180910390a3505b5050508080611482906124e9565b9150506111ff565b50505050565b604051638e8f294b60e01b81526001600160a01b0384811660048301525f9190841690638e8f294b90602401606060405180830381865afa1580156114d7573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906114fb919061250e565b80519091501561148a576020810151600183015560408082015160028401819055835462ff00001916620100001784559051635cc4fdeb60e01b81526001600160a01b0386811660048301525f6024830152604482019290925290841690635cc4fdeb906064015f604051808303815f87803b158015611579575f80fd5b505af115801561158b573d5f803e3d5ffd5b505050505f846001600160a01b03165f805160206125c683398151915283602001515f6040516115c5929190918252602082015260400190565b60405180910390a350505050565b5f826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015611610573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611634919061214b565b6040805160018082528183019092529192505f91906020808301908036833701905050905083815f8151811061166c5761166c612372565b6001600160a01b0392909216602092830291909101909101526040805160018082528183019092525f9181602001602082028036833701905050905083815f815181106116bb576116bb612372565b602002602001019060088111156116d4576116d4612386565b908160088111156116e7576116e7612386565b905250604051630125551160e51b81526001600160a01b038416906324aaa2209061171b908590859060019060040161239a565b5f604051808303815f87803b158015611732575f80fd5b505af1158015611744573d5f803e3d5ffd5b50506040516001600160a01b03881692507fcabefe1cd04e4ef8b0e722000a14845dbf565e66aa49ec96fc34436f7e7afa8c91505f90a25050505050565b5f826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa1580156117bf573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906117e3919061214b565b6040805160018082528183019092529192505f91906020808301908036833701905050905083815f8151811061181b5761181b612372565b6001600160a01b0392909216602092830291909101909101526040805160018082528183019092525f9181602001602082028036833701905050905083815f8151811061186a5761186a612372565b6020026020010190600881111561188357611883612386565b9081600881111561189657611896612386565b905250604051630125551160e51b81526001600160a01b038416906324aaa220906118c990859085905f9060040161239a565b5f604051808303815f87803b1580156118e0575f80fd5b505af11580156118f2573d5f803e3d5ffd5b50506040516001600160a01b03881692507f3d08819807b9ebc6ffb47aeb34037139c946f53bf20688dad7e61573038a2c6191505f90a25050505050565b5f816001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa15801561196d573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611991919061214b565b6001600160a01b0383165f90815260cb6020526040902080549192509062010000900460ff166119c057505050565b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316826001600160a01b031603611d47575f7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031663d463654c6040518163ffffffff1660e01b8152600401602060405180830381865afa158015611a56573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611a7a919061245a565b90505b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031663a657e5796040518163ffffffff1660e01b8152600401602060405180830381865afa158015611ad9573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611afd919061245a565b6001600160601b0316816001600160601b031611611d3857604051631849e08f60e11b81526001600160601b03821660048201526001600160a01b0385811660248301525f917f000000000000000000000000000000000000000000000000000000000000000090911690633093c11e9060440160e060405180830381865afa158015611b8c573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611bb09190612473565b50505050505090508015611d25576001600160601b0382165f8181526003850160209081526040808320546004808901909352818420549151639159b17760e01b8152928301949094526001600160a01b0389811660248401526044830194909452606482015290917f00000000000000000000000000000000000000000000000000000000000000001690639159b177906084016020604051808303815f875af1158015611c61573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611c859190612166565b90508015611ca95760405163255a0eef60e11b815260048101829052602401610758565b6001600160601b0383165f8181526003860160205260408082205490516001600160a01b038a16925f805160206125c683398151915292611cf292918252602082015260400190565b60405180910390a3506001600160601b0382165f9081526003840160209081526040808320839055600486019091528120555b5080611d30816124e9565b915050611a7d565b50805462ff0000191690555050565b60018101546002820154604051635cc4fdeb60e01b81526001600160a01b0386811660048301526024820193909352604481019190915290831690635cc4fdeb906064015f604051808303815f87803b158015611da2575f80fd5b505af1158015611db4573d5f803e3d5ffd5b505050505f836001600160a01b03165f805160206125c68339815191525f8460010154604051611dee929190918252602082015260400190565b60405180910390a35f600182018190556002820155805462ff0000191690555050565b5f826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015611e4e573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611e72919061214b565b6040805160018082528183019092529192505f91906020808301908036833701905050905083815f81518110611eaa57611eaa612372565b6001600160a01b0392909216602092830291909101909101526040805160018082528183019092525f9181602001602082028036833701905050905083815f81518110611ef957611ef9612372565b60200260200101906008811115611f1257611f12612386565b90816008811115611f2557611f25612386565b905250604051630125551160e51b81526001600160a01b038416906324aaa22090611f5890859085905f9060040161239a565b5f604051808303815f87803b158015611f6f575f80fd5b505af1158015611f81573d5f803e3d5ffd5b50506040516001600160a01b03881692507f08a539e2e19c65df87d437edc9103e19e6504955c6e43909c0f6ff65b85ee8d191505f90a25050505050565b603380546001600160a01b038381166001600160a01b0319831681179093556040519116919082907f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0905f90a35050565b5f54610100900460ff166120365760405162461bcd60e51b815260040161075890612327565b6106ec612064565b5f54610100900460ff166103c85760405162461bcd60e51b815260040161075890612327565b5f54610100900460ff1661208a5760405162461bcd60e51b815260040161075890612327565b6106ec33610e9a565b6001600160a01b03811681146103d1575f80fd5b5f602082840312156120b7575f80fd5b81356120c281612093565b9392505050565b80151581146103d1575f80fd5b5f80604083850312156120e7575f80fd5b82356120f281612093565b91506020830135612102816120c9565b809150509250929050565b5f80828403606081121561211f575f80fd5b833561212a81612093565b92506040601f198201121561213d575f80fd5b506020830190509250929050565b5f6020828403121561215b575f80fd5b81516120c281612093565b5f60208284031215612176575f80fd5b5051919050565b634e487b7160e01b5f52601160045260245ffd5b818103818111156121a4576121a461217d565b92915050565b80820281158282048414176121a4576121a461217d565b5f826121db57634e487b7160e01b5f52601260045260245ffd5b500490565b60ff811681146103d1575f80fd5b5f602082840312156121fe575f80fd5b81356120c2816121e0565b8135612214816121e0565b60ff8116905081548160ff1982161783556020840135612233816120c9565b61ffff199190911690911790151560081b61ff001617905550565b60408101823561225d816121e0565b60ff1682526020830135612270816120c9565b80151560208401525092915050565b5f81518084528060208401602086015e5f602082860101526020601f19601f83011685010191505092915050565b6001600160a01b03831681526040602082018190525f906122d09083018461227f565b949350505050565b5f602082840312156122e8575f80fd5b81516120c2816120c9565b6001600160a01b038481168252831660208201526060604082018190525f9061231e9083018461227f565b95945050505050565b6020808252602b908201527f496e697469616c697a61626c653a20636f6e7472616374206973206e6f74206960408201526a6e697469616c697a696e6760a81b606082015260800190565b634e487b7160e01b5f52603260045260245ffd5b634e487b7160e01b5f52602160045260245ffd5b606080825284519082018190525f906020906080840190828801845b828110156123db5781516001600160a01b0316845292840192908401906001016123b6565b505050838103828501528551808252868301918301905f5b8181101561242b5783516009811061241957634e487b7160e01b5f52602160045260245ffd5b835292840192918401916001016123f3565b5050851515604086015292506122d0915050565b80516001600160601b0381168114612455575f80fd5b919050565b5f6020828403121561246a575f80fd5b6120c28261243f565b5f805f805f805f60e0888a031215612489575f80fd5b8751612494816120c9565b602089015160408a015191985096506124ac816120c9565b606089015160808a0151919650945092506124c960a0890161243f565b915060c08801516124d9816120c9565b8091505092959891949750929550565b5f6001600160601b038083168181036125045761250461217d565b6001019392505050565b5f6060828403121561251e575f80fd5b6040516060810181811067ffffffffffffffff8211171561254d57634e487b7160e01b5f52604160045260245ffd5b604052825161255b816120c9565b815260208381015190820152604092830151928101929092525091905056fe736574546f6b656e4d6f6e69746f72696e67456e61626c656428616464726573732c626f6f6c29736574546f6b656e436f6e66696728616464726573732c2875696e74382c626f6f6c2929b414b23cc0073e9455efa4fb33fd3b9dd6d9c7da41ba68dbb852dad931caa5b9a26469706673582212209d2f6c1666c6ed00b5f0c0afa0094fe9fb265079f97cc9b0ec676c744482c02164736f6c63430008190033",
+  "deployedBytecode": "0x608060405234801561000f575f80fd5b5060043610610127575f3560e01c8063a348c9b3116100a9578063c4d66de81161006e578063c4d66de81461034f578063d92263e414610362578063e30c397814610375578063f2fde38b14610386578063fa7b81a014610399575f80fd5b8063a348c9b314610276578063a4edcd4c146102ea578063b05f233a14610311578063b4a0bdf31461032b578063ba707b7f1461033c575f80fd5b8063489e3773116100ef578063489e37731461022f578063715018a61461024257806379ba50971461024a5780638da5cb5b14610252578063955a9b2014610263575f80fd5b80630e32cb861461012b5780631a67d76c146101405780631b69dc5f1461017757806324c0ef12146101bb57806344626596146101fa575b5f80fd5b61013e6101393660046120a7565b6103c0565b005b61016261014e3660046120a7565b60ca6020525f908152604090205460ff1681565b60405190151581526020015b60405180910390f35b6101a26101853660046120a7565b60c96020525f908152604090205460ff8082169161010090041682565b6040805160ff909316835290151560208301520161016e565b6101e27f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b03909116815260200161016e565b61020d6102083660046120a7565b6103d4565b604080519415158552602085019390935291830152606082015260800161016e565b61013e61023d3660046120d6565b6105fb565b61013e6106db565b61013e6106ee565b6033546001600160a01b03166101e2565b61013e6102713660046120d6565b61076a565b6102b96102843660046120a7565b60cb6020525f908152604090208054600182015460029092015460ff8083169361010084048216936201000090049091169185565b60405161016e9594939291909415158552921515602085015290151560408401526060830152608082015260a00190565b6101e27f000000000000000000000000000000000000000000000000000000000000000081565b610319606481565b60405160ff909116815260200161016e565b6097546001600160a01b03166101e2565b61013e61034a36600461210d565b61082e565b61013e61035d3660046120a7565b610935565b61013e6103703660046120a7565b610a43565b6065546001600160a01b03166101e2565b61013e6103943660046120a7565b610c7a565b6101e27f000000000000000000000000000000000000000000000000000000000000000081565b6103c8610ceb565b6103d181610d45565b50565b5f805f805f856001600160a01b0316636f307dc36040518163ffffffff1660e01b8152600401602060405180830381865afa158015610415573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610439919061214b565b6001600160a01b038181165f81815260c9602090815260409182902082518084018452905460ff80821683526101009091041615159181019190915290516341976e0960e01b815260048101929092529293507f0000000000000000000000000000000000000000000000000000000000000000909116906341976e0990602401602060405180830381865afa1580156104d5573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906104f99190612166565b6040516341976e0960e01b81526001600160a01b0384811660048301529196507f0000000000000000000000000000000000000000000000000000000000000000909116906341976e0990602401602060405180830381865afa158015610562573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906105869190612166565b9350841580610593575083155b156105a757600195505f19925050506105f4565b5f858511156105c1576105ba8686612191565b90506105ce565b6105cb8587612191565b90505b856105da8260646121aa565b6105e491906121c1565b915160ff16821015965090925050505b9193509193565b61061c60405180606001604052806027815260200161257b60279139610e03565b6001600160a01b0382166106435760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b0382165f90815260c9602052604081208054909160ff909116900361068257604051639d5abc1360e01b815260040160405180910390fd5b805461ff0019166101008315159081029190911782556040519081526001600160a01b038416907f2ee122b659cb7e92ede8af7309b24d24f92473188b2f3fb6a199746f5fdc74949060200160405180910390a2505050565b6106e3610ceb565b6106ec5f610e9a565b565b60655433906001600160a01b031681146107615760405162461bcd60e51b815260206004820152602960248201527f4f776e61626c6532537465703a2063616c6c6572206973206e6f7420746865206044820152683732bb9037bbb732b960b91b60648201526084015b60405180910390fd5b6103d181610e9a565b6107a86040518060400160405280601e81526020017f736574547275737465644b656570657228616464726573732c626f6f6c290000815250610e03565b6001600160a01b0382166107cf5760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b0382165f81815260ca6020908152604091829020805460ff191685151590811790915591519182527f7e408cd3b78bfa9957ad0675d216841a1a928c24b49c36676e56d403e18b60b691015b60405180910390a25050565b61084f6040518060600160405280602481526020016125a260249139610e03565b6001600160a01b0382166108765760405163d92e233d60e01b815260040160405180910390fd5b61088360208201826121ee565b60ff165f036108a55760405163781269a760e01b815260040160405180910390fd5b60646108b460208301836121ee565b60ff1611156108d6576040516303d87e1560e61b815260040160405180910390fd5b6001600160a01b0382165f90815260c96020526040902081906108f98282612209565b905050816001600160a01b03167f335d6f66e9c9d01677ede2ab39cbf5da9eda7ca18bc0a732924da5ed9ec5b38982604051610822919061224e565b5f54610100900460ff161580801561095357505f54600160ff909116105b8061096c5750303b15801561096c57505f5460ff166001145b6109cf5760405162461bcd60e51b815260206004820152602e60248201527f496e697469616c697a61626c653a20636f6e747261637420697320616c72656160448201526d191e481a5b9a5d1a585b1a5e995960921b6064820152608401610758565b5f805460ff1916600117905580156109f0575f805461ff0019166101001790555b6109f982610eb3565b8015610a3f575f805461ff0019169055604051600181527f7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498906020015b60405180910390a15b5050565b335f90815260ca602052604090205460ff16610a72576040516377b1434760e01b815260040160405180910390fd5b5f816001600160a01b0316636f307dc36040518163ffffffff1660e01b8152600401602060405180830381865afa158015610aaf573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610ad3919061214b565b6001600160a01b0381165f90815260c96020908152604080832081518083019092525460ff808216808452610100909204161515928201929092529293509003610b3057604051639d5abc1360e01b815260040160405180910390fd5b8060200151610b525760405163ad6bd5c360e01b815260040160405180910390fd5b5f805f610b5e866103d4565b506001600160a01b0389165f90815260cb6020526040902092955090935091508315610c0c5782821115610bba57805460ff1615610b9f5750505050505050565b610baa876002610eea565b805460ff19166001178155610c71565b805462010000900460ff168015610bd757508054610100900460ff165b15610be55750505050505050565b610bee87611099565b610bf8875f6115d3565b805462ffff00191662010100178155610c71565b805460ff1615610c2a57610c21876002611782565b805460ff191681555b805462010000900460ff1615610c4e57610c4387611930565b805462ff0000191681555b8054610100900460ff1615610c7157610c67875f611e11565b805461ff00191681555b50505050505050565b610c82610ceb565b606580546001600160a01b0383166001600160a01b03199091168117909155610cb36033546001600160a01b031690565b6001600160a01b03167f38d16b8cac22d99fc7c124b9cd0de2d3fa1faef420bfe791d8c362d765e2270060405160405180910390a350565b6033546001600160a01b031633146106ec5760405162461bcd60e51b815260206004820181905260248201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e65726044820152606401610758565b6001600160a01b038116610da95760405162461bcd60e51b815260206004820152602560248201527f696e76616c696420616365737320636f6e74726f6c206d616e61676572206164604482015264647265737360d81b6064820152608401610758565b609780546001600160a01b038381166001600160a01b031983168117909355604080519190921680825260208201939093527f66fd58e82f7b31a2a5c30e0888f3093efe4e111b00cd2b0c31fe014601293aa09101610a36565b6097546040516318c5e8ab60e01b81525f916001600160a01b0316906318c5e8ab90610e3590339086906004016122ad565b602060405180830381865afa158015610e50573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610e7491906122d8565b905080610a3f57333083604051634a3fa29360e01b8152600401610758939291906122f3565b606580546001600160a01b03191690556103d181611fbf565b5f54610100900460ff16610ed95760405162461bcd60e51b815260040161075890612327565b610ee1612010565b6103d18161203e565b5f826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015610f27573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610f4b919061214b565b6040805160018082528183019092529192505f91906020808301908036833701905050905083815f81518110610f8357610f83612372565b6001600160a01b0392909216602092830291909101909101526040805160018082528183019092525f9181602001602082028036833701905050905083815f81518110610fd257610fd2612372565b60200260200101906008811115610feb57610feb612386565b90816008811115610ffe57610ffe612386565b905250604051630125551160e51b81526001600160a01b038416906324aaa22090611032908590859060019060040161239a565b5f604051808303815f87803b158015611049575f80fd5b505af115801561105b573d5f803e3d5ffd5b50506040516001600160a01b03881692507f372a173a55c3217bdab0e58a6cf1f1433fd2492f5366023323d13500f8d9b5ee91505f90a25050505050565b5f816001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa1580156110d6573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906110fa919061214b565b6001600160a01b0383165f90815260cb6020526040902080549192509062010000900460ff161561112a57505050565b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316826001600160a01b03160361149057805462ff000019166201000017815560408051633518d95360e21b815290515f916001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169163d463654c916004808201926020929091908290030181865afa1580156111d8573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906111fc919061245a565b90505b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031663a657e5796040518163ffffffff1660e01b8152600401602060405180830381865afa15801561125b573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061127f919061245a565b6001600160601b0316816001600160601b03161161148a57604051631849e08f60e11b81526001600160601b03821660048201526001600160a01b0385811660248301525f91829182917f000000000000000000000000000000000000000000000000000000000000000090911690633093c11e9060440160e060405180830381865afa158015611312573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906113369190612473565b505050935050925092508215611474576001600160601b0384165f81815260038701602090815260408083208690556004808a0190925280832085905551639159b17760e01b8152908101929092526001600160a01b038981166024840152604483018290526064830184905290917f000000000000000000000000000000000000000000000000000000000000000090911690639159b177906084016020604051808303815f875af11580156113ef573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906114139190612166565b905080156114375760405163255a0eef60e11b815260048101829052602401610758565b604080518481525f60208201526001600160601b038716916001600160a01b038b16915f805160206125c6833981519152910160405180910390a3505b5050508080611482906124e9565b9150506111ff565b50505050565b604051638e8f294b60e01b81526001600160a01b0384811660048301525f9190841690638e8f294b90602401606060405180830381865afa1580156114d7573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906114fb919061250e565b80519091501561148a576020810151600183015560408082015160028401819055835462ff00001916620100001784559051635cc4fdeb60e01b81526001600160a01b0386811660048301525f6024830152604482019290925290841690635cc4fdeb906064015f604051808303815f87803b158015611579575f80fd5b505af115801561158b573d5f803e3d5ffd5b505050505f846001600160a01b03165f805160206125c683398151915283602001515f6040516115c5929190918252602082015260400190565b60405180910390a350505050565b5f826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015611610573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611634919061214b565b6040805160018082528183019092529192505f91906020808301908036833701905050905083815f8151811061166c5761166c612372565b6001600160a01b0392909216602092830291909101909101526040805160018082528183019092525f9181602001602082028036833701905050905083815f815181106116bb576116bb612372565b602002602001019060088111156116d4576116d4612386565b908160088111156116e7576116e7612386565b905250604051630125551160e51b81526001600160a01b038416906324aaa2209061171b908590859060019060040161239a565b5f604051808303815f87803b158015611732575f80fd5b505af1158015611744573d5f803e3d5ffd5b50506040516001600160a01b03881692507fcabefe1cd04e4ef8b0e722000a14845dbf565e66aa49ec96fc34436f7e7afa8c91505f90a25050505050565b5f826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa1580156117bf573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906117e3919061214b565b6040805160018082528183019092529192505f91906020808301908036833701905050905083815f8151811061181b5761181b612372565b6001600160a01b0392909216602092830291909101909101526040805160018082528183019092525f9181602001602082028036833701905050905083815f8151811061186a5761186a612372565b6020026020010190600881111561188357611883612386565b9081600881111561189657611896612386565b905250604051630125551160e51b81526001600160a01b038416906324aaa220906118c990859085905f9060040161239a565b5f604051808303815f87803b1580156118e0575f80fd5b505af11580156118f2573d5f803e3d5ffd5b50506040516001600160a01b03881692507f3d08819807b9ebc6ffb47aeb34037139c946f53bf20688dad7e61573038a2c6191505f90a25050505050565b5f816001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa15801561196d573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611991919061214b565b6001600160a01b0383165f90815260cb6020526040902080549192509062010000900460ff166119c057505050565b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316826001600160a01b031603611d47575f7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031663d463654c6040518163ffffffff1660e01b8152600401602060405180830381865afa158015611a56573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611a7a919061245a565b90505b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031663a657e5796040518163ffffffff1660e01b8152600401602060405180830381865afa158015611ad9573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611afd919061245a565b6001600160601b0316816001600160601b031611611d3857604051631849e08f60e11b81526001600160601b03821660048201526001600160a01b0385811660248301525f917f000000000000000000000000000000000000000000000000000000000000000090911690633093c11e9060440160e060405180830381865afa158015611b8c573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611bb09190612473565b50505050505090508015611d25576001600160601b0382165f8181526003850160209081526040808320546004808901909352818420549151639159b17760e01b8152928301949094526001600160a01b0389811660248401526044830194909452606482015290917f00000000000000000000000000000000000000000000000000000000000000001690639159b177906084016020604051808303815f875af1158015611c61573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611c859190612166565b90508015611ca95760405163255a0eef60e11b815260048101829052602401610758565b6001600160601b0383165f8181526003860160205260408082205490516001600160a01b038a16925f805160206125c683398151915292611cf292918252602082015260400190565b60405180910390a3506001600160601b0382165f9081526003840160209081526040808320839055600486019091528120555b5080611d30816124e9565b915050611a7d565b50805462ff0000191690555050565b60018101546002820154604051635cc4fdeb60e01b81526001600160a01b0386811660048301526024820193909352604481019190915290831690635cc4fdeb906064015f604051808303815f87803b158015611da2575f80fd5b505af1158015611db4573d5f803e3d5ffd5b505050505f836001600160a01b03165f805160206125c68339815191525f8460010154604051611dee929190918252602082015260400190565b60405180910390a35f600182018190556002820155805462ff0000191690555050565b5f826001600160a01b0316635fe3b5676040518163ffffffff1660e01b8152600401602060405180830381865afa158015611e4e573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190611e72919061214b565b6040805160018082528183019092529192505f91906020808301908036833701905050905083815f81518110611eaa57611eaa612372565b6001600160a01b0392909216602092830291909101909101526040805160018082528183019092525f9181602001602082028036833701905050905083815f81518110611ef957611ef9612372565b60200260200101906008811115611f1257611f12612386565b90816008811115611f2557611f25612386565b905250604051630125551160e51b81526001600160a01b038416906324aaa22090611f5890859085905f9060040161239a565b5f604051808303815f87803b158015611f6f575f80fd5b505af1158015611f81573d5f803e3d5ffd5b50506040516001600160a01b03881692507f08a539e2e19c65df87d437edc9103e19e6504955c6e43909c0f6ff65b85ee8d191505f90a25050505050565b603380546001600160a01b038381166001600160a01b0319831681179093556040519116919082907f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0905f90a35050565b5f54610100900460ff166120365760405162461bcd60e51b815260040161075890612327565b6106ec612064565b5f54610100900460ff166103c85760405162461bcd60e51b815260040161075890612327565b5f54610100900460ff1661208a5760405162461bcd60e51b815260040161075890612327565b6106ec33610e9a565b6001600160a01b03811681146103d1575f80fd5b5f602082840312156120b7575f80fd5b81356120c281612093565b9392505050565b80151581146103d1575f80fd5b5f80604083850312156120e7575f80fd5b82356120f281612093565b91506020830135612102816120c9565b809150509250929050565b5f80828403606081121561211f575f80fd5b833561212a81612093565b92506040601f198201121561213d575f80fd5b506020830190509250929050565b5f6020828403121561215b575f80fd5b81516120c281612093565b5f60208284031215612176575f80fd5b5051919050565b634e487b7160e01b5f52601160045260245ffd5b818103818111156121a4576121a461217d565b92915050565b80820281158282048414176121a4576121a461217d565b5f826121db57634e487b7160e01b5f52601260045260245ffd5b500490565b60ff811681146103d1575f80fd5b5f602082840312156121fe575f80fd5b81356120c2816121e0565b8135612214816121e0565b60ff8116905081548160ff1982161783556020840135612233816120c9565b61ffff199190911690911790151560081b61ff001617905550565b60408101823561225d816121e0565b60ff1682526020830135612270816120c9565b80151560208401525092915050565b5f81518084528060208401602086015e5f602082860101526020601f19601f83011685010191505092915050565b6001600160a01b03831681526040602082018190525f906122d09083018461227f565b949350505050565b5f602082840312156122e8575f80fd5b81516120c2816120c9565b6001600160a01b038481168252831660208201526060604082018190525f9061231e9083018461227f565b95945050505050565b6020808252602b908201527f496e697469616c697a61626c653a20636f6e7472616374206973206e6f74206960408201526a6e697469616c697a696e6760a81b606082015260800190565b634e487b7160e01b5f52603260045260245ffd5b634e487b7160e01b5f52602160045260245ffd5b606080825284519082018190525f906020906080840190828801845b828110156123db5781516001600160a01b0316845292840192908401906001016123b6565b505050838103828501528551808252868301918301905f5b8181101561242b5783516009811061241957634e487b7160e01b5f52602160045260245ffd5b835292840192918401916001016123f3565b5050851515604086015292506122d0915050565b80516001600160601b0381168114612455575f80fd5b919050565b5f6020828403121561246a575f80fd5b6120c28261243f565b5f805f805f805f60e0888a031215612489575f80fd5b8751612494816120c9565b602089015160408a015191985096506124ac816120c9565b606089015160808a0151919650945092506124c960a0890161243f565b915060c08801516124d9816120c9565b8091505092959891949750929550565b5f6001600160601b038083168181036125045761250461217d565b6001019392505050565b5f6060828403121561251e575f80fd5b6040516060810181811067ffffffffffffffff8211171561254d57634e487b7160e01b5f52604160045260245ffd5b604052825161255b816120c9565b815260208381015190820152604092830151928101929092525091905056fe736574546f6b656e4d6f6e69746f72696e67456e61626c656428616464726573732c626f6f6c29736574546f6b656e436f6e66696728616464726573732c2875696e74382c626f6f6c2929b414b23cc0073e9455efa4fb33fd3b9dd6d9c7da41ba68dbb852dad931caa5b9a26469706673582212209d2f6c1666c6ed00b5f0c0afa0094fe9fb265079f97cc9b0ec676c744482c02164736f6c63430008190033",
+  "devdoc": {
+    "author": "Venus",
+    "errors": {
+      "ComptrollerError(uint256)": [
+        {
+          "params": {
+            "errorCode": "The error code returned by the comptroller"
+          }
+        }
+      ]
+    },
+    "events": {
+      "BorrowPaused(address)": {
+        "params": {
+          "market": "The market address"
+        }
+      },
+      "BorrowUnpaused(address)": {
+        "params": {
+          "market": "The market address"
+        }
+      },
+      "CollateralFactorUpdated(address,uint256,uint256)": {
+        "params": {
+          "market": "The market address",
+          "newCF": "The new collateral factor",
+          "oldCF": "The old collateral factor"
+        }
+      },
+      "CollateralFactorUpdated(address,uint96,uint256,uint256)": {
+        "params": {
+          "market": "The market address",
+          "newCF": "The new collateral factor",
+          "oldCF": "The old collateral factor",
+          "poolId": "The pool ID (emode group)"
+        }
+      },
+      "Initialized(uint8)": {
+        "details": "Triggered when the contract has been initialized or reinitialized."
+      },
+      "SupplyPaused(address)": {
+        "params": {
+          "market": "The market address"
+        }
+      },
+      "SupplyUnpaused(address)": {
+        "params": {
+          "market": "The market address"
+        }
+      },
+      "TokenConfigUpdated(address,(uint8,bool))": {
+        "params": {
+          "config": "The new deviation configuration",
+          "token": "The token address"
+        }
+      },
+      "TokenMonitoringStatusChanged(address,bool)": {
+        "params": {
+          "enabled": "Whether monitoring is enabled",
+          "token": "The token address"
+        }
+      },
+      "TrustedKeeperUpdated(address,bool)": {
+        "params": {
+          "isTrusted": "Whether the keeper is trusted",
+          "keeper": "The keeper address"
+        }
+      }
+    },
+    "kind": "dev",
+    "methods": {
+      "acceptOwnership()": {
+        "details": "The new owner accepts the ownership transfer."
+      },
+      "checkPriceDeviation(address)": {
+        "params": {
+          "market": "The vToken market to check"
+        },
+        "returns": {
+          "deviationPercent": "The percentage deviation (scaled by 100)",
+          "hasDeviation": "True if deviation exceeds configured threshold",
+          "oraclePrice": "The price from resilient oracle",
+          "sentinelPrice": "The price from sentinel oracle"
+        }
+      },
+      "constructor": {
+        "params": {
+          "corePoolComptroller_": "Address of the core pool comptroller",
+          "resilientOracle_": "Address of the resilient oracle",
+          "sentinelOracle_": "Address of the sentinel oracle"
+        }
+      },
+      "handleDeviation(address)": {
+        "custom:error": "UnauthorizedKeeper is thrown when caller is not a trusted keeperMarketNotConfigured is thrown when market's underlying token has no deviation configTokenMonitoringDisabled is thrown when monitoring is disabled for the tokenComptrollerError is thrown when comptroller operation fails",
+        "custom:event": "Emits BorrowPaused when borrow is paused due to high sentinel priceEmits BorrowUnpaused when borrow is unpaused after deviation resolvedEmits SupplyPaused when supply is paused due to low sentinel priceEmits SupplyUnpaused when supply is unpaused after deviation resolvedEmits CollateralFactorUpdated when collateral factor is modified",
+        "params": {
+          "market": "The vToken market to handle"
+        }
+      },
+      "initialize(address)": {
+        "params": {
+          "accessControlManager_": "Address of the access control manager"
+        }
+      },
+      "owner()": {
+        "details": "Returns the address of the current owner."
+      },
+      "pendingOwner()": {
+        "details": "Returns the address of the pending owner."
+      },
+      "renounceOwnership()": {
+        "details": "Leaves the contract without owner. It will not be possible to call `onlyOwner` functions. Can only be called by the current owner. NOTE: Renouncing ownership will leave the contract without an owner, thereby disabling any functionality that is only available to the owner."
+      },
+      "setAccessControlManager(address)": {
+        "custom:access": "Only Governance",
+        "custom:event": "Emits NewAccessControlManager event",
+        "details": "Admin function to set address of AccessControlManager",
+        "params": {
+          "accessControlManager_": "The new address of the AccessControlManager"
+        }
+      },
+      "setTokenConfig(address,(uint8,bool))": {
+        "custom:error": "ZeroAddress is thrown when token address is zeroZeroDeviation is thrown when deviation is set to zeroExceedsMaxDeviation is thrown when deviation exceeds MAX_DEVIATION",
+        "custom:event": "Emits TokenConfigUpdated event",
+        "params": {
+          "config": "Deviation configuration containing threshold and enabled status",
+          "token": "Address of the token"
+        }
+      },
+      "setTokenMonitoringEnabled(address,bool)": {
+        "custom:error": "ZeroAddress is thrown when token address is zeroMarketNotConfigured is thrown when token has no deviation config",
+        "custom:event": "Emits TokenMonitoringStatusChanged event",
+        "params": {
+          "enabled": "Whether to enable or disable monitoring",
+          "token": "Address of the token"
+        }
+      },
+      "setTrustedKeeper(address,bool)": {
+        "custom:error": "ZeroAddress is thrown when keeper address is zero",
+        "custom:event": "Emits TrustedKeeperUpdated event",
+        "params": {
+          "isTrusted": "Whether the keeper should be trusted",
+          "keeper": "Address of the keeper"
+        }
+      },
+      "transferOwnership(address)": {
+        "details": "Starts the ownership transfer of the contract to a new account. Replaces the pending transfer if there is one. Can only be called by the current owner."
+      }
+    },
+    "stateVariables": {
+      "CORE_POOL_COMPTROLLER": {
+        "custom:oz-upgrades-unsafe-allow": "state-variable-immutable"
+      },
+      "RESILIENT_ORACLE": {
+        "custom:oz-upgrades-unsafe-allow": "state-variable-immutable"
+      },
+      "SENTINEL_ORACLE": {
+        "custom:oz-upgrades-unsafe-allow": "state-variable-immutable"
+      }
+    },
+    "title": "DeviationSentinel",
+    "version": 1
+  },
+  "userdoc": {
+    "errors": {
+      "ComptrollerError(uint256)": [
+        {
+          "notice": "Thrown when comptroller operation fails"
+        }
+      ],
+      "ExceedsMaxDeviation()": [
+        {
+          "notice": "Thrown when deviation exceeds maximum allowed"
+        }
+      ],
+      "MarketNotConfigured()": [
+        {
+          "notice": "Thrown when market is not configured for monitoring"
+        }
+      ],
+      "TokenMonitoringDisabled()": [
+        {
+          "notice": "Thrown when token monitoring is disabled"
+        }
+      ],
+      "Unauthorized(address,address,string)": [
+        {
+          "notice": "Thrown when the action is prohibited by AccessControlManager"
+        }
+      ],
+      "UnauthorizedKeeper()": [
+        {
+          "notice": "Thrown when caller is not an authorized keeper"
+        }
+      ],
+      "ZeroAddress()": [
+        {
+          "notice": "Thrown when a zero address is provided"
+        }
+      ],
+      "ZeroDeviation()": [
+        {
+          "notice": "Thrown when deviation is set to zero"
+        }
+      ]
+    },
+    "events": {
+      "BorrowPaused(address)": {
+        "notice": "Emitted when borrow is paused for a market"
+      },
+      "BorrowUnpaused(address)": {
+        "notice": "Emitted when borrow is unpaused for a market"
+      },
+      "CollateralFactorUpdated(address,uint256,uint256)": {
+        "notice": "Emitted when collateral factor is updated for isolated pool"
+      },
+      "CollateralFactorUpdated(address,uint96,uint256,uint256)": {
+        "notice": "Emitted when collateral factor is updated for core pool"
+      },
+      "NewAccessControlManager(address,address)": {
+        "notice": "Emitted when access control manager contract address is changed"
+      },
+      "SupplyPaused(address)": {
+        "notice": "Emitted when supply is paused for a market"
+      },
+      "SupplyUnpaused(address)": {
+        "notice": "Emitted when supply is unpaused for a market"
+      },
+      "TokenConfigUpdated(address,(uint8,bool))": {
+        "notice": "Emitted when a token's deviation configuration is updated"
+      },
+      "TokenMonitoringStatusChanged(address,bool)": {
+        "notice": "Emitted when a token's monitoring status is changed"
+      },
+      "TrustedKeeperUpdated(address,bool)": {
+        "notice": "Emitted when a keeper's trusted status is updated"
+      }
+    },
+    "kind": "user",
+    "methods": {
+      "CORE_POOL_COMPTROLLER()": {
+        "notice": "Address of the Core Pool Comptroller"
+      },
+      "MAX_DEVIATION()": {
+        "notice": "Maximum allowed price deviation in percentage (e.g., 10 = 10%)"
+      },
+      "RESILIENT_ORACLE()": {
+        "notice": "Resilient Oracle for getting reference prices"
+      },
+      "SENTINEL_ORACLE()": {
+        "notice": "Sentinel Oracle for getting DEX prices"
+      },
+      "accessControlManager()": {
+        "notice": "Returns the address of the access control manager contract"
+      },
+      "checkPriceDeviation(address)": {
+        "notice": "Check if there is a price deviation between resilient oracle and sentinel oracle for a market"
+      },
+      "constructor": {
+        "notice": "Constructor for DeviationSentinel"
+      },
+      "handleDeviation(address)": {
+        "notice": "Handle price deviation for a market by pausing or adjusting collateral factor"
+      },
+      "initialize(address)": {
+        "notice": "Initialize the contract"
+      },
+      "marketStates(address)": {
+        "notice": "Mapping to track market state changes made by this contract"
+      },
+      "setAccessControlManager(address)": {
+        "notice": "Sets the address of AccessControlManager"
+      },
+      "setTokenConfig(address,(uint8,bool))": {
+        "notice": "Set deviation configuration for a token"
+      },
+      "setTokenMonitoringEnabled(address,bool)": {
+        "notice": "Enable or disable deviation monitoring for a token"
+      },
+      "setTrustedKeeper(address,bool)": {
+        "notice": "Set trusted status for a keeper"
+      },
+      "tokenConfigs(address)": {
+        "notice": "Mapping of token addresses to their DEX configuration"
+      },
+      "trustedKeepers(address)": {
+        "notice": "Mapping of trusted keeper addresses"
+      }
+    },
+    "notice": "Sentinel that compares ResilientOracle and SentinelOracle prices (via keeper) and pauses         specific actions (borrow, mint, collateral factor) per market when         large deviations are detected.",
+    "version": 1
+  },
+  "storageLayout": {
+    "storage": [
+      {
+        "astId": 246,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "_initialized",
+        "offset": 0,
+        "slot": "0",
+        "type": "t_uint8"
+      },
+      {
+        "astId": 249,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "_initializing",
+        "offset": 1,
+        "slot": "0",
+        "type": "t_bool"
+      },
+      {
+        "astId": 866,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "__gap",
+        "offset": 0,
+        "slot": "1",
+        "type": "t_array(t_uint256)50_storage"
+      },
+      {
+        "astId": 118,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "_owner",
+        "offset": 0,
+        "slot": "51",
+        "type": "t_address"
+      },
+      {
+        "astId": 238,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "__gap",
+        "offset": 0,
+        "slot": "52",
+        "type": "t_array(t_uint256)49_storage"
+      },
+      {
+        "astId": 11,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "_pendingOwner",
+        "offset": 0,
+        "slot": "101",
+        "type": "t_address"
+      },
+      {
+        "astId": 105,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "__gap",
+        "offset": 0,
+        "slot": "102",
+        "type": "t_array(t_uint256)49_storage"
+      },
+      {
+        "astId": 954,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "_accessControlManager",
+        "offset": 0,
+        "slot": "151",
+        "type": "t_contract(IAccessControlManagerV8)1139"
+      },
+      {
+        "astId": 959,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "__gap",
+        "offset": 0,
+        "slot": "152",
+        "type": "t_array(t_uint256)49_storage"
+      },
+      {
+        "astId": 1247,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "tokenConfigs",
+        "offset": 0,
+        "slot": "201",
+        "type": "t_mapping(t_address,t_struct(DeviationConfig)1205_storage)"
+      },
+      {
+        "astId": 1252,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "trustedKeepers",
+        "offset": 0,
+        "slot": "202",
+        "type": "t_mapping(t_address,t_bool)"
+      },
+      {
+        "astId": 1258,
+        "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+        "label": "marketStates",
+        "offset": 0,
+        "slot": "203",
+        "type": "t_mapping(t_address,t_struct(MarketState)1225_storage)"
+      }
+    ],
+    "types": {
+      "t_address": {
+        "encoding": "inplace",
+        "label": "address",
+        "numberOfBytes": "20"
+      },
+      "t_array(t_uint256)49_storage": {
+        "base": "t_uint256",
+        "encoding": "inplace",
+        "label": "uint256[49]",
+        "numberOfBytes": "1568"
+      },
+      "t_array(t_uint256)50_storage": {
+        "base": "t_uint256",
+        "encoding": "inplace",
+        "label": "uint256[50]",
+        "numberOfBytes": "1600"
+      },
+      "t_bool": {
+        "encoding": "inplace",
+        "label": "bool",
+        "numberOfBytes": "1"
+      },
+      "t_contract(IAccessControlManagerV8)1139": {
+        "encoding": "inplace",
+        "label": "contract IAccessControlManagerV8",
+        "numberOfBytes": "20"
+      },
+      "t_mapping(t_address,t_bool)": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => bool)",
+        "numberOfBytes": "32",
+        "value": "t_bool"
+      },
+      "t_mapping(t_address,t_struct(DeviationConfig)1205_storage)": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => struct DeviationSentinel.DeviationConfig)",
+        "numberOfBytes": "32",
+        "value": "t_struct(DeviationConfig)1205_storage"
+      },
+      "t_mapping(t_address,t_struct(MarketState)1225_storage)": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => struct DeviationSentinel.MarketState)",
+        "numberOfBytes": "32",
+        "value": "t_struct(MarketState)1225_storage"
+      },
+      "t_mapping(t_uint96,t_uint256)": {
+        "encoding": "mapping",
+        "key": "t_uint96",
+        "label": "mapping(uint96 => uint256)",
+        "numberOfBytes": "32",
+        "value": "t_uint256"
+      },
+      "t_struct(DeviationConfig)1205_storage": {
+        "encoding": "inplace",
+        "label": "struct DeviationSentinel.DeviationConfig",
+        "members": [
+          {
+            "astId": 1202,
+            "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+            "label": "deviation",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_uint8"
+          },
+          {
+            "astId": 1204,
+            "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+            "label": "enabled",
+            "offset": 1,
+            "slot": "0",
+            "type": "t_bool"
+          }
+        ],
+        "numberOfBytes": "32"
+      },
+      "t_struct(MarketState)1225_storage": {
+        "encoding": "inplace",
+        "label": "struct DeviationSentinel.MarketState",
+        "members": [
+          {
+            "astId": 1208,
+            "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+            "label": "borrowPaused",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_bool"
+          },
+          {
+            "astId": 1210,
+            "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+            "label": "supplyPaused",
+            "offset": 1,
+            "slot": "0",
+            "type": "t_bool"
+          },
+          {
+            "astId": 1212,
+            "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+            "label": "cfModified",
+            "offset": 2,
+            "slot": "0",
+            "type": "t_bool"
+          },
+          {
+            "astId": 1214,
+            "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+            "label": "originalCF",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_uint256"
+          },
+          {
+            "astId": 1216,
+            "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+            "label": "originalLT",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_uint256"
+          },
+          {
+            "astId": 1220,
+            "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+            "label": "poolCFs",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_mapping(t_uint96,t_uint256)"
+          },
+          {
+            "astId": 1224,
+            "contract": "contracts/DeviationSentinel/DeviationSentinel.sol:DeviationSentinel",
+            "label": "poolLTs",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_mapping(t_uint96,t_uint256)"
+          }
+        ],
+        "numberOfBytes": "160"
+      },
+      "t_uint256": {
+        "encoding": "inplace",
+        "label": "uint256",
+        "numberOfBytes": "32"
+      },
+      "t_uint8": {
+        "encoding": "inplace",
+        "label": "uint8",
+        "numberOfBytes": "1"
+      },
+      "t_uint96": {
+        "encoding": "inplace",
+        "label": "uint96",
+        "numberOfBytes": "12"
+      }
+    }
+  }
+}
