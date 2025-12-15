@@ -4,7 +4,10 @@ import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
 import { IILComptroller } from "../Interfaces/IILComptroller.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
-import { ResilientOracleInterface, OracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
+import {
+    ResilientOracleInterface,
+    OracleInterface
+} from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
 /**

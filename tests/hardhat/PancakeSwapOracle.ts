@@ -58,9 +58,8 @@ describe("PancakeSwapOracle", () => {
   }
 
   beforeEach(async () => {
-    ({ pancakeSwapOracle, accessControlManager, resilientOracle, pancakePool, owner, user } = await loadFixture(
-      deployFixture,
-    ));
+    ({ pancakeSwapOracle, accessControlManager, resilientOracle, pancakePool, owner, user } =
+      await loadFixture(deployFixture));
   });
 
   describe("Initialization", () => {

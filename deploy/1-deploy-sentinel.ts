@@ -29,7 +29,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
         args: [accessControlManager],
       },
     },
-    waitConfirmations: 2
+    waitConfirmations: 2,
   });
 
   await deploy("UniswapOracle", {
@@ -46,7 +46,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
         args: [accessControlManager],
       },
     },
-    waitConfirmations: 2
+    waitConfirmations: 2,
   });
 
   await deploy("SentinelOracle", {
@@ -63,7 +63,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
         args: [accessControlManager],
       },
     },
-    waitConfirmations: 2
+    waitConfirmations: 2,
   });
 
   const sentinelOracle = await hre.ethers.getContract("SentinelOracle");
@@ -82,7 +82,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
         args: [accessControlManager],
       },
     },
-    waitConfirmations: 2
+    waitConfirmations: 2,
   });
 
   const deviationSentinel = await hre.ethers.getContract("DeviationSentinel");

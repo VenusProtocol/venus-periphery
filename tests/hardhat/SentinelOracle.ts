@@ -49,9 +49,8 @@ describe("SentinelOracle", () => {
   }
 
   beforeEach(async () => {
-    ({ sentinelOracle, accessControlManager, pancakeSwapOracle, uniswapOracle, owner, user } = await loadFixture(
-      deployFixture,
-    ));
+    ({ sentinelOracle, accessControlManager, pancakeSwapOracle, uniswapOracle, owner, user } =
+      await loadFixture(deployFixture));
   });
 
   describe("Initialization", () => {

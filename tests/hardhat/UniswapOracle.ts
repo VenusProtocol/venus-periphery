@@ -53,9 +53,8 @@ describe("UniswapOracle", () => {
   }
 
   beforeEach(async () => {
-    ({ uniswapOracle, accessControlManager, resilientOracle, uniswapPool, owner, user } = await loadFixture(
-      deployFixture,
-    ));
+    ({ uniswapOracle, accessControlManager, resilientOracle, uniswapPool, owner, user } =
+      await loadFixture(deployFixture));
   });
 
   describe("Initialization", () => {
