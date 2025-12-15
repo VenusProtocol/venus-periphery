@@ -11,6 +11,3 @@ typechain
 contracts/oracle
 CHANGELOG.md
 docs
-
-# Ignore SwapHelper.sol since it was already audited
-contracts/SwapHelper/SwapHelper.sol

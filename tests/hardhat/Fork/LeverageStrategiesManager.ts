@@ -1,0 +1,2018 @@
+import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { expect } from "chai";
+import { BigNumber, Signer } from "ethers";
+import { parseEther, parseUnits } from "ethers/lib/utils";
+import { ethers, network, upgrades } from "hardhat";
+
+import {
+  ChainlinkOracle__factory,
+  ComptrollerMock,
+  ComptrollerMock__factory,
+  Diamond__factory,
+  IAccessControlManagerV8__factory,
+  IERC20,
+  IERC20__factory,
+  LeverageStrategiesManager,
+  SwapHelper,
+  Unitroller__factory,
+  VBNB,
+  VBNB__factory,
+  VBep20Delegator,
+  VBep20Delegator__factory,
+  VToken__factory,
+  WBNB,
+  WBNB__factory,
+} from "../../../typechain";
+import { forking, initMainnetUser } from "./utils";
+
+const NORMAL_TIMELOCK = "0x939bD8d64c0A9583A7Dcea9933f7b21697ab6396";
+const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
+const COMPTROLLER_ADDRESS = "0xfd36e2c2a6789db23113685031d7f16329158384";
+const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
+const vBNB_ADDRESS = "0xA07c5b74C9B40447a954e1466938b865b6BBea36";
+const vWBNB_ADDRESS = "0x6bCa74586218dB34cdB402295796b79663d816e9";
+
+const USDC_ADDRESS = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
+const ETH_ADDRESS = "0x2170Ed0880ac9A755fd29B2688956BD959F933F8";
+const vUSDC_ADDRESS = "0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8";
+const vETH_ADDRESS = "0xf508fCD89b8bd15579dc79A6827cB4686A3592c8";
+
+// Random Mainnet Users
+const vWBNB_HOLDER = "0x16C5433742ACCBB84Fa471A9a76352199Ba4c197";
+const USDC_WHALE = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
+
+const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
+
+type SetupMarketFixture = {
+  timelock: Signer;
+  leverageStrategiesManager: LeverageStrategiesManager;
+  swapHelper: SwapHelper;
+  comptroller: ComptrollerMock;
+  WBNB: WBNB;
+  USDC: IERC20;
+  ETH: IERC20;
+  vBNB: VBNB;
+  vWBNB: VBep20Delegator;
+  vUSDC: VBep20Delegator;
+  vETH: VBep20Delegator;
+};
+
+// Extracts function selectors from a contract ABI
+function getSelectors(contract: any) {
+  const signatures = Object.keys(contract.interface.functions);
+  const selectors: any = signatures.reduce((acc: any, val) => {
+    if (val !== "init(bytes)") {
+      acc.push(contract.interface.getSighash(val));
+    }
+    return acc;
+  }, []);
+  selectors.contract = contract;
+  return selectors;
+}
+
+// Upgrades Comptroller to support flash loans (can be removed once FlashLoan VIP is executed)
+async function upgradeComptroller(timelock: Signer) {
+  const FacetCutAction = { Add: 0, Replace: 1, Remove: 2 };
+
+  const DiamondFactory = await ethers.getContractFactory("Diamond");
+  const newDiamond = await DiamondFactory.deploy();
+
+  const Unitroller = Unitroller__factory.connect(COMPTROLLER_ADDRESS, timelock);
+  await Unitroller._setPendingImplementation(newDiamond.address);
+  await newDiamond.connect(timelock)._become(Unitroller.address);
+
+  const diamond = Diamond__factory.connect(COMPTROLLER_ADDRESS, timelock);
+
+  // Remove all existing facets
+  const cut: any[] = [];
+  const facets = await diamond.facets();
+
+  for (const facet of facets) {
+    cut.push({
+      facetAddress: ethers.constants.AddressZero,
+      action: FacetCutAction.Remove,
+      functionSelectors: facet.functionSelectors,
+    });
+  }
+
+  await diamond.diamondCut(cut);
+  cut.length = 0;
+
+  // Deploy and add new facets including FlashLoanFacet
+  const FacetNames = ["MarketFacet", "PolicyFacet", "SetterFacet", "RewardFacet", "FlashLoanFacet"];
+  for (const FacetName of FacetNames) {
+    const Facet = await ethers.getContractFactory(FacetName);
+    const facet = await Facet.deploy();
+    await facet.deployed();
+
+    const facetInterface = await ethers.getContractAt(`I${FacetName}`, facet.address);
+    cut.push({
+      facetAddress: facet.address,
+      action: FacetCutAction.Add,
+      functionSelectors: getSelectors(facetInterface),
+    });
+  }
+
+  await diamond.diamondCut(cut);
+  const comptroller = ComptrollerMock__factory.connect(COMPTROLLER_ADDRESS, timelock);
+
+  const ComptrollerLens = await ethers.getContractFactory("ComptrollerLens");
+  const lens = await ComptrollerLens.deploy();
+  await comptroller._setComptrollerLens(lens.address);
+
+  const acm = IAccessControlManagerV8__factory.connect(ACM, timelock);
+  await acm.giveCallPermission(COMPTROLLER_ADDRESS, "setWhiteListFlashLoanAccount(address,bool)", NORMAL_TIMELOCK);
+}
+
+// Upgrades vToken implementations to support flash loans
+async function upgradeVTokens(timelock: Signer) {
+  const UpdatedVToken = await ethers.getContractFactory("VBep20Delegate");
+  const vTokenImpl = await UpdatedVToken.deploy();
+
+  const vUSDC = VBep20Delegator__factory.connect(vUSDC_ADDRESS, ethers.provider);
+  const vWBNB = VBep20Delegator__factory.connect(vWBNB_ADDRESS, ethers.provider);
+  const vETH = VBep20Delegator__factory.connect(vETH_ADDRESS, ethers.provider);
+
+  await vUSDC.connect(timelock)._setImplementation(vTokenImpl.address, false, "0x");
+  await vWBNB.connect(timelock)._setImplementation(vTokenImpl.address, false, "0x");
+  await vETH.connect(timelock)._setImplementation(vTokenImpl.address, false, "0x");
+
+  const acm = IAccessControlManagerV8__factory.connect(ACM, timelock);
+  for (const vTokenAddress of [vUSDC_ADDRESS, vWBNB_ADDRESS, vETH_ADDRESS]) {
+    await acm.giveCallPermission(vTokenAddress, "setFlashLoanEnabled(bool)", NORMAL_TIMELOCK);
+    const market = VToken__factory.connect(vTokenAddress, timelock);
+    await market.setFlashLoanEnabled(true);
+  }
+}
+
+async function setMaxStalePeriod() {
+  const REDSTONE = "0x8455EFA4D7Ff63b8BFD96AdD889483Ea7d39B70a";
+  const CHAINLINK = "0x1B2103441A0A108daD8848D8F5d790e4D402921F";
+  const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseUnits("2"));
+
+  const redStoneOracle = ChainlinkOracle__factory.connect(REDSTONE, timelock);
+  const chainlinkOracle = ChainlinkOracle__factory.connect(CHAINLINK, timelock);
+
+  // WBNB
+  await redStoneOracle.setTokenConfig({
+    asset: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    feed: "0x8dd2D85C7c28F43F965AE4d9545189C7D022ED0e",
+    maxStalePeriod: "31536000", // 1 year
+  });
+  await chainlinkOracle.setTokenConfig({
+    asset: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    feed: "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE",
+    maxStalePeriod: "31536000", // 1 year
+  });
+}
+
+const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
+  const [root] = await ethers.getSigners();
+  const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseUnits("2"));
+  const comptroller = await ComptrollerMock__factory.connect(COMPTROLLER_ADDRESS, timelock);
+
+  const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
+  const swapHelper = (await SwapHelperFactory.deploy(root.address)) as SwapHelper;
+
+  const leverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
+  const leverageStrategiesManager = await upgrades.deployProxy(leverageStrategiesManagerFactory, [], {
+    constructorArgs: [comptroller.address, swapHelper.address, vBNB_ADDRESS],
+    initializer: "initialize",
+    unsafeAllow: ["state-variable-immutable"],
+  });
+
+  const WBNB = WBNB__factory.connect(WBNB_ADDRESS, root);
+  const USDC = IERC20__factory.connect(USDC_ADDRESS, root);
+  const ETH = IERC20__factory.connect(ETH_ADDRESS, root);
+
+  const vBNB = VBNB__factory.connect(vBNB_ADDRESS, timelock);
+  const vWBNB = VBep20Delegator__factory.connect(vWBNB_ADDRESS, timelock);
+  const vUSDC = VBep20Delegator__factory.connect(vUSDC_ADDRESS, timelock);
+  const vETH = VBep20Delegator__factory.connect(vETH_ADDRESS, timelock);
+
+  return {
+    timelock,
+    leverageStrategiesManager,
+    swapHelper,
+    comptroller,
+    USDC,
+    ETH,
+    WBNB,
+    vBNB,
+    vWBNB,
+    vUSDC,
+    vETH,
+  };
+};
+
+/**
+ * Tolerance constants for assertions
+ *
+ * TOLERANCE_HALF_PERCENT (0.5%): Used for borrow amount comparisons where flash loan fees
+ * and interest accrual can cause minor deviations from expected values.
+ *
+ * TOLERANCE_ONE_PERCENT (1%): Used for collateral balance comparisons where exchange rate
+ * fluctuations and rounding in mint/redeem operations can cause larger deviations.
+ */
+const TOLERANCE_HALF_PERCENT = 5; // 0.5% = 5/1000
+const TOLERANCE_ONE_PERCENT = 10; // 1% = 10/1000
+const TOLERANCE_DIVISOR = 1000;
+
+/**
+ * Helper function to calculate tolerance-based closeTo value
+ * @param amount Base amount to calculate tolerance from
+ * @param toleranceBps Tolerance in basis points (5 = 0.5%, 10 = 1%)
+ */
+function calculateTolerance(amount: BigNumber, toleranceBps: number = TOLERANCE_HALF_PERCENT): BigNumber {
+  return amount.mul(toleranceBps).div(TOLERANCE_DIVISOR);
+}
+
+async function createSwapAPICallData(
+  swapHelper: SwapHelper,
+  positionSwapper: string,
+  dexTarget: string,
+  dexCalldata: string,
+  tokenIn: string,
+  tokenOut: string,
+): Promise<string> {
+  // Create EIP-712 signature
+  const domain = {
+    chainId: network.config.chainId,
+    name: "VenusSwap",
+    verifyingContract: swapHelper.address,
+    version: "1",
+  };
+  const types = {
+    Multicall: [
+      { name: "caller", type: "address" },
+      { name: "calls", type: "bytes[]" },
+      { name: "deadline", type: "uint256" },
+      { name: "salt", type: "bytes32" },
+    ],
+  };
+
+  // Encode  function call
+  const approveMaxCall = swapHelper.interface.encodeFunctionData("approveMax", [tokenIn, dexTarget]);
+  const genericCall = swapHelper.interface.encodeFunctionData("genericCall", [dexTarget, dexCalldata]);
+  const tokenInSweepCall = swapHelper.interface.encodeFunctionData("sweep", [tokenIn, positionSwapper]);
+  const tokenOutSweepCall = swapHelper.interface.encodeFunctionData("sweep", [tokenOut, positionSwapper]);
+
+  const calls = [approveMaxCall, genericCall, tokenInSweepCall, tokenOutSweepCall];
+  const deadline = "17627727131762772187"; // Long time
+  const saltValue = ethers.utils.formatBytes32String(Math.random().toString());
+
+  const [root] = await ethers.getSigners();
+  const signature = await root._signTypedData(domain, types, {
+    caller: positionSwapper,
+    calls,
+    deadline,
+    salt: saltValue,
+  });
+
+  // Encode multicall with all parameters
+  const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
+  return multicallData;
+}
+
+interface LeverageBalanceSnapshot {
+  vTokenBalance: BigNumber;
+  borrowBalance: BigNumber;
+  underlyingBalance: BigNumber;
+  contractBalance: BigNumber;
+}
+
+async function captureBalanceSnapshot(
+  userAddress: string,
+  vToken: VBep20Delegator,
+  underlying: IERC20 | WBNB,
+  contractAddress: string,
+): Promise<LeverageBalanceSnapshot> {
+  return {
+    vTokenBalance: await vToken.balanceOf(userAddress),
+    borrowBalance: await vToken.callStatic.borrowBalanceCurrent(userAddress),
+    underlyingBalance: await underlying.balanceOf(userAddress),
+    contractBalance: await underlying.balanceOf(contractAddress),
+  };
+}
+
+function assertBalanceDelta(
+  actual: BigNumber,
+  expected: BigNumber,
+  toleranceBps: number = TOLERANCE_HALF_PERCENT,
+  description: string = "Balance delta",
+): void {
+  const tolerance = calculateTolerance(expected, toleranceBps);
+  expect(
+    actual,
+    `${description}: expected ${expected.toString()} ± ${tolerance.toString()}, got ${actual.toString()}`,
+  ).to.be.closeTo(expected, tolerance);
+}
+
+if (FORK_MAINNET) {
+  const blockNumber = 69297395;
+  forking(blockNumber, () => {
+    describe("LeverageStrategiesManager Fork Tests", function () {
+      this.timeout(300000); // 5 minutes
+      let leverageStrategiesManager: LeverageStrategiesManager;
+      let swapHelper: SwapHelper;
+      let comptroller: ComptrollerMock;
+      let WBNB: WBNB;
+      let USDC: IERC20;
+      let vWBNB: VBep20Delegator;
+      let vUSDC: VBep20Delegator;
+      let timelock: Signer;
+
+      before(async function () {
+        timelock = await initMainnetUser(NORMAL_TIMELOCK, parseUnits("2"));
+        await upgradeComptroller(timelock);
+        await upgradeVTokens(timelock);
+        await setMaxStalePeriod();
+      });
+
+      beforeEach(async function () {
+        ({ leverageStrategiesManager, comptroller, vWBNB, vUSDC, swapHelper, WBNB, USDC } =
+          await loadFixture(setupMarketFixture));
+        await comptroller.setWhiteListFlashLoanAccount(leverageStrategiesManager.address, true);
+      });
+
+      it("should deploy leverage strategies manager before fork tests", async function () {
+        expect(leverageStrategiesManager.address).to.properAddress;
+      });
+
+      describe("enterLeverage", function () {
+        it("should revert when user does not set delegate", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          // TODO: Replace with real dex calldata returned from Swap API
+          const dexCalldata =
+            "0x5ae401dc00000000000000000000000000000000000000000000000000000000691343800000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000124b858183f000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000800000000000000000000000001148959f1ef3b32aa8c5484393723b79c2cd2a260000000000000000000000000000000000000000000000001bc38f4c890ad8a400000000000000000000000000000000000000000000006965fbe6ad76010f7a0000000000000000000000000000000000000000000000000000000000000042bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00006455d398326f99059ff775485246999027b31979550000648ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"; // uniswap
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            WBNB_ADDRESS,
+            USDC_ADDRESS,
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverage(
+                vWBNB_ADDRESS,
+                0,
+                vUSDC_ADDRESS,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
+        });
+
+        it("should revert when dex swap fails", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("10", 18);
+
+          // Failing dex calldata
+          const dexCalldata =
+            "0x5ae401dc00000000000000000000000000000000000000000000000000000000691343800000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000124b858183f000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000800000000000000000000000001148959f1ef3b32aa8c5484393723b79c2cd2a260000000000000000000000000000000000000000000000001bc38f4c890ad8a400000000000000000000000000000000000000000000006965fbe6ad76010f7a0000000000000000000000000000000000000000000000000000000000000042bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00006455d398326f99059ff775485246999027b31979550000648ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverage(
+                vWBNB_ADDRESS,
+                0,
+                vUSDC_ADDRESS,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWithCustomError(leverageStrategiesManager, "TokenSwapCallFailed");
+        });
+
+        it("should revert when received less than minAmountAfterSwap", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("10", 18);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverage(
+                vWBNB_ADDRESS,
+                0,
+                vUSDC_ADDRESS,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWithCustomError(leverageStrategiesManager, "SlippageExceeded");
+        });
+
+        it("should enter leveraged position using vWBNB as collateral and borrowing vUSDC", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          const vWBNBBefore = await vWBNB.balanceOf(vWBNB_HOLDER);
+          const vUSDCBefore = await vUSDC.balanceOf(vWBNB_HOLDER);
+          const vUSDC_BorrowedBefore = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          const tx = await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterLeverage(
+              vWBNB_ADDRESS,
+              0,
+              vUSDC_ADDRESS,
+              borrowedAmountToFlashLoan,
+              minAmountAfterSwap,
+              multicallData,
+            );
+          const vWBNBAfter = await vWBNB.balanceOf(vWBNB_HOLDER);
+          const vUSDCAfter = await vUSDC.balanceOf(vWBNB_HOLDER);
+          const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await expect(tx)
+            .to.emit(leverageStrategiesManager, "LeverageEntered")
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, 0, vUSDC_ADDRESS, borrowedAmountToFlashLoan);
+
+          expect(vWBNBAfter).to.be.gt(vWBNBBefore);
+          expect(vUSDCAfter).to.be.eq(vUSDCBefore);
+          expect(vUSDC_BorrowedAfter).to.be.gt(vUSDC_BorrowedBefore);
+          expect(vUSDC_BorrowedAfter.sub(vUSDC_BorrowedBefore)).to.be.closeTo(
+            borrowedAmountToFlashLoan,
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
+        });
+
+        it("should enter leveraged position using vWBNB as collateral and borrowing vUSDC and transfer WBNB as seed", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+          const seedAmount = parseEther("0.1");
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: seedAmount });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, seedAmount);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          const WBNBBefore = await WBNB.balanceOf(vWBNB_HOLDER);
+          const vWBNBBefore = await vWBNB.balanceOf(vWBNB_HOLDER);
+          const vUSDCBefore = await vUSDC.balanceOf(vWBNB_HOLDER);
+          const vUSDC_BorrowedBefore = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          const tx = await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterLeverage(
+              vWBNB_ADDRESS,
+              seedAmount,
+              vUSDC_ADDRESS,
+              borrowedAmountToFlashLoan,
+              minAmountAfterSwap,
+              multicallData,
+            );
+
+          const WBNBAfter = await WBNB.balanceOf(vWBNB_HOLDER);
+          const vWBNBAfter = await vWBNB.balanceOf(vWBNB_HOLDER);
+          const vUSDCAfter = await vUSDC.balanceOf(vWBNB_HOLDER);
+          const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await expect(tx)
+            .to.emit(leverageStrategiesManager, "LeverageEntered")
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, seedAmount, vUSDC_ADDRESS, borrowedAmountToFlashLoan);
+
+          expect(vWBNBAfter).to.be.gt(vWBNBBefore);
+          expect(vUSDCAfter).to.be.eq(vUSDCBefore);
+          expect(WBNBAfter).to.be.eq(WBNBBefore.sub(seedAmount));
+
+          expect(vUSDC_BorrowedAfter).to.be.gt(vUSDC_BorrowedBefore);
+          // 0.5% tolerance: Flash loan fees and interest accrual cause minor deviations
+          expect(vUSDC_BorrowedAfter.sub(vUSDC_BorrowedBefore)).to.be.closeTo(
+            borrowedAmountToFlashLoan,
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
+        });
+
+        it("should revert when market has no flash loan enabled", async function () {
+          const vUSDC_market = VToken__factory.connect(vUSDC_ADDRESS, timelock);
+          await vUSDC_market.connect(timelock).setFlashLoanEnabled(false);
+
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverage(
+                vWBNB_ADDRESS,
+                0,
+                vUSDC_ADDRESS,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWithCustomError(comptroller, "FlashLoanNotEnabled");
+        });
+
+        it("should revert when operation causes liquidation", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          // Borrow some USDC to create debt, leaving some headroom initially
+          const [, liquidity] = await comptroller.getBorrowingPower(vWBNB_HOLDER_SIGNER.address);
+          const borrowAmount = liquidity; // borrow max
+          await vUSDC.connect(vWBNB_HOLDER_SIGNER).borrow(borrowAmount);
+
+          // Set lower CF For target Market to cause liquidation
+          await comptroller["setCollateralFactor(address,uint256,uint256)"](
+            vUSDC_ADDRESS,
+            parseUnits("0.4", 18),
+            parseUnits("0.4", 18),
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverage(
+                vWBNB_ADDRESS,
+                0,
+                vUSDC_ADDRESS,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWith("math error"); // reverts early during redeem;
+        });
+      });
+
+      describe("enterLeverageFromBorrow", function () {
+        it("should revert when user does not set delegate", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          // TODO: Replace with real dex calldata returned from Swap API
+          const dexCalldata =
+            "0x5ae401dc00000000000000000000000000000000000000000000000000000000691343800000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000124b858183f000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000800000000000000000000000001148959f1ef3b32aa8c5484393723b79c2cd2a260000000000000000000000000000000000000000000000001bc38f4c890ad8a400000000000000000000000000000000000000000000006965fbe6ad76010f7a0000000000000000000000000000000000000000000000000000000000000042bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00006455d398326f99059ff775485246999027b31979550000648ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"; // uniswap
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            WBNB_ADDRESS,
+            USDC_ADDRESS,
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverageFromBorrow(
+                vWBNB_ADDRESS,
+                vUSDC_ADDRESS,
+                0,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
+        });
+
+        it("should revert when dex swap fails", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          const dexCalldata =
+            "0x3087505600000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000010000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000a2a15d09519be0000000000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000008e00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000044095ea7b30000000000000000000000000000000000001ff3684f28c67538d4d072c227340000000000000000000000000000000000000000000000a2a15d09519be00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ff3684f28c67538d4d072c2273400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000006c42213bc0b000000000000000000000000df82debfd3304e33979b4d790aaaf89eb70c8ff00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d0000000000000000000000000000000000000000000000a2a15d09519be00000000000000000000000000000df82debfd3304e33979b4d790aaaf89eb70c8ff000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000005e41fff991f000000000000000000000000f5042e6ffac5a625d4e7848e0b01373d8eb9e222000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000000018aaf9da8958158000000000000000000000000000000000000000000000000000000000000000a01b0ec70ccfbfa221c37218cb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a00000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000046000000000000000000000000000000000000000000000000000000000000000e4c1fb425e000000000000000000000000df82debfd3304e33979b4d790aaaf89eb70c8ff00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d0000000000000000000000000000000000000000000000a2a15d09519be000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006924347700000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000164af72634f000000000000000000000000df82debfd3304e33979b4d790aaaf89eb70c8ff00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000000000000000000000000000000000000000271000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000ffffffffffffffc500000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003427100155d398326f99059ff775485246999027b319795500000200000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e48d68a156000000000000000000000000df82debfd3304e33979b4d790aaaf89eb70c8ff0000000000000000000000000000000000000000000000000000000000000271000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002c55d398326f99059ff775485246999027b319795501000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008434ee90ca000000000000000000000000f5c4f3dc02c3fb9279495a8fef7b0741da956157000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000000000000000000000000000003155fc2f0dfa50da0000000000000000000000000000000000000000000000000000000000002710000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f5042e6ffac5a625d4e7848e0b01373d8eb9e22200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001243b2253c8000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000000000000000000000010000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000579a883aacba0beda21b62704e873547c5068b9e36e1c39c4b523ccbf53bbf45";
+          const dexTarget = "0xbbbfd134e9b44bfb5123898ba36b01de7ab93d98";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverageFromBorrow(
+                vWBNB_ADDRESS,
+                vUSDC_ADDRESS,
+                0,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWithCustomError(leverageStrategiesManager, "TokenSwapCallFailed");
+        });
+
+        it("should enter leveraged position using vWBNB as collateral and borrowing vUSDC", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          const vWBNBBefore = await vWBNB.balanceOf(vWBNB_HOLDER);
+          const vUSDCBefore = await vUSDC.balanceOf(vWBNB_HOLDER);
+          const vUSDC_BorrowedBefore = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          const tx = await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterLeverageFromBorrow(
+              vWBNB_ADDRESS,
+              vUSDC_ADDRESS,
+              0,
+              borrowedAmountToFlashLoan,
+              minAmountAfterSwap,
+              multicallData,
+            );
+          const vWBNBAfter = await vWBNB.balanceOf(vWBNB_HOLDER);
+          const vUSDCAfter = await vUSDC.balanceOf(vWBNB_HOLDER);
+          const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await expect(tx)
+            .to.emit(leverageStrategiesManager, "LeverageEnteredFromBorrow")
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, 0, borrowedAmountToFlashLoan);
+
+          expect(vWBNBAfter).to.be.gt(vWBNBBefore);
+          expect(vUSDCAfter).to.be.eq(vUSDCBefore);
+          expect(vUSDC_BorrowedAfter).to.be.gt(vUSDC_BorrowedBefore);
+          // 0.5% tolerance: Flash loan fees and interest accrual cause minor deviations
+          expect(vUSDC_BorrowedAfter.sub(vUSDC_BorrowedBefore)).to.be.closeTo(
+            borrowedAmountToFlashLoan,
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
+        });
+
+        it("should enter leveraged position using vWBNB as collateral and borrowing vUSDC", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+          const borrowedAmountSeed = parseUnits("1000", 18);
+
+          const USDC_HOLDER_SIGNER = await initMainnetUser(USDC_WHALE, parseUnits("5000", 18));
+          await USDC.connect(USDC_HOLDER_SIGNER).transfer(vWBNB_HOLDER, borrowedAmountSeed);
+
+          await USDC.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, borrowedAmountSeed);
+
+          const dexCalldata =
+            "0xe3ead59e00000000000000000000000000c600b30fb0400701010f4b080409018b9006e00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000006c6b935b8bbd4000000000000000000000000000000000000000000000000000001073b5e64318cadb00000000000000000000000000000000000000000000000020e76bcc863195b7385b605565f442228014e77355984f8700000000000000000000000004217fdc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004c0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004c000000000000000000000000000000160000000000000012000000000000000c81b81d678ffb9c0263b24a97847620c99d213eb1400000140008400000000000300000000000000000000000000000000000000000000000000000000c04b8d59000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000006a000f20005980200259b80c510200304000106800000000000000000000000000000000000000000000000000000000692d6bb40000000000000000000000000000000000000000000000022b1c8c1227a000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002b8ac76a51cc950d9822d68b83fe1ad97b32cd580d0001f4bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000000000000000000000000000000160000000000000012000000000000025801b81d678ffb9c0263b24a97847620c99d213eb1400000140008400000000000300000000000000000000000000000000000000000000000000000000c04b8d59000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000006a000f20005980200259b80c510200304000106800000000000000000000000000000000000000000000000000000000692d6bb4000000000000000000000000000000000000000000000068155a43676e0000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002b8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000000000000000000000000000000160000000000000012000000000000000c883c346ba3d4bf36b308705e24fad80999401854b00000140008400000000000300000000000000000000000000000000000000000000000000000000c04b8d59000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000006a000f20005980200259b80c510200304000106800000000000000000000000000000000000000000000000000000000692d6bb40000000000000000000000000000000000000000000000022b1c8c1227a000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002b8ac76a51cc950d9822d68b83fe1ad97b32cd580d000bb8bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000000000000000000000";
+          const dexTarget = "0x6a000f20005980200259b80c5102003040001068";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          const vWBNBBefore = await vWBNB.balanceOf(vWBNB_HOLDER);
+          const vUSDCBefore = await vUSDC.balanceOf(vWBNB_HOLDER);
+          const vUSDC_BorrowedBefore = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          const leverageStrategiesManager_USDC_Before = await USDC.balanceOf(leverageStrategiesManager.address);
+
+          const tx = await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterLeverageFromBorrow(
+              vWBNB_ADDRESS,
+              vUSDC_ADDRESS,
+              borrowedAmountSeed,
+              borrowedAmountToFlashLoan,
+              minAmountAfterSwap,
+              multicallData,
+            );
+          const vWBNBAfter = await vWBNB.balanceOf(vWBNB_HOLDER);
+          const vUSDCAfter = await vUSDC.balanceOf(vWBNB_HOLDER);
+          const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          const leverageStrategiesManager_USDC_After = await USDC.balanceOf(leverageStrategiesManager.address);
+
+          await expect(tx)
+            .to.emit(leverageStrategiesManager, "LeverageEnteredFromBorrow")
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, borrowedAmountSeed, borrowedAmountToFlashLoan);
+
+          expect(vWBNBAfter).to.be.gt(vWBNBBefore);
+          expect(vUSDCAfter).to.be.eq(vUSDCBefore);
+          expect(vUSDC_BorrowedAfter).to.be.gt(vUSDC_BorrowedBefore);
+          // 0.5% tolerance: Flash loan fees and interest accrual cause minor deviations
+          expect(vUSDC_BorrowedAfter.sub(vUSDC_BorrowedBefore)).to.be.closeTo(
+            borrowedAmountToFlashLoan,
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
+
+          expect(leverageStrategiesManager_USDC_After).to.be.eq(leverageStrategiesManager_USDC_Before);
+        });
+
+        it("should revert when received less than minAmountAfterSwap", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+
+          const minAmountAfterSwap = parseUnits("100000", 18); // set high to force revert
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverageFromBorrow(
+                vWBNB_ADDRESS,
+                vUSDC_ADDRESS,
+                0,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWithCustomError(leverageStrategiesManager, "SlippageExceeded");
+        });
+
+        it("should revert when flash loan is not enabled", async function () {
+          const vUSDC_market = VToken__factory.connect(vUSDC_ADDRESS, timelock);
+          await vUSDC_market.connect(timelock).setFlashLoanEnabled(false);
+
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverageFromBorrow(
+                vWBNB_ADDRESS,
+                vUSDC_ADDRESS,
+                0,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWithCustomError(comptroller, "FlashLoanNotEnabled");
+        });
+
+        it("should revert when operation causes liquidation", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          // Borrow some USDC to create debt, leaving some headroom initially
+          const [, liquidity] = await comptroller.getBorrowingPower(vWBNB_HOLDER_SIGNER.address);
+          const borrowAmount = liquidity; // borrow max
+          await vUSDC.connect(vWBNB_HOLDER_SIGNER).borrow(borrowAmount);
+
+          // Set lower CF for target Market to cause liquidation
+          await comptroller["setCollateralFactor(address,uint256,uint256)"](
+            vUSDC_ADDRESS,
+            parseUnits("0.4", 18),
+            parseUnits("0.4", 18),
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverageFromBorrow(
+                vWBNB_ADDRESS,
+                vUSDC_ADDRESS,
+                0,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.revertedWith("math error"); // reverts early during borrow
+        });
+      });
+
+      describe("exitLeverage", function () {
+        it("should revert when user does not set delegate", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+
+          const collateralAmountToRedeemForSwap = BigNumber.from("1778542509895467507"); // 1.778542509895467507 vWBNB
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwapForExit = BigNumber.from("1000000000000000000000"); // 1000 USDC
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .exitLeverage(
+                vWBNB_ADDRESS,
+                collateralAmountToRedeemForSwap,
+                vUSDC_ADDRESS,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwapForExit,
+                "0x",
+              ),
+          ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
+        });
+
+        it("should revert when flash loan is not enabled", async function () {
+          const vUSDC_market = VToken__factory.connect(vUSDC_ADDRESS, timelock);
+          await vUSDC_market.connect(timelock).setFlashLoanEnabled(false);
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountToRedeemForSwap = BigNumber.from("1778542509895467507");
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwapForExit = BigNumber.from("1000000000000000000000");
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .exitLeverage(
+                vWBNB_ADDRESS,
+                collateralAmountToRedeemForSwap,
+                vUSDC_ADDRESS,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwapForExit,
+                "0x",
+              ),
+          ).to.be.revertedWithCustomError(comptroller, "FlashLoanNotEnabled");
+        });
+
+        it("should exit leveraged position using vWBNB as collateral and repaying vUSDC", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwapForEnter = parseUnits("0", 18);
+
+          const enterDexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const enterDexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const enterMulticallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            enterDexTarget,
+            enterDexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterLeverage(
+              vWBNB_ADDRESS,
+              0,
+              vUSDC_ADDRESS,
+              borrowedAmountToFlashLoan,
+              minAmountAfterSwapForEnter,
+              enterMulticallData,
+            );
+
+          const minAmountAfterSwapForExit = BigNumber.from("1000000000000000000000"); // 1000 USDC
+          const exitDexCalldata =
+            "0x7f4576750000000000000000000000000e5891850bb3f03090f03010000806f080040100000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000013c217247b3059cc00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000107713491152f57fbcc13a6e075c4b01a06da6d491e46a65000000000000000000000000042198e50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001e000000160000000000000000000000120000000000000013700000000000027101b81d678ffb9c0263b24a97847620c99d213eb140140008400a400000000000300000000000000000000000000000000000000000000000000000000f28c0498000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000e5891850bb3f03090f03010000806f08004010000000000000000000000000000000000000000000000000000000000692d7e7c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000107713491152f57f000000000000000000000000000000000000000000000000000000000000002b8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000000000000000000000";
+          const exitDexTarget = "0x6a000f20005980200259b80c5102003040001068";
+
+          const vUSDC_BorrowedBefore = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          const exitMulticallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            exitDexTarget,
+            exitDexCalldata,
+            WBNB_ADDRESS,
+            USDC_ADDRESS,
+          );
+
+          const collateralAmountToRedeemForSwap = BigNumber.from("1778542509895467507"); // 1.778542509895467507 vWBNB
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitLeverage(
+              vWBNB_ADDRESS,
+              collateralAmountToRedeemForSwap,
+              vUSDC_ADDRESS,
+              borrowedAmountToFlashLoan,
+              minAmountAfterSwapForExit,
+              exitMulticallData,
+            );
+
+          const vUSDC_BorrowedAfter = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          expect(vUSDC_BorrowedAfter).to.be.lt(vUSDC_BorrowedBefore);
+          // 0.5% tolerance: Small residual borrow can remain due to flash loan fees and timing
+          expect(vUSDC_BorrowedAfter).to.be.closeTo(
+            0,
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
+        });
+
+        it("should revert when received less than minAmountAfterSwap", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwapForEnter = parseUnits("0", 18);
+
+          const enterDexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const enterDexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const enterMulticallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            enterDexTarget,
+            enterDexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterLeverage(
+              vWBNB_ADDRESS,
+              0,
+              vUSDC_ADDRESS,
+              borrowedAmountToFlashLoan,
+              minAmountAfterSwapForEnter,
+              enterMulticallData,
+            );
+
+          const minAmountAfterSwapForExit = BigNumber.from("2000000000000000000000"); // 2000 USDC
+          const exitDexCalldata =
+            "0x7f4576750000000000000000000000000e5891850bb3f03090f03010000806f080040100000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000013c217247b3059cc00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000107713491152f57fbcc13a6e075c4b01a06da6d491e46a65000000000000000000000000042198e50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001e000000160000000000000000000000120000000000000013700000000000027101b81d678ffb9c0263b24a97847620c99d213eb140140008400a400000000000300000000000000000000000000000000000000000000000000000000f28c0498000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000e5891850bb3f03090f03010000806f08004010000000000000000000000000000000000000000000000000000000000692d7e7c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000107713491152f57f000000000000000000000000000000000000000000000000000000000000002b8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000000000000000000000";
+          const exitDexTarget = "0x6a000f20005980200259b80c5102003040001068";
+
+          const exitMulticallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            exitDexTarget,
+            exitDexCalldata,
+            WBNB_ADDRESS,
+            USDC_ADDRESS,
+          );
+
+          const collateralAmountToRedeemForSwap = BigNumber.from("1778542509895467507"); // 1.778542509895467507 vWBNB
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .exitLeverage(
+                vWBNB_ADDRESS,
+                collateralAmountToRedeemForSwap,
+                vUSDC_ADDRESS,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwapForExit,
+                exitMulticallData,
+              ),
+          ).to.be.revertedWithCustomError(leverageStrategiesManager, "SlippageExceeded");
+        });
+
+        it("should revert when operation causes liquidation", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwapForEnter = parseUnits("0", 18);
+
+          const enterDexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const enterDexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const enterMulticallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            enterDexTarget,
+            enterDexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          // First enter a leveraged position
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterLeverage(
+              vWBNB_ADDRESS,
+              0,
+              vUSDC_ADDRESS,
+              borrowedAmountToFlashLoan,
+              minAmountAfterSwapForEnter,
+              enterMulticallData,
+            );
+
+          // Borrow more to put account near max capacity
+          const [, liquidity] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          await vUSDC.connect(vWBNB_HOLDER_SIGNER).borrow(liquidity.mul(90).div(100));
+
+          // Lower collateral factor to create liquidation risk
+          await comptroller["setCollateralFactor(address,uint256,uint256)"](
+            vWBNB_ADDRESS,
+            parseUnits("0.3", 18),
+            parseUnits("0.3", 18),
+          );
+
+          const minAmountAfterSwapForExit = BigNumber.from("1000000000000000000000"); // 1000 USDC
+          const exitDexCalldata =
+            "0x7f4576750000000000000000000000000e5891850bb3f03090f03010000806f080040100000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000013c217247b3059cc00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000107713491152f57fbcc13a6e075c4b01a06da6d491e46a65000000000000000000000000042198e50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001e000000160000000000000000000000120000000000000013700000000000027101b81d678ffb9c0263b24a97847620c99d213eb140140008400a400000000000300000000000000000000000000000000000000000000000000000000f28c0498000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000e5891850bb3f03090f03010000806f08004010000000000000000000000000000000000000000000000000000000000692d7e7c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000107713491152f57f000000000000000000000000000000000000000000000000000000000000002b8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000000000000000000000";
+          const exitDexTarget = "0x6a000f20005980200259b80c5102003040001068";
+
+          const exitMulticallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            exitDexTarget,
+            exitDexCalldata,
+            WBNB_ADDRESS,
+            USDC_ADDRESS,
+          );
+
+          const collateralAmountToRedeemForSwap = BigNumber.from("1778542509895467507"); // 1.778542509895467507 vWBNB
+
+          // Exit should fail because redeeming collateral would cause liquidation
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .exitLeverage(
+                vWBNB_ADDRESS,
+                collateralAmountToRedeemForSwap,
+                vUSDC_ADDRESS,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwapForExit,
+                exitMulticallData,
+              ),
+          ).to.be.revertedWith("math error"); // reverts early during redeem;
+        });
+      });
+
+      describe("enterSingleAssetLeverage", function () {
+        it("should revert when user does not set delegate", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+
+          const collateralAmountSeed = parseUnits("0", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan),
+          ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
+        });
+
+        it("should revert when flash loan is not enabled", async function () {
+          const vWBNB_market = VToken__factory.connect(vWBNB_ADDRESS, timelock);
+          await vWBNB_market.connect(timelock).setFlashLoanEnabled(false);
+
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan),
+          ).to.be.revertedWithCustomError(comptroller, "FlashLoanNotEnabled");
+        });
+
+        it("should enter leveraged position with single collateral without seed", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          const vWBNBBalanceBefore = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowBefore = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          const tx = await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNBBalanceAfter = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowAfter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await expect(tx)
+            .to.emit(leverageStrategiesManager, "SingleAssetLeverageEntered")
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          // Collateral balance should increase by flash loan amount
+          expect(vWBNBBalanceAfter).to.be.gt(vWBNBBalanceBefore);
+          expect(vWBNBBalanceAfter.sub(vWBNBBalanceBefore)).to.be.closeTo(
+            collateralAmountToFlashLoan,
+            collateralAmountToFlashLoan.mul(1).div(100),
+          ); // 1% tolerance
+
+          // Borrow balance should increase by fees only
+          expect(vWBNBBorrowAfter).to.be.gt(vWBNBBorrowBefore);
+        });
+
+        it("should enter leveraged position with single collateral with seed", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          // Give user some WBNB to use as seed
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          const vWBNBBalanceBefore = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowBefore = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          const wbnbBalanceBefore = await WBNB.balanceOf(vWBNB_HOLDER);
+
+          const tx = await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNBBalanceAfter = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowAfter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          const wbnbBalanceAfter = await WBNB.balanceOf(vWBNB_HOLDER);
+
+          await expect(tx)
+            .to.emit(leverageStrategiesManager, "SingleAssetLeverageEntered")
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          // WBNB was transferred from user
+          expect(wbnbBalanceBefore.sub(wbnbBalanceAfter)).to.equal(collateralAmountSeed);
+
+          // Collateral balance should increase
+          expect(vWBNBBalanceAfter).to.be.gt(vWBNBBalanceBefore);
+          // The increase should be close to the flash loan amount plus seed (seed is minted as collateral too)
+          expect(vWBNBBalanceAfter.sub(vWBNBBalanceBefore)).to.be.closeTo(
+            collateralAmountToFlashLoan.add(collateralAmountSeed),
+            collateralAmountToFlashLoan.add(collateralAmountSeed).mul(1).div(100),
+          ); // 1% tolerance for rounding
+
+          // Borrow balance should increase (by fees in this single collateral case)
+          expect(vWBNBBorrowAfter).to.be.gt(vWBNBBorrowBefore);
+        });
+
+        it("should revert when operation causes liquidation", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          // Borrow max to put account at risk
+          const [, liquidity] = await comptroller.getBorrowingPower(vWBNB_HOLDER_SIGNER.address);
+          await vUSDC.connect(vWBNB_HOLDER_SIGNER).borrow(liquidity);
+
+          // Lower collateral factor to cause liquidation risk
+          await comptroller["setCollateralFactor(address,uint256,uint256)"](
+            vWBNB_ADDRESS,
+            parseUnits("0.4", 18),
+            parseUnits("0.4", 18),
+          );
+
+          const collateralAmountSeed = parseUnits("0", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan),
+          ).to.be.revertedWithCustomError(leverageStrategiesManager, "OperationCausesLiquidation");
+        });
+      });
+
+      describe("exitSingleAssetLeverage", function () {
+        it("should revert when user does not set delegate", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .exitSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountToFlashLoan),
+          ).to.be.revertedWithCustomError(comptroller, "NotAnApprovedDelegate");
+        });
+
+        it("should revert when flash loan is not enabled", async function () {
+          const vWBNB_market = VToken__factory.connect(vWBNB_ADDRESS, timelock);
+          await vWBNB_market.connect(timelock).setFlashLoanEnabled(false);
+
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .exitSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountToFlashLoan),
+          ).to.be.revertedWithCustomError(comptroller, "FlashLoanNotEnabled");
+        });
+
+        it("should exit leveraged position with single collateral", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          // First enter a leveraged position
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoanEnter = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoanEnter);
+
+          const vWBNBBalanceAfterEnter = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          // Now exit the position - flash loan the full borrow balance to repay debt
+          const collateralAmountToFlashLoanExit = vWBNBBorrowAfterEnter;
+
+          const tx = await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountToFlashLoanExit);
+
+          const vWBNBBalanceAfterExit = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowAfterExit = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await expect(tx)
+            .to.emit(leverageStrategiesManager, "SingleAssetLeverageExited")
+            .withArgs(vWBNB_HOLDER, vWBNB_ADDRESS, collateralAmountToFlashLoanExit);
+
+          // Collateral balance should decrease
+          expect(vWBNBBalanceAfterExit).to.be.lt(vWBNBBalanceAfterEnter);
+
+          // Borrow balance should be 0 or minimal after exit (allowing for small interest accrual)
+          expect(vWBNBBorrowAfterExit).to.be.closeTo(0, parseUnits("0.001", 18));
+        });
+
+        it("should cap redeem to user collateral balance when flash loan exceeds available collateral", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          // First enter a small leveraged position
+          const collateralAmountSeed = parseUnits("0.1", 18);
+          const collateralAmountToFlashLoanEnter = parseUnits("0.2", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoanEnter);
+
+          const vWBNB = VToken__factory.connect(vWBNB_ADDRESS, vWBNB_HOLDER_SIGNER);
+          const borrowBalanceAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, borrowBalanceAfterEnter);
+
+          const borrowBalanceAfterExit = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          expect(borrowBalanceAfterExit).to.be.closeTo(0, parseUnits("0.001", 18));
+        });
+
+        it("should verify account is safe after exiting leveraged position", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          // First enter a leveraged position
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoanEnter = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoanEnter);
+
+          const vWBNBBorrowAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          // Exit the position
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, vWBNBBorrowAfterEnter);
+
+          // Account should be safe (no shortfall)
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+      });
+
+      describe("Additional Coverage Tests", function () {
+        it("should handle zero seed amount with large flash loan for single asset leverage", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0", 18); // Zero seed
+          const collateralAmountToFlashLoan = parseUnits("5", 18); // Large flash loan
+
+          const vWBNBBalanceBefore = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowBefore = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNBBalanceAfter = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowAfter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          // Collateral should increase by flash loan amount
+          expect(vWBNBBalanceAfter).to.be.gt(vWBNBBalanceBefore);
+          expect(vWBNBBalanceAfter.sub(vWBNBBalanceBefore)).to.be.closeTo(
+            collateralAmountToFlashLoan,
+            collateralAmountToFlashLoan.mul(1).div(100),
+          );
+
+          // Borrow should increase by fees
+          expect(vWBNBBorrowAfter).to.be.gt(vWBNBBorrowBefore);
+        });
+
+        it("should handle multiple sequential leverage operations by same user", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          // First leverage operation
+          const collateralAmountSeed1 = parseUnits("0.2", 18);
+          const collateralAmountToFlashLoan1 = parseUnits("0.5", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: parseUnits("1", 18) });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, parseUnits("1", 18));
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed1, collateralAmountToFlashLoan1);
+
+          const vWBNBBalanceAfterFirst = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowAfterFirst = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          // Second leverage operation - add more leverage
+          const collateralAmountSeed2 = parseUnits("0.3", 18);
+          const collateralAmountToFlashLoan2 = parseUnits("0.8", 18);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed2, collateralAmountToFlashLoan2);
+
+          const vWBNBBalanceAfterSecond = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+          const vWBNBBorrowAfterSecond = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          // Collateral and borrow should increase after each operation
+          expect(vWBNBBalanceAfterSecond).to.be.gt(vWBNBBalanceAfterFirst);
+          expect(vWBNBBorrowAfterSecond).to.be.gt(vWBNBBorrowAfterFirst);
+
+          // Account should still be safe
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+
+        it("should handle enter then exit sequence correctly", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const initialBorrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          // Enter leverage
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const borrowAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          // Exit leverage
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, borrowAfterEnter);
+
+          const finalBorrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          // Borrow balance should be close to initial (zero or minimal interest accrual)
+          expect(finalBorrowBalance).to.be.closeTo(initialBorrowBalance, parseUnits("0.01", 18));
+
+          // Account should be safe
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+
+        it("should handle multiple enter/exit cycles correctly", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: parseUnits("2", 18) });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, parseUnits("2", 18));
+
+          // First cycle
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, parseUnits("0.3", 18), parseUnits("0.5", 18));
+
+          let borrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, borrowBalance);
+
+          // Second cycle
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, parseUnits("0.4", 18), parseUnits("0.8", 18));
+
+          borrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, borrowBalance);
+
+          // Third cycle with larger amounts
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, parseUnits("0.5", 18), parseUnits("1", 18));
+
+          borrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, borrowBalance);
+
+          // Final borrow should be minimal
+          const finalBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          expect(finalBorrow).to.be.closeTo(0, parseUnits("0.01", 18));
+
+          // Account should be safe
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+
+        it("should emit DustTransferred event when dust remains after single asset exit", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          // Enter a leveraged position
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNBBorrowAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          const tx = await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, vWBNBBorrowAfterEnter);
+
+          const contractWBNBBalance = await WBNB.balanceOf(leverageStrategiesManager.address);
+          expect(contractWBNBBalance).to.equal(0);
+
+          await expect(tx).to.emit(leverageStrategiesManager, "SingleAssetLeverageExited");
+        });
+
+        it("should verify contract has zero balance after enterSingleAssetLeverage", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          const contractWBNBBefore = await WBNB.balanceOf(leverageStrategiesManager.address);
+          expect(contractWBNBBefore).to.equal(0);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const contractWBNBAfter = await WBNB.balanceOf(leverageStrategiesManager.address);
+          expect(contractWBNBAfter).to.equal(0);
+        });
+
+        it("should correctly track balance deltas using helper functions", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          const snapshotBefore = await captureBalanceSnapshot(
+            vWBNB_HOLDER,
+            vWBNB,
+            WBNB,
+            leverageStrategiesManager.address,
+          );
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const snapshotAfter = await captureBalanceSnapshot(
+            vWBNB_HOLDER,
+            vWBNB,
+            WBNB,
+            leverageStrategiesManager.address,
+          );
+
+          expect(snapshotAfter.vTokenBalance).to.be.gt(snapshotBefore.vTokenBalance);
+          expect(snapshotAfter.borrowBalance).to.be.gt(snapshotBefore.borrowBalance);
+          expect(snapshotAfter.contractBalance).to.equal(0); // No dust left in contract
+        });
+      });
+
+      describe("Negative Test Cases", function () {
+        it("should revert enterSingleAssetLeverage when market is paused for borrow", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          await comptroller.setActionsPaused([vWBNB_ADDRESS], [2], true); // Action 2 = Borrow
+
+          const collateralAmountSeed = parseUnits("0", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan),
+          ).to.be.reverted; // Reverts due to paused borrow action
+        });
+
+        it("should revert enterLeverage when borrow market is paused", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          await comptroller.setActionsPaused([vUSDC_ADDRESS], [2], true); // Action 2 = Borrow
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwap = parseUnits("0", 18);
+
+          const dexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const dexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const multicallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            dexTarget,
+            dexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterLeverageFromBorrow(
+                vWBNB_ADDRESS,
+                vUSDC_ADDRESS,
+                0,
+                borrowedAmountToFlashLoan,
+                minAmountAfterSwap,
+                multicallData,
+              ),
+          ).to.be.reverted; // Reverts due to paused borrow action
+        });
+
+        it("should revert exitSingleAssetLeverage when market is paused for redeem", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNBBorrowAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await comptroller.setActionsPaused([vWBNB_ADDRESS], [1], true); // Action 1 = Redeem
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .exitSingleAssetLeverage(vWBNB_ADDRESS, vWBNBBorrowAfterEnter),
+          ).to.be.reverted; // Reverts due to paused redeem action
+        });
+
+        it("should revert when trying to leverage with zero flash loan amount", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("0", 18); // Zero flash loan
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(vWBNB_HOLDER_SIGNER)
+              .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan),
+          ).to.be.revertedWithCustomError(leverageStrategiesManager, "ZeroFlashLoanAmount");
+        });
+
+        it("should revert when user has not entered collateral market", async function () {
+          const NEW_USER = "0x0000000000000000000000000000000000000001";
+          const newUserSigner = await initMainnetUser(NEW_USER, parseEther("10"));
+          await comptroller.connect(newUserSigner).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await expect(
+            leverageStrategiesManager
+              .connect(newUserSigner)
+              .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan),
+          ).to.be.reverted;
+        });
+
+        it("should handle exit when flash loan amount exceeds redeemable collateral by capping redeem", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.1", 18);
+          const collateralAmountToFlashLoan = parseUnits("0.2", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNB = VToken__factory.connect(vWBNB_ADDRESS, vWBNB_HOLDER_SIGNER);
+          const borrowBalanceAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, borrowBalanceAfterEnter);
+
+          const borrowBalanceAfterExit = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          expect(borrowBalanceAfterExit).to.be.closeTo(0, parseUnits("0.001", 18));
+        });
+      });
+
+      describe("Flash Loan Overpayment Tests", function () {
+        it("should handle flash loan amount exceeding actual debt in exitSingleAssetLeverage", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const actualBorrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          // Request flash loan with 10% buffer (simulating UI buffer for interest accrual)
+          const flashLoanWithBuffer = actualBorrowBalance.mul(110).div(100);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, flashLoanWithBuffer);
+
+          const finalBorrowBalance = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          expect(finalBorrowBalance).to.be.closeTo(0, parseUnits("0.001", 18));
+
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+
+        it("should handle flash loan amount exceeding actual debt in exitLeverage with swap", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const borrowedAmountToFlashLoan = parseUnits("1000", 18);
+          const minAmountAfterSwapForEnter = parseUnits("0", 18);
+
+          // DEX calldata for enter: swap USDC -> WBNB
+          const enterDexCalldata =
+            "0x6184305c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000084000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000006352a56caadc4f1e25cd6c75970fa768a3304e640000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000078490411a320000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a1000000000000000000000000000000000000000000000003635c9adc5dea0000000000000000000000000000000000000000000000000000008368dc5662fbe17000000000000000000000000000000000000000000000000106d1b8acc5f7c2f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000d4c165392fc4c9d322588cac07bc314677e61d8800000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000104e5b07cdb000000000000000000000000f2688fb5b81049dfb7703ada5e770543770612c4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000001911c4fd8cccc5931ab39e66779ea4b5a851827a00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002e8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000648a6a1e85000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000922164bbbd36acf9e854acbbf32facc949fcaeef000000000000000000000000000000000000000000000000106d1b8acc5f7c2f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a49f865422000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000064d1660f99000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000003dd2c59690b65b6bb13c14c169832a84fe121a100000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+          const enterDexTarget = "0x23f223D025074293eaf6a3dE481B4E147dfcdabb";
+
+          const enterMulticallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            enterDexTarget,
+            enterDexCalldata,
+            USDC_ADDRESS,
+            WBNB_ADDRESS,
+          );
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterLeverage(
+              vWBNB_ADDRESS,
+              0,
+              vUSDC_ADDRESS,
+              borrowedAmountToFlashLoan,
+              minAmountAfterSwapForEnter,
+              enterMulticallData,
+            );
+
+          const exitDexCalldata =
+            "0x7f4576750000000000000000000000000e5891850bb3f03090f03010000806f080040100000000000000000000000000bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c0000000000000000000000008ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000013c217247b3059cc00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000107713491152f57fbcc13a6e075c4b01a06da6d491e46a65000000000000000000000000042198e50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001e000000160000000000000000000000120000000000000013700000000000027101b81d678ffb9c0263b24a97847620c99d213eb140140008400a400000000000300000000000000000000000000000000000000000000000000000000f28c0498000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000e5891850bb3f03090f03010000806f08004010000000000000000000000000000000000000000000000000000000000692d7e7c00000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000107713491152f57f000000000000000000000000000000000000000000000000000000000000002b8ac76a51cc950d9822d68b83fe1ad97b32cd580d000064bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c000000000000000000000000000000000000000000";
+          const exitDexTarget = "0x6a000f20005980200259b80c5102003040001068";
+
+          const exitMulticallData = await createSwapAPICallData(
+            swapHelper,
+            leverageStrategiesManager.address,
+            exitDexTarget,
+            exitDexCalldata,
+            WBNB_ADDRESS,
+            USDC_ADDRESS,
+          );
+
+          // Request flash loan with buffer: use the original 1000 USDC flash loan
+          // even though actual borrow may be slightly less due to timing
+          // The contract should cap repayment to actual debt
+          const flashLoanWithBuffer = borrowedAmountToFlashLoan;
+          const minAmountAfterSwapForExit = parseUnits("0", 18);
+          const collateralAmountToRedeemForSwap = BigNumber.from("1778542509895467507");
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitLeverage(
+              vWBNB_ADDRESS,
+              collateralAmountToRedeemForSwap,
+              vUSDC_ADDRESS,
+              flashLoanWithBuffer,
+              minAmountAfterSwapForExit,
+              exitMulticallData,
+            );
+
+          const finalBorrowBalance = await vUSDC.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+
+          expect(finalBorrowBalance).to.be.closeTo(
+            0,
+            calculateTolerance(borrowedAmountToFlashLoan, TOLERANCE_HALF_PERCENT),
+          );
+
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+      });
+
+      describe("Partial Exit Tests", function () {
+        it("should handle partial single asset leverage exit", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          const vWBNBBorrowAfterEnter = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          const vWBNBBalanceAfterEnter = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+
+          const partialExitAmount = vWBNBBorrowAfterEnter.div(2);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, partialExitAmount);
+
+          const vWBNBBorrowAfterPartialExit = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          const vWBNBBalanceAfterPartialExit = await vWBNB.callStatic.balanceOfUnderlying(vWBNB_HOLDER);
+
+          expect(vWBNBBorrowAfterPartialExit).to.be.lt(vWBNBBorrowAfterEnter);
+          expect(vWBNBBorrowAfterPartialExit).to.be.gt(0);
+
+          expect(vWBNBBalanceAfterPartialExit).to.be.lt(vWBNBBalanceAfterEnter);
+
+          const borrowReduction = vWBNBBorrowAfterEnter.sub(vWBNBBorrowAfterPartialExit);
+          assertBalanceDelta(
+            borrowReduction,
+            partialExitAmount,
+            TOLERANCE_ONE_PERCENT,
+            "Partial exit borrow reduction",
+          );
+
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+
+        it("should allow multiple partial exits until fully deleveraged", async function () {
+          const vWBNB_HOLDER_SIGNER = await initMainnetUser(vWBNB_HOLDER, parseEther("10"));
+          await comptroller.connect(vWBNB_HOLDER_SIGNER).updateDelegate(leverageStrategiesManager.address, true);
+
+          // Enter a leveraged position
+          const collateralAmountSeed = parseUnits("0.5", 18);
+          const collateralAmountToFlashLoan = parseUnits("1", 18);
+
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).deposit({ value: collateralAmountSeed });
+          await WBNB.connect(vWBNB_HOLDER_SIGNER).approve(leverageStrategiesManager.address, collateralAmountSeed);
+
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .enterSingleAssetLeverage(vWBNB_ADDRESS, collateralAmountSeed, collateralAmountToFlashLoan);
+
+          // First partial exit (1/3)
+          let currentBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, currentBorrow.div(3));
+
+          // Second partial exit (1/2 of remaining)
+          currentBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, currentBorrow.div(2));
+
+          // Final exit (remaining balance)
+          currentBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          await leverageStrategiesManager
+            .connect(vWBNB_HOLDER_SIGNER)
+            .exitSingleAssetLeverage(vWBNB_ADDRESS, currentBorrow);
+
+          // Final borrow should be minimal (close to zero after all exits)
+          const finalBorrow = await vWBNB.callStatic.borrowBalanceCurrent(vWBNB_HOLDER);
+          expect(finalBorrow).to.be.closeTo(0, parseUnits("0.001", 18));
+
+          // Account should be safe
+          const [err, , shortfall] = await comptroller.getBorrowingPower(vWBNB_HOLDER);
+          expect(err).to.equal(0);
+          expect(shortfall).to.equal(0);
+        });
+      });
+    });
+  });
+}

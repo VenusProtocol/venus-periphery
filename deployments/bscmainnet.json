@@ -3,7 +3,7 @@
   "chainId": "56",
   "contracts": {
     "SwapHelper": {
-      "address": "0xe1a3b4189F56Cf38747BE79348b8664Ef18cCFd1",
+      "address": "0xD79be25aEe798Aa34A9Ba1230003d7499be29A24",
       "abi": [
         {
           "inputs": [
