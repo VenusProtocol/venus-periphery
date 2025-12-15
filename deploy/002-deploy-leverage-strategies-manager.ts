@@ -7,10 +7,6 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deploy } = deployments;
   const { deployer } = await getNamedAccounts();
 
-  const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
-  const vBNBDeployment = await deployments.get("vBNB");
-  const vWBNBDeploymentAddress = "0x6bCa74586218dB34cdB402295796b79663d816e9";
-
   const comptrollerDeployment = await deployments.get("Unitroller");
   const timelock = await deployments.get("NormalTimelock");
 
@@ -20,18 +16,17 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
   );
 
-  const swapHelper = await ethers.getContract("SwapHelper");
+  const swapHelperDeployment = await deployments.get("SwapHelper");
+  const vBNBDeployment = await deployments.get("vBNB");
 
-  await deploy("PositionSwapper", {
+  console.log(
+    `Deploying LeverageStrategiesManager on ${network.name} network with Comptroller: ${comptrollerDeployment.address}, SwapHelper: ${swapHelperDeployment.address}, vBNB: ${vBNBDeployment.address}`,
+  );
+
+  await deploy("LeverageStrategiesManager", {
     from: deployer,
     log: true,
-    args: [
-      comptrollerDeployment.address,
-      swapHelper.address,
-      WBNB_ADDRESS,
-      vBNBDeployment.address,
-      vWBNBDeploymentAddress,
-    ],
+    args: [comptrollerDeployment.address, swapHelperDeployment.address, vBNBDeployment.address],
     proxy: {
       owner: network.name === "hardhat" ? deployer : timelock.address,
       proxyContract: "OptimizedTransparentUpgradeableProxy",
@@ -45,9 +40,22 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
       },
     },
   });
-};
 
-func.tags = ["PositionSwapper"];
-// func.skip = async hre => hre.network.name === "hardhat";
+  const leverageStrategiesManager = await ethers.getContract("LeverageStrategiesManager");
+  const owner = await leverageStrategiesManager.owner();
+
+  console.log(
+    `LeverageStrategiesManager verify arguments: ${leverageStrategiesManager.address} ${comptrollerDeployment.address} ${swapHelperDeployment.address} ${vBNBDeployment.address}`,
+  );
+
+  if (owner === deployer) {
+    console.log("Transferring ownership to Normal Timelock ....");
+    const tx = await leverageStrategiesManager.transferOwnership(timelock.address);
+    await tx.wait();
+    console.log("Ownership transferred to Normal Timelock");
+  }
+};
+func.tags = ["LeverageManager"];
+func.skip = async hre => hre.network.name === "hardhat";
 
 export default func;

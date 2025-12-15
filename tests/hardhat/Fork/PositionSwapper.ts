@@ -1,6 +1,6 @@
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
-import { constants, Signer } from "ethers";
+import { Signer, constants } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, network, upgrades } from "hardhat";
 
@@ -153,7 +153,6 @@ async function upgradeVTokens(timelock: Signer) {
 async function setMaxStalePeriod() {
   const REDSTONE = "0x8455EFA4D7Ff63b8BFD96AdD889483Ea7d39B70a";
   const CHAINLINK = "0x1B2103441A0A108daD8848D8F5d790e4D402921F";
-  const BINANCE = "0x594810b741d136f1960141C0d8Fb4a91bE78A820";
   const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseUnits("2"));
 
   const redStoneOracle = ChainlinkOracle__factory.connect(REDSTONE, timelock);
@@ -178,7 +177,7 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   const comptroller = await ComptrollerMock__factory.connect(COMPTROLLER_ADDRESS, timelock);
 
   const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
-  const swapHelper = await SwapHelperFactory.deploy(WBNB_ADDRESS, root.address);
+  const swapHelper = (await SwapHelperFactory.deploy(root.address)) as SwapHelper;
 
   const positionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
   const positionSwapper = await upgrades.deployProxy(positionSwapperFactory, [], {
@@ -228,6 +227,7 @@ async function createSwapAPICallData(
   };
   const types = {
     Multicall: [
+      { name: "caller", type: "address" },
       { name: "calls", type: "bytes[]" },
       { name: "deadline", type: "uint256" },
       { name: "salt", type: "bytes32" },
@@ -245,7 +245,12 @@ async function createSwapAPICallData(
   const saltValue = ethers.utils.formatBytes32String(Math.random().toString());
 
   const [root] = await ethers.getSigners();
-  const signature = await root._signTypedData(domain, types, { calls, deadline, salt: saltValue });
+  const signature = await root._signTypedData(domain, types, {
+    caller: positionSwapper,
+    calls,
+    deadline,
+    salt: saltValue,
+  });
 
   // Encode multicall with all parameters
   const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
@@ -275,9 +280,8 @@ if (FORK_MAINNET) {
       });
 
       beforeEach(async function () {
-        ({ positionSwapper, comptroller, vBNB, vWBNB, vUSDC, vETH, swapHelper, WBNB, USDC } = await loadFixture(
-          setupMarketFixture,
-        ));
+        ({ positionSwapper, comptroller, vBNB, vWBNB, vUSDC, vETH, swapHelper, WBNB, USDC } =
+          await loadFixture(setupMarketFixture));
         await comptroller.setWhiteListFlashLoanAccount(positionSwapper.address, true);
       });
 
@@ -359,7 +363,14 @@ if (FORK_MAINNET) {
           // Swap Collateral
           const tx = await positionSwapper
             .connect(vWBNB_HOLDER_SIGNER)
-            .swapCollateral(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, constants.MaxUint256, minCollateralToSupply, multicallData);
+            .swapCollateral(
+              vWBNB_HOLDER,
+              vWBNB_ADDRESS,
+              vUSDC_ADDRESS,
+              constants.MaxUint256,
+              minCollateralToSupply,
+              multicallData,
+            );
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
           const tolerance = parseUnits("0.0000001", 18);
@@ -467,14 +478,7 @@ if (FORK_MAINNET) {
 
           const tx = await positionSwapper
             .connect(vETH_BORROWER_SIGNER)
-            .swapDebt(
-              vETH_BORROWER,
-              vETH_ADDRESS,
-              vUSDC_ADDRESS,
-              initialETHBorrow,
-              maxBorrowToOpen,
-              multicallData,
-            );
+            .swapDebt(vETH_BORROWER, vETH_ADDRESS, vUSDC_ADDRESS, initialETHBorrow, maxBorrowToOpen, multicallData);
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
 
@@ -572,7 +576,6 @@ if (FORK_MAINNET) {
           // Fund user1 with WBNB via VTreasury
           const collateralAmount = parseUnits("20", 18);
           await VTreasury.withdrawTreasuryBEP20(WBNB_ADDRESS, collateralAmount, user1Address);
-          const balance = await WBNB.balanceOf(user1Address);
 
           // Enter markets and supply WBNB as collateral
           await comptroller.connect(user1).enterMarkets([vWBNB_ADDRESS]);
@@ -592,7 +595,7 @@ if (FORK_MAINNET) {
           );
 
           // Prepare swap data
-          const dexTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"; //uniswap
+          const dexTarget = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"; // uniswap
           const dexCalldata =
             "0x5ae401dc000000000000000000000000000000000000000000000000000000006913aa3a0000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000124b858183f000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000800000000000000000000000001148959f1ef3b32aa8c5484393723b79c2cd2a26000000000000000000000000000000000000000000000001158e460913d00000000000000000000000000000000000000000000000000367b5342785ebece07d0000000000000000000000000000000000000000000000000000000000000042bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c00006455d398326f99059ff775485246999027b31979550000648ac76a51cc950d9822d68b83fe1ad97b32cd580d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
           const multicallData = await createSwapAPICallData(
@@ -610,14 +613,7 @@ if (FORK_MAINNET) {
           await expect(
             positionSwapper
               .connect(user1)
-              .swapCollateral(
-                user1Address,
-                vWBNB_ADDRESS,
-                vUSDC_ADDRESS,
-                amountToSwap,
-                minToSupply,
-                multicallData,
-              ),
+              .swapCollateral(user1Address, vWBNB_ADDRESS, vUSDC_ADDRESS, amountToSwap, minToSupply, multicallData),
           ).to.be.revertedWith("math error"); // reverts early during redeem
         });
 

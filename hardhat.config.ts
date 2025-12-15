@@ -34,6 +34,7 @@ extendEnvironment(hre => {
 
 extendConfig((config: HardhatConfig) => {
   if (process.env.EXPORT !== "true") {
+    console.log("Adding external deployments from venus-protocol and governance-contracts");
     config.external = {
       ...config.external,
       deployments: {
@@ -41,10 +42,12 @@ extendConfig((config: HardhatConfig) => {
         bsctestnet: [
           "node_modules/@venusprotocol/venus-protocol/deployments/bsctestnet",
           "node_modules/@venusprotocol/governance-contracts/deployments/bsctestnet",
+          "node_modules/@venusprotocol/protocol-reserve/deployments/bsctestnet",
         ],
         bscmainnet: [
           "node_modules/@venusprotocol/venus-protocol/deployments/bscmainnet",
           "node_modules/@venusprotocol/governance-contracts/deployments/bscmainnet",
+          "node_modules/@venusprotocol/protocol-reserve/deployments/bscmainnet",
         ],
         unichainmainnet: ["node_modules/@venusprotocol/venus-protocol/deployments/unichainmainnet"],
       },
@@ -155,7 +158,6 @@ const config: HardhatUserConfig = {
       chainId: 56,
       live: true,
       timeout: 1200000,
-      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [`0x${process.env.DEPLOYER_PRIVATE_KEY}`] : [],
     },
     ethereum: {
       url: process.env.ARCHIVE_NODE_ethereum || "https://eth.drpc.org",
