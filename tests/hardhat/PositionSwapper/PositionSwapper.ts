@@ -1,4 +1,4 @@
-import { FakeContract, smock } from "@defi-wonderland/smock";
+import { smock } from "@defi-wonderland/smock";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { BigNumber, Contract, Signer, Wallet, constants } from "ethers";
@@ -26,7 +26,7 @@ type SetupMarketFixture = {
   WBNB: WBNB;
   vWBNB: VBep20Harness;
   positionSwapper: PositionSwapper;
-  swapHelper: FakeContract<SwapHelper>;
+  swapHelper: SwapHelper;
   vUSDT: VBep20Harness;
   USDT: EIP20Interface;
   vBUSD: VBep20Harness;
@@ -134,7 +134,9 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   const accessControl = await smock.fake<IAccessControlManagerV8>("AccessControlManager");
   accessControl.isAllowedToCall.returns(true);
   const comptrollerLens = await smock.fake<ComptrollerLensInterface>("ComptrollerLens");
-  const protocolShareReserve = await smock.fake<IProtocolShareReserve>("IProtocolShareReserve");
+  const protocolShareReserve = await smock.fake<IProtocolShareReserve>(
+    "@venusprotocol/venus-protocol/contracts/external/IProtocolShareReserve.sol:IProtocolShareReserve",
+  );
   const interestRateModel = await smock.fake<InterestRateModel>("InterestRateModelHarness");
   interestRateModel.isInterestRateModel.returns(true);
   const resilientOracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
@@ -173,7 +175,7 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   );
 
   const SwapHelperFactory = await ethers.getContractFactory("SwapHelper");
-  const swapHelper = await SwapHelperFactory.deploy(WBNB.address, admin.address);
+  const swapHelper = (await SwapHelperFactory.deploy(admin.address)) as SwapHelper;
 
   const positionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
   const positionSwapper = await upgrades.deployProxy(positionSwapperFactory, [], {
@@ -206,7 +208,7 @@ describe("positionSwapper", () => {
   let user1: Signer;
   let comptroller: ComptrollerMock;
   let positionSwapper: PositionSwapper;
-  let swapHelper: FakeContract<SwapHelper>;
+  let swapHelper: SwapHelper;
   let vUSDT: VBep20Harness;
   let USDT: EIP20Interface;
   let vBUSD: VBep20Harness;
@@ -215,9 +217,8 @@ describe("positionSwapper", () => {
 
   beforeEach(async () => {
     [admin, user1] = await ethers.getSigners();
-    ({ comptroller, vBNB, WBNB, vWBNB, positionSwapper, swapHelper, vUSDT, USDT, vBUSD, BUSD } = await loadFixture(
-      setupMarketFixture,
-    ));
+    ({ comptroller, vBNB, WBNB, vWBNB, positionSwapper, swapHelper, vUSDT, USDT, vBUSD, BUSD } =
+      await loadFixture(setupMarketFixture));
     await comptroller.connect(user1).updateDelegate(positionSwapper.address, true);
     await vBNB.connect(user1).mint({ value: parseEther("5") });
     await vUSDT.mint(parseUnits("20", 18));
@@ -231,6 +232,7 @@ describe("positionSwapper", () => {
     amount: BigNumber,
     signer: Wallet,
     salt: string,
+    caller: string,
   ): Promise<string> {
     const tokenAddress = token.address;
 
@@ -251,6 +253,7 @@ describe("positionSwapper", () => {
     };
     const types = {
       Multicall: [
+        { name: "caller", type: "address" },
         { name: "calls", type: "bytes[]" },
         { name: "deadline", type: "uint256" },
         { name: "salt", type: "bytes32" },
@@ -259,7 +262,7 @@ describe("positionSwapper", () => {
     const calls = [sweepData];
     const deadline = "17627727131762772187";
     const saltValue = salt || ethers.utils.formatBytes32String(Math.random().toString());
-    const signature = await signer._signTypedData(domain, types, { calls, deadline, salt: saltValue });
+    const signature = await signer._signTypedData(domain, types, { caller, calls, deadline, salt: saltValue });
 
     // Encode multicall with all parameters
     const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
@@ -284,17 +287,22 @@ describe("positionSwapper", () => {
 
   describe("swapDebtNativeToWrapped", () => {
     it("should swapDebtNativeToWrapped from vBNB to vWBNB", async () => {
-      // Create a Debt for User1 on vBNB market
-      await vUSDT.mintBehalf(user1Address, parseEther("15"));
-      await comptroller.connect(user1).enterMarkets([vUSDT.address]);
-      await vBNB.connect(user1).borrow(parseEther("2"));
-      expect(await vBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("2"));
-      expect(await vWBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
+      const borrower = ethers.Wallet.createRandom().connect(ethers.provider);
+      const borrowerAddress = borrower.address;
 
-      // Swap debt
-      await positionSwapper.connect(user1).swapDebtNativeToWrapped(user1Address);
-      expect(await vWBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(parseEther("2"));
-      expect(await vBNB.callStatic.borrowBalanceCurrent(user1Address)).to.equals(0n);
+      await admin.sendTransaction({ to: borrowerAddress, value: parseEther("1") });
+      await vBNB.mint({ value: parseEther("10") });
+      await vUSDT.mintBehalf(borrowerAddress, parseEther("15"));
+      await comptroller.connect(borrower).enterMarkets([vUSDT.address]);
+      await comptroller.connect(borrower).updateDelegate(positionSwapper.address, true);
+
+      await vBNB.connect(borrower).borrow(parseEther("2"));
+      expect(await vBNB.callStatic.borrowBalanceCurrent(borrowerAddress)).to.equals(parseEther("2"));
+      expect(await vWBNB.callStatic.borrowBalanceCurrent(borrowerAddress)).to.equals(0n);
+
+      await positionSwapper.connect(borrower).swapDebtNativeToWrapped(borrowerAddress);
+      expect(await vWBNB.callStatic.borrowBalanceCurrent(borrowerAddress)).to.equals(parseEther("2"));
+      expect(await vBNB.callStatic.borrowBalanceCurrent(borrowerAddress)).to.equals(0n);
     });
   });
 
@@ -307,6 +315,7 @@ describe("positionSwapper", () => {
         parseUnits("12", 18),
         admin,
         ethers.utils.formatBytes32String("2"),
+        positionSwapper.address,
       );
       // Add some Collateral to vWBNB
       await vWBNB.mintBehalf(user1Address, parseUnits("12", 18));
@@ -334,6 +343,7 @@ describe("positionSwapper", () => {
         parseUnits("5", 18),
         admin,
         ethers.utils.formatBytes32String("3"),
+        positionSwapper.address,
       );
 
       // Add some Collateral to vWBNB (12)
@@ -373,6 +383,7 @@ describe("positionSwapper", () => {
         parseUnits("3", 18),
         admin,
         ethers.utils.formatBytes32String("4"),
+        positionSwapper.address,
       );
 
       // Swap Debt
@@ -399,6 +410,7 @@ describe("positionSwapper", () => {
         parseUnits("2", 18),
         admin,
         ethers.utils.formatBytes32String("5"),
+        positionSwapper.address,
       );
 
       // Swap only part of the debt; repay 2 USDT, open 3 BUSD
@@ -452,6 +464,7 @@ describe("positionSwapper", () => {
         parseUnits("3", 18),
         admin,
         ethers.utils.formatBytes32String("6"),
+        positionSwapper.address,
       );
 
       // Swap Debt: request to open 4 BUSD debt; with fee, borrowed amount > 4, but fee is repaid
@@ -539,35 +552,52 @@ describe("positionSwapper", () => {
       ).to.be.revertedWithCustomError(positionSwapper, "InsufficientBorrowBalance");
     });
 
-    it("owner can sweep token and native; non-owner reverts", async () => {
+    it("owner can sweep token; non-owner reverts", async () => {
       // Send some USDT to PositionSwapper
       await USDT.transfer(positionSwapper.address, parseUnits("1", 18));
 
-      // Set the contract's native token balance using hardhat_setBalance
-      await ethers.provider.send("hardhat_setBalance", [
-        positionSwapper.address,
-        "0xDE0B6B3A7640000", // 1 ETH
-      ]);
-
       const [adminSigner, nonOwner] = await ethers.getSigners();
+      const owner = await positionSwapper.owner();
+      expect(owner).to.equal(await adminSigner.getAddress());
 
-      // Non-owner sweep attempts revert
       await expect(positionSwapper.connect(nonOwner).sweepToken(USDT.address)).to.be.reverted;
-      await expect(positionSwapper.connect(nonOwner).sweepNative()).to.be.reverted;
 
-      // Owner can sweep successfully
       const ownerUSDTBefore = await USDT.balanceOf(await adminSigner.getAddress());
       await positionSwapper.connect(adminSigner).sweepToken(USDT.address);
       const ownerUSDTAfter = await USDT.balanceOf(await adminSigner.getAddress());
       expect(ownerUSDTAfter.sub(ownerUSDTBefore)).to.be.gte(parseUnits("1", 18));
+    });
 
-      const ownerNativeBefore = await ethers.provider.getBalance(await adminSigner.getAddress());
-      await expect(positionSwapper.connect(adminSigner).sweepNative())
-        .to.emit(positionSwapper, "SweepNative")
-        .withArgs(await adminSigner.getAddress(), parseEther("1"));
+    it("owner can sweep native; non-owner reverts", async () => {
+      const receiverWallet = ethers.Wallet.createRandom().connect(ethers.provider);
 
-      // Verify the balance was transferred to the owner
-      const ownerNativeAfter = await ethers.provider.getBalance(await adminSigner.getAddress());
+      const positionSwapperFactory = await ethers.getContractFactory("PositionSwapper");
+      const freshPositionSwapper = await upgrades.deployProxy(positionSwapperFactory, [], {
+        constructorArgs: [comptroller.address, swapHelper.address, WBNB.address, vBNB.address, vWBNB.address],
+        initializer: "initialize",
+        unsafeAllow: ["state-variable-immutable"],
+      });
+
+      await freshPositionSwapper.transferOwnership(receiverWallet.address);
+      await admin.sendTransaction({ to: receiverWallet.address, value: parseEther("1") });
+      await freshPositionSwapper.connect(receiverWallet).acceptOwnership();
+
+      await ethers.provider.send("hardhat_setBalance", [
+        freshPositionSwapper.address,
+        "0xDE0B6B3A7640000", // 1 ETH
+      ]);
+
+      const [, nonOwner] = await ethers.getSigners();
+
+      await expect(freshPositionSwapper.connect(nonOwner).sweepNative()).to.be.reverted;
+
+      const ownerNativeBefore = await ethers.provider.getBalance(receiverWallet.address);
+      const tx = await freshPositionSwapper.connect(receiverWallet).sweepNative();
+      await tx.wait();
+
+      const contractBalance = await ethers.provider.getBalance(freshPositionSwapper.address);
+      expect(contractBalance).to.equal(0);
+      const ownerNativeAfter = await ethers.provider.getBalance(receiverWallet.address);
       expect(ownerNativeAfter).to.be.gt(ownerNativeBefore);
     });
   });
@@ -588,12 +618,7 @@ describe("positionSwapper", () => {
 
     it("should revert with UnauthorizedCaller when caller is not user nor approved delegate", async () => {
       const [adminSigner, otherUser] = await ethers.getSigners();
-      const {
-        comptroller: c2,
-        vBNB: vBNB2,
-        positionSwapper: ps2,
-        vWBNB: vWBNB2,
-      } = await loadFixture(setupMarketFixture);
+      const { vBNB: vBNB2, positionSwapper: ps2 } = await loadFixture(setupMarketFixture);
       const otherAddr = await otherUser.getAddress();
 
       await vBNB2.connect(otherUser).mint({ value: parseEther("1") });
