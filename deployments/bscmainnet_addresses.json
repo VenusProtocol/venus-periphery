@@ -2,7 +2,9 @@
   "name": "bscmainnet",
   "chainId": "56",
   "addresses": {
-    "SwapHelper": "0xD79be25aEe798Aa34A9Ba1230003d7499be29A24",
-    "LeverageStrategiesManager": "0x03F079E809185a669Ca188676D0ADb09cbAd6dC1"
+    "LeverageStrategiesManager": "0x03F079E809185a669Ca188676D0ADb09cbAd6dC1",
+    "LeverageStrategiesManager_Implementation": "0x88F896E7667e01E0e8b27a5E39076B020318EF51",
+    "LeverageStrategiesManager_Proxy": "0x03F079E809185a669Ca188676D0ADb09cbAd6dC1",
+    "SwapHelper": "0xD79be25aEe798Aa34A9Ba1230003d7499be29A24"
   }
 }
