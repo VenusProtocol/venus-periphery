@@ -2,18 +2,18 @@
 pragma solidity ^0.8.25;
 
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { IPancakeV3Pool } from "../Interfaces/IPancakeV3Pool.sol";
+import { IUniswapV3Pool } from "../../Interfaces/IUniswapV3Pool.sol";
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
-import { FixedPoint96 } from "../Libraries/FixedPoint96.sol";
-import { FullMath } from "../Libraries/FullMath.sol";
+import { FixedPoint96 } from "../../Libraries/FixedPoint96.sol";
+import { FullMath } from "../../Libraries/FullMath.sol";
 
 /**
- * @title PancakeSwapOracle
+ * @title UniswapOracle
  * @author Venus
- * @notice Oracle contract for fetching asset prices from PancakeSwap V3
+ * @notice Oracle contract for fetching asset prices from Uniswap V3
  */
-contract PancakeSwapOracle is AccessControlledV8 {
+contract UniswapOracle is AccessControlledV8 {
     /// @notice Resilient Oracle for getting reference token prices
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     ResilientOracleInterface public immutable RESILIENT_ORACLE;
@@ -38,7 +38,7 @@ contract PancakeSwapOracle is AccessControlledV8 {
     /// @notice Thrown when price calculation fails
     error PriceCalculationError();
 
-    /// @notice Constructor for PancakeSwapPriceOracle
+    /// @notice Constructor for UniswapPriceOracle
     /// @param resilientOracle_ Address of the resilient oracle
     constructor(ResilientOracleInterface resilientOracle_) {
         RESILIENT_ORACLE = resilientOracle_;
@@ -56,7 +56,7 @@ contract PancakeSwapOracle is AccessControlledV8 {
 
     /// @notice Set pool configuration for a token
     /// @param token Address of the token
-    /// @param pool Address of the PancakeSwap V3 pool
+    /// @param pool Address of the Uniswap V3 pool
     /// @custom:event Emits PoolConfigUpdated event
     /// @custom:error ZeroAddress is thrown when token or pool address is zero
     function setPoolConfig(address token, address pool) external {
@@ -68,7 +68,7 @@ contract PancakeSwapOracle is AccessControlledV8 {
         emit PoolConfigUpdated(token, pool);
     }
 
-    /// @notice Get the price of an asset from PancakeSwap V3
+    /// @notice Get the price of an asset from Uniswap V3
     /// @param asset Address of the asset
     /// @return price Price in (36 - asset decimals) format, same as ResilientOracle
     /// @custom:error TokenNotConfigured is thrown when asset has no pool configured
@@ -76,15 +76,15 @@ contract PancakeSwapOracle is AccessControlledV8 {
         address pool = tokenPools[asset];
         if (pool == address(0)) revert TokenNotConfigured();
 
-        return _getPancakeSwapV3Price(pool, asset);
+        return _getUniswapV3Price(pool, asset);
     }
 
-    /// @notice Get token price from PancakeSwap V3 pool
-    /// @param pool PancakeSwap V3 pool address
+    /// @notice Get token price from Uniswap V3 pool
+    /// @param pool Uniswap V3 pool address
     /// @param token Target token address
     /// @return price Price in (36 - token decimals) format
-    function _getPancakeSwapV3Price(address pool, address token) internal view returns (uint256 price) {
-        IPancakeV3Pool v3Pool = IPancakeV3Pool(pool);
+    function _getUniswapV3Price(address pool, address token) internal view returns (uint256 price) {
+        IUniswapV3Pool v3Pool = IUniswapV3Pool(pool);
         address token0 = v3Pool.token0();
         address token1 = v3Pool.token1();
         (uint160 sqrtPriceX96, , , , , , ) = v3Pool.slot0();
