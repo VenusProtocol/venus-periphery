@@ -77,6 +77,10 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param isTrusted Whether the keeper is trusted
     event TrustedKeeperUpdated(address indexed keeper, bool isTrusted);
 
+    /// @notice Emitted when a market's state is reset
+    /// @param market The market address
+    event MarketStateReset(address indexed market);
+
     /// @notice Emitted when borrow is paused for a market
     /// @param market The market address
     event BorrowPaused(address indexed market);
@@ -208,6 +212,40 @@ contract DeviationSentinel is AccessControlledV8 {
 
         config.enabled = enabled;
         emit TokenMonitoringStatusChanged(token, enabled);
+    }
+
+    /// @notice Reset the market state for a specific market
+    /// @dev This should be called after manually intervening in a paused market and before re-enabling deviation monitoring.
+    ///      It clears all stored state including pause flags and original collateral factors to prevent mismatches
+    ///      between the protocol state and this contract's tracked state.
+    /// @param market The vToken market to reset
+    /// @custom:event Emits MarketStateReset event
+    /// @custom:error ZeroAddress is thrown when market address is zero
+    function resetMarketState(IVToken market) external {
+        _checkAccessAllowed("resetMarketState(address)");
+
+        if (address(market) == address(0)) revert ZeroAddress();
+
+        MarketState storage state = marketStates[address(market)];
+        IComptroller comptroller = market.comptroller();
+
+        // Clear pool-specific data for core pool
+        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
+            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+                delete state.poolCFs[i];
+                delete state.poolLTs[i];
+            }
+        } else {
+            // Clear isolated pool data (stored at index 0)
+            delete state.poolCFs[0];
+            delete state.poolLTs[0];
+        }
+
+        // Clear pause flags
+        state.borrowPaused = false;
+        state.cfModifiedAndSupplyPaused = false;
+
+        emit MarketStateReset(address(market));
     }
 
     /// @notice Handle price deviation for a market by pausing or adjusting collateral factor

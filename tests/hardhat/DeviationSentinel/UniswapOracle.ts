@@ -5,7 +5,7 @@ import chai from "chai";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
-import type { IAccessControlManagerV8, IUniswapV3Pool, ResilientOracleInterface, UniswapOracle } from "../../typechain";
+import type { IAccessControlManagerV8, IUniswapV3Pool, ResilientOracleInterface, UniswapOracle } from "../../../typechain";
 
 const { expect } = chai;
 chai.use(smock.matchers);

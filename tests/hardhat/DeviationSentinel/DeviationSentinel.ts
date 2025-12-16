@@ -12,7 +12,7 @@ import type {
   IVToken,
   OracleInterface,
   ResilientOracleInterface,
-} from "../../typechain";
+} from "../../../typechain";
 
 const { expect } = chai;
 chai.use(smock.matchers);

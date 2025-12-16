@@ -10,7 +10,7 @@ import type {
   IPancakeV3Pool,
   PancakeSwapOracle,
   ResilientOracleInterface,
-} from "../../typechain";
+} from "../../../typechain";
 
 const { expect } = chai;
 chai.use(smock.matchers);
