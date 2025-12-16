@@ -243,20 +243,20 @@ contract DeviationSentinel is AccessControlledV8 {
                 // Early return if borrow is already paused
                 if (state.borrowPaused) return;
 
-                _pauseBorrow(market, IComptroller.Action.BORROW);
+                _pauseBorrow(market);
                 state.borrowPaused = true;
             } else {
                 // Early return if CF is already modified and supply is already paused
                 if (state.cfModified && state.supplyPaused) return;
 
                 _setCollateralFactorToZero(market);
-                _pauseSupply(market, IComptroller.Action.MINT);
+                _pauseSupply(market);
                 state.cfModified = true;
                 state.supplyPaused = true;
             }
         } else {
             if (state.borrowPaused) {
-                _unpauseBorrow(market, IComptroller.Action.BORROW);
+                _unpauseBorrow(market);
                 state.borrowPaused = false;
             }
 
@@ -266,7 +266,7 @@ contract DeviationSentinel is AccessControlledV8 {
             }
 
             if (state.supplyPaused) {
-                _unpauseSupply(market, IComptroller.Action.MINT);
+                _unpauseSupply(market);
                 state.supplyPaused = false;
             }
         }
@@ -307,14 +307,13 @@ contract DeviationSentinel is AccessControlledV8 {
 
     /// @notice Pause borrow action for a market
     /// @param market The market to pause borrow for
-    /// @param action The action to pause
-    function _pauseBorrow(IVToken market, IComptroller.Action action) internal {
+    function _pauseBorrow(IVToken market) internal {
         IComptroller comptroller = market.comptroller();
 
         address[] memory markets = new address[](1);
         markets[0] = address(market);
         IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = action;
+        actions[0] = IComptroller.Action.BORROW;
 
         comptroller.setActionsPaused(markets, actions, true);
         emit BorrowPaused(address(market));
@@ -322,14 +321,13 @@ contract DeviationSentinel is AccessControlledV8 {
 
     /// @notice Unpause borrow action for a market
     /// @param market The market to unpause borrow for
-    /// @param action The action to unpause
-    function _unpauseBorrow(IVToken market, IComptroller.Action action) internal {
+    function _unpauseBorrow(IVToken market) internal {
         IComptroller comptroller = market.comptroller();
 
         address[] memory markets = new address[](1);
         markets[0] = address(market);
         IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = action;
+        actions[0] = IComptroller.Action.BORROW;
 
         comptroller.setActionsPaused(markets, actions, false);
         emit BorrowUnpaused(address(market));
@@ -337,14 +335,13 @@ contract DeviationSentinel is AccessControlledV8 {
 
     /// @notice Pause supply action for a market
     /// @param market The market to pause supply for
-    /// @param action The action to pause
-    function _pauseSupply(IVToken market, IComptroller.Action action) internal {
+    function _pauseSupply(IVToken market) internal {
         IComptroller comptroller = market.comptroller();
 
         address[] memory markets = new address[](1);
         markets[0] = address(market);
         IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = action;
+        actions[0] = IComptroller.Action.MINT;
 
         comptroller.setActionsPaused(markets, actions, true);
         emit SupplyPaused(address(market));
@@ -352,14 +349,13 @@ contract DeviationSentinel is AccessControlledV8 {
 
     /// @notice Unpause supply action for a market
     /// @param market The market to unpause supply for
-    /// @param action The action to unpause
-    function _unpauseSupply(IVToken market, IComptroller.Action action) internal {
+    function _unpauseSupply(IVToken market) internal {
         IComptroller comptroller = market.comptroller();
 
         address[] memory markets = new address[](1);
         markets[0] = address(market);
         IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = action;
+        actions[0] = IComptroller.Action.MINT;
 
         comptroller.setActionsPaused(markets, actions, false);
         emit SupplyUnpaused(address(market));
