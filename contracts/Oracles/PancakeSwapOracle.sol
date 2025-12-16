@@ -62,8 +62,7 @@ contract PancakeSwapOracle is AccessControlledV8 {
     function setPoolConfig(address token, address pool) external {
         _checkAccessAllowed("setPoolConfig(address,address)");
 
-        if (token == address(0)) revert ZeroAddress();
-        if (pool == address(0)) revert ZeroAddress();
+        if (token == address(0) || pool == address(0)) revert ZeroAddress();
 
         tokenPools[token] = pool;
         emit PoolConfigUpdated(token, pool);
