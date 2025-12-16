@@ -27,4 +27,8 @@ interface IVToken is IERC20Upgradeable {
     function underlying() external view returns (address);
 
     function exchangeRateStored() external view returns (uint256);
+
+    function repayBorrowBehalf(address borrower, uint repayAmount) external returns (uint256);
+
+    function redeemUnderlyingBehalf(address redeemer, uint redeemAmount) external returns (uint);
 }

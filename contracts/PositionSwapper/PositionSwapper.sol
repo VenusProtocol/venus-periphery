@@ -7,7 +7,9 @@ import {
     IERC20Upgradeable
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import { IVToken, IComptroller, IVBNB } from "../Interfaces.sol";
+import { IComptroller } from "../Interfaces/IComptroller.sol";
+import { IVBNB } from "../Interfaces/IVBNB.sol";
+import { IVToken } from "../Interfaces/IVToken.sol";
 import { ISwapHelper } from "./ISwapHelper.sol";
 
 /**
