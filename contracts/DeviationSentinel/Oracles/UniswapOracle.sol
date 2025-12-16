@@ -108,7 +108,6 @@ contract UniswapOracle is AccessControlledV8 {
         uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
         uint8 targetDecimals = IERC20Metadata(targetToken).decimals();
         uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
-        uint8 targetPriceDecimals = 36 - targetDecimals;
 
         uint256 targetTokensPerReferenceToken;
 
@@ -118,20 +117,6 @@ contract UniswapOracle is AccessControlledV8 {
             targetTokensPerReferenceToken = FullMath.mulDiv(priceX96 * (10 ** 18), 1, FixedPoint96.Q96);
         }
 
-        // Calculate intermediate price in 18 decimals
-        price = FullMath.mulDiv(
-            referencePrice * (10 ** targetDecimals),
-            (10 ** 18),
-            targetTokensPerReferenceToken * (10 ** referenceDecimals)
-        );
-
-        // Convert from 18 decimals to target price decimals
-        if (targetPriceDecimals != 18) {
-            if (targetPriceDecimals > 18) {
-                price = price * (10 ** (targetPriceDecimals - 18));
-            } else {
-                price = price / (10 ** (18 - targetPriceDecimals));
-            }
-        }
+        price = FullMath.mulDiv(referencePrice, (10 ** 18), targetTokensPerReferenceToken);
     }
 }

@@ -182,7 +182,7 @@ if (FORK_MAINNET) {
       describe("check Sentinel Oracle prices", () => {
         it("check TRX price from PancakeSwap", async () => {
           const price = await sentinelOracle.getPrice(TRX);
-          expect(price).to.be.equal(parseUnits("0.287615712885971478", 30));
+          expect(price).to.be.equal(parseUnits("0.287615712885971478809080625324", 30));
         });
 
         it("check USDT price from PancakeSwap", async () => {
