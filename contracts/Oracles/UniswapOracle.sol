@@ -83,10 +83,7 @@ contract UniswapOracle is AccessControlledV8 {
     /// @param pool Uniswap V3 pool address
     /// @param token Target token address
     /// @return price Price in (36 - token decimals) format
-    /// @custom:error InvalidPool is thrown when pool address is zero or token not in pool
     function _getUniswapV3Price(address pool, address token) internal view returns (uint256 price) {
-        if (pool == address(0)) revert InvalidPool();
-
         IUniswapV3Pool v3Pool = IUniswapV3Pool(pool);
         address token0 = v3Pool.token0();
         address token1 = v3Pool.token1();
