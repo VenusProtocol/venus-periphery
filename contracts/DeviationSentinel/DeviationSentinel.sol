@@ -29,15 +29,11 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice State tracking for market modifications by this contract
     /// @param borrowPaused True if borrow is paused for this market by this contract
     /// @param cfModifiedAndSupplyPaused True if collateral factor was modified and supply is paused by this contract
-    /// @param originalCF Original collateral factor before modification (for IL pools)
-    /// @param originalLT Original liquidation threshold before modification (for IL pools)
-    /// @param poolCFs Mapping of pool ID to original collateral factor (for core pool)
-    /// @param poolLTs Mapping of pool ID to original liquidation threshold (for core pool)
+    /// @param poolCFs Mapping of pool ID to original collateral factor (0 for isolated pools, 1+ for core pool emode groups)
+    /// @param poolLTs Mapping of pool ID to original liquidation threshold (0 for isolated pools, 1+ for core pool emode groups)
     struct MarketState {
         bool borrowPaused;
         bool cfModifiedAndSupplyPaused;
-        uint256 originalCF;
-        uint256 originalLT;
         mapping(uint96 => uint256) poolCFs;
         mapping(uint96 => uint256) poolLTs;
     }
@@ -398,8 +394,8 @@ contract DeviationSentinel is AccessControlledV8 {
         } else {
             IILComptroller.Market memory marketData = IILComptroller(address(comptroller)).markets(address(market));
             if (marketData.isListed) {
-                state.originalCF = marketData.collateralFactorMantissa;
-                state.originalLT = marketData.liquidationThresholdMantissa;
+                state.poolCFs[0] = marketData.collateralFactorMantissa;
+                state.poolLTs[0] = marketData.liquidationThresholdMantissa;
                 state.cfModifiedAndSupplyPaused = true;
                 IILComptroller(address(comptroller)).setCollateralFactor(
                     address(market),
@@ -444,14 +440,12 @@ contract DeviationSentinel is AccessControlledV8 {
             state.cfModifiedAndSupplyPaused = false;
         } else {
             // Isolated pool
-            IILComptroller(address(comptroller)).setCollateralFactor(
-                address(market),
-                state.originalCF,
-                state.originalLT
-            );
-            emit CollateralFactorUpdated(address(market), 0, 0, state.originalCF);
-            state.originalCF = 0;
-            state.originalLT = 0;
+            uint256 originalCF = state.poolCFs[0];
+            uint256 originalLT = state.poolLTs[0];
+            IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
+            emit CollateralFactorUpdated(address(market), 0, 0, originalCF);
+            delete state.poolCFs[0];
+            delete state.poolLTs[0];
             state.cfModifiedAndSupplyPaused = false;
         }
     }
