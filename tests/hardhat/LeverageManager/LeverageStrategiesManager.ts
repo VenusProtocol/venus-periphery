@@ -8,8 +8,8 @@ import { ethers, network } from "hardhat";
 import {
   ComptrollerLensInterface,
   ComptrollerMock,
-  EIP20Interface,
   IAccessControlManagerV8,
+  IERC20,
   IProtocolShareReserve,
   InterestRateModel,
   LeverageStrategiesManager,
@@ -24,9 +24,9 @@ type SetupFixture = {
   protocolShareReserve: FakeContract<IProtocolShareReserve>;
   swapHelper: SwapHelper;
   collateralMarket: VBep20Harness;
-  collateral: EIP20Interface;
+  collateral: IERC20;
   borrowMarket: VBep20Harness;
-  borrow: EIP20Interface;
+  borrow: IERC20;
   unlistedMarket: VBep20Harness;
   vBNBMarket: VBep20Harness;
 };
@@ -39,7 +39,7 @@ async function deployVToken(
   psr: string,
   admin: string,
   isListed: boolean = true,
-): Promise<{ mockToken: EIP20Interface; vToken: VBep20Harness }> {
+): Promise<{ mockToken: IERC20; vToken: VBep20Harness }> {
   const MockTokenFactory = await ethers.getContractFactory("MockToken");
   const mockToken = await MockTokenFactory.deploy(symbol, symbol, 18);
 
@@ -87,7 +87,7 @@ const setupFixture = async (): Promise<SetupFixture> => {
 
   const comptrollerLens = await smock.fake<ComptrollerLensInterface>("ComptrollerLens");
   const protocolShareReserve = await smock.fake<IProtocolShareReserve>(
-    "contracts/Interfaces.sol:IProtocolShareReserve",
+    "contracts/Interfaces/IProtocolShareReserve.sol:IProtocolShareReserve",
   );
   const interestRateModel = await smock.fake<InterestRateModel>("InterestRateModelHarness");
   interestRateModel.isInterestRateModel.returns(true);
@@ -178,9 +178,9 @@ describe("LeverageStrategiesManager", () => {
   let aliceAddress: string;
   let bob: Signer;
   let collateralMarket: VBep20Harness;
-  let collateral: EIP20Interface;
+  let collateral: IERC20;
   let borrowMarket: VBep20Harness;
-  let borrow: EIP20Interface;
+  let borrow: IERC20;
   let protocolShareReserve: FakeContract<IProtocolShareReserve>;
   let unlistedMarket: VBep20Harness;
   let vBNBMarket: VBep20Harness;
@@ -256,7 +256,7 @@ describe("LeverageStrategiesManager", () => {
   }
 
   async function createSwapMulticallData(
-    token: EIP20Interface,
+    token: IERC20,
     recipient: string,
     amount: BigNumber,
     signer: Wallet,
