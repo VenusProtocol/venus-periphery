@@ -1,3 +1,9 @@
+## 1.1.0-dev.4 (2025-12-17)
+
+* Merge pull request #37 from VenusProtocol/feat/slim-package ([5966768](https://github.com/VenusProtocol/venus-periphery/commit/5966768)), closes [#37](https://github.com/VenusProtocol/venus-periphery/issues/37)
+* cd: publish slim package ([83990d3](https://github.com/VenusProtocol/venus-periphery/commit/83990d3))
+* feat: add slim package scripts ([c10a2ef](https://github.com/VenusProtocol/venus-periphery/commit/c10a2ef))
+
 ## 1.1.0-dev.3 (2025-12-17)
 
 * Merge pull request #36 from VenusProtocol/fix/patch-dep ([c8ceb2f](https://github.com/VenusProtocol/venus-periphery/commit/c8ceb2f)), closes [#36](https://github.com/VenusProtocol/venus-periphery/issues/36)
