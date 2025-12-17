@@ -147,39 +147,46 @@ if (FORK_MAINNET) {
           pancakeSwapOracle,
           uniswapOracle,
         } = await loadFixture(setupMarketFixture));
-
-        // Configure PancakeSwap pools
-        await pancakeSwapOracle.connect(timelock).setPoolConfig(TRX, "0xF683113764E4499c473aCd38Fc4b37E71554E4aD");
-        await pancakeSwapOracle.connect(timelock).setPoolConfig(USDT, "0x172fcD41E0913e95784454622d1c3724f546f849");
-
-        // Configure Uniswap pools
-        await uniswapOracle.connect(timelock).setPoolConfig(BTCB, "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD");
-        await uniswapOracle.connect(timelock).setPoolConfig(WBNB, "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD");
-
-        // Configure SentinelOracle to use appropriate DEX oracles
-        await sentinelOracle.connect(timelock).setTokenOracleConfig(TRX, pancakeSwapOracle.address);
-        await sentinelOracle.connect(timelock).setTokenOracleConfig(USDT, pancakeSwapOracle.address);
-        await sentinelOracle.connect(timelock).setTokenOracleConfig(BTCB, uniswapOracle.address);
-        await sentinelOracle.connect(timelock).setTokenOracleConfig(WBNB, uniswapOracle.address);
-
-        // Configure DeviationSentinel with simplified configs
-        await deviationSentinel.connect(timelock).setTokenConfig(TRX, {
-          deviation: 10,
-          enabled: true,
-        });
-
-        await deviationSentinel.connect(timelock).setTokenConfig(USDT, {
-          deviation: 10,
-          enabled: true,
-        });
-
-        await deviationSentinel.connect(timelock).setTokenConfig(BTCB, {
-          deviation: 10,
-          enabled: true,
-        });
       });
 
       describe("check Sentinel Oracle prices", () => {
+        before(async () => {
+          // Configure PancakeSwap pools
+          await pancakeSwapOracle.connect(timelock).setPoolConfig(TRX, "0xF683113764E4499c473aCd38Fc4b37E71554E4aD");
+          await pancakeSwapOracle.connect(timelock).setPoolConfig(USDT, "0x172fcD41E0913e95784454622d1c3724f546f849");
+          await pancakeSwapOracle.connect(timelock).setPoolConfig(WBNB, "0xF683113764E4499c473aCd38Fc4b37E71554E4aD");
+
+          // Configure Uniswap pools
+          await uniswapOracle.connect(timelock).setPoolConfig(BTCB, "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD");
+
+          // Configure SentinelOracle to use appropriate DEX oracles
+          await sentinelOracle.connect(timelock).setTokenOracleConfig(TRX, pancakeSwapOracle.address);
+          await sentinelOracle.connect(timelock).setTokenOracleConfig(USDT, pancakeSwapOracle.address);
+          await sentinelOracle.connect(timelock).setTokenOracleConfig(BTCB, uniswapOracle.address);
+          await sentinelOracle.connect(timelock).setTokenOracleConfig(WBNB, pancakeSwapOracle.address);
+
+          // Configure DeviationSentinel with simplified configs
+          await deviationSentinel.connect(timelock).setTokenConfig(TRX, {
+            deviation: 10,
+            enabled: true,
+          });
+
+          await deviationSentinel.connect(timelock).setTokenConfig(USDT, {
+            deviation: 10,
+            enabled: true,
+          });
+
+          await deviationSentinel.connect(timelock).setTokenConfig(BTCB, {
+            deviation: 10,
+            enabled: true,
+          });
+
+          await deviationSentinel.connect(timelock).setTokenConfig(WBNB, {
+            deviation: 10,
+            enabled: true,
+          });
+        });
+
         it("check TRX price from PancakeSwap", async () => {
           const price = await sentinelOracle.getPrice(TRX);
           expect(price).to.be.equal(parseUnits("0.287615712885971478809080625324", 30));
@@ -190,6 +197,11 @@ if (FORK_MAINNET) {
           expect(price).to.be.equal(parseUnits("0.999676428802385649", 18));
         });
 
+        it("check WBNB price from PancakeSwap", async () => {
+          const price = await sentinelOracle.getPrice(WBNB);
+          expect(price).to.be.equal(parseUnits("904.692815717066812497", 18));
+        });
+
         it("check BTCB price from Uniswap", async () => {
           const price = await sentinelOracle.getPrice(BTCB);
           expect(price).to.be.equal(parseUnits("91784.949423700465674501", 18));
@@ -198,6 +210,9 @@ if (FORK_MAINNET) {
 
       describe("check price deviation", () => {
         before(async () => {
+          await uniswapOracle.connect(timelock).setPoolConfig(WBNB, "0x28dF0835942396B7a1b7aE1cd068728E6ddBbAfD");
+          await sentinelOracle.connect(timelock).setTokenOracleConfig(WBNB, uniswapOracle.address);
+
           await deviationSentinel.connect(timelock).setTokenConfig(WBNB, {
             deviation: 10,
             enabled: true,
