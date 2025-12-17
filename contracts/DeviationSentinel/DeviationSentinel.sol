@@ -446,8 +446,6 @@ contract DeviationSentinel is AccessControlledV8 {
         IComptroller comptroller = market.comptroller();
         MarketState storage state = marketStates[address(market)];
 
-        if (!state.cfModifiedAndSupplyPaused) return;
-
         // Check if this is a core pool or isolated pool
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
             // Core pool - restore original CF and LT for each emode group
@@ -470,7 +468,6 @@ contract DeviationSentinel is AccessControlledV8 {
                     delete state.poolLTs[i];
                 }
             }
-            state.cfModifiedAndSupplyPaused = false;
         } else {
             // Isolated pool
             uint256 originalCF = state.poolCFs[0];
@@ -479,7 +476,6 @@ contract DeviationSentinel is AccessControlledV8 {
             emit CollateralFactorUpdated(address(market), 0, 0, originalCF);
             delete state.poolCFs[0];
             delete state.poolLTs[0];
-            state.cfModifiedAndSupplyPaused = false;
         }
     }
 }
