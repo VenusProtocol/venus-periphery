@@ -394,11 +394,7 @@ contract DeviationSentinel is AccessControlledV8 {
         IComptroller comptroller = market.comptroller();
         MarketState storage state = marketStates[address(market)];
 
-        if (state.cfModifiedAndSupplyPaused) return;
-
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
-            state.cfModifiedAndSupplyPaused = true;
-
             // Store original CF and LT for each emode group, then set to 0
             for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
                 (
@@ -434,7 +430,6 @@ contract DeviationSentinel is AccessControlledV8 {
             if (marketData.isListed) {
                 state.poolCFs[0] = marketData.collateralFactorMantissa;
                 state.poolLTs[0] = marketData.liquidationThresholdMantissa;
-                state.cfModifiedAndSupplyPaused = true;
                 IILComptroller(address(comptroller)).setCollateralFactor(
                     address(market),
                     0,
