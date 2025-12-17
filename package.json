@@ -52,7 +52,8 @@
     "@venusprotocol/solidity-utilities": "2.0.3",
     "ethers": "^5.7.0",
     "hardhat-deploy": "^0.11.14",
-    "module-alias": "^2.2.2"
+    "module-alias": "^2.2.2",
+    "patch-package": "^8.0.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^17.0.3",
@@ -92,7 +93,6 @@
     "hardhat-deploy-ethers": "^0.3.0-beta.13",
     "hardhat-gas-reporter": "^1.0.8",
     "husky": "^8.0.1",
-    "patch-package": "^8.0.0",
     "prettier": "3.7.4",
     "prettier-plugin-solidity": "2.2.0",
     "semantic-release": "^25.0.2",
