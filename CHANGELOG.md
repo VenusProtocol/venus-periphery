@@ -1,3 +1,8 @@
+## 1.1.0-dev.3 (2025-12-17)
+
+* Merge pull request #36 from VenusProtocol/fix/patch-dep ([c8ceb2f](https://github.com/VenusProtocol/venus-periphery/commit/c8ceb2f)), closes [#36](https://github.com/VenusProtocol/venus-periphery/issues/36)
+* fix: move patch-package to dependencies ([0fd9d1e](https://github.com/VenusProtocol/venus-periphery/commit/0fd9d1e))
+
 ## 1.1.0-dev.2 (2025-12-16)
 
 * fixup! feat: SwapHelper & LeverageStrategiesManager audits ([eda400f](https://github.com/VenusProtocol/venus-periphery/commit/eda400f))
