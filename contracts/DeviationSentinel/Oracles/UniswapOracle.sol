@@ -106,8 +106,6 @@ contract UniswapOracle is AccessControlledV8 {
         }
 
         uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
-        uint8 targetDecimals = IERC20Metadata(targetToken).decimals();
-        uint8 referenceDecimals = IERC20Metadata(referenceToken).decimals();
 
         uint256 targetTokensPerReferenceToken;
 
