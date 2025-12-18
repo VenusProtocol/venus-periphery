@@ -1,5 +1,7 @@
 {
   "name": "bsctestnet",
   "chainId": "97",
-  "addresses": {}
+  "addresses": {
+    "SwapHelper": "0x55Fa097cA59BAc70C1ba488BEb11A5F6bf7019Eb"
+  }
 }
