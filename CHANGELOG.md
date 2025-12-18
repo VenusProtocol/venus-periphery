@@ -1,3 +1,7 @@
+## 1.1.0-dev.5 (2025-12-18)
+
+* fix: slim pkg release ([09bfcc9](https://github.com/VenusProtocol/venus-periphery/commit/09bfcc9))
+
 ## 1.1.0-dev.4 (2025-12-17)
 
 * Merge pull request #37 from VenusProtocol/feat/slim-package ([5966768](https://github.com/VenusProtocol/venus-periphery/commit/5966768)), closes [#37](https://github.com/VenusProtocol/venus-periphery/issues/37)
