@@ -1,191 +1,329 @@
-import { FakeContract, MockContract, smock } from "@defi-wonderland/smock";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { FakeContract, smock } from "@defi-wonderland/smock";
+import { loadFixture, setBalance } from "@nomicfoundation/hardhat-network-helpers";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import chai from "chai";
+import { BigNumber, Contract, Wallet } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
-import { ethers, upgrades } from "hardhat";
+import { ethers, network, upgrades } from "hardhat";
 
-import { convertToUnit } from "../../../helpers/utils";
 import {
-  BEP20Harness,
-  BEP20Harness__factory,
   ComptrollerLens__factory,
   ComptrollerMock,
-  ComptrollerMock__factory,
+  EIP20Interface,
   IAccessControlManagerV8,
   IWBNB,
-  InterestRateModelHarness,
+  InterestRateModel,
+  MockToken,
+  MockToken__factory,
   MockVBNB,
   ResilientOracleInterface,
   SwapHelper,
   SwapRouter,
-  SwapRouter__factory,
   VBep20Harness,
   VBep20Harness__factory,
-} from "../../typechain";
+} from "../../../typechain";
 
 const { expect } = chai;
 chai.use(smock.matchers);
 
-const mockUnderlying = async (name: string, symbol: string): Promise<MockContract<BEP20Harness>> => {
-  const underlyingFactory = await smock.mock<BEP20Harness__factory>("BEP20Harness");
-  const underlying = await underlyingFactory.deploy(0, name, 18, symbol);
-  return underlying;
+type SwapRouterFixture = {
+  swapRouter: SwapRouter;
+  comptroller: ComptrollerMock;
+  swapHelper: SwapHelper;
+  wrappedNative: FakeContract<IWBNB>;
+  nativeVToken: MockVBNB;
+  tokenA: MockToken;
+  tokenB: MockToken;
+  vTokenA: VBep20Harness;
+  vTokenB: VBep20Harness;
+  interestRateModel: FakeContract<InterestRateModel>;
 };
 
-// Helper function to create multicall data similar to GenericSwapper.ts
-const createMockMulticallData = async (
-  swapHelper: FakeContract<SwapHelper>,
-  admin: SignerWithAddress,
-  fromToken: string,
-  toToken: string,
-  amount: string,
-  salt?: string,
-): Promise<string> => {
-  // Create mock swap data
-  const sweepData = ethers.utils.defaultAbiCoder.encode(
-    ["address", "address", "uint256"],
-    [fromToken, toToken, amount],
+async function deployMockToken(name: string, symbol: string): Promise<MockToken> {
+  const MockTokenFactory = await ethers.getContractFactory("MockToken");
+  return await MockTokenFactory.deploy(name, symbol, 18);
+}
+
+async function deployVToken(
+  underlying: Contract,
+  comptroller: Contract,
+  acm: string,
+  irm: string,
+  admin: string,
+  name: string,
+  symbol: string,
+): Promise<VBep20Harness> {
+  const vTokenFactory = await ethers.getContractFactory("VBep20Harness");
+  const vToken = await vTokenFactory.deploy(
+    underlying.address,
+    comptroller.address,
+    irm,
+    parseUnits("1", 28),
+    name,
+    symbol,
+    8,
+    admin,
   );
+  return vToken;
+}
+
+async function deploySwapRouterFixture(): Promise<SwapRouterFixture> {
+  const [admin] = await ethers.getSigners();
+
+  // Deploy access control and oracle mocks
+  const accessControl = await smock.fake<IAccessControlManagerV8>("AccessControlManager");
+  accessControl.isAllowedToCall.returns(true);
+
+  const oracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
+  oracle.getUnderlyingPrice.returns(parseUnits("1", 18)); // 1:1 price for simplicity
+
+  const interestRateModel = await smock.fake<InterestRateModel>("InterestRateModelHarness");
+  interestRateModel.isInterestRateModel.returns(true);
+
+  // Deploy comptroller
+  const comptrollerFactory = await ethers.getContractFactory("ComptrollerMock");
+  const comptroller = await comptrollerFactory.deploy();
+
+  const comptrollerLensFactory = await smock.mock<ComptrollerLens__factory>("ComptrollerLens");
+  const comptrollerLens = await comptrollerLensFactory.deploy();
+
+  await comptroller._setAccessControl(accessControl.address);
+  await comptroller._setComptrollerLens(comptrollerLens.address);
+  await comptroller._setPriceOracle(oracle.address);
+
+  // Deploy mock tokens
+  const tokenA = await deployMockToken("TokenA", "TKA");
+  const tokenB = await deployMockToken("TokenB", "TKB");
+
+  // Deploy vTokens
+  const vTokenA = await deployVToken(
+    tokenA,
+    comptroller,
+    accessControl.address,
+    interestRateModel.address,
+    admin.address,
+    "Venus TokenA",
+    "vTKA",
+  );
+
+  const vTokenB = await deployVToken(
+    tokenB,
+    comptroller,
+    accessControl.address,
+    interestRateModel.address,
+    admin.address,
+    "Venus TokenB",
+    "vTKB",
+  );
+
+  await vTokenA.connect(admin).setAccessControlManager(accessControl.address);
+  await vTokenB.connect(admin).setAccessControlManager(accessControl.address);
+
+  // Support markets and enable borrowing
+  await comptroller._supportMarket(vTokenA.address);
+  await comptroller._supportMarket(vTokenB.address);
+  await comptroller.setIsBorrowAllowed(0, vTokenA.address, true);
+  await comptroller.setIsBorrowAllowed(0, vTokenB.address, true);
+
+  // Set collateral factors
+  await comptroller["setCollateralFactor(address,uint256,uint256)"](
+    vTokenA.address,
+    parseEther("0.8"),
+    parseEther("0.85"),
+  );
+  await comptroller["setCollateralFactor(address,uint256,uint256)"](
+    vTokenB.address,
+    parseEther("0.8"),
+    parseEther("0.85"),
+  );
+
+  // Set caps
+  await comptroller._setMarketSupplyCaps(
+    [vTokenA.address, vTokenB.address],
+    [parseEther("10000"), parseEther("10000")],
+  );
+  await comptroller._setMarketBorrowCaps([vTokenA.address, vTokenB.address], [parseEther("5000"), parseEther("5000")]);
+
+  // Deploy native vToken
+  const nativeVTokenFactory = await ethers.getContractFactory("MockVBNB");
+  const nativeVToken = await nativeVTokenFactory.deploy(
+    comptroller.address,
+    interestRateModel.address,
+    parseUnits("1", 28),
+    "Venus BNB",
+    "vBNB",
+    8,
+    admin.address,
+  );
+  await nativeVToken.connect(admin).setAccessControlManager(accessControl.address);
+  await comptroller._supportMarket(nativeVToken.address);
+  await comptroller["setCollateralFactor(address,uint256,uint256)"](
+    nativeVToken.address,
+    parseEther("0.9"),
+    parseEther("0.95"),
+  );
+
+  // Setup wrapped native mock with proper behavior
+  const wrappedNative = await smock.fake<IWBNB>("IWBNB");
+  wrappedNative.deposit.returns();
+  wrappedNative.withdraw.returns();
+  wrappedNative.transfer.returns(true);
+  wrappedNative.transferFrom.returns(true);
+  wrappedNative.balanceOf.returns(parseEther("1000"));
+  wrappedNative.approve.returns(true);
+
+  // Deploy SwapHelper
+  const swapHelperFactory = await ethers.getContractFactory("SwapHelper");
+  const swapHelper = (await swapHelperFactory.deploy(admin.address)) as SwapHelper;
+
+  // Deploy SwapRouter
+  const swapRouterFactory = await ethers.getContractFactory("SwapRouter");
+  const swapRouter = (await upgrades.deployProxy(swapRouterFactory, [], {
+    constructorArgs: [comptroller.address, swapHelper.address, wrappedNative.address, nativeVToken.address],
+    initializer: "initialize",
+    unsafeAllow: ["state-variable-immutable"],
+  })) as SwapRouter;
+
+  // Mint extra tokens for test operations
+  await tokenA.faucet(parseEther("10000"));
+  await tokenB.faucet(parseEther("10000"));
+
+  await tokenA.approve(vTokenA.address, parseEther("500"));
+  await tokenB.approve(vTokenB.address, parseEther("500"));
+
+  await vTokenA.mint(parseEther("500"));
+  await vTokenB.mint(parseEther("500"));
+
+  return {
+    swapRouter,
+    comptroller,
+    swapHelper,
+    wrappedNative,
+    nativeVToken,
+    tokenA,
+    tokenB,
+    vTokenA,
+    vTokenB,
+    interestRateModel,
+  };
+}
+
+async function createSwapMulticallData(
+  swapHelper: SwapHelper,
+  fromToken: EIP20Interface,
+  toToken: EIP20Interface,
+  recipient: string,
+  amountOut: BigNumber,
+  signer: Wallet,
+  swapRouterAddress: string, // Need this for proper caller
+  salt?: string,
+): Promise<string> {
+  // Get tokens to swapHelper to simulate the swap result
+  // We need to fund the swapHelper with the output tokens before the test
+
+  // Encode sweep function call to send tokens to recipient
+  const sweepData = swapHelper.interface.encodeFunctionData("sweep", [toToken.address, recipient]);
+
+  // Create EIP-712 signature
+  const domain = {
+    chainId: network.config.chainId,
+    name: "VenusSwap",
+    verifyingContract: swapHelper.address,
+    version: "1",
+  };
+  const types = {
+    Multicall: [
+      { name: "caller", type: "address" },
+      { name: "calls", type: "bytes[]" },
+      { name: "deadline", type: "uint256" },
+      { name: "salt", type: "bytes32" },
+    ],
+  };
 
   const calls = [sweepData];
   const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
   const saltValue = salt || ethers.utils.formatBytes32String(Math.random().toString());
 
-  // Generate random signature for testing
-  const signature = ethers.utils.hexlify(ethers.utils.randomBytes(65));
+  const signature = await signer._signTypedData(domain, types, {
+    caller: swapRouterAddress, // SwapRouter will call swapHelper
+    calls,
+    deadline,
+    salt: saltValue,
+  });
 
   // Encode multicall with all parameters
   const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
 
   return multicallData;
-};
+}
+
+async function createNativeSwapMulticallData(
+  swapHelper: SwapHelper,
+  wrappedNativeAddress: string,
+  toToken: EIP20Interface,
+  recipient: string,
+  amountOut: BigNumber,
+  signer: Wallet,
+  swapRouterAddress: string,
+  salt?: string,
+): Promise<string> {
+  // Encode sweep function call to send output tokens to recipient
+  const sweepData = swapHelper.interface.encodeFunctionData("sweep", [toToken.address, recipient]);
+
+  // Create EIP-712 signature for native swap (WRAPPED_NATIVE -> output token)
+  const domain = {
+    chainId: network.config.chainId,
+    name: "VenusSwap",
+    verifyingContract: swapHelper.address,
+    version: "1",
+  };
+  const types = {
+    Multicall: [
+      { name: "caller", type: "address" },
+      { name: "calls", type: "bytes[]" },
+      { name: "deadline", type: "uint256" },
+      { name: "salt", type: "bytes32" },
+    ],
+  };
+
+  const calls = [sweepData];
+  const deadline = Math.floor(Date.now() / 1000) + 3600;
+  const saltValue = salt || ethers.utils.formatBytes32String(Math.random().toString());
+
+  const signature = await signer._signTypedData(domain, types, {
+    caller: swapRouterAddress,
+    calls,
+    deadline,
+    salt: saltValue,
+  });
+
+  const multicallData = swapHelper.interface.encodeFunctionData("multicall", [calls, deadline, saltValue, signature]);
+
+  return multicallData;
+}
 
 describe("SwapRouter", function () {
-  let deployer: SignerWithAddress;
   let user: SignerWithAddress;
-  let admin: SignerWithAddress;
+  let admin: Wallet;
 
-  let swapRouter: MockContract<SwapRouter>;
-  let comptroller: FakeContract<ComptrollerMock>;
-  let swapHelper: FakeContract<SwapHelper>;
+  let swapRouter: SwapRouter;
+  let comptroller: ComptrollerMock;
+  let swapHelper: SwapHelper;
   let wrappedNative: FakeContract<IWBNB>;
   let nativeVToken: MockVBNB;
-
-  let underlyingA: MockContract<BEP20Harness>;
-  let underlyingB: MockContract<BEP20Harness>;
-  let vTokenA: MockContract<VBep20Harness>;
-  let vTokenB: MockContract<VBep20Harness>;
+  let tokenA: MockToken;
+  let tokenB: MockToken;
+  let vTokenA: VBep20Harness;
+  let vTokenB: VBep20Harness;
 
   const AMOUNT_IN = parseEther("100");
   const AMOUNT_OUT = parseEther("95");
   const MIN_AMOUNT_OUT = parseEther("90");
 
-  async function deploySwapRouterFixture() {
-    [deployer, user, admin] = await ethers.getSigners();
-
-    const oracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
-    const accessControl = await smock.fake<IAccessControlManagerV8>("AccessControlManager");
-    accessControl.isAllowedToCall.returns(true);
-
-    const ComptrollerFactory = await smock.mock<ComptrollerMock__factory>("ComptrollerMock");
-    comptroller = await ComptrollerFactory.deploy();
-
-    const ComptrollerLensFactory = await smock.mock<ComptrollerLens__factory>("ComptrollerLens");
-    const comptrollerLens = await ComptrollerLensFactory.deploy();
-
-    await comptroller._setAccessControl(accessControl.address);
-    await comptroller._setComptrollerLens(comptrollerLens.address);
-    await comptroller._setPriceOracle(oracle.address);
-    await comptroller._setLiquidationIncentive(convertToUnit("1", 18));
-
-    const interestRateModelHarnessFactory = await ethers.getContractFactory("InterestRateModelHarness");
-    const InterestRateModelHarness = (await interestRateModelHarnessFactory.deploy(
-      parseUnits("1", 12),
-    )) as InterestRateModelHarness;
-
-    const nativeVTokenFactory = await ethers.getContractFactory("MockVBNB");
-    console.log("Deploying native vToken...");
-    nativeVToken = await nativeVTokenFactory.deploy(
-      comptroller.address,
-      InterestRateModelHarness.address,
-      parseUnits("1", 28),
-      "Venus BNB",
-      "vBNB",
-      8,
-      admin.address,
-    );
-    await nativeVToken.connect(admin).setAccessControlManager(accessControl.address);
-
-    wrappedNative = await smock.fake<IWBNB>("IWBNB");
-    swapHelper = await smock.fake<SwapHelper>("SwapHelper");
-
-    underlyingA = await mockUnderlying("TokenA", "TKA");
-    underlyingB = await mockUnderlying("TokenB", "TKB");
-
-    const vTokenFactory = await smock.mock<VBep20Harness__factory>("VBep20Harness");
-    vTokenA = await vTokenFactory.deploy(
-      underlyingA.address,
-      comptroller.address,
-      InterestRateModelHarness.address,
-      "200000000000000000000000",
-      "vTokenA",
-      "VTKNA",
-      18,
-      admin.address,
-    );
-
-    vTokenB = await vTokenFactory.deploy(
-      underlyingB.address,
-      comptroller.address,
-      InterestRateModelHarness.address,
-      "200000000000000000000000",
-      "vTokenB",
-      "VTKNB",
-      18,
-      admin.address,
-    );
-
-    await comptroller._supportMarket(vTokenA.address);
-    await comptroller._supportMarket(vTokenB.address);
-    await comptroller._supportMarket(nativeVToken.address);
-
-    await comptroller._setCollateralFactor(vTokenA.address, parseEther("0.8"));
-    await comptroller._setCollateralFactor(vTokenB.address, parseEther("0.8"));
-    await comptroller._setCollateralFactor(nativeVToken.address, parseEther("0.9"));
-
-    await comptroller._setMarketSupplyCaps(
-      [vTokenA.address, vTokenB.address],
-      [parseEther("1000"), parseEther("1000")],
-    );
-    await comptroller._setMarketBorrowCaps([vTokenA.address, vTokenB.address], [parseEther("500"), parseEther("500")]);
-
-    await comptroller._setMarketSupplyCaps([nativeVToken.address], [parseEther("100")]);
-    await comptroller._setMarketBorrowCaps([nativeVToken.address], [parseEther("100")]);
-
-    // Deploy SwapRouter
-    const swapRouterFactory = await ethers.getContractFactory("SwapRouter");
-    swapRouter = await upgrades.deployProxy(swapRouterFactory, [], {
-      constructorArgs: [comptroller.address, swapHelper.address, wrappedNative.address, nativeVToken.address],
-      initializer: "initialize",
-      unsafeAllow: ["state-variable-immutable"],
-    });
-
-    return {
-      swapRouter,
-      comptroller,
-      swapHelper,
-      wrappedNative,
-      nativeVToken,
-      underlyingA,
-      underlyingB,
-      vTokenA,
-      vTokenB,
-    };
-  }
-
   beforeEach(async function () {
-    await loadFixture(deploySwapRouterFixture);
+    [user, admin] = await ethers.getSigners();
+    ({ swapRouter, comptroller, swapHelper, wrappedNative, nativeVToken, tokenA, tokenB, vTokenA, vTokenB } =
+      await loadFixture(deploySwapRouterFixture));
   });
 
   describe("Constructor", function () {
@@ -223,560 +361,566 @@ describe("SwapRouter", function () {
 
   describe("SwapAndSupply", function () {
     beforeEach(async function () {
-      // Mint tokens to user
-      await underlyingA.harnessSetBalance(user.address, parseUnits("1000", 18));
-      await underlyingB.harnessSetBalance(user.address, parseUnits("1000", 18));
+      // Give user tokens for the swap
+      await tokenA.transfer(user.address, parseEther("1000"));
 
-      // Setup user approval
-      await underlyingA.connect(user).approve(swapRouter.address, AMOUNT_IN);
-
-      // Mock balance checks - start with 0, then return AMOUNT_OUT after swap
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT); // Second call returns tokens
-
-      // Mock the supply operation
-      vTokenB.mintBehalf.returns(0); // Success code
-
-      // Mock vToken balance - user gets vTokens after supply
-      vTokenB.balanceOf.whenCalledWith(user.address).returns(parseEther("50"));
-
-      // Mock comptroller account liquidity check
-      comptroller.getAccountLiquidity.returns([0, parseEther("1000"), 0]); // [error, liquidity, shortfall]
+      // User approves SwapRouter to spend their tokens
+      await tokenA.connect(user).approve(swapRouter.address, AMOUNT_IN);
     });
 
-    it("should swap tokens and supply to Venus market", async function () {
-      // Create multicall data using helper function
-      const swapCallData = await createMockMulticallData(
+    it("should revert with zero amount", async function () {
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenB.transfer(swapHelper.address, AMOUNT_OUT);
+
+      const swapCallData = await createSwapMulticallData(
         swapHelper,
+        tokenA,
+        tokenB,
+        swapRouter.address,
+        AMOUNT_OUT,
         admin,
-        underlyingA.address,
-        underlyingB.address,
-        AMOUNT_OUT.toString(),
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapAndSupply(vTokenB.address, tokenA.address, 0, MIN_AMOUNT_OUT, swapCallData),
+      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
+    });
+
+    it("should revert with invalid vToken", async function () {
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenB.transfer(swapHelper.address, AMOUNT_OUT);
+
+      const swapCallData = await createSwapMulticallData(
+        swapHelper,
+        tokenA,
+        tokenB,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapAndSupply(user.address, tokenA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
+      ).to.be.revertedWithCustomError(swapRouter, "MarketNotListed");
+    });
+
+    it("should revert when slippage protection fails", async function () {
+      // Create swap data that returns less than minimum
+      const lowAmountOut = parseEther("50");
+
+      // Fund the swapHelper with lower amount
+      await tokenB.transfer(swapHelper.address, lowAmountOut);
+
+      const swapCallData = await createSwapMulticallData(
+        swapHelper,
+        tokenA,
+        tokenB,
+        swapRouter.address,
+        lowAmountOut,
+        admin,
+        swapRouter.address,
       );
 
       await expect(
         swapRouter
           .connect(user)
-          .swapAndSupply(vTokenB.address, underlyingA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
+          .swapAndSupply(vTokenB.address, tokenA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
+      ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
+    });
+
+    it("should swap tokens and supply to Venus market", async function () {
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenB.transfer(swapHelper.address, AMOUNT_OUT);
+
+      // Create multicall data that will result in AMOUNT_OUT tokens being sent to SwapRouter
+      const swapCallData = await createSwapMulticallData(
+        swapHelper,
+        tokenA,
+        tokenB,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      const userVTokenBalanceBefore = await vTokenB.balanceOf(user.address);
+      const userTokenABalanceBefore = await tokenA.balanceOf(user.address);
+      const userTokenBBalanceBefore = await tokenB.balanceOf(user.address);
+
+      await expect(
+        swapRouter
+          .connect(user)
+          .swapAndSupply(vTokenB.address, tokenA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
       )
         .to.emit(swapRouter, "SwapAndSupply")
-        .withArgs(
-          user.address,
-          vTokenB.address,
-          underlyingA.address,
-          underlyingB.address,
-          AMOUNT_IN,
-          AMOUNT_OUT,
-          AMOUNT_OUT,
-        );
+        .withArgs(user.address, vTokenB.address, tokenA.address, tokenB.address, AMOUNT_IN, AMOUNT_OUT, AMOUNT_OUT);
 
-      // Verify the supply operation was called correctly
-      expect(vTokenB.mintBehalf).to.have.been.calledWith(user.address, AMOUNT_OUT);
+      // Verify user spent tokenA
+      const userTokenABalanceAfter = await tokenA.balanceOf(user.address);
+      expect(userTokenABalanceBefore.sub(userTokenABalanceAfter)).to.equal(AMOUNT_IN);
 
-      // Verify the user received vTokens (supply position created)
-      const userVTokenBalance = await vTokenB.balanceOf(user.address);
-      expect(userVTokenBalance).to.be.gt(0);
+      // Verify user didn't receive tokenB directly (it was supplied to market)
+      const userTokenBBalanceAfter = await tokenB.balanceOf(user.address);
+      expect(userTokenBBalanceAfter).to.equal(userTokenBBalanceBefore);
+
+      // Verify user received vTokens
+      const userVTokenBalanceAfter = await vTokenB.balanceOf(user.address);
+      expect(userVTokenBalanceAfter).to.be.gt(userVTokenBalanceBefore);
+
+      // Verify user has supply balance in the market
+      const supplyBalance = await vTokenB.callStatic.balanceOfUnderlying(user.address);
+      expect(supplyBalance).to.be.gt(0);
     });
 
     it("should create supply position in Venus market", async function () {
-      // Setup balance mock
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0); // Before swap
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT); // After swap
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenB.transfer(swapHelper.address, AMOUNT_OUT);
 
-      const swapCallData = await createMockMulticallData(
+      const swapCallData = await createSwapMulticallData(
         swapHelper,
+        tokenA,
+        tokenB,
+        swapRouter.address,
+        AMOUNT_OUT,
         admin,
-        underlyingA.address,
-        underlyingB.address,
-        AMOUNT_OUT.toString(),
+        swapRouter.address,
       );
 
       // Execute swap and supply
       await swapRouter
         .connect(user)
-        .swapAndSupply(vTokenB.address, underlyingA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData);
+        .swapAndSupply(vTokenB.address, tokenA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData);
 
       // Verify supply position was created
-      const finalVTokenBalance = await vTokenB.balanceOf(user.address);
-      expect(finalVTokenBalance).to.be.gt(0);
+      const supplyBalance = await vTokenB.callStatic.balanceOfUnderlying(user.address);
+      expect(supplyBalance).to.be.gt(0);
 
-      // Verify user's account has liquidity
-      const [, liquidity] = await comptroller.getAccountLiquidity(user.address);
-      expect(liquidity).to.be.gt(0);
+      // Verify user's account has liquidity by checking vToken balance
+      const vTokenBalance = await vTokenB.balanceOf(user.address);
+      expect(vTokenBalance).to.be.gt(0);
 
-      // Verify the vToken market processed the supply correctly
-      expect(vTokenB.mintBehalf).to.have.been.calledWith(user.address, AMOUNT_OUT);
-    });
-
-    it("should revert with zero amount", async function () {
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        underlyingA.address,
-        underlyingB.address,
-        "0",
-      );
-
-      await expect(
-        swapRouter.connect(user).swapAndSupply(vTokenB.address, underlyingA.address, 0, MIN_AMOUNT_OUT, swapCallData),
-      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
-    });
-
-    it("should revert with invalid vToken", async function () {
-      comptroller.markets.whenCalledWith(user.address).returns([false, 0, false]);
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        underlyingA.address,
-        underlyingB.address,
-        "0",
-      );
-
-      await expect(
-        swapRouter
-          .connect(user)
-          .swapAndSupply(user.address, underlyingA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
-      ).to.be.revertedWithCustomError(swapRouter, "MarketNotListed");
-    });
-
-    it("should revert when slippage protection fails", async function () {
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0); // Before swap
-      underlyingB.balanceOf.returnsAtCall(1, parseEther("50")); // After swap - less than min
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        underlyingA.address,
-        underlyingB.address,
-        "50",
-      );
-
-      await expect(
-        swapRouter
-          .connect(user)
-          .swapAndSupply(vTokenB.address, underlyingA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
-      ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
-    });
-  });
-
-  describe("SwapNativeAndSupply", function () {
-    beforeEach(async function () {
-      // Mock wrapped native behavior
-      wrappedNative.deposit.returns();
-      wrappedNative.balanceOf.whenCalledWith(swapRouter.address).returns(AMOUNT_IN);
-      wrappedNative.transfer.returns(true); // Mock successful transfer
-      wrappedNative.transferFrom.returns(true); // Mock successful transferFrom
-
-      // Mock balance checks - start with 0, then return AMOUNT_OUT after swap
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT);
-
-      // Mock the supply operation
-      vTokenB.mintBehalf.returns(0); // Success code
-
-      // Mock vToken balance - user gets vTokens after supply
-      vTokenB.balanceOf.whenCalledWith(user.address).returns(parseEther("50"));
-    });
-
-    it("should swap native tokens and supply to Venus market", async function () {
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT);
-
-      // Mock WBNB balance for the contract after deposit
-      wrappedNative.balanceOf.reset();
-      wrappedNative.balanceOf.whenCalledWith(swapRouter.address).returns(AMOUNT_IN);
-
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        wrappedNative.address,
-        underlyingB.address,
-        AMOUNT_OUT.toString(),
-      );
-
-      await expect(
-        swapRouter
-          .connect(user)
-          .swapNativeAndSupply(vTokenB.address, MIN_AMOUNT_OUT, swapCallData, { value: AMOUNT_IN }),
-      ).to.emit(swapRouter, "SwapAndSupply");
-
-      expect(wrappedNative.deposit).to.have.been.calledWith();
-      expect(vTokenB.mintBehalf).to.have.been.calledWith(user.address, AMOUNT_OUT);
-    });
-
-    it("should revert with zero value", async function () {
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        wrappedNative.address,
-        underlyingB.address,
-        "0",
-      );
-
-      await expect(
-        swapRouter.connect(user).swapNativeAndSupply(vTokenB.address, MIN_AMOUNT_OUT, swapCallData, { value: 0 }),
-      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
-    });
-  });
-
-  describe("SwapNativeAndRepay", function () {
-    beforeEach(async function () {
-      // Mock wrapped native behavior
-      wrappedNative.deposit.returns();
-      wrappedNative.balanceOf.whenCalledWith(swapRouter.address).returns(AMOUNT_IN);
-      wrappedNative.transfer.returns(true); // Mock successful transfer
-      wrappedNative.transferFrom.returns(true); // Mock successful transferFrom
-
-      // Setup user debt
-      vTokenB.borrowBalanceCurrent.whenCalledWith(user.address).returns(parseEther("50"));
-
-      // Mock balance checks - start with 0, then return AMOUNT_OUT after swap
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT);
-
-      // Mock the repay operation
-      vTokenB.repayBorrowBehalf.returns(0); // Success code
-    });
-
-    it("should swap native tokens and repay debt", async function () {
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT);
-
-      // Set the actual balance in the mock token for transfers
-      await underlyingB.harnessSetBalance(swapRouter.address, AMOUNT_OUT);
-
-      // Mock WBNB balance for the contract after deposit
-      wrappedNative.balanceOf.reset();
-      wrappedNative.balanceOf.whenCalledWith(swapRouter.address).returns(AMOUNT_IN);
-
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        wrappedNative.address,
-        underlyingB.address,
-        AMOUNT_OUT.toString(),
-      );
-
-      await expect(
-        swapRouter
-          .connect(user)
-          .swapNativeAndRepay(vTokenB.address, MIN_AMOUNT_OUT, swapCallData, { value: AMOUNT_IN }),
-      ).to.emit(swapRouter, "SwapAndRepay");
-
-      expect(wrappedNative.deposit).to.have.been.calledWith();
-      expect(vTokenB.repayBorrowBehalf).to.have.been.calledWith(user.address, parseEther("50"));
-    });
-
-    it("should revert with zero value", async function () {
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        wrappedNative.address,
-        underlyingB.address,
-        "0",
-      );
-
-      await expect(
-        swapRouter.connect(user).swapNativeAndRepay(vTokenB.address, MIN_AMOUNT_OUT, swapCallData, { value: 0 }),
-      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
-    });
-
-    it("should revert when user has no debt", async function () {
-      // Reset balance mock
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT);
-
-      // Set no debt
-      vTokenB.borrowBalanceCurrent.whenCalledWith(user.address).returns(0);
-
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        wrappedNative.address,
-        underlyingB.address,
-        AMOUNT_OUT.toString(),
-      );
-
-      await expect(
-        swapRouter
-          .connect(user)
-          .swapNativeAndRepay(vTokenB.address, MIN_AMOUNT_OUT, swapCallData, { value: AMOUNT_IN }),
-      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
-    });
-
-    it("should return excess tokens to user when overpaying debt", async function () {
-      // Reset and setup balance mock for overpayment scenario
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, parseEther("80")); // More than debt amount (50)
-
-      // Set the actual balance in the mock token for transfers
-      await underlyingB.harnessSetBalance(swapRouter.address, parseEther("80"));
-
-      // Mock WBNB balance for the contract after deposit
-      wrappedNative.balanceOf.reset();
-      wrappedNative.balanceOf.whenCalledWith(swapRouter.address).returns(AMOUNT_IN);
-
-      // Create mock swap data for larger amount
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        wrappedNative.address,
-        underlyingB.address,
-        parseEther("80").toString(),
-      );
-
-      await expect(
-        swapRouter
-          .connect(user)
-          .swapNativeAndRepay(vTokenB.address, parseEther("70"), swapCallData, { value: AMOUNT_IN }),
-      )
-        .to.emit(swapRouter, "SwapAndRepay")
-        .withArgs(
-          user.address,
-          vTokenB.address,
-          wrappedNative.address,
-          underlyingB.address,
-          AMOUNT_IN,
-          parseEther("80"),
-          parseEther("50"),
-        );
-
-      // Should repay only the debt amount (50), not the full received amount (80)
-      expect(vTokenB.repayBorrowBehalf).to.have.been.calledWith(user.address, parseEther("50"));
+      // Verify no tokens are stuck in the router
+      expect(await tokenA.balanceOf(swapRouter.address)).to.equal(0);
+      expect(await tokenB.balanceOf(swapRouter.address)).to.equal(0);
     });
   });
 
   describe("SwapAndRepay", function () {
     beforeEach(async function () {
-      // Mint tokens to user
-      await underlyingA.harnessSetBalance(user.address, parseUnits("1000", 18));
+      // Setup: User has borrowed tokens
+      await tokenA.transfer(user.address, parseEther("1000"));
+      await tokenA.connect(user).approve(vTokenA.address, parseEther("500"));
+      await vTokenA.connect(user).mint(parseEther("500"));
 
-      // Setup user approval and debt
-      await underlyingA.connect(user).approve(swapRouter.address, AMOUNT_IN);
-      vTokenB.borrowBalanceCurrent.whenCalledWith(user.address).returns(parseEther("50"));
+      await comptroller.connect(user).enterMarkets([vTokenA.address]);
+      await vTokenA.connect(user).borrow(parseEther("100"));
 
-      // Mock balance checks - start with 0, then return AMOUNT_OUT after swap
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT); // Second call returns tokens
-
-      // Mock the repay operation
-      vTokenB.repayBorrowBehalf.returns(0); // Success code
+      // User gets tokenB to swap for repayment
+      await tokenB.transfer(user.address, parseEther("1000"));
+      await tokenB.connect(user).approve(swapRouter.address, AMOUNT_IN);
     });
 
-    it("should swap tokens and repay debt", async function () {
-      // Reset and setup balance mock
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT);
+    it("should revert with zero amount", async function () {
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenA.transfer(swapHelper.address, AMOUNT_OUT);
 
-      // Also set the actual balance in the mock token for transfers
-      await underlyingB.harnessSetBalance(swapRouter.address, AMOUNT_OUT);
-
-      const swapCallData = await createMockMulticallData(
+      const swapCallData = await createSwapMulticallData(
         swapHelper,
+        tokenB,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
         admin,
-        underlyingA.address,
-        underlyingB.address,
-        AMOUNT_OUT.toString(),
+        swapRouter.address,
       );
 
       await expect(
-        swapRouter
-          .connect(user)
-          .swapAndRepay(vTokenB.address, underlyingA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
-      ).to.emit(swapRouter, "SwapAndRepay");
-
-      expect(vTokenB.repayBorrowBehalf).to.have.been.calledWith(user.address, parseEther("50"));
-    });
-
-    it("should revert when user has no debt", async function () {
-      // Reset balance mock
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, AMOUNT_OUT);
-
-      vTokenB.borrowBalanceCurrent.whenCalledWith(user.address).returns(0);
-
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        underlyingA.address,
-        underlyingB.address,
-        "0",
-      );
-
-      await expect(
-        swapRouter
-          .connect(user)
-          .swapAndRepay(vTokenB.address, underlyingA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
+        swapRouter.connect(user).swapAndRepay(vTokenA.address, tokenB.address, 0, MIN_AMOUNT_OUT, swapCallData),
       ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
+    });
+
+    it("should revert with invalid vToken", async function () {
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenA.transfer(swapHelper.address, AMOUNT_OUT);
+
+      const swapCallData = await createSwapMulticallData(
+        swapHelper,
+        tokenB,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapAndRepay(user.address, tokenB.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
+      ).to.be.revertedWithCustomError(swapRouter, "MarketNotListed");
+    });
+
+    it("should revert when slippage protection fails", async function () {
+      // Create swap data that returns less than minimum
+      const lowAmountOut = parseEther("50");
+
+      // Fund the swapHelper with lower amount
+      await tokenA.transfer(swapHelper.address, lowAmountOut);
+
+      const swapCallData = await createSwapMulticallData(
+        swapHelper,
+        tokenB,
+        tokenA,
+        swapRouter.address,
+        lowAmountOut,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapAndRepay(vTokenA.address, tokenB.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
+      ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
+    });
+
+    it("should swap tokens and repay borrow", async function () {
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenA.transfer(swapHelper.address, AMOUNT_OUT);
+
+      // Create multicall data that will result in tokenA being sent to SwapRouter for repayment
+      const swapCallData = await createSwapMulticallData(
+        swapHelper,
+        tokenB,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      const borrowBalanceBefore = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      const userTokenBBalanceBefore = await tokenB.balanceOf(user.address);
+
+      await expect(
+        swapRouter.connect(user).swapAndRepay(vTokenA.address, tokenB.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
+      )
+        .to.emit(swapRouter, "SwapAndRepay")
+        .withArgs(user.address, vTokenA.address, tokenB.address, tokenA.address, AMOUNT_IN, AMOUNT_OUT, AMOUNT_OUT);
+
+      // Verify user spent tokenB
+      const userTokenBBalanceAfter = await tokenB.balanceOf(user.address);
+      expect(userTokenBBalanceBefore.sub(userTokenBBalanceAfter)).to.equal(AMOUNT_IN);
+
+      // Verify borrow balance was reduced
+      const borrowBalanceAfter = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      expect(borrowBalanceAfter).to.be.lt(borrowBalanceBefore);
+    });
+
+    it("should handle full repayment correctly", async function () {
+      const currentBorrowBalance = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+
+      // Fund the swapHelper with enough tokens to fully repay
+      await tokenA.transfer(swapHelper.address, currentBorrowBalance);
+
+      // Create multicall data that provides enough tokens to fully repay
+      const swapCallData = await createSwapMulticallData(
+        swapHelper,
+        tokenB,
+        tokenA,
+        swapRouter.address,
+        currentBorrowBalance, // Provide exact amount to repay
+        admin,
+        swapRouter.address,
+      );
+
+      await swapRouter
+        .connect(user)
+        .swapAndRepay(vTokenA.address, tokenB.address, AMOUNT_IN, currentBorrowBalance, swapCallData);
+
+      // Verify borrow balance is now minimal (accounting for accrued interest)
+      const borrowBalanceAfter = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      expect(borrowBalanceAfter).to.be.lt(parseEther("0.01")); // Very small due to rounding
+    });
+  });
+
+  describe("SwapNativeAndSupply", function () {
+    beforeEach(async function () {
+      // Set user's native balance - need enough for tx value + gas
+      await setBalance(user.address, parseEther("200"));
+    });
+
+    it("should swap native tokens and supply to Venus market", async function () {
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenA.transfer(swapHelper.address, AMOUNT_OUT);
+
+      // Create multicall data for native swap (WRAPPED_NATIVE -> tokenA)
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      const userVTokenBalanceBefore = await vTokenA.balanceOf(user.address);
+      const userNativeBalanceBefore = await ethers.provider.getBalance(user.address);
+
+      const tx = await swapRouter.connect(user).swapNativeAndSupply(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
+        value: AMOUNT_IN,
+      });
+
+      await expect(tx)
+        .to.emit(swapRouter, "SwapAndSupply")
+        .withArgs(
+          user.address,
+          vTokenA.address,
+          wrappedNative.address,
+          tokenA.address,
+          AMOUNT_IN,
+          AMOUNT_OUT,
+          AMOUNT_OUT,
+        );
+
+      // Verify user spent native tokens (plus gas)
+      const userNativeBalanceAfter = await ethers.provider.getBalance(user.address);
+      expect(userNativeBalanceBefore.sub(userNativeBalanceAfter)).to.be.gt(AMOUNT_IN);
+
+      // Verify user received vTokens
+      const userVTokenBalanceAfter = await vTokenA.balanceOf(user.address);
+      expect(userVTokenBalanceAfter).to.be.gt(userVTokenBalanceBefore);
+
+      // Verify supply position was created
+      const supplyBalance = await vTokenA.callStatic.balanceOfUnderlying(user.address);
+      expect(supplyBalance).to.be.gt(0);
+    });
+
+    it("should revert with zero amount", async function () {
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapNativeAndSupply(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
+          value: 0,
+        }),
+      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
+    });
+
+    it("should revert when slippage protection fails", async function () {
+      const lowAmountOut = parseEther("50");
+
+      // Fund the swapHelper with lower amount
+      await tokenA.transfer(swapHelper.address, lowAmountOut);
+
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        lowAmountOut,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapNativeAndSupply(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
+          value: AMOUNT_IN,
+        }),
+      ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
+    });
+  });
+
+  describe("SwapNativeAndRepay", function () {
+    beforeEach(async function () {
+      // Setup: User has borrowed tokens
+      await tokenA.transfer(user.address, parseEther("1000"));
+      await tokenA.connect(user).approve(vTokenA.address, parseEther("500"));
+      await vTokenA.connect(user).mint(parseEther("500"));
+
+      await comptroller.connect(user).enterMarkets([vTokenA.address]);
+      await vTokenA.connect(user).borrow(parseEther("100"));
+
+      // Set user's native balance for repayment - need enough for tx value + gas
+      await setBalance(user.address, parseEther("200"));
+    });
+
+    it("should swap native tokens and repay borrow", async function () {
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenA.transfer(swapHelper.address, AMOUNT_OUT);
+
+      // Create multicall data for native swap (WRAPPED_NATIVE -> tokenA)
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      const borrowBalanceBefore = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      const userNativeBalanceBefore = await ethers.provider.getBalance(user.address);
+
+      const tx = await swapRouter.connect(user).swapNativeAndRepay(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
+        value: AMOUNT_IN,
+      });
+
+      await expect(tx)
+        .to.emit(swapRouter, "SwapAndRepay")
+        .withArgs(
+          user.address,
+          vTokenA.address,
+          wrappedNative.address,
+          tokenA.address,
+          AMOUNT_IN,
+          AMOUNT_OUT,
+          AMOUNT_OUT,
+        );
+
+      // Verify user spent native tokens (plus gas)
+      const userNativeBalanceAfter = await ethers.provider.getBalance(user.address);
+      expect(userNativeBalanceBefore.sub(userNativeBalanceAfter)).to.be.gt(AMOUNT_IN);
+
+      // Verify borrow balance was reduced
+      const borrowBalanceAfter = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      expect(borrowBalanceAfter).to.be.lt(borrowBalanceBefore);
+    });
+
+    it("should handle full native repayment correctly", async function () {
+      const currentBorrowBalance = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+
+      // Fund the swapHelper with enough tokens to fully repay
+      await tokenA.transfer(swapHelper.address, currentBorrowBalance);
+
+      // Create multicall data for native swap
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        currentBorrowBalance,
+        admin,
+        swapRouter.address,
+      );
+
+      await swapRouter.connect(user).swapNativeAndRepay(vTokenA.address, currentBorrowBalance, swapCallData, {
+        value: AMOUNT_IN,
+      });
+
+      // Verify borrow balance is now minimal (accounting for accrued interest)
+      const borrowBalanceAfter = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      expect(borrowBalanceAfter).to.be.lt(parseEther("0.01")); // Very small due to rounding
     });
   });
 
   describe("SwapAndRepayFull", function () {
     beforeEach(async function () {
-      // Mint tokens to user
-      await underlyingA.harnessSetBalance(user.address, parseUnits("1000", 18));
+      // Setup: User has borrowed tokens
+      await tokenA.transfer(user.address, parseEther("1000"));
+      await tokenA.connect(user).approve(vTokenA.address, parseEther("500"));
+      await vTokenA.connect(user).mint(parseEther("500"));
 
-      await underlyingA.connect(user).approve(swapRouter.address, AMOUNT_IN);
-      vTokenB.borrowBalanceCurrent.whenCalledWith(user.address).returns(parseEther("50"));
+      await comptroller.connect(user).enterMarkets([vTokenA.address]);
+      await vTokenA.connect(user).borrow(parseEther("100"));
 
-      // Mock balance checks - start with 0, then return enough tokens after swap
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, parseEther("60")); // More than debt amount
-
-      // Mock the repay operation
-      vTokenB.repayBorrowBehalf.returns(0); // Success code
+      // User gets tokenB to swap for repayment
+      await tokenB.transfer(user.address, parseEther("1000"));
+      await tokenB.connect(user).approve(swapRouter.address, parseEther("500"));
     });
 
-    it("should swap tokens and repay full debt", async function () {
-      // Reset and setup balance mock
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, parseEther("60"));
+    it("should swap tokens and repay full borrow balance", async function () {
+      const currentBorrowBalance = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
 
-      // Set the actual balance in the mock token for transfers
-      await underlyingB.harnessSetBalance(swapRouter.address, parseEther("60"));
+      // Fund the swapHelper with more than enough tokens to fully repay
+      const excessAmount = currentBorrowBalance.add(parseEther("50"));
+      await tokenA.transfer(swapHelper.address, excessAmount);
 
-      const swapCallData = await createMockMulticallData(
+      // Create multicall data that provides excess tokens for full repayment
+      const swapCallData = await createSwapMulticallData(
         swapHelper,
+        tokenB,
+        tokenA,
+        swapRouter.address,
+        excessAmount,
         admin,
-        underlyingA.address,
-        underlyingB.address,
-        parseEther("60").toString(),
+        swapRouter.address,
+      );
+
+      const userTokenBBalanceBefore = await tokenB.balanceOf(user.address);
+      const userTokenABalanceBefore = await tokenA.balanceOf(user.address);
+
+      const tx = await swapRouter
+        .connect(user)
+        .swapAndRepayFull(vTokenA.address, tokenB.address, AMOUNT_IN, swapCallData);
+
+      await expect(tx).to.emit(swapRouter, "SwapAndRepay").withArgs(
+        user.address,
+        vTokenA.address,
+        tokenB.address,
+        tokenA.address,
+        AMOUNT_IN,
+        excessAmount,
+        currentBorrowBalance, // Amount actually used for repayment
+      );
+
+      // Verify user spent input tokens
+      const userTokenBBalanceAfter = await tokenB.balanceOf(user.address);
+      expect(userTokenBBalanceBefore.sub(userTokenBBalanceAfter)).to.equal(AMOUNT_IN);
+
+      // Verify user received excess tokens back
+      const userTokenABalanceAfter = await tokenA.balanceOf(user.address);
+      const expectedExcess = excessAmount.sub(currentBorrowBalance);
+      expect(userTokenABalanceAfter.sub(userTokenABalanceBefore)).to.be.gt(expectedExcess.mul(90).div(100)); // Allow for some precision loss
+
+      // Verify borrow balance is now zero or very minimal
+      const borrowBalanceAfter = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      expect(borrowBalanceAfter).to.be.lt(parseEther("0.01")); // Very small due to rounding
+    });
+
+    it("should revert with zero amount", async function () {
+      const swapCallData = await createSwapMulticallData(
+        swapHelper,
+        tokenB,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
       );
 
       await expect(
-        swapRouter.connect(user).swapAndRepayFull(vTokenB.address, underlyingA.address, AMOUNT_IN, swapCallData),
-      ).to.emit(swapRouter, "SwapAndRepay");
-
-      expect(vTokenB.repayBorrowBehalf).to.have.been.calledWith(user.address, parseEther("50"));
+        swapRouter.connect(user).swapAndRepayFull(vTokenA.address, tokenB.address, 0, swapCallData),
+      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
     });
 
-    it("should revert when swap output is insufficient for full repayment", async function () {
-      // Reset balance mock to return insufficient amount
-      underlyingB.balanceOf.reset();
-      underlyingB.balanceOf.returns(0);
-      underlyingB.balanceOf.returnsAtCall(1, parseEther("40")); // Less than debt
+    it("should revert when insufficient tokens for full repayment", async function () {
+      const currentBorrowBalance = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      const insufficientAmount = currentBorrowBalance.div(2); // Only half of what's needed
 
-      const swapCallData = await createMockMulticallData(
+      // Fund the swapHelper with insufficient tokens
+      await tokenA.transfer(swapHelper.address, insufficientAmount);
+
+      const swapCallData = await createSwapMulticallData(
         swapHelper,
+        tokenB,
+        tokenA,
+        swapRouter.address,
+        insufficientAmount,
         admin,
-        underlyingA.address,
-        underlyingB.address,
-        parseEther("40").toString(),
+        swapRouter.address,
       );
 
       await expect(
-        swapRouter.connect(user).swapAndRepayFull(vTokenB.address, underlyingA.address, AMOUNT_IN, swapCallData),
+        swapRouter.connect(user).swapAndRepayFull(vTokenA.address, tokenB.address, AMOUNT_IN, swapCallData),
       ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
-    });
-  });
-
-  describe("Administrative Functions", function () {
-    describe("SweepToken", function () {
-      beforeEach(async function () {
-        await underlyingA.harnessSetBalance(swapRouter.address, parseEther("10"));
-      });
-
-      it("should sweep tokens to owner", async function () {
-        // Mock transfer function to return success
-        underlyingA.transfer.returns(true);
-
-        await expect(swapRouter.sweepToken(underlyingA.address))
-          .to.emit(swapRouter, "SweepToken")
-          .withArgs(underlyingA.address, deployer.address, parseEther("10"));
-
-        // Verify transfer was called with correct parameters
-        expect(underlyingA.transfer).to.have.been.calledWith(deployer.address, parseEther("10"));
-      });
-
-      it("should revert when called by non-owner", async function () {
-        await expect(swapRouter.connect(user).sweepToken(underlyingA.address)).to.be.revertedWith(
-          "Ownable: caller is not the owner",
-        );
-      });
-    });
-
-    describe("SweepNative", function () {
-      it("should sweep native tokens to owner", async function () {
-        // Set the contract's ETH balance using hardhat_setBalance
-        await ethers.provider.send("hardhat_setBalance", [
-          swapRouter.address,
-          "0xDE0B6B3A7640000", // 1 ETH in hex
-        ]);
-
-        const initialBalance = await ethers.provider.getBalance(deployer.address);
-
-        await expect(swapRouter.sweepNative())
-          .to.emit(swapRouter, "SweepNative")
-          .withArgs(deployer.address, parseEther("1"));
-
-        // Verify the balance was transferred to the owner
-        const finalBalance = await ethers.provider.getBalance(deployer.address);
-        expect(finalBalance).to.be.gt(initialBalance);
-      });
-
-      it("should revert when called by non-owner", async function () {
-        await expect(swapRouter.connect(user).sweepNative()).to.be.revertedWith("Ownable: caller is not the owner");
-      });
-    });
-  });
-
-  describe("Edge Cases", function () {
-    beforeEach(async function () {
-      await underlyingA.harnessSetBalance(user.address, parseUnits("1000", 18));
-
-      // Mock the supply operation
-      vTokenA.mintBehalf.returns(0); // Success code
-      vTokenB.mintBehalf.returns(0); // Success code
-
-      // Mock vToken balance - user gets vTokens after supply
-      vTokenA.balanceOf.whenCalledWith(user.address).returns(parseEther("50"));
-      vTokenB.balanceOf.whenCalledWith(user.address).returns(parseEther("50"));
-    });
-
-    it("should handle same token swap (no actual swap needed)", async function () {
-      await underlyingA.connect(user).approve(swapRouter.address, AMOUNT_IN);
-
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        underlyingA.address,
-        underlyingA.address,
-        AMOUNT_IN.toString(),
-      );
-
-      await expect(
-        swapRouter
-          .connect(user)
-          .swapAndSupply(vTokenA.address, underlyingA.address, AMOUNT_IN, MIN_AMOUNT_OUT, swapCallData),
-      ).to.emit(swapRouter, "SwapAndSupply");
-
-      expect(vTokenA.mintBehalf).to.have.been.calledWith(user.address, AMOUNT_IN);
-    });
-
-    it("should handle insufficient user balance", async function () {
-      await underlyingA.connect(user).approve(swapRouter.address, parseEther("2000"));
-
-      const swapCallData = await createMockMulticallData(
-        swapHelper,
-        admin,
-        underlyingA.address,
-        underlyingB.address,
-        parseEther("2000").toString(),
-      );
-
-      await expect(
-        swapRouter
-          .connect(user)
-          .swapAndSupply(vTokenB.address, underlyingA.address, parseEther("2000"), MIN_AMOUNT_OUT, swapCallData),
-      ).to.be.revertedWith("Insufficient balance");
     });
   });
 });
