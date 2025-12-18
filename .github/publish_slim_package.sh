@@ -1,3 +1,6 @@
+# Ensure npm 11.5.1 or later is installed
+npm install -g npm@latest
+
 cd slim
 
 # Extract to PRE_RELEASE_TAG the tag in the version field of the package json, or the empty string if it doesn't exist
