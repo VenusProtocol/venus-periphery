@@ -227,15 +227,8 @@ describe("SwapRouter Fork Tests", function () {
   if (FORK_TESTNET) {
     forking(FORK_BLOCK_NUMBER, () => {
       describe("SwapRouter Fork Tests on BSC Testnet", () => {
-        // let usdtHolder: SignerWithAddress;
-        // let btcHolder: SignerWithAddress;
-        // let userWithDebt: SignerWithAddress;
-
         beforeEach(async function () {
-          const fixture = await deploySwapRouterForkFixture();
-          // usdtHolder = fixture.usdtHolder;
-          // btcHolder = fixture.btcHolder;
-          // userWithDebt = fixture.userWithDebt;
+          await deploySwapRouterForkFixture();
         });
 
         describe("SwapAndSupply Tests", function () {

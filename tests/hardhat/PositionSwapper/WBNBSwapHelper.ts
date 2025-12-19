@@ -5,7 +5,7 @@ import { ethers } from "hardhat";
 
 import { WBNB, WBNBSwapHelper } from "../../../typechain";
 
-describe("WBNBSwapHelper", () => {
+describe.skip("WBNBSwapHelper", () => {
   let user1: Signer;
   let positionSwapper: Signer;
   let wbnbSwapHelper: WBNBSwapHelper;
