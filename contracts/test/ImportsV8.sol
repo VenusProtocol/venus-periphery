@@ -10,3 +10,4 @@ import { VBep20Harness } from "@venusprotocol/venus-protocol/contracts/test/VBep
 import { ComptrollerLens } from "@venusprotocol/venus-protocol/contracts/Lens/ComptrollerLens.sol";
 import { ChainlinkOracle } from "@venusprotocol/oracle/contracts/oracles/ChainlinkOracle.sol";
 import { BinanceOracle } from "@venusprotocol/oracle/contracts/oracles/BinanceOracle.sol";
+import { ResilientOracle } from "@venusprotocol/oracle/contracts/ResilientOracle.sol";
