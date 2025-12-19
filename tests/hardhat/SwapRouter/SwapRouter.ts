@@ -321,7 +321,7 @@ describe("SwapRouter", function () {
   const MIN_AMOUNT_OUT = parseEther("90");
 
   beforeEach(async function () {
-    [user, admin] = await ethers.getSigners();
+    [admin, user] = await ethers.getSigners();
     ({ swapRouter, comptroller, swapHelper, wrappedNative, nativeVToken, tokenA, tokenB, vTokenA, vTokenB } =
       await loadFixture(deploySwapRouterFixture));
   });
