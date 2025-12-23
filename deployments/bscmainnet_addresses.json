@@ -5,6 +5,9 @@
     "LeverageStrategiesManager": "0x03F079E809185a669Ca188676D0ADb09cbAd6dC1",
     "LeverageStrategiesManager_Implementation": "0x88F896E7667e01E0e8b27a5E39076B020318EF51",
     "LeverageStrategiesManager_Proxy": "0x03F079E809185a669Ca188676D0ADb09cbAd6dC1",
-    "SwapHelper": "0xD79be25aEe798Aa34A9Ba1230003d7499be29A24"
+    "SwapHelper": "0xD79be25aEe798Aa34A9Ba1230003d7499be29A24",
+    "SwapRouter": "0x511fa4E04d47E2D80dB9FD334359740BE022aA35",
+    "SwapRouter_Implementation": "0x9274C513C2E255586DBD74C11D60837e5bF8F502",
+    "SwapRouter_Proxy": "0x511fa4E04d47E2D80dB9FD334359740BE022aA35"
   }
 }
