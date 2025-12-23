@@ -11,6 +11,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const vBNBDeployment = await deployments.get("vBNB");
   const comptrollerDeployment = await deployments.get("Unitroller");
   const timelock = await deployments.get("NormalTimelock");
+  const swapHelper = await deployments.get("SwapHelper");
 
   // Explicitly mentioning Default Proxy Admin contract path to fetch it from hardhat-deploy instead of OpenZeppelin
   // as zksync doesnot compile OpenZeppelin contracts using zksolc. It is backward compatible for all networks as well.
@@ -18,18 +19,6 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
   );
 
-  // Step 1: Deploy SwapHelper
-  console.log(`Deploying SwapHelper on ${network.name}...`);
-  await deploy("SwapHelper", {
-    from: deployer,
-    log: true,
-    args: [wBNBAddress, deployer], // wrappedNative, backendSigner
-    skipIfAlreadyDeployed: true,
-  });
-
-  const swapHelper = await ethers.getContract("SwapHelper");
-
-  // Step 2: Deploy SwapRouter
   console.log(`Deploying SwapRouter on ${network.name}...`);
   await deploy("SwapRouter", {
     from: deployer,
@@ -51,7 +40,6 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 
   const swapRouter = await ethers.getContract("SwapRouter");
 
-  // Step 3: Transfer ownership to timelock (if not hardhat)
   if (network.name !== "hardhat") {
     if ((await swapRouter.owner()) === deployer) {
       console.log("Transferring SwapRouter ownership to Normal Timelock ....");
