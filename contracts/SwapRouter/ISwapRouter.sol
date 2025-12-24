@@ -75,6 +75,14 @@ interface ISwapRouter {
     ) external payable;
 
     /**
+     * @notice Swaps native tokens and repays the full debt for a user
+     * @param vToken The vToken market to repay full debt to
+     * @param swapCallData Array of bytes containing swap instructions
+     * @custom:event Emits SwapAndRepay event
+     */
+    function swapNativeAndRepayFull(address vToken, bytes calldata swapCallData) external payable;
+
+    /**
      * @notice Sweeps leftover ERC-20 tokens from the contract
      * @param token The token to sweep
      * @custom:event Emits SweepToken event

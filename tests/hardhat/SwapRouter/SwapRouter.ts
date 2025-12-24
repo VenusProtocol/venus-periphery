@@ -507,6 +507,101 @@ describe("SwapRouter", function () {
     });
   });
 
+  describe("SwapNativeAndSupply", function () {
+    beforeEach(async function () {
+      // Set user's native balance - need enough for tx value + gas
+      await setBalance(user.address, parseEther("200"));
+    });
+
+    it("should swap native tokens and supply to Venus market", async function () {
+      // Fund the swapHelper with output tokens to simulate swap result
+      await tokenA.transfer(swapHelper.address, AMOUNT_OUT);
+
+      // Create multicall data for native swap (WRAPPED_NATIVE -> tokenA)
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      const userVTokenBalanceBefore = await vTokenA.balanceOf(user.address);
+      const userNativeBalanceBefore = await ethers.provider.getBalance(user.address);
+
+      const tx = await swapRouter.connect(user).swapNativeAndSupply(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
+        value: AMOUNT_IN,
+      });
+
+      await expect(tx)
+        .to.emit(swapRouter, "SwapAndSupply")
+        .withArgs(
+          user.address,
+          vTokenA.address,
+          wrappedNative.address,
+          tokenA.address,
+          AMOUNT_IN,
+          AMOUNT_OUT,
+          AMOUNT_OUT,
+        );
+
+      // Verify user spent native tokens (plus gas)
+      const userNativeBalanceAfter = await ethers.provider.getBalance(user.address);
+      expect(userNativeBalanceBefore.sub(userNativeBalanceAfter)).to.be.gt(AMOUNT_IN);
+
+      // Verify user received vTokens
+      const userVTokenBalanceAfter = await vTokenA.balanceOf(user.address);
+      expect(userVTokenBalanceAfter).to.be.gt(userVTokenBalanceBefore);
+
+      // Verify supply position was created
+      const supplyBalance = await vTokenA.callStatic.balanceOfUnderlying(user.address);
+      expect(supplyBalance).to.be.gt(0);
+    });
+
+    it("should revert with zero amount", async function () {
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapNativeAndSupply(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
+          value: 0,
+        }),
+      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
+    });
+
+    it("should revert when slippage protection fails", async function () {
+      const lowAmountOut = parseEther("50");
+
+      // Fund the swapHelper with lower amount
+      await tokenA.transfer(swapHelper.address, lowAmountOut);
+
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        lowAmountOut,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapNativeAndSupply(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
+          value: AMOUNT_IN,
+        }),
+      ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
+    });
+  });
+
   describe("SwapAndRepay", function () {
     beforeEach(async function () {
       // Setup: User has borrowed tokens
@@ -639,101 +734,6 @@ describe("SwapRouter", function () {
       // Verify borrow balance is now minimal (accounting for accrued interest)
       const borrowBalanceAfter = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
       expect(borrowBalanceAfter).to.be.lt(parseEther("0.01")); // Very small due to rounding
-    });
-  });
-
-  describe("SwapNativeAndSupply", function () {
-    beforeEach(async function () {
-      // Set user's native balance - need enough for tx value + gas
-      await setBalance(user.address, parseEther("200"));
-    });
-
-    it("should swap native tokens and supply to Venus market", async function () {
-      // Fund the swapHelper with output tokens to simulate swap result
-      await tokenA.transfer(swapHelper.address, AMOUNT_OUT);
-
-      // Create multicall data for native swap (WRAPPED_NATIVE -> tokenA)
-      const swapCallData = await createNativeSwapMulticallData(
-        swapHelper,
-        wrappedNative.address,
-        tokenA,
-        swapRouter.address,
-        AMOUNT_OUT,
-        admin,
-        swapRouter.address,
-      );
-
-      const userVTokenBalanceBefore = await vTokenA.balanceOf(user.address);
-      const userNativeBalanceBefore = await ethers.provider.getBalance(user.address);
-
-      const tx = await swapRouter.connect(user).swapNativeAndSupply(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
-        value: AMOUNT_IN,
-      });
-
-      await expect(tx)
-        .to.emit(swapRouter, "SwapAndSupply")
-        .withArgs(
-          user.address,
-          vTokenA.address,
-          wrappedNative.address,
-          tokenA.address,
-          AMOUNT_IN,
-          AMOUNT_OUT,
-          AMOUNT_OUT,
-        );
-
-      // Verify user spent native tokens (plus gas)
-      const userNativeBalanceAfter = await ethers.provider.getBalance(user.address);
-      expect(userNativeBalanceBefore.sub(userNativeBalanceAfter)).to.be.gt(AMOUNT_IN);
-
-      // Verify user received vTokens
-      const userVTokenBalanceAfter = await vTokenA.balanceOf(user.address);
-      expect(userVTokenBalanceAfter).to.be.gt(userVTokenBalanceBefore);
-
-      // Verify supply position was created
-      const supplyBalance = await vTokenA.callStatic.balanceOfUnderlying(user.address);
-      expect(supplyBalance).to.be.gt(0);
-    });
-
-    it("should revert with zero amount", async function () {
-      const swapCallData = await createNativeSwapMulticallData(
-        swapHelper,
-        wrappedNative.address,
-        tokenA,
-        swapRouter.address,
-        AMOUNT_OUT,
-        admin,
-        swapRouter.address,
-      );
-
-      await expect(
-        swapRouter.connect(user).swapNativeAndSupply(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
-          value: 0,
-        }),
-      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
-    });
-
-    it("should revert when slippage protection fails", async function () {
-      const lowAmountOut = parseEther("50");
-
-      // Fund the swapHelper with lower amount
-      await tokenA.transfer(swapHelper.address, lowAmountOut);
-
-      const swapCallData = await createNativeSwapMulticallData(
-        swapHelper,
-        wrappedNative.address,
-        tokenA,
-        swapRouter.address,
-        lowAmountOut,
-        admin,
-        swapRouter.address,
-      );
-
-      await expect(
-        swapRouter.connect(user).swapNativeAndSupply(vTokenA.address, MIN_AMOUNT_OUT, swapCallData, {
-          value: AMOUNT_IN,
-        }),
-      ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
     });
   });
 
@@ -921,6 +921,134 @@ describe("SwapRouter", function () {
       await expect(
         swapRouter.connect(user).swapAndRepayFull(vTokenA.address, tokenB.address, AMOUNT_IN, swapCallData),
       ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
+    });
+  });
+
+  describe("SwapNativeAndRepayFull", function () {
+    beforeEach(async function () {
+      // Setup: User has borrowed tokens
+      await tokenA.transfer(user.address, parseEther("1000"));
+      await tokenA.connect(user).approve(vTokenA.address, parseEther("500"));
+      await vTokenA.connect(user).mint(parseEther("500"));
+
+      await comptroller.connect(user).enterMarkets([vTokenA.address]);
+      await vTokenA.connect(user).borrow(parseEther("100"));
+
+      // Set user's native balance for repayment - need enough for tx value + gas
+      await setBalance(user.address, parseEther("200"));
+    });
+
+    it("should swap native tokens and repay full borrow balance", async function () {
+      const currentBorrowBalance = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+
+      // Fund the swapHelper with more than enough tokens to fully repay
+      const excessAmount = currentBorrowBalance.add(parseEther("50"));
+      await tokenA.transfer(swapHelper.address, excessAmount);
+
+      // Create multicall data for native swap (WRAPPED_NATIVE -> tokenA)
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        excessAmount,
+        admin,
+        swapRouter.address,
+      );
+
+      const userNativeBalanceBefore = await ethers.provider.getBalance(user.address);
+      const userTokenABalanceBefore = await tokenA.balanceOf(user.address);
+
+      const tx = await swapRouter.connect(user).swapNativeAndRepayFull(vTokenA.address, swapCallData, {
+        value: AMOUNT_IN,
+      });
+
+      await expect(tx).to.emit(swapRouter, "SwapAndRepay").withArgs(
+        user.address,
+        vTokenA.address,
+        wrappedNative.address,
+        tokenA.address,
+        AMOUNT_IN,
+        excessAmount,
+        currentBorrowBalance, // Amount actually used for repayment
+      );
+
+      // Verify user spent native tokens (plus gas)
+      const userNativeBalanceAfter = await ethers.provider.getBalance(user.address);
+      expect(userNativeBalanceBefore.sub(userNativeBalanceAfter)).to.be.gt(AMOUNT_IN);
+
+      // Verify user received excess tokens back
+      const userTokenABalanceAfter = await tokenA.balanceOf(user.address);
+      const expectedExcess = excessAmount.sub(currentBorrowBalance);
+      expect(userTokenABalanceAfter.sub(userTokenABalanceBefore)).to.be.gt(expectedExcess.mul(90).div(100)); // Allow for some precision loss
+
+      // Verify borrow balance is now zero or very minimal
+      const borrowBalanceAfter = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      expect(borrowBalanceAfter).to.be.lt(parseEther("0.01")); // Very small due to rounding
+    });
+
+    it("should revert with zero amount", async function () {
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapNativeAndRepayFull(vTokenA.address, swapCallData, { value: 0 }),
+      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
+    });
+
+    it("should revert when insufficient tokens for full repayment", async function () {
+      const currentBorrowBalance = await vTokenA.callStatic.borrowBalanceCurrent(user.address);
+      const insufficientAmount = currentBorrowBalance.div(2); // Only half of what's needed
+
+      // Fund the swapHelper with insufficient tokens
+      await tokenA.transfer(swapHelper.address, insufficientAmount);
+
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        insufficientAmount,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(user).swapNativeAndRepayFull(vTokenA.address, swapCallData, {
+          value: AMOUNT_IN,
+        }),
+      ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
+    });
+
+    it("should revert when user has no debt", async function () {
+      // Create a new user with no debt
+      const [, , , newUser] = await ethers.getSigners();
+
+      // Set new user's native balance
+      await setBalance(newUser.address, parseEther("200"));
+
+      const swapCallData = await createNativeSwapMulticallData(
+        swapHelper,
+        wrappedNative.address,
+        tokenA,
+        swapRouter.address,
+        AMOUNT_OUT,
+        admin,
+        swapRouter.address,
+      );
+
+      await expect(
+        swapRouter.connect(newUser).swapNativeAndRepayFull(vTokenA.address, swapCallData, {
+          value: AMOUNT_IN,
+        }),
+      ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
     });
   });
 });

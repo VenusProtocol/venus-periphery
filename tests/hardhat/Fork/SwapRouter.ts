@@ -206,7 +206,29 @@ describe("SwapRouter Fork Tests", function () {
           vWBNB = fixture.vWBNB;
         });
 
-        describe("SwapAndSupply Tests", function () {
+        describe("Deployment Tests", function () {
+          it("should revert wiht zero address for comptroller", async function () {
+            const SwapRouterFactory = await ethers.getContractFactory("SwapRouter");
+            await expect(
+              upgrades.deployProxy(SwapRouterFactory, [], {
+                constructorArgs: [ethers.constants.AddressZero, swapHelper.address, WBNB_ADDRESS, vWBNB_ADDRESS],
+                initializer: "initialize",
+                unsafeAllow: ["state-variable-immutable"],
+              }),
+            ).to.be.revertedWithCustomError(SwapRouterFactory, "ZeroAddress");
+          });
+
+          it("should revert wiht zero address for swap helper", async function () {
+            const SwapRouterFactory = await ethers.getContractFactory("SwapRouter");
+            await expect(
+              upgrades.deployProxy(SwapRouterFactory, [], {
+                constructorArgs: [COMPTROLLER_ADDRESS, ethers.constants.AddressZero, WBNB_ADDRESS, vWBNB_ADDRESS],
+                initializer: "initialize",
+                unsafeAllow: ["state-variable-immutable"],
+              }),
+            ).to.be.revertedWithCustomError(SwapRouterFactory, "ZeroAddress");
+          });
+
           it("should deploy SwapRouter with correct parameters", async function () {
             // Basic deployment test
             expect(swapRouter.address).to.not.equal(ethers.constants.AddressZero);
@@ -221,8 +243,10 @@ describe("SwapRouter Fork Tests", function () {
             expect(swapHelperAddr).to.equal(swapHelper.address); // Use our fresh SwapHelper
             expect(wrappedNative).to.equal(WBNB_ADDRESS);
           });
+        });
 
-          it("should swap USDT to USDC and supply to Venus market", async function () {
+        describe("SwapAndSupply Tests", function () {
+          it("swapAndSupply - should swap USDT to USDC and supply to Venus market", async function () {
             const swapAmount = parseUnits("100", 18); // 100 USDT
             const expectedOutput = parseUnits("99", 18); // ~99 USDC
             const minAmountOut = parseUnits("95", 18); // 95 USDC minimum
@@ -282,7 +306,7 @@ describe("SwapRouter Fork Tests", function () {
             expect(finalVUSDCBalance).to.be.gt(initialVUSDCBalance);
           });
 
-          it("should swap ETH to USDT and supply to Venus market", async function () {
+          it("swapAndSupply - should swap ETH to USDT and supply to Venus market", async function () {
             const swapAmount = parseEther("1"); // 1 ETH
             const expectedOutput = parseUnits("300", 18); // ~300 USDT
             const minAmountOut = parseUnits("290", 18); // 290 USDT minimum
@@ -328,7 +352,7 @@ describe("SwapRouter Fork Tests", function () {
             expect(finalVUSDTBalance).to.be.gt(initialVUSDTBalance);
           });
 
-          it("should swap native BNB to USDT and supply to Venus market", async function () {
+          it("swapNativeAndSupply - should swap native BNB to USDT and supply to Venus market", async function () {
             const swapAmount = parseEther("1"); // 1 BNB
             const expectedOutput = parseUnits("600", 18); // ~600 USDT
             const minAmountOut = parseUnits("580", 18); // 580 USDT minimum
@@ -385,7 +409,8 @@ describe("SwapRouter Fork Tests", function () {
             const borrowAmount = parseUnits("100", 18); // Borrow 100 USDC
             await vUSDC.connect(user).borrow(borrowAmount);
           });
-          it("should swap ETH to USDC and repay debt", async function () {
+
+          it("swapAndRepay - should swap ETH to USDC and repay debt", async function () {
             const swapAmount = parseEther("1"); // 1 ETH
             const expectedOutput = parseUnits("30", 18); // ~30 USDC
             const minAmountOut = parseUnits("25", 18); // 25 USDC minimum
@@ -429,7 +454,7 @@ describe("SwapRouter Fork Tests", function () {
             expect(finalDebt).to.be.lt(initialDebt);
           });
 
-          it("should swap native BNB to USDC and repay debt", async function () {
+          it("swapNativeAndRepay - should swap native BNB to USDC and repay debt", async function () {
             const swapAmount = parseEther("2"); // 2 BNB
             const expectedOutput = parseUnits("12", 18); // ~12 USDC
             const minAmountOut = parseUnits("10", 18); // 10 USDC minimum
@@ -467,6 +492,96 @@ describe("SwapRouter Fork Tests", function () {
             // Verify debt was reduced or fully repaid
             const finalDebt = await vUSDC.borrowBalanceStored(user.address);
             expect(finalDebt).to.be.lt(initialDebt);
+          });
+
+          it("swapAndRepayFull - should swap ETH and repay full USDC debt", async function () {
+            const currentDebt = await vUSDC.callStatic.borrowBalanceCurrent(user.address);
+            const swapAmount = parseEther("3"); // 3 ETH
+            const excessOutput = currentDebt.add(parseUnits("10", 18)); // More than debt
+
+            // Transfer ETH from holder to user
+            await eth.connect(ethHolder).transfer(user.address, swapAmount);
+
+            // Fund SwapHelper with excess USDC to fully repay
+            await usdc.connect(usdcHolder).transfer(swapHelper.address, excessOutput);
+
+            // User approves SwapRouter to spend ETH
+            await eth.connect(user).approve(swapRouter.address, swapAmount);
+
+            // Create multicall data
+            const swapCallData = await createRealSwapMulticallData(
+              swapHelper,
+              eth.address,
+              usdc.address,
+              swapRouter.address,
+              excessOutput,
+              user,
+              swapRouter.address,
+              root,
+            );
+
+            // Get initial balances
+            const initialETHBalance = await eth.balanceOf(user.address);
+            const initialUSDCBalance = await usdc.balanceOf(user.address);
+
+            // Execute swap and full repayment
+            await expect(
+              swapRouter.connect(user).swapAndRepayFull(vUSDC.address, eth.address, swapAmount, swapCallData),
+            ).to.not.be.reverted;
+
+            // Verify ETH was taken from user
+            const finalETHBalance = await eth.balanceOf(user.address);
+            expect(finalETHBalance).to.equal(initialETHBalance.sub(swapAmount));
+
+            // Verify excess tokens were returned to user
+            const finalUSDCBalance = await usdc.balanceOf(user.address);
+            expect(finalUSDCBalance).to.be.gt(initialUSDCBalance);
+
+            // Verify debt is fully repaid
+            const finalDebt = await vUSDC.borrowBalanceStored(user.address);
+            expect(finalDebt).to.equal(0); // Fully repaid
+          });
+
+          it("swapNativeAndRepayFull - should swap native BNB and repay full USDC debt", async function () {
+            const currentDebt = await vUSDC.callStatic.borrowBalanceCurrent(user.address);
+            const swapAmount = parseEther("5"); // 5 BNB
+            const excessOutput = currentDebt.add(parseUnits("10", 18)); // More than debt
+
+            // Fund SwapHelper with excess USDC to fully repay
+            await usdc.connect(usdcHolder).transfer(swapHelper.address, excessOutput);
+
+            // Create multicall data for native swap
+            const swapCallData = await createRealSwapMulticallData(
+              swapHelper,
+              wbnb.address,
+              usdc.address,
+              swapRouter.address,
+              excessOutput,
+              user,
+              swapRouter.address,
+              root,
+            );
+
+            // Get initial balances
+            const initialBNBBalance = await ethers.provider.getBalance(user.address);
+            const initialUSDCBalance = await usdc.balanceOf(user.address);
+
+            // Execute native swap and full repayment
+            await expect(
+              swapRouter.connect(user).swapNativeAndRepayFull(vUSDC.address, swapCallData, { value: swapAmount }),
+            ).to.not.be.reverted;
+
+            // Verify BNB was taken from user (accounting for gas)
+            const finalBNBBalance = await ethers.provider.getBalance(user.address);
+            expect(finalBNBBalance).to.be.lt(initialBNBBalance.sub(swapAmount));
+
+            // Verify excess tokens were returned to user
+            const finalUSDCBalance = await usdc.balanceOf(user.address);
+            expect(finalUSDCBalance).to.be.gt(initialUSDCBalance);
+
+            // Verify debt is fully repaid
+            const finalDebt = await vUSDC.borrowBalanceStored(user.address);
+            expect(finalDebt).to.be.equal(0); // Fully repaid
           });
         });
 
@@ -659,6 +774,54 @@ describe("SwapRouter Fork Tests", function () {
             ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
           });
 
+          it("should revert when trying to use swapNativeAndRepayFull with insufficient output", async function () {
+            // First setup debt for the user
+            const supplyAmount = parseUnits("1000", 18); // Supply 1k USDT as collateral
+            await usdt.connect(usdtHolder).transfer(user.address, supplyAmount);
+            await usdt.connect(user).approve(vUSDT.address, supplyAmount);
+            await vUSDT.connect(user).mint(supplyAmount);
+
+            // Enable USDT as collateral
+            const comptroller = await ethers.getContractAt("ComptrollerInterface", COMPTROLLER_ADDRESS);
+            await comptroller.connect(user).enterMarkets([vUSDT.address]);
+
+            // Borrow some USDC against USDT collateral
+            const borrowAmount = parseUnits("50", 18); // Borrow 50 USDC
+            await vUSDC.connect(user).borrow(borrowAmount);
+
+            const currentDebt = await vUSDC.callStatic.borrowBalanceCurrent(user.address);
+            const swapAmount = parseEther("2"); // 2 BNB
+            const insufficientOutput = currentDebt.div(2); // Only half of what's needed
+
+            // Fund SwapHelper with insufficient USDC
+            await usdc.connect(usdcHolder).transfer(swapHelper.address, insufficientOutput);
+
+            // Create multicall data for native swap
+            const swapCallData = await createRealSwapMulticallData(
+              swapHelper,
+              wbnb.address,
+              usdc.address,
+              swapRouter.address,
+              insufficientOutput,
+              user,
+              swapRouter.address,
+              root,
+            );
+
+            // Should revert because insufficient tokens for full repayment
+            await expect(
+              swapRouter.connect(user).swapNativeAndRepayFull(vUSDC.address, swapCallData, { value: swapAmount }),
+            ).to.be.revertedWithCustomError(swapRouter, "InsufficientAmountOut");
+          });
+
+          it("should revert when using swapNativeAndRepayFull with zero value", async function () {
+            const swapCallData = "0x";
+
+            await expect(
+              swapRouter.connect(user).swapNativeAndRepayFull(vUSDC.address, swapCallData, { value: 0 }),
+            ).to.be.revertedWithCustomError(swapRouter, "ZeroAmount");
+          });
+
           it("should revert when trying to supply to unlisted market", async function () {
             const swapAmount = parseUnits("100", 18);
             const invalidVToken = ethers.constants.AddressZero;
@@ -759,7 +922,7 @@ describe("SwapRouter Fork Tests", function () {
             };
 
             const calls = [sweepData];
-            const pastDeadline = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
+            const pastDeadline = 1; // Very old timestamp
             const salt = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("expired" + Math.random()));
 
             const signature = await root._signTypedData(domain, types, {

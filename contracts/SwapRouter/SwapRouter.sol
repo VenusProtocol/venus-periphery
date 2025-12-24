@@ -106,6 +106,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param _wrappedNative The address of the wrapped native token (e.g., WBNB)
      * @param _nativeVToken The address of the native vToken (e.g., vBNB)
      * @custom:oz-upgrades-unsafe-allow constructor
+     * @custom:error ZeroAddress Thrown when any address parameter is zero
      */
     constructor(IComptroller _comptroller, SwapHelper _swapHelper, IWBNB _wrappedNative, address _nativeVToken) {
         if (address(_comptroller) == address(0)) revert ZeroAddress();
@@ -131,6 +132,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
     /**
      * @notice Accepts native tokens sent to this contract
      * @dev Only allows WBNB contract to send native tokens to prevent accidental transfers
+     * @custom:error UnauthorizedNativeSender if sender is not the wrapped native token contract
      */
     receive() external payable {
         if (msg.sender != address(WRAPPED_NATIVE)) {
@@ -146,6 +148,14 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param minAmountOut The minimum amount of output tokens expected
      * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndSupply event
+     * @custom:error ZeroAmount Thrown when amountIn is zero
+     * @custom:error ZeroAddress Thrown when vToken is zero address
+     * @custom:error MarketNotListed Thrown when vToken is not listed in comptroller
+     * @custom:error InsufficientBalance Thrown when user has insufficient balance for the swap
+     * @custom:error SwapFailed Thrown when the swap operation fails
+     * @custom:error InsufficientAmountOut Thrown when received amount is less than minAmountOut
+     * @custom:error NoTokensReceived Thrown when no tokens are received from the swap
+     * @custom:error SupplyFailed Thrown when supply to Venus market fails
      */
     function swapAndSupply(
         address vToken,
@@ -177,6 +187,13 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param minAmountOut The minimum amount of output tokens expected
      * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndSupply event
+     * @custom:error ZeroAmount Thrown when msg.value is zero
+     * @custom:error ZeroAddress Thrown when vToken is zero address
+     * @custom:error MarketNotListed Thrown when vToken is not listed in comptroller
+     * @custom:error SwapFailed Thrown when the swap operation fails
+     * @custom:error InsufficientAmountOut Thrown when received amount is less than minAmountOut
+     * @custom:error NoTokensReceived Thrown when no tokens are received from the swap
+     * @custom:error SupplyFailed Thrown when supply to Venus market fails
      */
     function swapNativeAndSupply(
         address vToken,
@@ -208,6 +225,14 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param minAmountOut The minimum amount of output tokens expected
      * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndRepay event
+     * @custom:error ZeroAmount Thrown when amountIn or debtAmount is zero
+     * @custom:error ZeroAddress Thrown when vToken is zero address
+     * @custom:error MarketNotListed Thrown when vToken is not listed in comptroller
+     * @custom:error InsufficientBalance Thrown when user has insufficient balance for the swap
+     * @custom:error SwapFailed Thrown when the swap operation fails
+     * @custom:error InsufficientAmountOut Thrown when received amount is less than minAmountOut
+     * @custom:error NoTokensReceived Thrown when no tokens are received from the swap
+     * @custom:error RepayFailed Thrown when repay to Venus market fails
      */
     function swapAndRepay(
         address vToken,
@@ -243,6 +268,13 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param minAmountOut The minimum amount of output tokens expected
      * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndRepay event
+     * @custom:error ZeroAmount Thrown when msg.value or debtAmount is zero
+     * @custom:error ZeroAddress Thrown when vToken is zero address
+     * @custom:error MarketNotListed Thrown when vToken is not listed in comptroller
+     * @custom:error SwapFailed Thrown when the swap operation fails
+     * @custom:error InsufficientAmountOut Thrown when received amount is less than minAmountOut
+     * @custom:error NoTokensReceived Thrown when no tokens are received from the swap
+     * @custom:error RepayFailed Thrown when repay to Venus market fails
      */
     function swapNativeAndRepay(
         address vToken,
@@ -277,6 +309,14 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
      * @param maxAmountIn The maximum amount of input tokens to use
      * @param swapCallData Array of bytes containing swap instructions
      * @custom:event Emits SwapAndRepay event
+     * @custom:error ZeroAmount Thrown when maxAmountIn or debtAmount is zero
+     * @custom:error ZeroAddress Thrown when vToken is zero address
+     * @custom:error MarketNotListed Thrown when vToken is not listed in comptroller
+     * @custom:error InsufficientBalance Thrown when user has insufficient balance for the swap
+     * @custom:error SwapFailed Thrown when the swap operation fails
+     * @custom:error InsufficientAmountOut Thrown when received amount is less than debt amount
+     * @custom:error NoTokensReceived Thrown when no tokens are received from the swap
+     * @custom:error RepayFailed Thrown when repay to Venus market fails
      */
     function swapAndRepayFull(
         address vToken,
@@ -309,7 +349,46 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
+     * @notice Swaps native tokens and repays the full debt for a user
+     * @param vToken The vToken market to repay full debt to
+     * @param swapCallData Array of bytes containing swap instructions
+     * @custom:event Emits SwapAndRepay event
+     * @custom:error ZeroAmount Thrown when msg.value or debtAmount is zero
+     * @custom:error ZeroAddress Thrown when vToken is zero address
+     * @custom:error MarketNotListed Thrown when vToken is not listed in comptroller
+     * @custom:error SwapFailed Thrown when the swap operation fails
+     * @custom:error InsufficientAmountOut Thrown when received amount is less than debt amount
+     * @custom:error NoTokensReceived Thrown when no tokens are received from the swap
+     * @custom:error RepayFailed Thrown when repay to Venus market fails
+     */
+    function swapNativeAndRepayFull(address vToken, bytes calldata swapCallData) external payable nonReentrant {
+        if (msg.value == 0) revert ZeroAmount();
+        _validateVToken(vToken);
+
+        // Get user's current debt
+        uint256 debtAmount = IVToken(vToken).borrowBalanceCurrent(msg.sender);
+        if (debtAmount == 0) revert ZeroAmount();
+
+        address tokenOut = _getUnderlyingToken(vToken);
+
+        // Wrap native tokens
+        WRAPPED_NATIVE.deposit{ value: msg.value }();
+
+        // Perform swap - no minAmountOut since we need exact debt amount
+        uint256 amountOut = _performSwap(address(WRAPPED_NATIVE), tokenOut, msg.value, 0, swapCallData);
+
+        // Ensure we have enough to cover debt
+        if (amountOut < debtAmount) revert InsufficientAmountOut(amountOut, debtAmount);
+
+        // Repay full debt
+        uint256 amountRepaid = _repay(vToken, tokenOut, amountOut);
+
+        emit SwapAndRepay(msg.sender, vToken, address(WRAPPED_NATIVE), tokenOut, msg.value, amountOut, amountRepaid);
+    }
+
+    /**
      * @notice Sweeps leftover ERC-20 tokens from the contract
+     * @dev Only callable by the owner
      * @param token The token to sweep
      * @custom:event Emits SweepToken event
      */
@@ -323,6 +402,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
 
     /**
      * @notice Sweeps leftover native tokens from the contract
+     * @dev Only callable by the owner
      * @custom:event Emits SweepNative event
      */
     function sweepNative() external onlyOwner {
