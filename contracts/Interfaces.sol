@@ -33,6 +33,8 @@ interface IVToken is IERC20Upgradeable {
 }
 
 interface IVBNB is IVToken {
+    function mint() external payable;
+
     function repayBorrowBehalf(address borrower) external payable;
 
     function liquidateBorrow(address borrower, IVToken vTokenCollateral) external payable;
