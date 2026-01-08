@@ -34,23 +34,19 @@ library FullMath {
             twos := add(div(sub(0, twos), twos), 1)
         }
 
-        // Shift in bits from prod1 into prod0. This multiplication is expected to wrap.
         unchecked {
             prod0 |= prod1 * twos;
         }
 
-        // Invert denominator mod 2^256 using Newton-Raphson iteration.
-        // These multiplications are part of modular arithmetic and are expected to wrap.
         unchecked {
             uint256 inverse = (3 * denominator) ^ 2;
-            inverse *= 2 - denominator * inverse; // inverse mod 2^8
-            inverse *= 2 - denominator * inverse; // inverse mod 2^16
-            inverse *= 2 - denominator * inverse; // inverse mod 2^32
-            inverse *= 2 - denominator * inverse; // inverse mod 2^64
-            inverse *= 2 - denominator * inverse; // inverse mod 2^128
-            inverse *= 2 - denominator * inverse; // inverse mod 2^256
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
 
-            // Multiply by the modular inverse of denominator. This is expected to wrap.
             result = prod0 * inverse;
         }
         return result;
