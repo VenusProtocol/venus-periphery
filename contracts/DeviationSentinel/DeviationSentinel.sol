@@ -135,6 +135,7 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param corePoolComptroller_ Address of the core pool comptroller
     /// @param resilientOracle_ Address of the resilient oracle
     /// @param sentinelOracle_ Address of the sentinel oracle
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(
         ICorePoolComptroller corePoolComptroller_,
         ResilientOracleInterface resilientOracle_,

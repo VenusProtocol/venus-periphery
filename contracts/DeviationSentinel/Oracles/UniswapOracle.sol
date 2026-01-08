@@ -40,6 +40,7 @@ contract UniswapOracle is AccessControlledV8 {
 
     /// @notice Constructor for UniswapPriceOracle
     /// @param resilientOracle_ Address of the resilient oracle
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ResilientOracleInterface resilientOracle_) {
         RESILIENT_ORACLE = resilientOracle_;
 

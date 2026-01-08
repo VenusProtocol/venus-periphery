@@ -40,6 +40,7 @@ contract PancakeSwapOracle is AccessControlledV8 {
 
     /// @notice Constructor for PancakeSwapPriceOracle
     /// @param resilientOracle_ Address of the resilient oracle
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ResilientOracleInterface resilientOracle_) {
         RESILIENT_ORACLE = resilientOracle_;
 
