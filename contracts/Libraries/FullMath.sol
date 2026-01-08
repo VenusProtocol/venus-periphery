@@ -11,14 +11,14 @@ library FullMath {
         }
 
         if (prod1 == 0) {
-            require(denominator > 0);
+            require(denominator > 0, "FullMath: denominator is zero");
             assembly {
                 result := div(prod0, denominator)
             }
             return result;
         }
 
-        require(denominator > prod1);
+        require(denominator > prod1, "FullMath: result overflows uint256");
 
         uint256 remainder;
         assembly {
