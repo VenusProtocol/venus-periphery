@@ -226,7 +226,9 @@ contract DeviationSentinel is AccessControlledV8 {
 
         // Clear pool-specific data for core pool
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
-            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+            uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
+            uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
+            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
                 delete state.poolCFs[i];
                 delete state.poolLTs[i];
             }
@@ -391,7 +393,9 @@ contract DeviationSentinel is AccessControlledV8 {
 
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
             // Store original CF and LT for each emode group, then set to 0
-            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+            uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
+            uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
+            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
                 (
                     bool isListed,
                     uint256 collateralFactorMantissa, // isVenus
@@ -444,7 +448,9 @@ contract DeviationSentinel is AccessControlledV8 {
         // Check if this is a core pool or isolated pool
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
             // Core pool - restore original CF and LT for each emode group
-            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+            uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
+            uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
+            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
                 (bool isListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
                 if (isListed) {
                     uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(
