@@ -107,14 +107,14 @@ contract UniswapOracle is AccessControlledV8 {
 
         uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
 
-        uint256 targetTokensPerReferenceToken;
-
+        // Directly calculate target token price from reference price and pool price ratio
+        // Avoids intermediate calculations that could overflow or round to zero
         if (targetIsToken0) {
-            targetTokensPerReferenceToken = FullMath.mulDiv(FixedPoint96.Q96 * (10 ** 18), 1, priceX96);
+            // token0/token1 = 1/priceX96, so targetPrice = referencePrice * Q96 / priceX96
+            price = FullMath.mulDiv(referencePrice, FixedPoint96.Q96, priceX96);
         } else {
-            targetTokensPerReferenceToken = FullMath.mulDiv(priceX96 * (10 ** 18), 1, FixedPoint96.Q96);
+            // token1/token0 = priceX96, so targetPrice = referencePrice * priceX96 / Q96
+            price = FullMath.mulDiv(referencePrice, priceX96, FixedPoint96.Q96);
         }
-
-        price = FullMath.mulDiv(referencePrice, (10 ** 18), targetTokensPerReferenceToken);
     }
 }
