@@ -109,9 +109,9 @@ contract PancakeSwapOracle is AccessControlledV8 {
         uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
 
         if (targetIsToken0) {
-            price = FullMath.mulDiv(referencePrice, FixedPoint96.Q96, priceX96);
-        } else {
             price = FullMath.mulDiv(referencePrice, priceX96, FixedPoint96.Q96);
+        } else {
+            price = FullMath.mulDiv(referencePrice, FixedPoint96.Q96, priceX96);
         }
     }
 }
