@@ -16,6 +16,10 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  * @notice Sentinel that compares ResilientOracle and SentinelOracle prices (via keeper) and pauses
  *         specific actions (borrow, mint, collateral factor) per market when
  *         large deviations are detected.
+ * @dev IMPORTANT: When creating VIPs to update collateral factor (CF) or mint/supply pause state for markets
+ *      monitored by this contract, ALWAYS call resetMarketState() BEFORE applying the parameter changes.
+ *      This prevents race conditions where the DeviationSentinel might store outdated values and later
+ *      restore them incorrectly, overwriting the VIP's intended changes.
  */
 contract DeviationSentinel is AccessControlledV8 {
     /// @notice Configuration for price deviation monitoring
