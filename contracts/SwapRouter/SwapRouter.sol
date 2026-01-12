@@ -323,7 +323,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         address tokenIn,
         uint256 maxAmountIn,
         bytes calldata swapCallData
-    ) external payable nonReentrant {
+    ) external nonReentrant {
         if (maxAmountIn == 0) revert ZeroAmount();
         _validateVToken(vToken);
 
