@@ -524,13 +524,17 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         if (vToken == address(NATIVE_VTOKEN)) {
             // Handle native token supply
             IWBNB(underlyingToken).withdraw(amount);
+
+            uint256 vTokenBalanceBefore = IERC20Upgradeable(vToken).balanceOf(address(this));
             NATIVE_VTOKEN.mint{ value: amount }();
+            uint256 vTokenBalanceAfter = IERC20Upgradeable(vToken).balanceOf(address(this));
+
+            uint256 mintedAmount = vTokenBalanceAfter - vTokenBalanceBefore;
             amountSupplied = amount;
 
-            // Transfer vBNB tokens to user (only needed for NATIVE_VTOKEN since it doesn't support mintBehalf)
-            uint256 vTokenBalance = IERC20Upgradeable(vToken).balanceOf(address(this));
-            if (vTokenBalance > 0) {
-                IERC20Upgradeable(vToken).safeTransfer(msg.sender, vTokenBalance);
+            // Transfer only the newly minted vBNB tokens to user (only needed for NATIVE_VTOKEN since it doesn't support mintBehalf)
+            if (mintedAmount > 0) {
+                IERC20Upgradeable(vToken).safeTransfer(msg.sender, mintedAmount);
             }
         } else {
             // Handle ERC20 token supply
