@@ -93,7 +93,7 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   await comptroller._setMarketBorrowCaps([vWBNB.address], [parseEther("100")]);
 
   const undertakerFactory = await ethers.getContractFactory("Undertaker");
-  const undertaker = (await undertakerFactory.deploy()) as Undertaker;
+  const undertaker = (await undertakerFactory.deploy(comptroller.address)) as Undertaker;
 
   return {
     comptroller,
