@@ -488,6 +488,13 @@ contract DeviationSentinel is AccessControlledV8 {
             }
         } else {
             // Isolated pool
+            IILComptroller.Market memory marketData = IILComptroller(address(comptroller)).markets(address(market));
+
+            // Check if market is still listed before restoring
+            if (!marketData.isListed) {
+                return;
+            }
+
             uint256 originalCF = state.poolCFs[0];
             uint256 originalLT = state.poolLTs[0];
 
