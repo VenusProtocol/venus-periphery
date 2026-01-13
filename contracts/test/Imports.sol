@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.25;
 
+import { IAccessControlManagerV8 } from "@venusprotocol/governance-contracts/contracts/Governance/IAccessControlManagerV8.sol";
 import { ComptrollerMock } from "@venusprotocol/venus-protocol/contracts/test/ComptrollerMock.sol";
 import { VBNB } from "@venusprotocol/venus-protocol/contracts/Tokens/VTokens/VBNB.sol";
 import { Diamond } from "@venusprotocol/venus-protocol/contracts/Comptroller/Diamond/Diamond.sol";
