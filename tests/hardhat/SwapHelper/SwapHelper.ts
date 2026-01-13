@@ -690,7 +690,7 @@ describe("SwapHelper", () => {
         const callData = mockTarget.interface.encodeFunctionData("setValue", [42]);
 
         await expect(swapHelper.connect(owner).genericCall(userAddress, callData)).to.be.revertedWith(
-          "Address: low-level call failed",
+          "Address: call to non-contract",
         );
       });
 
