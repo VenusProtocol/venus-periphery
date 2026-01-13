@@ -579,7 +579,7 @@ describe("positionSwapper", () => {
       });
 
       await freshPositionSwapper.transferOwnership(receiverWallet.address);
-      await admin.sendTransaction({ to: receiverWallet.address, value: parseEther("1") });
+      await admin.sendTransaction({ to: receiverWallet.address, value: parseEther("1800") });
       await freshPositionSwapper.connect(receiverWallet).acceptOwnership();
 
       // explicitly setting balance becuase only authorized senders could send native to position swapper
