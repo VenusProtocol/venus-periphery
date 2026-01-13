@@ -35,9 +35,6 @@ contract UniswapOracle is AccessControlledV8 {
     /// @notice Thrown when token is not configured
     error TokenNotConfigured();
 
-    /// @notice Thrown when price calculation fails
-    error PriceCalculationError();
-
     /// @notice Constructor for UniswapPriceOracle
     /// @param resilientOracle_ Address of the resilient oracle
     /// @custom:oz-upgrades-unsafe-allow constructor
