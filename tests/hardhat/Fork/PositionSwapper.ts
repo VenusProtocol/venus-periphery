@@ -1,6 +1,6 @@
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
-import { constants, Signer } from "ethers";
+import { Signer, constants } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, network, upgrades } from "hardhat";
 
@@ -275,9 +275,8 @@ if (FORK_MAINNET) {
       });
 
       beforeEach(async function () {
-        ({ positionSwapper, comptroller, vBNB, vWBNB, vUSDC, vETH, swapHelper, WBNB, USDC } = await loadFixture(
-          setupMarketFixture,
-        ));
+        ({ positionSwapper, comptroller, vBNB, vWBNB, vUSDC, vETH, swapHelper, WBNB, USDC } =
+          await loadFixture(setupMarketFixture));
         await comptroller.setWhiteListFlashLoanAccount(positionSwapper.address, true);
       });
 
@@ -359,7 +358,14 @@ if (FORK_MAINNET) {
           // Swap Collateral
           const tx = await positionSwapper
             .connect(vWBNB_HOLDER_SIGNER)
-            .swapCollateral(vWBNB_HOLDER, vWBNB_ADDRESS, vUSDC_ADDRESS, constants.MaxUint256, minCollateralToSupply, multicallData);
+            .swapCollateral(
+              vWBNB_HOLDER,
+              vWBNB_ADDRESS,
+              vUSDC_ADDRESS,
+              constants.MaxUint256,
+              minCollateralToSupply,
+              multicallData,
+            );
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
           const tolerance = parseUnits("0.0000001", 18);
@@ -467,14 +473,7 @@ if (FORK_MAINNET) {
 
           const tx = await positionSwapper
             .connect(vETH_BORROWER_SIGNER)
-            .swapDebt(
-              vETH_BORROWER,
-              vETH_ADDRESS,
-              vUSDC_ADDRESS,
-              initialETHBorrow,
-              maxBorrowToOpen,
-              multicallData,
-            );
+            .swapDebt(vETH_BORROWER, vETH_ADDRESS, vUSDC_ADDRESS, initialETHBorrow, maxBorrowToOpen, multicallData);
           const receipt = await tx.wait();
           expect(receipt.status).to.equal(1);
 
@@ -610,14 +609,7 @@ if (FORK_MAINNET) {
           await expect(
             positionSwapper
               .connect(user1)
-              .swapCollateral(
-                user1Address,
-                vWBNB_ADDRESS,
-                vUSDC_ADDRESS,
-                amountToSwap,
-                minToSupply,
-                multicallData,
-              ),
+              .swapCollateral(user1Address, vWBNB_ADDRESS, vUSDC_ADDRESS, amountToSwap, minToSupply, multicallData),
           ).to.be.revertedWith("math error"); // reverts early during redeem
         });
 

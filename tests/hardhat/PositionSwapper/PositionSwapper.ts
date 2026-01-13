@@ -215,9 +215,8 @@ describe("positionSwapper", () => {
 
   beforeEach(async () => {
     [admin, user1] = await ethers.getSigners();
-    ({ comptroller, vBNB, WBNB, vWBNB, positionSwapper, swapHelper, vUSDT, USDT, vBUSD, BUSD } = await loadFixture(
-      setupMarketFixture,
-    ));
+    ({ comptroller, vBNB, WBNB, vWBNB, positionSwapper, swapHelper, vUSDT, USDT, vBUSD, BUSD } =
+      await loadFixture(setupMarketFixture));
     await comptroller.connect(user1).updateDelegate(positionSwapper.address, true);
     await vBNB.connect(user1).mint({ value: parseEther("5") });
     await vUSDT.mint(parseUnits("20", 18));
