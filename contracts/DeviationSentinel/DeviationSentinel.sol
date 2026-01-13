@@ -455,20 +455,33 @@ contract DeviationSentinel is AccessControlledV8 {
             uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
             uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
             for (uint96 i = corePoolId; i <= lastPoolId; i++) {
-                (bool isListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+                (
+                    bool isListed,
+                    uint256 currentCF, // isVenus
+                    ,
+                    uint256 currentLT, // liquidationIncentiveMantissa // marketPoolId // isBorrowAllowed
+                    ,
+                    ,
+
+                ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+
                 if (isListed) {
-                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(
-                        i,
-                        address(market),
-                        state.poolCFs[i],
-                        state.poolLTs[i]
-                    );
+                    uint256 storedCF = state.poolCFs[i];
+                    uint256 storedLT = state.poolLTs[i];
+
+                    if (storedCF == 0 && currentCF != 0) {
+                        continue;
+                    }
+
+                    if (storedLT == 0) {
+                        continue;
+                    }
+
+                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(i, address(market), storedCF, storedLT);
                     if (result != 0) revert ComptrollerError(result);
 
-                    // Emit event for each pool ID
-                    emit CollateralFactorUpdated(address(market), i, 0, state.poolCFs[i]);
+                    emit CollateralFactorUpdated(address(market), i, 0, storedCF);
 
-                    // Clear stored values
                     delete state.poolCFs[i];
                     delete state.poolLTs[i];
                 }
@@ -477,6 +490,11 @@ contract DeviationSentinel is AccessControlledV8 {
             // Isolated pool
             uint256 originalCF = state.poolCFs[0];
             uint256 originalLT = state.poolLTs[0];
+
+            if (originalLT == 0) {
+                return;
+            }
+
             IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
             emit CollateralFactorUpdated(address(market), 0, 0, originalCF);
             delete state.poolCFs[0];
