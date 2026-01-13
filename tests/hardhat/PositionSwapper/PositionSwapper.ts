@@ -290,7 +290,7 @@ describe("positionSwapper", () => {
       const borrower = ethers.Wallet.createRandom().connect(ethers.provider);
       const borrowerAddress = borrower.address;
 
-      await admin.sendTransaction({ to: borrowerAddress, value: parseEther("1") });
+      await admin.sendTransaction({ to: borrowerAddress, value: parseEther("1800") }); // needed extra on CI
       await vBNB.mint({ value: parseEther("10") });
       await vUSDT.mintBehalf(borrowerAddress, parseEther("15"));
       await comptroller.connect(borrower).enterMarkets([vUSDT.address]);
@@ -582,9 +582,10 @@ describe("positionSwapper", () => {
       await admin.sendTransaction({ to: receiverWallet.address, value: parseEther("1") });
       await freshPositionSwapper.connect(receiverWallet).acceptOwnership();
 
+      // explicitly setting balance becuase only authorized senders could send native to position swapper
       await ethers.provider.send("hardhat_setBalance", [
         freshPositionSwapper.address,
-        "0xDE0B6B3A7640000", // 1 ETH
+        "0x6194049f30f7200000", // 1800 ETH
       ]);
 
       const [, nonOwner] = await ethers.getSigners();
