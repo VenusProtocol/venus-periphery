@@ -48,6 +48,6 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 };
 
 func.tags = ["PositionSwapper"];
-// func.skip = async hre => hre.network.name === "hardhat";
+func.skip = async hre => hre.network.name === "hardhat";
 
 export default func;
