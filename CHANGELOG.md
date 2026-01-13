@@ -1,3 +1,10 @@
+## <small>1.1.1-dev.1 (2026-01-13)</small>
+
+* Merge pull request #34 from VenusProtocol/swaphelper-coverage-improvements ([1c4b0ed](https://github.com/VenusProtocol/venus-periphery/commit/1c4b0ed)), closes [#34](https://github.com/VenusProtocol/venus-periphery/issues/34)
+* Merge pull request #40 from VenusProtocol/main ([67c3379](https://github.com/VenusProtocol/venus-periphery/commit/67c3379)), closes [#40](https://github.com/VenusProtocol/venus-periphery/issues/40)
+* fix: update error message in SwapHelper test for clarity ([b142bf5](https://github.com/VenusProtocol/venus-periphery/commit/b142bf5))
+* test: improve code coverage of SwapHelper ([d0cff75](https://github.com/VenusProtocol/venus-periphery/commit/d0cff75))
+
 ## 1.1.0 (2025-12-18)
 
 * fixup! feat: SwapHelper & LeverageStrategiesManager audits ([eda400f](https://github.com/VenusProtocol/venus-periphery/commit/eda400f))
