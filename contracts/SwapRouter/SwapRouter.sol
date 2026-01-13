@@ -336,11 +336,8 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         // Handle input token transfer
         uint256 actualAmountIn = _handleTokenInput(tokenIn, maxAmountIn);
 
-        // Perform swap - no minAmountOut since we need exact debt amount
-        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, 0, swapCallData);
-
-        // Ensure we have enough to cover debt
-        if (amountOut < debtAmount) revert InsufficientAmountOut(amountOut, debtAmount);
+        // Perform swap
+        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, debtAmount, swapCallData);
 
         // Repay full debt
         uint256 amountRepaid = _repay(vToken, tokenOut, amountOut);
@@ -374,11 +371,8 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         // Wrap native tokens
         WRAPPED_NATIVE.deposit{ value: msg.value }();
 
-        // Perform swap - no minAmountOut since we need exact debt amount
-        uint256 amountOut = _performSwap(address(WRAPPED_NATIVE), tokenOut, msg.value, 0, swapCallData);
-
-        // Ensure we have enough to cover debt
-        if (amountOut < debtAmount) revert InsufficientAmountOut(amountOut, debtAmount);
+        // Perform swap
+        uint256 amountOut = _performSwap(address(WRAPPED_NATIVE), tokenOut, msg.value, debtAmount, swapCallData);
 
         // Repay full debt
         uint256 amountRepaid = _repay(vToken, tokenOut, amountOut);
