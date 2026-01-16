@@ -466,17 +466,22 @@ contract DeviationSentinel is AccessControlledV8 {
                 ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
 
                 if (isListed) {
+                    // Retrieve stored original CF and LT
                     uint256 storedCF = state.poolCFs[i];
                     uint256 storedLT = state.poolLTs[i];
 
+                    // - If storedCF is 0 and currentCF != 0, this pool was added after _setCollateralFactorToZero,
+                    //   so we skip restoring to avoid overwriting new pool config with zero values.
+                    // - If storedLT is 0, skip restoration to prevent setting LT=0, which could cause immediate liquidation risk.
+                    //   This also protects against uninitialized storage for new pools.
                     if (storedCF == 0 && currentCF != 0) {
                         continue;
                     }
-
                     if (storedLT == 0) {
                         continue;
                     }
 
+                    // If stored value is 0 and current CF is also 0, it might be the original value, allow restoration.
                     uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(i, address(market), storedCF, storedLT);
                     if (result != 0) revert ComptrollerError(result);
 
