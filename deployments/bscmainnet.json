@@ -2146,7 +2146,7 @@
       ]
     },
     "SwapRouter": {
-      "address": "0x511fa4E04d47E2D80dB9FD334359740BE022aA35",
+      "address": "0xde7E4f67Af577F29e5F3B995f9e67FD425F73621",
       "abi": [
         {
           "anonymous": false,
@@ -2711,7 +2711,7 @@
           ],
           "name": "swapAndRepayFull",
           "outputs": [],
-          "stateMutability": "payable",
+          "stateMutability": "nonpayable",
           "type": "function"
         },
         {
@@ -2766,6 +2766,24 @@
             }
           ],
           "name": "swapNativeAndRepay",
+          "outputs": [],
+          "stateMutability": "payable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "vToken",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes",
+              "name": "swapCallData",
+              "type": "bytes"
+            }
+          ],
+          "name": "swapNativeAndRepayFull",
           "outputs": [],
           "stateMutability": "payable",
           "type": "function"
@@ -2850,7 +2868,7 @@
       ]
     },
     "SwapRouter_Implementation": {
-      "address": "0x9274C513C2E255586DBD74C11D60837e5bF8F502",
+      "address": "0xf0B661b6694940Ad4cE583449b71733D4D44C2F1",
       "abi": [
         {
           "inputs": [
@@ -3331,7 +3349,7 @@
           ],
           "name": "swapAndRepayFull",
           "outputs": [],
-          "stateMutability": "payable",
+          "stateMutability": "nonpayable",
           "type": "function"
         },
         {
@@ -3386,6 +3404,24 @@
             }
           ],
           "name": "swapNativeAndRepay",
+          "outputs": [],
+          "stateMutability": "payable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "vToken",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes",
+              "name": "swapCallData",
+              "type": "bytes"
+            }
+          ],
+          "name": "swapNativeAndRepayFull",
           "outputs": [],
           "stateMutability": "payable",
           "type": "function"
@@ -3453,7 +3489,7 @@
       ]
     },
     "SwapRouter_Proxy": {
-      "address": "0x511fa4E04d47E2D80dB9FD334359740BE022aA35",
+      "address": "0xde7E4f67Af577F29e5F3B995f9e67FD425F73621",
       "abi": [
         {
           "inputs": [
