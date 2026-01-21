@@ -115,6 +115,9 @@ interface IPositionSwapper {
     /// @custom:error InitiatorMismatch Invalid initiator address in flash loan callback
     error InitiatorMismatch();
 
+    /// @custom:error SameMarket The source and destination markets cannot be the same
+    error SameMarket();
+
     // External functions
     /// @notice Allows the owner to sweep leftover ERC-20 tokens from the contract.
     /// @param token The token to sweep.

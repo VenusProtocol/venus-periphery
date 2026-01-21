@@ -173,6 +173,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param minAmountToSupply Minimum amount of `marketTo` underlying to supply after swap. Validates the swapped tokens received.
      * @param swapData Bytes containing swap instructions for the SwapHelper.
      *                 Swaps flashLoaned amount `marketFrom` underlying to `marketTo` underlying asset.
+     * @custom:error SameMarket If `marketFrom` and `marketTo` are the same market.
      * @custom:error ZeroAmount If `amountToSwap` is zero (and not `type(uint256).max`).
      * @custom:error InsufficientCollateralBalance If the user has no or insufficient underlying balance in `marketFrom`.
      * @custom:event Emits CollateralSwapped event on success.
@@ -185,6 +186,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 minAmountToSupply,
         bytes calldata swapData
     ) external nonReentrant {
+        if (address(marketFrom) == address(marketTo)) revert SameMarket();
         if (amountToSwap == 0) revert ZeroAmount();
         uint256 userBalance = marketFrom.balanceOfUnderlying(user);
         if (userBalance == 0) revert InsufficientCollateralBalance();
@@ -210,6 +212,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param maxDebtAmountToOpen Maximum amount of new debt to open on `marketTo`.
      * @param swapData Bytes containing swap instructions for the SwapHelper.
      *                 Swaps flashLoaned amount `marketTo` underlying to `marketFrom` underlying asset.
+     * @custom:error SameMarket If `marketFrom` and `marketTo` are the same market.
      * @custom:error ZeroAmount If `repayAmount` is zero (and not `type(uint256).max`).
      * @custom:error InsufficientBorrowBalance If the user has no or insufficient borrow balance in `marketFrom`.
      * @custom:event Emits DebtSwapped event on success.
@@ -222,6 +225,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 maxDebtAmountToOpen,
         bytes calldata swapData
     ) external nonReentrant {
+        if (address(marketFrom) == address(marketTo)) revert SameMarket();
         if (repayAmount == 0) revert ZeroAmount();
         uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
         if (borrowBalance == 0) revert InsufficientBorrowBalance();
