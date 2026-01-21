@@ -433,28 +433,21 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @notice Handles input token transfer (ERC20 or native)
+     * @notice Handles input token transfer (ERC20)
      * @param tokenIn The input token address
      * @param amountIn The amount to transfer
      * @return actualAmountIn The actual amount transferred
      */
     function _handleTokenInput(address tokenIn, uint256 amountIn) internal returns (uint256 actualAmountIn) {
-        if (tokenIn == NATIVE_TOKEN_ADDR) {
-            // Native token - should use msg.value
-            if (msg.value != amountIn) revert InsufficientBalance();
-            WRAPPED_NATIVE.deposit{ value: msg.value }();
-            return msg.value;
-        } else {
-            // ERC20 token - measure actual amount received
-            IERC20Upgradeable token = IERC20Upgradeable(tokenIn);
+        // ERC20 token - measure actual amount received
+        IERC20Upgradeable token = IERC20Upgradeable(tokenIn);
 
-            uint256 balanceBefore = token.balanceOf(address(this));
-            token.safeTransferFrom(msg.sender, address(this), amountIn);
-            uint256 balanceAfter = token.balanceOf(address(this));
+        uint256 balanceBefore = token.balanceOf(address(this));
+        token.safeTransferFrom(msg.sender, address(this), amountIn);
+        uint256 balanceAfter = token.balanceOf(address(this));
 
-            actualAmountIn = balanceAfter - balanceBefore;
-            return actualAmountIn;
-        }
+        actualAmountIn = balanceAfter - balanceBefore;
+        return actualAmountIn;
     }
 
     /**
