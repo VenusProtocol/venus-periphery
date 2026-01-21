@@ -440,12 +440,13 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param vTokens Array with the borrowed vToken market (single element)
      * @param amounts Array with the borrowed underlying amount (single element)
      * @param premiums Array with the flash loan fee amount (single element)
-     * @param /initiator The address that initiated the flash loan (unused)
+     * @param initiator The address that initiated the flash loan
      * @param onBehalf The user for whome debt will be opened
      * @param param Encoded auxiliary data for the operation (e.g., swap multicall)
      * @return success Whether the execution succeeded
      * @return repayAmounts Amounts to approve for flash loan repayment
      * @custom:error UnauthorizedExecutor When caller is not the Comptroller
+     * @custom:error InitiatorMismatch When initiator is not this contract
      * @custom:error FlashLoanAssetOrAmountMismatch When array lengths mismatch or > 1 element
      * @custom:error InvalidExecuteOperation When operation type is unknown
      */
@@ -453,13 +454,19 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         IVToken[] calldata vTokens,
         uint256[] calldata amounts,
         uint256[] calldata premiums,
-        address /* initiator */,
+        address initiator,
         address onBehalf,
         bytes calldata param
     ) external override returns (bool success, uint256[] memory repayAmounts) {
         if (msg.sender != address(COMPTROLLER)) {
             revert UnauthorizedExecutor();
         }
+
+        // Flash loan must be initiated by this contract to prevent unauthorized callbacks
+        if (initiator != address(this)) {
+            revert InitiatorMismatch();
+        }
+
         if (vTokens.length != 1 || amounts.length != 1 || premiums.length != 1) {
             revert FlashLoanAssetOrAmountMismatch();
         }

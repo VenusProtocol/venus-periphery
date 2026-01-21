@@ -112,6 +112,9 @@ interface IPositionSwapper {
     /// @custom:error Thrown when unauthorized sender tries to send native tokens
     error UnauthorizedNativeSender(address sender);
 
+    /// @custom:error InitiatorMismatch Invalid initiator address in flash loan callback
+    error InitiatorMismatch();
+
     // External functions
     /// @notice Allows the owner to sweep leftover ERC-20 tokens from the contract.
     /// @param token The token to sweep.
