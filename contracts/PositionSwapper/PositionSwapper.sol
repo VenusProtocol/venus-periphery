@@ -252,10 +252,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     }
 
     /**
-     * @notice Internal helper to swap native collateral to wrapped-native collateral via flash loan.
+     * @notice Internal helper to swap collateral FROM native market TO wrapped-native market via flash loan.
      * @param user Address of the user whose collateral is being migrated
-     * @param marketFrom Native vToken market (e.g., vBNB)
-     * @param marketTo Wrapped-native vToken market (e.g., vWBNB)
+     * @param marketFrom MUST be a native vToken market (e.g., vBNB).
+     * @param marketTo MUST be a wrapped-native vToken market (e.g., vWBNB).
      * @param collateralAmountToSwap Amount of native underlying to migrate
      * @custom:error MarketNotListed If any market is not listed in Comptroller
      * @custom:error UnauthorizedCaller If caller is neither the user nor an approved delegate
@@ -289,10 +289,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     }
 
     /**
-     * @notice Internal helper to swap native debt to wrapped-native debt via flash loan.
+     * @notice Internal helper to swap debt FROM native market TO wrapped-native market via flash loan.
      * @param user Address of the user whose debt is being migrated
-     * @param marketFrom Native vToken market (e.g., vBNB)
-     * @param marketTo Wrapped-native vToken market (e.g., vWBNB)
+     * @param marketFrom MUST be a native vToken market (e.g., vBNB).
+     * @param marketTo MUST be a wrapped-native vToken market (e.g., vWBNB).
      * @param debtRepaymentAmount Amount of native debt to repay
      * @custom:error MarketNotListed If any market is not listed in Comptroller
      * @custom:error UnauthorizedCaller If caller is neither the user nor an approved delegate
@@ -310,6 +310,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
         transientDebtRepaymentAmount = debtRepaymentAmount;
         IVToken[] memory borrowedMarkets = new IVToken[](1);
+        // The borrowed token is WRAPPED_NATIVE_MARKET, which is different from the normal generic flow
+        // where marketFrom is used. This is because the native market (marketFrom) does not support flash loans.
         borrowedMarkets[0] = WRAPPED_NATIVE_MARKET;
 
         uint256[] memory flashLoanAmounts = new uint256[](1);
