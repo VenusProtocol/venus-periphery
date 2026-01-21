@@ -723,7 +723,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param minAmountOut The minimum acceptable `tokenOut` amount, else revert
      * @param param The encoded swap instructions/calldata for the SwapHelper
      * @return amountOut The amount of output tokens received
-     * @custom:error TokenSwapCallFailed If the swap execution fails
+     * @custom:error TokenSwapCallFailed If the swap execution fails without return data
      * @custom:error InsufficientAmountOutAfterSwap If swap output is below minimum
      */
     function _performSwap(
@@ -736,9 +736,15 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         tokenIn.safeTransfer(address(SWAP_HELPER), amountIn);
         uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
 
-        (bool success, ) = address(SWAP_HELPER).call(param);
+        (bool success, bytes memory returnData) = address(SWAP_HELPER).call(param);
         if (!success) {
-            revert TokenSwapCallFailed();
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(returnData, 0x20), mload(returnData))
+                }
+            } else {
+                revert TokenSwapCallFailed();
+            }
         }
 
         amountOut = tokenOut.balanceOf(address(this)) - tokenOutBalanceBefore;
