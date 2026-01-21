@@ -323,7 +323,7 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         address tokenIn,
         uint256 maxAmountIn,
         bytes calldata swapCallData
-    ) external payable nonReentrant {
+    ) external nonReentrant {
         if (maxAmountIn == 0) revert ZeroAmount();
         _validateVToken(vToken);
 
@@ -336,11 +336,8 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         // Handle input token transfer
         uint256 actualAmountIn = _handleTokenInput(tokenIn, maxAmountIn);
 
-        // Perform swap - no minAmountOut since we need exact debt amount
-        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, 0, swapCallData);
-
-        // Ensure we have enough to cover debt
-        if (amountOut < debtAmount) revert InsufficientAmountOut(amountOut, debtAmount);
+        // Perform swap
+        uint256 amountOut = _performSwap(tokenIn, tokenOut, actualAmountIn, debtAmount, swapCallData);
 
         // Repay full debt
         uint256 amountRepaid = _repay(vToken, tokenOut, amountOut);
@@ -374,11 +371,8 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         // Wrap native tokens
         WRAPPED_NATIVE.deposit{ value: msg.value }();
 
-        // Perform swap - no minAmountOut since we need exact debt amount
-        uint256 amountOut = _performSwap(address(WRAPPED_NATIVE), tokenOut, msg.value, 0, swapCallData);
-
-        // Ensure we have enough to cover debt
-        if (amountOut < debtAmount) revert InsufficientAmountOut(amountOut, debtAmount);
+        // Perform swap
+        uint256 amountOut = _performSwap(address(WRAPPED_NATIVE), tokenOut, msg.value, debtAmount, swapCallData);
 
         // Repay full debt
         uint256 amountRepaid = _repay(vToken, tokenOut, amountOut);
@@ -439,28 +433,21 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @notice Handles input token transfer (ERC20 or native)
+     * @notice Handles input token transfer (ERC20)
      * @param tokenIn The input token address
      * @param amountIn The amount to transfer
      * @return actualAmountIn The actual amount transferred
      */
     function _handleTokenInput(address tokenIn, uint256 amountIn) internal returns (uint256 actualAmountIn) {
-        if (tokenIn == NATIVE_TOKEN_ADDR) {
-            // Native token - should use msg.value
-            if (msg.value != amountIn) revert InsufficientBalance();
-            WRAPPED_NATIVE.deposit{ value: msg.value }();
-            return msg.value;
-        } else {
-            // ERC20 token - measure actual amount received
-            IERC20Upgradeable token = IERC20Upgradeable(tokenIn);
+        // ERC20 token - measure actual amount received
+        IERC20Upgradeable token = IERC20Upgradeable(tokenIn);
 
-            uint256 balanceBefore = token.balanceOf(address(this));
-            token.safeTransferFrom(msg.sender, address(this), amountIn);
-            uint256 balanceAfter = token.balanceOf(address(this));
+        uint256 balanceBefore = token.balanceOf(address(this));
+        token.safeTransferFrom(msg.sender, address(this), amountIn);
+        uint256 balanceAfter = token.balanceOf(address(this));
 
-            actualAmountIn = balanceAfter - balanceBefore;
-            return actualAmountIn;
-        }
+        actualAmountIn = balanceAfter - balanceBefore;
+        return actualAmountIn;
     }
 
     /**
@@ -524,13 +511,17 @@ contract SwapRouter is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
         if (vToken == address(NATIVE_VTOKEN)) {
             // Handle native token supply
             IWBNB(underlyingToken).withdraw(amount);
+
+            uint256 vTokenBalanceBefore = IERC20Upgradeable(vToken).balanceOf(address(this));
             NATIVE_VTOKEN.mint{ value: amount }();
+            uint256 vTokenBalanceAfter = IERC20Upgradeable(vToken).balanceOf(address(this));
+
+            uint256 mintedAmount = vTokenBalanceAfter - vTokenBalanceBefore;
             amountSupplied = amount;
 
-            // Transfer vBNB tokens to user (only needed for NATIVE_VTOKEN since it doesn't support mintBehalf)
-            uint256 vTokenBalance = IERC20Upgradeable(vToken).balanceOf(address(this));
-            if (vTokenBalance > 0) {
-                IERC20Upgradeable(vToken).safeTransfer(msg.sender, vTokenBalance);
+            // Transfer only the newly minted vBNB tokens to user (only needed for NATIVE_VTOKEN since it doesn't support mintBehalf)
+            if (mintedAmount > 0) {
+                IERC20Upgradeable(vToken).safeTransfer(msg.sender, mintedAmount);
             }
         } else {
             // Handle ERC20 token supply
