@@ -75,9 +75,13 @@ interface IComptroller {
 
     function approvedDelegates(address borrower, address delegate) external view returns (bool);
 
+    function updateDelegate(address delegate, bool approved) external;
+
     function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);
 
     function checkMembership(address account, IVToken vToken) external view returns (bool);
+
+    function exitMarketBehalf(address onBehalf, address vToken) external returns (uint256);
 
     function getBorrowingPower(
         address account
