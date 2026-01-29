@@ -173,6 +173,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param minAmountToSupply Minimum amount of `marketTo` underlying to supply after swap. Validates the swapped tokens received.
      * @param swapData Bytes containing swap instructions for the SwapHelper.
      *                 Swaps flashLoaned amount `marketFrom` underlying to `marketTo` underlying asset.
+     * @custom:error SameMarket If `marketFrom` and `marketTo` are the same market.
      * @custom:error ZeroAmount If `amountToSwap` is zero (and not `type(uint256).max`).
      * @custom:error InsufficientCollateralBalance If the user has no or insufficient underlying balance in `marketFrom`.
      * @custom:event Emits CollateralSwapped event on success.
@@ -185,6 +186,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 minAmountToSupply,
         bytes calldata swapData
     ) external nonReentrant {
+        if (address(marketFrom) == address(marketTo)) revert SameMarket();
         if (amountToSwap == 0) revert ZeroAmount();
         uint256 userBalance = marketFrom.balanceOfUnderlying(user);
         if (userBalance == 0) revert InsufficientCollateralBalance();
@@ -210,6 +212,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param maxDebtAmountToOpen Maximum amount of new debt to open on `marketTo`.
      * @param swapData Bytes containing swap instructions for the SwapHelper.
      *                 Swaps flashLoaned amount `marketTo` underlying to `marketFrom` underlying asset.
+     * @custom:error SameMarket If `marketFrom` and `marketTo` are the same market.
      * @custom:error ZeroAmount If `repayAmount` is zero (and not `type(uint256).max`).
      * @custom:error InsufficientBorrowBalance If the user has no or insufficient borrow balance in `marketFrom`.
      * @custom:event Emits DebtSwapped event on success.
@@ -222,6 +225,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 maxDebtAmountToOpen,
         bytes calldata swapData
     ) external nonReentrant {
+        if (address(marketFrom) == address(marketTo)) revert SameMarket();
         if (repayAmount == 0) revert ZeroAmount();
         uint256 borrowBalance = marketFrom.borrowBalanceCurrent(user);
         if (borrowBalance == 0) revert InsufficientBorrowBalance();
@@ -248,10 +252,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     }
 
     /**
-     * @notice Internal helper to swap native collateral to wrapped-native collateral via flash loan.
+     * @notice Internal helper to swap collateral FROM native market TO wrapped-native market via flash loan.
      * @param user Address of the user whose collateral is being migrated
-     * @param marketFrom Native vToken market (e.g., vBNB)
-     * @param marketTo Wrapped-native vToken market (e.g., vWBNB)
+     * @param marketFrom MUST be a native vToken market (e.g., vBNB).
+     * @param marketTo MUST be a wrapped-native vToken market (e.g., vWBNB).
      * @param collateralAmountToSwap Amount of native underlying to migrate
      * @custom:error MarketNotListed If any market is not listed in Comptroller
      * @custom:error UnauthorizedCaller If caller is neither the user nor an approved delegate
@@ -285,10 +289,10 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
     }
 
     /**
-     * @notice Internal helper to swap native debt to wrapped-native debt via flash loan.
+     * @notice Internal helper to swap debt FROM native market TO wrapped-native market via flash loan.
      * @param user Address of the user whose debt is being migrated
-     * @param marketFrom Native vToken market (e.g., vBNB)
-     * @param marketTo Wrapped-native vToken market (e.g., vWBNB)
+     * @param marketFrom MUST be a native vToken market (e.g., vBNB).
+     * @param marketTo MUST be a wrapped-native vToken market (e.g., vWBNB).
      * @param debtRepaymentAmount Amount of native debt to repay
      * @custom:error MarketNotListed If any market is not listed in Comptroller
      * @custom:error UnauthorizedCaller If caller is neither the user nor an approved delegate
@@ -306,6 +310,8 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
         transientDebtRepaymentAmount = debtRepaymentAmount;
         IVToken[] memory borrowedMarkets = new IVToken[](1);
+        // The borrowed token is WRAPPED_NATIVE_MARKET, which is different from the normal generic flow
+        // where marketFrom is used. This is because the native market (marketFrom) does not support flash loans.
         borrowedMarkets[0] = WRAPPED_NATIVE_MARKET;
 
         uint256[] memory flashLoanAmounts = new uint256[](1);
@@ -440,12 +446,13 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param vTokens Array with the borrowed vToken market (single element)
      * @param amounts Array with the borrowed underlying amount (single element)
      * @param premiums Array with the flash loan fee amount (single element)
-     * @param /initiator The address that initiated the flash loan (unused)
+     * @param initiator The address that initiated the flash loan
      * @param onBehalf The user for whome debt will be opened
      * @param param Encoded auxiliary data for the operation (e.g., swap multicall)
      * @return success Whether the execution succeeded
      * @return repayAmounts Amounts to approve for flash loan repayment
      * @custom:error UnauthorizedExecutor When caller is not the Comptroller
+     * @custom:error InitiatorMismatch When initiator is not this contract
      * @custom:error FlashLoanAssetOrAmountMismatch When array lengths mismatch or > 1 element
      * @custom:error InvalidExecuteOperation When operation type is unknown
      */
@@ -453,13 +460,19 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         IVToken[] calldata vTokens,
         uint256[] calldata amounts,
         uint256[] calldata premiums,
-        address /* initiator */,
+        address initiator,
         address onBehalf,
         bytes calldata param
     ) external override returns (bool success, uint256[] memory repayAmounts) {
         if (msg.sender != address(COMPTROLLER)) {
             revert UnauthorizedExecutor();
         }
+
+        // Flash loan must be initiated by this contract to prevent unauthorized callbacks
+        if (initiator != address(this)) {
+            revert InitiatorMismatch();
+        }
+
         if (vTokens.length != 1 || amounts.length != 1 || premiums.length != 1) {
             revert FlashLoanAssetOrAmountMismatch();
         }
@@ -712,7 +725,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param minAmountOut The minimum acceptable `tokenOut` amount, else revert
      * @param param The encoded swap instructions/calldata for the SwapHelper
      * @return amountOut The amount of output tokens received
-     * @custom:error TokenSwapCallFailed If the swap execution fails
+     * @custom:error TokenSwapCallFailed If the swap execution fails without return data
      * @custom:error InsufficientAmountOutAfterSwap If swap output is below minimum
      */
     function _performSwap(
@@ -725,9 +738,15 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         tokenIn.safeTransfer(address(SWAP_HELPER), amountIn);
         uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
 
-        (bool success, ) = address(SWAP_HELPER).call(param);
+        (bool success, bytes memory returnData) = address(SWAP_HELPER).call(param);
         if (!success) {
-            revert TokenSwapCallFailed();
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(returnData, 0x20), mload(returnData))
+                }
+            } else {
+                revert TokenSwapCallFailed();
+            }
         }
 
         amountOut = tokenOut.balanceOf(address(this)) - tokenOutBalanceBefore;
