@@ -103,6 +103,7 @@ contract DeviationSentinel is AccessControlledV8 {
     event SupplyUnpaused(address indexed market);
 
     /// @notice Emitted when collateral factor is updated
+    /// @notice Emitted when collateral factor is updated
     /// @param market The market address
     /// @param poolId The pool ID (emode group for core pools, 0 for isolated pools)
     /// @param oldCF The old collateral factor
