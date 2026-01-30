@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 pragma solidity ^0.8.25;
 
 import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
@@ -455,28 +456,58 @@ contract DeviationSentinel is AccessControlledV8 {
             uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
             uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
             for (uint96 i = corePoolId; i <= lastPoolId; i++) {
-                (bool isListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+                (
+                    bool isListed,
+                    uint256 currentCF, // isVenus
+                    ,
+                    uint256 currentLT, // liquidationIncentiveMantissa // marketPoolId // isBorrowAllowed
+                    ,
+                    ,
+
+                ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+
                 if (isListed) {
-                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(
-                        i,
-                        address(market),
-                        state.poolCFs[i],
-                        state.poolLTs[i]
-                    );
+                    // Retrieve stored original CF and LT
+                    uint256 storedCF = state.poolCFs[i];
+                    uint256 storedLT = state.poolLTs[i];
+
+                    // - If storedCF is 0 and currentCF != 0, this pool was added after _setCollateralFactorToZero,
+                    //   so we skip restoring to avoid overwriting new pool config with zero values.
+                    // - If storedLT is 0, skip restoration to prevent setting LT=0, which could cause immediate liquidation risk.
+                    //   This also protects against uninitialized storage for new pools.
+                    if (storedCF == 0 && currentCF != 0) {
+                        continue;
+                    }
+                    if (storedLT == 0) {
+                        continue;
+                    }
+
+                    // If stored value is 0 and current CF is also 0, it might be the original value, allow restoration.
+                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(i, address(market), storedCF, storedLT);
                     if (result != 0) revert ComptrollerError(result);
 
-                    // Emit event for each pool ID
-                    emit CollateralFactorUpdated(address(market), i, 0, state.poolCFs[i]);
+                    emit CollateralFactorUpdated(address(market), i, 0, storedCF);
 
-                    // Clear stored values
                     delete state.poolCFs[i];
                     delete state.poolLTs[i];
                 }
             }
         } else {
             // Isolated pool
+            IILComptroller.Market memory marketData = IILComptroller(address(comptroller)).markets(address(market));
+
+            // Check if market is still listed before restoring
+            if (!marketData.isListed) {
+                return;
+            }
+
             uint256 originalCF = state.poolCFs[0];
             uint256 originalLT = state.poolLTs[0];
+
+            if (originalLT == 0) {
+                return;
+            }
+
             IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
             emit CollateralFactorUpdated(address(market), 0, 0, originalCF);
             delete state.poolCFs[0];

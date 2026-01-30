@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity ^0.8.25;
-
-import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IPancakeV3Pool } from "../../Interfaces/IPancakeV3Pool.sol";
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
@@ -34,9 +32,6 @@ contract PancakeSwapOracle is AccessControlledV8 {
 
     /// @notice Thrown when token is not configured
     error TokenNotConfigured();
-
-    /// @notice Thrown when price calculation fails
-    error PriceCalculationError();
 
     /// @notice Constructor for PancakeSwapPriceOracle
     /// @param resilientOracle_ Address of the resilient oracle
@@ -92,7 +87,6 @@ contract PancakeSwapOracle is AccessControlledV8 {
 
         uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, FixedPoint96.Q96);
 
-        address targetToken = token;
         address referenceToken;
         bool targetIsToken0;
 

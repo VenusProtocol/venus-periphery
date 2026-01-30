@@ -256,4 +256,123 @@ describe("DeviationSentinel", () => {
       );
     });
   });
+
+  describe("_restoreCollateralFactor protection against new pools", () => {
+    const NEW_POOL_ID = 2;
+    const ORIGINAL_CF = parseUnits("0.7", 18);
+    const ORIGINAL_LT = parseUnits("0.75", 18);
+    const NEW_POOL_CF = parseUnits("0.6", 18);
+    const NEW_POOL_LT = parseUnits("0.65", 18);
+
+    beforeEach(async () => {
+      await deviationSentinel.setTokenConfig(UNDERLYING_ASSET, {
+        deviation: 10,
+        enabled: true,
+      });
+      await deviationSentinel.setTrustedKeeper(keeper.address, true);
+
+      // Setup core pool comptroller
+      corePoolComptroller.corePoolId.returns(0);
+      corePoolComptroller.lastPoolId.returns(1); // Initially only pools 0 and 1
+      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
+
+      // Setup existing pool (pool 1) with original CF and LT
+      corePoolComptroller.poolMarkets
+        .whenCalledWith(1, vToken.address)
+        .returns([true, ORIGINAL_CF, 0, ORIGINAL_LT, 0, 0, 0]);
+
+      corePoolComptroller.actionPaused.returns(false);
+    });
+
+    it("should skip restoring CF for new pools added after _setCollateralFactorToZero", async () => {
+      // Trigger deviation to store original CF for pool 1
+      resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
+      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18)); // Lower price triggers supply pause
+
+      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+
+      // Simulate adding a new pool (pool 2) after deviation was triggered
+      corePoolComptroller.lastPoolId.returns(2); // Now includes pool 2
+      corePoolComptroller.poolMarkets
+        .whenCalledWith(NEW_POOL_ID, vToken.address)
+        .returns([true, NEW_POOL_CF, 0, NEW_POOL_LT, 0, 0, 0]);
+
+      // Resolve deviation - should restore pool 1 but skip pool 2
+      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
+      corePoolComptroller.actionPaused.returns(true);
+
+      // Reset call count before resolution
+      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
+
+      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+
+      // Verify setCollateralFactor was called for pool 1 restoration
+      // Should restore the original CF (0.7) that was stored during deviation
+      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
+        1,
+        vToken.address,
+        ORIGINAL_CF, // Restored original CF
+        ORIGINAL_LT,
+      );
+
+      // Verify setCollateralFactor was NOT called for new pool 2
+      // Check that it wasn't called with NEW_POOL_ID
+      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.not.have.been.calledWith(
+        NEW_POOL_ID,
+        vToken.address,
+      );
+    });
+
+    it("should skip restoring when stored LT is 0 to prevent immediate liquidation", async () => {
+      // Setup a pool with CF = 0 and LT = 0 (edge case)
+      corePoolComptroller.poolMarkets.whenCalledWith(1, vToken.address).returns([true, 0, 0, 0, 0, 0, 0]);
+
+      // Trigger deviation
+      resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
+      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
+
+      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+
+      // Reset the mock to clear previous calls during deviation trigger
+      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
+
+      // Resolve deviation
+      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
+      corePoolComptroller.actionPaused.returns(true);
+
+      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+
+      // Should not attempt to restore LT = 0
+      // When stored LT is 0, setCollateralFactor should not be called to prevent liquidation risk
+      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.not.have.been.called;
+    });
+
+    it("should properly restore original CF when pool had CF=0 originally", async () => {
+      // Setup a pool that originally had CF = 0 but LT > 0
+      const ZERO_CF = ethers.constants.Zero;
+      const VALID_LT = parseUnits("0.75", 18);
+
+      corePoolComptroller.poolMarkets.whenCalledWith(1, vToken.address).returns([true, ZERO_CF, 0, VALID_LT, 0, 0, 0]);
+
+      // Trigger deviation
+      resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
+      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
+
+      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+
+      // Resolve deviation
+      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
+      corePoolComptroller.actionPaused.returns(true);
+
+      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+
+      // Should restore CF = 0 (original value) because LT > 0
+      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
+        1,
+        vToken.address,
+        ZERO_CF,
+        VALID_LT,
+      );
+    });
+  });
 });
