@@ -1187,6 +1187,8 @@ describe("DeviationSentinel", () => {
     });
 
     it("should skip restoring when stored LT is 0 to prevent immediate liquidation", async () => {
+      // Ensure pool 0 is not listed so only pool 1 is tested
+      corePoolComptroller.poolMarkets.whenCalledWith(0, vToken.address).returns([false, 0, 0, 0, 0, 0, 0]);
       // Setup a pool with CF = 0 and LT = 0 (edge case)
       corePoolComptroller.poolMarkets.whenCalledWith(1, vToken.address).returns([true, 0, 0, 0, 0, 0, 0]);
 
