@@ -31,6 +31,7 @@ contract SentinelOracle is AccessControlledV8 {
     error TokenNotConfigured();
 
     /// @notice Constructor for PriceSentinelOracle
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         // Note that the contract is upgradeable. Use initialize() or reinitializers
         // to set the state variables.

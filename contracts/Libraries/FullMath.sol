@@ -11,14 +11,14 @@ library FullMath {
         }
 
         if (prod1 == 0) {
-            require(denominator > 0);
+            require(denominator > 0, "FullMath: denominator is zero");
             assembly {
                 result := div(prod0, denominator)
             }
             return result;
         }
 
-        require(denominator > prod1);
+        require(denominator > prod1, "FullMath: result overflows uint256");
 
         uint256 remainder;
         assembly {
@@ -34,17 +34,21 @@ library FullMath {
             twos := add(div(sub(0, twos), twos), 1)
         }
 
-        prod0 |= prod1 * twos;
+        unchecked {
+            prod0 |= prod1 * twos;
+        }
 
-        uint256 inverse = (3 * denominator) ^ 2;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
+        unchecked {
+            uint256 inverse = (3 * denominator) ^ 2;
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
+            inverse *= 2 - denominator * inverse;
 
-        result = prod0 * inverse;
+            result = prod0 * inverse;
+        }
         return result;
     }
 }

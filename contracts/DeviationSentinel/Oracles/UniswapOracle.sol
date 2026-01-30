@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity ^0.8.25;
-
-import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IUniswapV3Pool } from "../../Interfaces/IUniswapV3Pool.sol";
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
@@ -35,11 +33,9 @@ contract UniswapOracle is AccessControlledV8 {
     /// @notice Thrown when token is not configured
     error TokenNotConfigured();
 
-    /// @notice Thrown when price calculation fails
-    error PriceCalculationError();
-
     /// @notice Constructor for UniswapPriceOracle
     /// @param resilientOracle_ Address of the resilient oracle
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ResilientOracleInterface resilientOracle_) {
         RESILIENT_ORACLE = resilientOracle_;
 
@@ -91,7 +87,6 @@ contract UniswapOracle is AccessControlledV8 {
 
         uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, FixedPoint96.Q96);
 
-        address targetToken = token;
         address referenceToken;
         bool targetIsToken0;
 
@@ -107,14 +102,10 @@ contract UniswapOracle is AccessControlledV8 {
 
         uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
 
-        uint256 targetTokensPerReferenceToken;
-
         if (targetIsToken0) {
-            targetTokensPerReferenceToken = FullMath.mulDiv(FixedPoint96.Q96 * (10 ** 18), 1, priceX96);
+            price = FullMath.mulDiv(referencePrice, priceX96, FixedPoint96.Q96);
         } else {
-            targetTokensPerReferenceToken = FullMath.mulDiv(priceX96 * (10 ** 18), 1, FixedPoint96.Q96);
+            price = FullMath.mulDiv(referencePrice, FixedPoint96.Q96, priceX96);
         }
-
-        price = FullMath.mulDiv(referencePrice, (10 ** 18), targetTokensPerReferenceToken);
     }
 }

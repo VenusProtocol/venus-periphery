@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 pragma solidity ^0.8.25;
 
 import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
@@ -16,6 +17,10 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  * @notice Sentinel that compares ResilientOracle and SentinelOracle prices (via keeper) and pauses
  *         specific actions (borrow, mint, collateral factor) per market when
  *         large deviations are detected.
+ * @dev IMPORTANT: When creating VIPs to update collateral factor (CF) or mint/supply pause state for markets
+ *      monitored by this contract, ALWAYS call resetMarketState() BEFORE applying the parameter changes.
+ *      This prevents race conditions where the DeviationSentinel might store outdated values and later
+ *      restore them incorrectly, overwriting the VIP's intended changes.
  */
 contract DeviationSentinel is AccessControlledV8 {
     /// @notice Configuration for price deviation monitoring
@@ -97,18 +102,12 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param market The market address
     event SupplyUnpaused(address indexed market);
 
-    /// @notice Emitted when collateral factor is updated for core pool
+    /// @notice Emitted when collateral factor is updated
     /// @param market The market address
-    /// @param poolId The pool ID (emode group)
+    /// @param poolId The pool ID (emode group for core pools, 0 for isolated pools)
     /// @param oldCF The old collateral factor
     /// @param newCF The new collateral factor
     event CollateralFactorUpdated(address indexed market, uint96 indexed poolId, uint256 oldCF, uint256 newCF);
-
-    /// @notice Emitted when collateral factor is updated for isolated pool
-    /// @param market The market address
-    /// @param oldCF The old collateral factor
-    /// @param newCF The new collateral factor
-    event CollateralFactorUpdated(address indexed market, uint256 oldCF, uint256 newCF);
 
     /// @notice Thrown when deviation is set to zero
     error ZeroDeviation();
@@ -141,6 +140,7 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param corePoolComptroller_ Address of the core pool comptroller
     /// @param resilientOracle_ Address of the resilient oracle
     /// @param sentinelOracle_ Address of the sentinel oracle
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(
         ICorePoolComptroller corePoolComptroller_,
         ResilientOracleInterface resilientOracle_,
@@ -231,7 +231,9 @@ contract DeviationSentinel is AccessControlledV8 {
 
         // Clear pool-specific data for core pool
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
-            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+            uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
+            uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
+            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
                 delete state.poolCFs[i];
                 delete state.poolLTs[i];
             }
@@ -396,7 +398,9 @@ contract DeviationSentinel is AccessControlledV8 {
 
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
             // Store original CF and LT for each emode group, then set to 0
-            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
+            uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
+            uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
+            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
                 (
                     bool isListed,
                     uint256 collateralFactorMantissa, // isVenus
@@ -449,29 +453,61 @@ contract DeviationSentinel is AccessControlledV8 {
         // Check if this is a core pool or isolated pool
         if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
             // Core pool - restore original CF and LT for each emode group
-            for (uint96 i = CORE_POOL_COMPTROLLER.corePoolId(); i <= CORE_POOL_COMPTROLLER.lastPoolId(); i++) {
-                (bool isListed, , , , , , ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+            uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
+            uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
+            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
+                (
+                    bool isListed,
+                    uint256 currentCF, // isVenus
+                    ,
+                    uint256 currentLT, // liquidationIncentiveMantissa // marketPoolId // isBorrowAllowed
+                    ,
+                    ,
+
+                ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
+
                 if (isListed) {
-                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(
-                        i,
-                        address(market),
-                        state.poolCFs[i],
-                        state.poolLTs[i]
-                    );
+                    // Retrieve stored original CF and LT
+                    uint256 storedCF = state.poolCFs[i];
+                    uint256 storedLT = state.poolLTs[i];
+
+                    // - If storedCF is 0 and currentCF != 0, this pool was added after _setCollateralFactorToZero,
+                    //   so we skip restoring to avoid overwriting new pool config with zero values.
+                    // - If storedLT is 0, skip restoration to prevent setting LT=0, which could cause immediate liquidation risk.
+                    //   This also protects against uninitialized storage for new pools.
+                    if (storedCF == 0 && currentCF != 0) {
+                        continue;
+                    }
+                    if (storedLT == 0) {
+                        continue;
+                    }
+
+                    // If stored value is 0 and current CF is also 0, it might be the original value, allow restoration.
+                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(i, address(market), storedCF, storedLT);
                     if (result != 0) revert ComptrollerError(result);
 
-                    // Emit event for each pool ID
-                    emit CollateralFactorUpdated(address(market), i, 0, state.poolCFs[i]);
+                    emit CollateralFactorUpdated(address(market), i, 0, storedCF);
 
-                    // Clear stored values
                     delete state.poolCFs[i];
                     delete state.poolLTs[i];
                 }
             }
         } else {
             // Isolated pool
+            IILComptroller.Market memory marketData = IILComptroller(address(comptroller)).markets(address(market));
+
+            // Check if market is still listed before restoring
+            if (!marketData.isListed) {
+                return;
+            }
+
             uint256 originalCF = state.poolCFs[0];
             uint256 originalLT = state.poolLTs[0];
+
+            if (originalLT == 0) {
+                return;
+            }
+
             IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
             emit CollateralFactorUpdated(address(market), 0, 0, originalCF);
             delete state.poolCFs[0];
