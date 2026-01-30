@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.28;
-import { IComptroller } from "../Interfaces.sol";
+
+import { IComptroller, IVToken } from "../Interfaces.sol";
 
 /**
  * @title IPositionAccount
@@ -18,6 +19,51 @@ interface IPositionAccount {
      * @param shortAsset_ Address of the short asset (vToken)
      */
     function initialize(address owner_, address longAsset_, address shortAsset_) external;
+
+    /**
+     * @notice Forwards enterLeverage to the LeverageStrategiesManager on behalf of this position account
+     * @dev Only callable by the RelativePositionManager. Ensures the position account is msg.sender to LM.
+     * @param collateralMarket Collateral (e.g. long) vToken to supply after swap
+     * @param collateralAmountSeed Optional seed amount of collateral (RPM uses 0; collateral from swap)
+     * @param borrowedMarket Borrowed (e.g. short) vToken to flash-borrow
+     * @param borrowedAmountToFlashLoan Amount to borrow via flash loan
+     * @param minAmountOutAfterSwap Minimum collateral out after swap (slippage protection)
+     * @param swapData Swap calldata (e.g. borrowed → collateral)
+     */
+    function enterLeverage(
+        IVToken collateralMarket,
+        uint256 collateralAmountSeed,
+        IVToken borrowedMarket,
+        uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
+        bytes calldata swapData
+    ) external;
+
+    /**
+     * @notice Forwards exitLeverage to the LeverageStrategiesManager on behalf of this position account
+     * @dev Only callable by the RelativePositionManager. Enables clearer flow and better revert messages.
+     * @param collateralMarket Collateral (e.g. long) vToken to redeem
+     * @param collateralAmountToRedeemForSwap Amount of collateral to redeem for swap
+     * @param borrowedMarket Borrowed (e.g. short) vToken to repay
+     * @param borrowedAmountToFlashLoan Amount to repay via flash loan
+     * @param minAmountOutAfterSwap Minimum amount out after swap (slippage protection)
+     * @param swapData Swap calldata (e.g. collateral → borrowed)
+     */
+    function exitLeverage(
+        IVToken collateralMarket,
+        uint256 collateralAmountToRedeemForSwap,
+        IVToken borrowedMarket,
+        uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
+        bytes calldata swapData
+    ) external;
+
+    /**
+     * @notice Transfers full balance of an ERC20 token from this position account to its owner (dust recovery)
+     * @dev Only callable by the RelativePositionManager. Used to sweep dust to the position owner.
+     * @param token Address of the ERC20 token to transfer
+     */
+    function transferDustToOwner(address token) external;
 
     /**
      * @notice Executes a generic call to any contract

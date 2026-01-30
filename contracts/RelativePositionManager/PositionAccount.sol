@@ -3,7 +3,12 @@ pragma solidity 0.8.28;
 
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { AddressUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
-import { IComptroller } from "../Interfaces.sol";
+import {
+    IERC20Upgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import { SafeERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import { IComptroller, IVToken } from "../Interfaces.sol";
+import { ILeverageStrategiesManager } from "../LeverageManager/ILeverageStrategiesManager.sol";
 import { IPositionAccount } from "./IPositionAccount.sol";
 
 /**
@@ -17,6 +22,7 @@ import { IPositionAccount } from "./IPositionAccount.sol";
  */
 contract PositionAccount is Initializable, IPositionAccount {
     using AddressUpgradeable for address;
+    using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @notice Address of the Venus Comptroller (same for all clones)
     IComptroller public immutable COMPTROLLER;
@@ -43,6 +49,34 @@ contract PositionAccount is Initializable, IPositionAccount {
      * @param data Call data executed
      */
     event GenericCallExecuted(address indexed caller, address target, bytes data);
+
+    /**
+     * @notice Emitted when enterLeverage is forwarded to the LeverageManager
+     * @param collateralMarket Collateral vToken market
+     * @param borrowedMarket Borrowed vToken market
+     * @param collateralAmountSeed Collateral seed amount (often 0)
+     * @param borrowedAmount Flash loan amount
+     */
+    event EnterLeverageForwarded(
+        address indexed collateralMarket,
+        address indexed borrowedMarket,
+        uint256 collateralAmountSeed,
+        uint256 borrowedAmount
+    );
+
+    /**
+     * @notice Emitted when exitLeverage is forwarded to the LeverageManager
+     * @param collateralMarket Collateral vToken market
+     * @param borrowedMarket Borrowed vToken market
+     * @param collateralAmount Amount of collateral to redeem for swap
+     * @param borrowedAmount Flash loan amount for repayment
+     */
+    event ExitLeverageForwarded(
+        address indexed collateralMarket,
+        address indexed borrowedMarket,
+        uint256 collateralAmount,
+        uint256 borrowedAmount
+    );
 
     /// @notice Thrown when caller is not the authorized RelativePositionManager
     error UnauthorizedCaller();
@@ -105,6 +139,91 @@ contract PositionAccount is Initializable, IPositionAccount {
         // Approve delegates for both managers to act on behalf of this account
         COMPTROLLER.updateDelegate(RELATIVE_POSITION_MANAGER, true);
         COMPTROLLER.updateDelegate(LEVERAGE_MANAGER, true);
+    }
+
+    /**
+     * @notice Forwards enterLeverage to the LeverageStrategiesManager on behalf of this position account
+     * @dev Only callable by the RelativePositionManager. Ensures the position account is msg.sender to LM,
+     *      so debt/collateral and dust stay on this account. Emits EnterLeverageForwarded for debugging.
+     * @param collateralMarket Collateral (e.g. long) vToken to supply after swap
+     * @param collateralAmountSeed Optional seed amount of collateral (RPM uses 0)
+     * @param borrowedMarket Borrowed (e.g. short) vToken to flash-borrow
+     * @param borrowedAmountToFlashLoan Amount to borrow via flash loan
+     * @param minAmountOutAfterSwap Minimum collateral out after swap (slippage protection)
+     * @param swapData Swap calldata (e.g. borrowed → collateral)
+     * @custom:error UnauthorizedCaller if caller is not the RelativePositionManager.
+     */
+    function enterLeverage(
+        IVToken collateralMarket,
+        uint256 collateralAmountSeed,
+        IVToken borrowedMarket,
+        uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
+        bytes calldata swapData
+    ) external onlyRelativePositionManager {
+        emit EnterLeverageForwarded(
+            address(collateralMarket),
+            address(borrowedMarket),
+            collateralAmountSeed,
+            borrowedAmountToFlashLoan
+        );
+        ILeverageStrategiesManager(LEVERAGE_MANAGER).enterLeverage(
+            collateralMarket,
+            collateralAmountSeed,
+            borrowedMarket,
+            borrowedAmountToFlashLoan,
+            minAmountOutAfterSwap,
+            swapData
+        );
+    }
+
+    /**
+     * @notice Forwards exitLeverage to the LeverageStrategiesManager on behalf of this position account
+     * @dev Only callable by the RelativePositionManager. Ensures the position account is msg.sender to LM,
+     *      so debt/collateral and dust stay on this account. Emits ExitLeverageForwarded for debugging.
+     * @param collateralMarket Collateral (e.g. long) vToken to redeem
+     * @param collateralAmountToRedeemForSwap Amount of collateral to redeem for swap
+     * @param borrowedMarket Borrowed (e.g. short) vToken to repay
+     * @param borrowedAmountToFlashLoan Amount to repay via flash loan
+     * @param minAmountOutAfterSwap Minimum amount out after swap (slippage protection)
+     * @param swapData Swap calldata (e.g. collateral → borrowed)
+     * @custom:error UnauthorizedCaller if caller is not the RelativePositionManager.
+     */
+    function exitLeverage(
+        IVToken collateralMarket,
+        uint256 collateralAmountToRedeemForSwap,
+        IVToken borrowedMarket,
+        uint256 borrowedAmountToFlashLoan,
+        uint256 minAmountOutAfterSwap,
+        bytes calldata swapData
+    ) external onlyRelativePositionManager {
+        emit ExitLeverageForwarded(
+            address(collateralMarket),
+            address(borrowedMarket),
+            collateralAmountToRedeemForSwap,
+            borrowedAmountToFlashLoan
+        );
+        ILeverageStrategiesManager(LEVERAGE_MANAGER).exitLeverage(
+            collateralMarket,
+            collateralAmountToRedeemForSwap,
+            borrowedMarket,
+            borrowedAmountToFlashLoan,
+            minAmountOutAfterSwap,
+            swapData
+        );
+    }
+
+    /**
+     * @notice Transfers full balance of an ERC20 token from this position account to its owner (dust recovery)
+     * @dev Only callable by the RelativePositionManager. Used to sweep dust to the position owner.
+     * @param token Address of the ERC20 token to transfer
+     * @custom:error UnauthorizedCaller if caller is not the RelativePositionManager.
+     */
+    function transferDustToOwner(address token) external onlyRelativePositionManager {
+        uint256 balance = IERC20Upgradeable(token).balanceOf(address(this));
+        if (balance > 0) {
+            IERC20Upgradeable(token).safeTransfer(owner, balance);
+        }
     }
 
     /**

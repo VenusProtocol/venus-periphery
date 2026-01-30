@@ -84,6 +84,7 @@ const config: HardhatUserConfig = {
               yul: !process.env.CI,
             },
           },
+          viaIR: true,
           evmVersion: "cancun",
           outputSelection: {
             "*": {

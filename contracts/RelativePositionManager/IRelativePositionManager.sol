@@ -20,7 +20,7 @@ interface IRelativePositionManager {
         address shortAsset; // Asset being shorted (immutable)
         uint8 dsaIndex; // Index of DSA in dsaVTokens array (immutable)
         address positionAccount; // Address of the PositionAccount contract (immutable)
-        uint256 suppliedPrincipal; // Total DSA supplied as collateral (mutable)
+        uint256 suppliedPrincipal; // Total DSA supplied as collateral, in vToken amount (mutable)
         uint256 effectiveLeverage; // Leverage ratio (mutable)
         uint256 cycleId; // Current cycle ID, increments on each activation (mutable)
         bool isActive; // Whether position is currently active (mutable)
@@ -46,6 +46,9 @@ interface IRelativePositionManager {
 
     /// @custom:error InvalidDSA when DSA asset is not valid
     error InvalidDSA();
+
+    /// @custom:error WithdrawPrincipalBeforeChangingDSA when user tries to change DSA asset without first withdrawing current principal
+    error WithdrawPrincipalBeforeChangingDSA();
 
     /// @custom:error InsufficientPrincipal when supplied principal is insufficient
     error InsufficientPrincipal();
@@ -98,11 +101,29 @@ interface IRelativePositionManager {
     /// @custom:error ZeroFlashLoanAmount when flash loan amount is zero
     error ZeroFlashLoanAmount();
 
+    /// @custom:error NoShortDebtToRepay when closeWithProfit is called but position has no short debt to repay
+    error NoShortDebtToRepay();
+
+    /// @custom:error ShortDebtNotFullyRepaid when repay step did not clear all short debt (insufficient swap output)
+    error ShortDebtNotFullyRepaid();
+
+    /// @custom:error NotProfitScenario when closeWithProfit is called but long collateral value (USD) is not greater than short debt (USD)
+    error NotProfitScenario();
+
+    /// @custom:error NotLossScenario when closeWithLoss is called but short debt (USD) is not greater than long collateral (USD)
+    error NotLossScenario();
+
     /// @custom:error ExitMarketFailed when exiting market fails
     error ExitMarketFailed();
 
     /// @custom:error RedeemBehalfFailed when redeeming vTokens on behalf fails
     error RedeemBehalfFailed();
+
+    /// @custom:error TokenSwapCallFailed when swap execution via SwapHelper fails
+    error TokenSwapCallFailed();
+
+    /// @custom:error SlippageExceeded when swap output is below the minimum required
+    error SlippageExceeded();
 
     /// @notice Emitted when a user activates a position account
     /// @param user Address of the user
@@ -137,7 +158,7 @@ interface IRelativePositionManager {
         uint256 newTotalPrincipal
     );
 
-    /// @notice Emitted when a position is opened
+    /// @notice Emitted when a position is opened or scaled (borrow + swap to long)
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
     /// @param longAsset Address of the long asset
@@ -145,6 +166,7 @@ interface IRelativePositionManager {
     /// @param dsaAsset Address of the DSA asset
     /// @param shortAmount Amount borrowed in short asset
     /// @param effectiveLeverage Leverage ratio set for this position
+    /// @param additionalPrincipal Additional principal supplied this call (0 if none)
     event PositionOpened(
         address indexed user,
         address indexed positionAccount,
@@ -153,20 +175,8 @@ interface IRelativePositionManager {
         address shortAsset,
         address dsaAsset,
         uint256 shortAmount,
-        uint256 effectiveLeverage
-    );
-
-    /// @notice Emitted when a position is scaled (additional principal supplied)
-    /// @param user Address of the user
-    /// @param positionAccount Address of the position account
-    /// @param additionalPrincipal Additional principal supplied
-    /// @param newTotalPrincipal New total principal amount
-    event PositionScaled(
-        address indexed user,
-        address indexed positionAccount,
-        uint256 cycleId,
-        uint256 additionalPrincipal,
-        uint256 newTotalPrincipal
+        uint256 effectiveLeverage,
+        uint256 additionalPrincipal
     );
 
     /// @notice Emitted when a position is closed (partially or fully)
@@ -174,6 +184,12 @@ interface IRelativePositionManager {
     /// @param positionAccount Address of the position account
     /// @param cycleId The cycle ID of the position
     event PositionClosed(address indexed user, address indexed positionAccount, uint256 cycleId);
+
+    /// @notice Emitted when leverage is closed with profit (debt repaid, profit realized). Principal remains; user withdraws separately.
+    /// @param user Address of the user
+    /// @param positionAccount Address of the position account
+    /// @param cycleId The cycle ID of the position
+    event ProfitRealized(address indexed user, address indexed positionAccount, uint256 cycleId);
 
     /// @notice Emitted when principal is withdrawn
     /// @param user Address of the user
@@ -209,7 +225,7 @@ interface IRelativePositionManager {
      * @notice Activates a position account for the user with specified asset pair and DSA
      * @dev Deploys a new PositionAccount contract if one doesn't exist for this user/asset combination.
      *      The desired leverage must be set during activation and will be used to validate borrow amounts
-     *      in openPosition and scalePosition operations.
+     *      in openPosition operations.
      * @param longAsset The vToken market address for the asset to long
      * @param shortAsset The vToken market address for the asset to short
      * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
@@ -236,44 +252,19 @@ interface IRelativePositionManager {
     function supplyPrincipal(address longAsset, address shortAsset, uint8 dsaIndex, uint256 amount) external;
 
     /**
-     * @notice Opens a leveraged position using the supplied principal
-     * @dev Validates that the shortAmount doesn't exceed the maximum allowed based on capital utilization.
-     *      Uses sophisticated calculation considering:
-     *      - Actual capital utilized (based on collateral LTV ratios)
-     *      - Nominal capital utilized (based on leverage ratio)
-     *      - Available capital remaining
-     *      Maximum borrow = available capital * effective leverage
-     *      Internally calls LeverageManager.enterLeverage with appropriate parameters.
+     * @notice Opens a leveraged position or scales an existing one (borrow short, swap to long)
+     * @dev Can be called multiple times to scale the position. Optionally supply additional principal
+     *      via additionalPrincipal; otherwise uses existing principal. Validates that shortAmount doesn't
+     *      exceed the maximum allowed based on capital utilization. Maximum borrow = available capital * effective leverage.
      *      The DSA asset is retrieved from the position data (set during activation).
      * @param longVToken The vToken market for the asset to long
      * @param shortVToken The vToken market for the asset to short
+     * @param additionalPrincipal Additional principal to supply this call (0 if none)
      * @param shortAmount Amount to borrow in shortAsset terms (must not exceed max calculated borrow)
      * @param minLongAmount Minimum amount of long asset expected from swap (protects against slippage)
      * @param swapData Swap instructions for converting shortAsset to longAsset
      */
     function openPosition(
-        IVToken longVToken,
-        IVToken shortVToken,
-        uint256 shortAmount,
-        uint256 minLongAmount,
-        bytes calldata swapData
-    ) external;
-
-    /**
-     * @notice Scales an existing position while maintaining the same leverage ratio
-     * @dev Validates that shortAmount doesn't exceed the maximum allowed based on capital utilization.
-     *      Uses sophisticated calculation considering current position state, collateral ratios, and available capital.
-     *      Maximum borrow = available capital * effective leverage
-     *      This ensures safe position scaling without excessive risk.
-     *      The DSA asset is retrieved from the position data (set during activation).
-     * @param longVToken The vToken market for the long asset
-     * @param shortVToken The vToken market for the short asset
-     * @param additionalPrincipal Additional principal to supply
-     * @param shortAmount Additional amount to borrow (must not exceed max calculated borrow)
-     * @param minLongAmount Minimum amount of long asset expected from swap (protects against slippage)
-     * @param swapData Swap instructions for converting shortAsset to longAsset
-     */
-    function scalePosition(
         IVToken longVToken,
         IVToken shortVToken,
         uint256 additionalPrincipal,
@@ -299,6 +290,60 @@ interface IRelativePositionManager {
         uint256 borrowedAmountToRepay,
         uint256 minAmountOutAfterSwap,
         bytes calldata swapData
+    ) external;
+
+    /**
+     * @notice Closes a position with profit (longValueUSD > shortDebtUSD)
+     * @dev Repay: only params needed for exitLeverage (collateral amount, swap calldata, minOut). Borrow amount from state.
+     *      Profit: user supplies redeem amount for swap, swap calldata, minOut. If supplied redeem amount is less than
+     *      current excess long, we redeem full excess, run swap, and transfer to user both the swapped amount (DSA)
+     *      and any extra redeemed collateral (long) that was not swapped.
+     *      Principal is not withdrawn; user withdraws separately via withdrawPrincipal or deactivatePosition.
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @param collateralAmountToRedeemForRepay Amount of long to redeem for repay swap (passed to exitLeverage)
+     * @param swapDataRepay Swap #1: long → short for debt repayment
+     * @param minAmountOutRepay Minimum short out from repay swap (required for debt + flash loan fee)
+     * @param amountToRedeemForProfitSwap Amount of excess long to use in profit swap (if less than actual excess, we redeem full and transfer extra to user)
+     * @param minAmountOutProfit Minimum DSA out from profit swap
+     * @param swapDataProfit Swap #2: long → DSA for profit realization
+     */
+    function closeWithProfit(
+        IVToken longVToken,
+        IVToken shortVToken,
+        uint256 collateralAmountToRedeemForRepay,
+        bytes calldata swapDataRepay,
+        uint256 minAmountOutRepay,
+        uint256 amountToRedeemForProfitSwap,
+        uint256 minAmountOutProfit,
+        bytes calldata swapDataProfit
+    ) external;
+
+    /**
+     * @notice Closes a position with loss (longValueUSD < shortDebtUSD)
+     * @dev First exitLeverage (long→short) redeems full long (computed: if DSA==long, principal withdrawn first then long balance; else long underlying balance).
+     *      Second exitLeverage (DSA→short) for remaining debt. Any dust transferred to user.
+     *      UI shows this when longValueUSD < shortDebtUSD. Requires two swap calldata from backend.
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @param borrowedAmountToRepayFirst Short debt to repay in first exit (Exact-In)
+     * @param minAmountOutFirst Minimum short out from first swap
+     * @param swapDataFirst Swap #1: long → short
+     * @param dsaAmountToRedeemForRepay DSA principal to redeem for second repayment
+     * @param borrowedAmountToRepaySecond Remaining short debt to repay (Exact-In)
+     * @param minAmountOutSecond Minimum short out from second swap
+     * @param swapDataSecond Swap #2: DSA → short
+     */
+    function closeWithLoss(
+        IVToken longVToken,
+        IVToken shortVToken,
+        uint256 borrowedAmountToRepayFirst,
+        uint256 minAmountOutFirst,
+        bytes calldata swapDataFirst,
+        uint256 dsaAmountToRedeemForRepay,
+        uint256 borrowedAmountToRepaySecond,
+        uint256 minAmountOutSecond,
+        bytes calldata swapDataSecond
     ) external;
 
     /**

@@ -29,6 +29,8 @@ interface IVToken is IERC20Upgradeable {
 
     function borrowBalanceStored(address account) external view returns (uint256);
 
+    function exchangeRateCurrent() external returns (uint256);
+
     function underlying() external view returns (address);
 }
 
