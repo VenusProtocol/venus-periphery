@@ -63,8 +63,10 @@ export const UNICHAIN_MAINNET_MULTISIG = "0x1803Cf1D3495b43cC628aa1d8638A981F8CD
 export const preconfiguredAddresses = {
   hardhat: {
     VTreasury: "account:deployer",
+    NormalTimelock: "0x0000000000000000000000000000000000000000",
     AccessControlManager: Wallet.createRandom().address,
     PoolRegistry: Wallet.createRandom().address,
+    ResilientOracle: "0x0000000000000000000000000000000000000001",
   },
   bsctestnet: {
     NormalTimelock: governanceBscTestnet.NormalTimelock.address,

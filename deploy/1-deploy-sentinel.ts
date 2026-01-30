@@ -56,14 +56,14 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     deterministicDeployment: false,
     args: [],
     proxy: {
-      owner: timelock,
+      owner: network.live ? timelock : deployer,
       proxyContract: "OptimizedTransparentProxy",
       execute: {
         methodName: "initialize",
         args: [accessControlManager],
       },
     },
-    waitConfirmations: 2,
+    waitConfirmations: network.live ? 2 : 1,
   });
 
   const sentinelOracle = await hre.ethers.getContract("SentinelOracle");
@@ -75,25 +75,25 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     deterministicDeployment: false,
     args: [corePool, resilientOracle, sentinelOracle.address],
     proxy: {
-      owner: timelock,
+      owner: network.live ? timelock : deployer,
       proxyContract: "OptimizedTransparentProxy",
       execute: {
         methodName: "initialize",
         args: [accessControlManager],
       },
     },
-    waitConfirmations: 2,
+    waitConfirmations: network.live ? 2 : 1,
   });
 
   const deviationSentinel = await hre.ethers.getContract("DeviationSentinel");
   // const uniswapOracle = await hre.ethers.getContract("UniswapOracle");
   // const pancakeSwapOracle = await hre.ethers.getContract("PancakeSwapOracle");
 
-  if ((await sentinelOracle.owner()) == deployer) {
+  if (network.live && (await sentinelOracle.owner()) == deployer) {
     await sentinelOracle.transferOwnership(timelock);
   }
 
-  if ((await deviationSentinel.owner()) == deployer) {
+  if (network.live && (await deviationSentinel.owner()) == deployer) {
     await deviationSentinel.transferOwnership(timelock);
   }
 
