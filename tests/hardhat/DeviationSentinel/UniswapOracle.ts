@@ -124,9 +124,10 @@ describe("UniswapOracle", () => {
     });
 
     it("should revert with ZeroAddress when pool is zero", async () => {
-      await expect(
-        uniswapOracle.setPoolConfig(TOKEN_A, ethers.constants.AddressZero),
-      ).to.be.revertedWithCustomError(uniswapOracle, "ZeroAddress");
+      await expect(uniswapOracle.setPoolConfig(TOKEN_A, ethers.constants.AddressZero)).to.be.revertedWithCustomError(
+        uniswapOracle,
+        "ZeroAddress",
+      );
     });
 
     it("should revert with ZeroAddress when both token and pool are zero", async () => {
@@ -148,10 +149,7 @@ describe("UniswapOracle", () => {
 
   describe("getPrice — revert cases", () => {
     it("should revert with TokenNotConfigured when token has no pool", async () => {
-      await expect(uniswapOracle.getPrice(TOKEN_C)).to.be.revertedWithCustomError(
-        uniswapOracle,
-        "TokenNotConfigured",
-      );
+      await expect(uniswapOracle.getPrice(TOKEN_C)).to.be.revertedWithCustomError(uniswapOracle, "TokenNotConfigured");
     });
 
     it("should revert with InvalidPool when token is neither token0 nor token1 of the pool", async () => {
@@ -161,10 +159,7 @@ describe("UniswapOracle", () => {
       uniswapPool.token1.returns(TOKEN_C);
       uniswapPool.slot0.returns(slot0(Q96));
 
-      await expect(uniswapOracle.getPrice(TOKEN_A)).to.be.revertedWithCustomError(
-        uniswapOracle,
-        "InvalidPool",
-      );
+      await expect(uniswapOracle.getPrice(TOKEN_A)).to.be.revertedWithCustomError(uniswapOracle, "InvalidPool");
     });
   });
 

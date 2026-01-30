@@ -118,26 +118,10 @@ const setupMarketFixture = async (): Promise<SetupMarketFixture> => {
   );
 
   // DeviationSentinel admin permissions for timelock
-  await acm.giveCallPermission(
-    deviationSentinel.address,
-    "setTokenConfig(address,(uint8,bool))",
-    NORMAL_TIMELOCK,
-  );
-  await acm.giveCallPermission(
-    deviationSentinel.address,
-    "setTrustedKeeper(address,bool)",
-    NORMAL_TIMELOCK,
-  );
-  await acm.giveCallPermission(
-    deviationSentinel.address,
-    "resetMarketState(address)",
-    NORMAL_TIMELOCK,
-  );
-  await acm.giveCallPermission(
-    deviationSentinel.address,
-    "setTokenMonitoringEnabled(address,bool)",
-    NORMAL_TIMELOCK,
-  );
+  await acm.giveCallPermission(deviationSentinel.address, "setTokenConfig(address,(uint8,bool))", NORMAL_TIMELOCK);
+  await acm.giveCallPermission(deviationSentinel.address, "setTrustedKeeper(address,bool)", NORMAL_TIMELOCK);
+  await acm.giveCallPermission(deviationSentinel.address, "resetMarketState(address)", NORMAL_TIMELOCK);
+  await acm.giveCallPermission(deviationSentinel.address, "setTokenMonitoringEnabled(address,bool)", NORMAL_TIMELOCK);
 
   // Oracle permissions for timelock
   await acm.giveCallPermission(sentinelOracle.address, "setTokenOracleConfig(address,address)", NORMAL_TIMELOCK);
@@ -197,9 +181,7 @@ if (FORK_MAINNET) {
       describe("Deployment & Initialization", () => {
         it("should store correct immutable addresses", async () => {
           // On-chain addresses are checksummed; compare case-insensitively
-          expect((await deviationSentinel.CORE_POOL_COMPTROLLER()).toLowerCase()).to.equal(
-            COMPTROLLER.toLowerCase(),
-          );
+          expect((await deviationSentinel.CORE_POOL_COMPTROLLER()).toLowerCase()).to.equal(COMPTROLLER.toLowerCase());
           expect((await deviationSentinel.RESILIENT_ORACLE()).toLowerCase()).to.equal(ORACLE.toLowerCase());
           expect(await deviationSentinel.SENTINEL_ORACLE()).to.equal(sentinelOracle.address);
         });
@@ -400,9 +382,10 @@ if (FORK_MAINNET) {
 
         it("should revert with UnauthorizedKeeper when caller is not trusted", async () => {
           const [, randomUser] = await ethers.getSigners();
-          await expect(
-            deviationSentinel.connect(randomUser).handleDeviation(vWBNB),
-          ).to.be.revertedWithCustomError(deviationSentinel, "UnauthorizedKeeper");
+          await expect(deviationSentinel.connect(randomUser).handleDeviation(vWBNB)).to.be.revertedWithCustomError(
+            deviationSentinel,
+            "UnauthorizedKeeper",
+          );
         });
 
         it("should revert with TokenMonitoringDisabled when monitoring is off", async () => {
@@ -411,9 +394,10 @@ if (FORK_MAINNET) {
           // Force deviation so the only revert reason is monitoring disabled
           await chainlinkOracle.connect(timelock).setDirectPrice(WBNB, parseUnits("3000", 18));
 
-          await expect(
-            deviationSentinel.connect(timelock).handleDeviation(vWBNB),
-          ).to.be.revertedWithCustomError(deviationSentinel, "TokenMonitoringDisabled");
+          await expect(deviationSentinel.connect(timelock).handleDeviation(vWBNB)).to.be.revertedWithCustomError(
+            deviationSentinel,
+            "TokenMonitoringDisabled",
+          );
 
           // Re-enable for subsequent tests
           await deviationSentinel.connect(timelock).setTokenMonitoringEnabled(WBNB, true);
@@ -643,9 +627,10 @@ if (FORK_MAINNET) {
           // Force deviation
           await chainlinkOracle.connect(timelock).setDirectPrice(WBNB, parseUnits("3000", 18));
 
-          await expect(
-            deviationSentinel.connect(timelock).handleDeviation(vWBNB),
-          ).to.be.revertedWithCustomError(deviationSentinel, "TokenMonitoringDisabled");
+          await expect(deviationSentinel.connect(timelock).handleDeviation(vWBNB)).to.be.revertedWithCustomError(
+            deviationSentinel,
+            "TokenMonitoringDisabled",
+          );
         });
 
         it("should re-enable monitoring and allow handleDeviation", async () => {

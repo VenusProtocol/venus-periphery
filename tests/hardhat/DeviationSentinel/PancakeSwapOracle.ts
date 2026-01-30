@@ -162,10 +162,7 @@ describe("PancakeSwapOracle", () => {
       pancakePool.token1.returns(TOKEN_C);
       pancakePool.slot0.returns(slot0(Q96));
 
-      await expect(pancakeSwapOracle.getPrice(TOKEN_A)).to.be.revertedWithCustomError(
-        pancakeSwapOracle,
-        "InvalidPool",
-      );
+      await expect(pancakeSwapOracle.getPrice(TOKEN_A)).to.be.revertedWithCustomError(pancakeSwapOracle, "InvalidPool");
     });
   });
 
