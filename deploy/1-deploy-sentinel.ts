@@ -15,39 +15,39 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   const timelock = ADDRESSES.preconfiguredAddresses.NormalTimelock;
   const resilientOracle = ADDRESSES.preconfiguredAddresses.ResilientOracle;
 
-  // await deploy("PancakeSwapOracle", {
-  //   contract: "PancakeSwapOracle",
-  //   from: deployer,
-  //   log: true,
-  //   deterministicDeployment: false,
-  //   args: [resilientOracle],
-  //   proxy: {
-  //     owner: timelock,
-  //     proxyContract: "OptimizedTransparentProxy",
-  //     execute: {
-  //       methodName: "initialize",
-  //       args: [accessControlManager],
-  //     },
-  //   },
-  //   waitConfirmations: 2,
-  // });
+  await deploy("PancakeSwapOracle", {
+    contract: "PancakeSwapOracle",
+    from: deployer,
+    log: true,
+    deterministicDeployment: false,
+    args: [resilientOracle],
+    proxy: {
+      owner: timelock,
+      proxyContract: "OptimizedTransparentProxy",
+      execute: {
+        methodName: "initialize",
+        args: [accessControlManager],
+      },
+    },
+    waitConfirmations: 2,
+  });
 
-  // await deploy("UniswapOracle", {
-  //   contract: "UniswapOracle",
-  //   from: deployer,
-  //   log: true,
-  //   deterministicDeployment: false,
-  //   args: [resilientOracle],
-  //   proxy: {
-  //     owner: timelock,
-  //     proxyContract: "OptimizedTransparentProxy",
-  //     execute: {
-  //       methodName: "initialize",
-  //       args: [accessControlManager],
-  //     },
-  //   },
-  //   waitConfirmations: 2,
-  // });
+  await deploy("UniswapOracle", {
+    contract: "UniswapOracle",
+    from: deployer,
+    log: true,
+    deterministicDeployment: false,
+    args: [resilientOracle],
+    proxy: {
+      owner: timelock,
+      proxyContract: "OptimizedTransparentProxy",
+      execute: {
+        methodName: "initialize",
+        args: [accessControlManager],
+      },
+    },
+    waitConfirmations: 2,
+  });
 
   await deploy("SentinelOracle", {
     contract: "SentinelOracle",
@@ -86,8 +86,8 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   });
 
   const deviationSentinel = await hre.ethers.getContract("DeviationSentinel");
-  // const uniswapOracle = await hre.ethers.getContract("UniswapOracle");
-  // const pancakeSwapOracle = await hre.ethers.getContract("PancakeSwapOracle");
+  const uniswapOracle = await hre.ethers.getContract("UniswapOracle");
+  const pancakeSwapOracle = await hre.ethers.getContract("PancakeSwapOracle");
 
   if (network.live && (await sentinelOracle.owner()) == deployer) {
     await sentinelOracle.transferOwnership(timelock);
@@ -97,13 +97,39 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     await deviationSentinel.transferOwnership(timelock);
   }
 
-  // if ((await uniswapOracle.owner()) == deployer) {
-  //   await uniswapOracle.transferOwnership(timelock);
-  // }
+  if ((await uniswapOracle.owner()) == deployer) {
+    await uniswapOracle.transferOwnership(timelock);
+  }
 
-  // if ((await pancakeSwapOracle.owner()) == deployer) {
-  //   await pancakeSwapOracle.transferOwnership(timelock);
-  // }
+  if ((await pancakeSwapOracle.owner()) == deployer) {
+    await pancakeSwapOracle.transferOwnership(timelock);
+  }
+
+  // Verify implementation contracts
+  const pancakeSwapOracleImpl = await deployments.get("PancakeSwapOracle_Implementation");
+  const uniswapOracleImpl = await deployments.get("UniswapOracle_Implementation");
+  const sentinelOracleImpl = await deployments.get("SentinelOracle_Implementation");
+  const deviationSentinelImpl = await deployments.get("DeviationSentinel_Implementation");
+
+  await hre.run("verify:verify", {
+    address: pancakeSwapOracleImpl.address,
+    constructorArguments: [resilientOracle],
+  });
+
+  await hre.run("verify:verify", {
+    address: uniswapOracleImpl.address,
+    constructorArguments: [resilientOracle],
+  });
+
+  await hre.run("verify:verify", {
+    address: sentinelOracleImpl.address,
+    constructorArguments: [],
+  });
+
+  await hre.run("verify:verify", {
+    address: deviationSentinelImpl.address,
+    constructorArguments: [corePool, resilientOracle, sentinelOracle.address],
+  });
 };
 
 export default func;

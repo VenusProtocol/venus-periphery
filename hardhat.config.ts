@@ -161,6 +161,7 @@ const config: HardhatUserConfig = {
       chainId: 56,
       live: true,
       timeout: 1200000,
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [`0x${process.env.DEPLOYER_PRIVATE_KEY}`] : [],
     },
     ethereum: {
       url: process.env.ARCHIVE_NODE_ethereum || "https://eth.drpc.org",
