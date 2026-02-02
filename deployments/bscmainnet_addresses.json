@@ -2,9 +2,21 @@
   "name": "bscmainnet",
   "chainId": "56",
   "addresses": {
+    "DeviationSentinel": "0x6599C15cc8407046CD91E5c0F8B7f765fF914870",
+    "DeviationSentinel_Implementation": "0x4921963DfEE266E5Ee85B15E39bC7fC988D94eF0",
+    "DeviationSentinel_Proxy": "0x6599C15cc8407046CD91E5c0F8B7f765fF914870",
     "LeverageStrategiesManager": "0x03F079E809185a669Ca188676D0ADb09cbAd6dC1",
     "LeverageStrategiesManager_Implementation": "0x88F896E7667e01E0e8b27a5E39076B020318EF51",
     "LeverageStrategiesManager_Proxy": "0x03F079E809185a669Ca188676D0ADb09cbAd6dC1",
-    "SwapHelper": "0xD79be25aEe798Aa34A9Ba1230003d7499be29A24"
+    "PancakeSwapOracle": "0x44B72078240A3509979faF450085Fa818401D32E",
+    "PancakeSwapOracle_Implementation": "0xcC29BEa10dBD52E8f915B99C55b55C74AC9AfD5b",
+    "PancakeSwapOracle_Proxy": "0x44B72078240A3509979faF450085Fa818401D32E",
+    "SentinelOracle": "0x58eae0Cf4215590E19860b66b146C5d539cb6f14",
+    "SentinelOracle_Implementation": "0x26F9aCA545Cb0d91738e5AAD1b8E6568728f7BC0",
+    "SentinelOracle_Proxy": "0x58eae0Cf4215590E19860b66b146C5d539cb6f14",
+    "SwapHelper": "0xD79be25aEe798Aa34A9Ba1230003d7499be29A24",
+    "UniswapOracle": "0x8FD05458faf220B2324c4BFbb29DBC4B3CF6f23f",
+    "UniswapOracle_Implementation": "0x3156529859cf18708404544324098330EAb31827",
+    "UniswapOracle_Proxy": "0x8FD05458faf220B2324c4BFbb29DBC4B3CF6f23f"
   }
 }
