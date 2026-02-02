@@ -153,7 +153,7 @@ interface IRelativePositionManager {
     /// @param dsaAsset Address of the DSA asset
     /// @param positionAccount Address of the deployed PositionAccount
     /// @param initialPrincipal Initial principal supplied (optional)
-    /// @param desiredLeverage Target leverage ratio for the position
+    /// @param effectiveLeverage Target leverage ratio for the position
     event PositionActivated(
         address indexed user,
         address indexed longAsset,
@@ -162,7 +162,7 @@ interface IRelativePositionManager {
         address positionAccount,
         uint256 cycleId,
         uint256 initialPrincipal,
-        uint256 desiredLeverage
+        uint256 effectiveLeverage
     );
 
     /// @notice Emitted when a user supplies additional principal
@@ -188,7 +188,6 @@ interface IRelativePositionManager {
     /// @param shortAsset Address of the short asset
     /// @param dsaAsset Address of the DSA asset
     /// @param shortAmount Amount borrowed in short asset
-    /// @param effectiveLeverage Leverage ratio set for this position
     /// @param additionalPrincipal Additional principal supplied this call (0 if none)
     event PositionOpened(
         address indexed user,
@@ -198,7 +197,6 @@ interface IRelativePositionManager {
         address shortAsset,
         address dsaAsset,
         uint256 shortAmount,
-        uint256 effectiveLeverage,
         uint256 additionalPrincipal
     );
 
@@ -206,13 +204,20 @@ interface IRelativePositionManager {
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
     /// @param cycleId The cycle ID of the position
-    event PositionClosed(address indexed user, address indexed positionAccount, uint256 cycleId);
+    /// @param remainingDebt Remaining short debt on the position account after the close (0 if fully closed)
+    event PositionClosed(address indexed user, address indexed positionAccount, uint256 cycleId, uint256 remainingDebt);
 
-    /// @notice Emitted when leverage is closed with profit (debt repaid, profit realized). Principal remains; user withdraws separately.
+    /// @notice Emitted when a position is closed with profit (debt repaid, profit realized). Principal remains; user withdraws separately.
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
     /// @param cycleId The cycle ID of the position
-    event ProfitRealized(address indexed user, address indexed positionAccount, uint256 cycleId);
+    event PositionClosedWithProfit(address indexed user, address indexed positionAccount, uint256 cycleId);
+
+    /// @notice Emitted when a position is closed with loss (debt repaid, position fully closed).
+    /// @param user Address of the user
+    /// @param positionAccount Address of the position account
+    /// @param cycleId The cycle ID of the position
+    event PositionClosedWithLoss(address indexed user, address indexed positionAccount, uint256 cycleId);
 
     /// @notice Emitted when principal is withdrawn
     /// @param user Address of the user
@@ -247,20 +252,20 @@ interface IRelativePositionManager {
     /**
      * @notice Activates a position account for the user with specified asset pair and DSA
      * @dev Deploys a new PositionAccount contract if one doesn't exist for this user/asset combination.
-     *      The desired leverage must be set during activation and will be used to validate borrow amounts
+     *      The effective leverage must be set during activation and will be used to validate borrow amounts
      *      in openPosition operations.
      * @param longVToken The vToken market address for the asset to long
      * @param shortVToken The vToken market address for the asset to short
      * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
      * @param initialPrincipal Optional initial principal amount to supply
-     * @param desiredLeverage The target leverage ratio for this position (in mantissa, e.g., 2e18 = 2x leverage)
+     * @param effectiveLeverage The target leverage ratio for this position (in mantissa, e.g., 2e18 = 2x leverage)
      */
     function activatePosition(
         address longVToken,
         address shortVToken,
         uint8 dsaIndex,
         uint256 initialPrincipal,
-        uint256 desiredLeverage
+        uint256 effectiveLeverage
     ) external;
 
     /**
@@ -299,7 +304,7 @@ interface IRelativePositionManager {
 
     /**
      * @notice Closes a position partially or fully
-     * @dev Supports partial closing. Validates that remaining leverage doesn't exceed desired leverage.
+     * @dev Supports partial closing. Validates that remaining leverage doesn't exceed effective leverage.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param collateralAmountToRedeem Amount of long collateral to redeem
@@ -388,8 +393,7 @@ interface IRelativePositionManager {
 
     /**
      * @notice Adds a new DSA vToken to the supported list
-     * @dev Index will be the current length of the array.
-     *      TODO: Add ACM-based access control here
+     * @dev Index will be the current length of the array. Callable only by accounts with ACM permission for addDSAVToken(address).
      * @param dsaVToken The vToken market address to add as a supported DSA
      */
     function addDSAVToken(address dsaVToken) external;
@@ -429,9 +433,8 @@ interface IRelativePositionManager {
 
     /**
      * @notice Executes an arbitrary call on behalf of a position account
-     * @dev Only the position account owner (msg.sender) may request a call on their account.
-     *      Allows operations like emergency fund rescue or contract migrations.
-     * @param positionAccount Address of the position account (must be owned by msg.sender)
+     * @dev Callable by governance, Allows operations like emergency fund rescues.
+     * @param positionAccount Address of the position account
      * @param target Target contract address
      * @param data Encoded call data
      */

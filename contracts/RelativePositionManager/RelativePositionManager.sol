@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.28;
 
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import {
-    ReentrancyGuardUpgradeable
-} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import {
     SafeERC20Upgradeable,
     IERC20Upgradeable
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import { ClonesUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/ClonesUpgradeable.sol";
-
+import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 import { IVToken, IComptroller } from "../Interfaces.sol";
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
 import { LeverageStrategiesManager } from "../LeverageManager/LeverageStrategiesManager.sol";
@@ -25,13 +22,13 @@ import { IPositionAccount } from "./IPositionAccount.sol";
  *      trading relative prices rather than traditional leverage. Uses 3-token logic (DSA + Long + Short)
  *      and deploys isolated PositionAccount contracts for each position.
  */
-contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, IRelativePositionManager {
+contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeable, IRelativePositionManager {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @dev Success return value for Comptroller operations (e.g. enterMarketBehalf)
     uint256 private constant SUCCESS = 0;
 
-    /// @dev Mantissa for fixed-point arithmetic (1e18 = 100%)
+    /// @dev Mantissa for fixed-point arithmetic (MANTISSA_ONE = 100%)
     uint256 private constant MANTISSA_ONE = 1e18;
 
     /// @dev Maximum leverage ratio (10x)
@@ -80,31 +77,30 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
     /**
      * @notice Initializes the upgradeable contract
-     * @dev Sets up Ownable2Step and ReentrancyGuard. Call once after deployment (or via proxy).
-     *      DSA vTokens must be added by the owner via addDSAVToken before users can activate positions.
+     * @param accessControlManager_ Address of the Access Control Manager contract
      */
-    function initialize() external initializer {
-        __Ownable2Step_init();
+    function initialize(address accessControlManager_) external initializer {
+        __AccessControlled_init(accessControlManager_);
         __ReentrancyGuard_init();
     }
 
     /**
      * @notice Activates a position account for the user with specified asset pair and DSA
      * @dev Deploys a new PositionAccount contract if one doesn't exist for this user/asset combination.
-     *      The desired leverage must be set during activation and will be used to validate borrow amounts
+     *      The effective leverage must be set during activation and will be used to validate borrow amounts
      *      in openPosition operations.
      * @param longVToken The vToken market address for the asset to long
      * @param shortVToken The vToken market address for the asset to short
      * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
      * @param initialPrincipal Optional initial principal amount to supply
-     * @param desiredLeverage The target leverage ratio for this position (in mantissa, e.g., 2e18 = 2x leverage)
+     * @param effectiveLeverage The target leverage ratio for this position (in mantissa, e.g., 2e18 = 2x leverage)
      */
     function activatePosition(
         address longVToken,
         address shortVToken,
         uint8 dsaIndex,
         uint256 initialPrincipal,
-        uint256 desiredLeverage
+        uint256 effectiveLeverage
     ) external nonReentrant {
         if (longVToken == address(0) || shortVToken == address(0)) {
             revert ZeroAddress();
@@ -116,7 +112,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         // Validate and resolve DSA vToken from index
         IVToken dsaVToken = _getValidatedDSAVToken(dsaIndex);
 
-        if (desiredLeverage < MIN_LEVERAGE || desiredLeverage > MAX_LEVERAGE) {
+        if (effectiveLeverage < MIN_LEVERAGE || effectiveLeverage > MAX_LEVERAGE) {
             revert InvalidLeverage();
         }
 
@@ -140,7 +136,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         position.cycleId++;
         position.isActive = true;
         position.dsaIndex = dsaIndex;
-        position.effectiveLeverage = desiredLeverage;
+        position.effectiveLeverage = effectiveLeverage;
 
         // Enter DSA market on behalf of position account (to use as collateral)
         _validateAndEnterMarket(position.positionAccount, dsaVToken);
@@ -162,7 +158,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
             position.positionAccount,
             position.cycleId,
             initialPrincipal,
-            desiredLeverage
+            effectiveLeverage
         );
     }
 
@@ -268,7 +264,6 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
             address(shortVToken),
             address(dsaVToken),
             shortAmount,
-            position.effectiveLeverage,
             additionalPrincipal
         );
     }
@@ -328,7 +323,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
         _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
 
-        emit PositionClosed(msg.sender, positionAccount, position.cycleId);
+        emit PositionClosed(msg.sender, positionAccount, position.cycleId, remainingShortDebt);
     }
 
     /**
@@ -405,7 +400,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
         // Deactivate position; user may withdraw principal or start a new cycle via activatePosition
         position.isActive = false;
-        emit ProfitRealized(msg.sender, positionAccount, position.cycleId);
+        emit PositionClosedWithProfit(msg.sender, positionAccount, position.cycleId);
     }
 
     /**
@@ -487,7 +482,8 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
 
         position.isActive = false;
-        emit PositionClosed(msg.sender, positionAccount, position.cycleId);
+        emit PositionClosed(msg.sender, positionAccount, position.cycleId, 0);
+        emit PositionClosedWithLoss(msg.sender, positionAccount, position.cycleId);
     }
 
     /**
@@ -518,7 +514,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
         uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
         uint256 redeemError = dsaVToken.redeemUnderlyingBehalf(positionAccount, amount);
-        if (redeemError != 0) {
+        if (redeemError != SUCCESS) {
             revert RedeemBehalfFailed(redeemError);
         }
         uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
@@ -569,11 +565,11 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
     /**
      * @notice Adds a new DSA vToken to the supported list
-     * @dev Index will be the current length of the array. Only owner can add.
+     * @dev Index will be the current length of the array. Callable only by Governance.
      * @param dsaVToken The vToken market address to add as a supported DSA
      */
-    function addDSAVToken(address dsaVToken) external onlyOwner {
-        // TODO: Add ACM-based access control here
+    function addDSAVToken(address dsaVToken) external {
+        _checkAccessAllowed("addDSAVToken(address)");
         if (dsaVToken == address(0)) {
             revert ZeroAddress();
         }
@@ -627,13 +623,13 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
     /**
      * @notice Executes an arbitrary call on behalf of a position account
-     * @dev Only the position account owner (msg.sender) may request a call. Reverts with UnauthorizedAccess if positionAccount.owner() != msg.sender.
-     * @param positionAccount Address of the position account (must be owned by msg.sender)
+     * @dev Callable by governance, Allows operations like emergency fund rescues.
+     * @param positionAccount Address of the position account
      * @param target Target contract address
      * @param data Encoded call data
      */
     function executePositionAccountCall(address positionAccount, address target, bytes calldata data) external {
-        if (IPositionAccount(positionAccount).owner() != msg.sender) revert UnauthorizedAccess();
+        _checkAccessAllowed("executePositionAccountCall(address,address,bytes)");
         IPositionAccount(positionAccount).executeCall(target, data);
         emit GenericCallExecuted(positionAccount, target, data);
     }
@@ -725,7 +721,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
         // Always redeem full excess (if user supplied amount < current excess, we still redeem full)
         uint256 redeemErr = longVToken.redeemUnderlyingBehalf(positionAccount, excessLongToRedeem);
-        if (redeemErr != 0) revert RedeemBehalfFailed(redeemErr);
+        if (redeemErr != SUCCESS) revert RedeemBehalfFailed(redeemErr);
 
         uint256 longBalance = longUnderlying.balanceOf(address(this));
 
@@ -765,7 +761,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
             return;
         }
         uint256 err = dsaVToken.redeemUnderlyingBehalf(positionAccount, type(uint256).max);
-        if (err != 0) revert RedeemBehalfFailed(err);
+        if (err != SUCCESS) revert RedeemBehalfFailed(err);
         uint256 received = IERC20Upgradeable(dsaUnderlying).balanceOf(address(this));
         if (received > 0) {
             IERC20Upgradeable(dsaUnderlying).safeTransfer(msg.sender, received);
@@ -786,7 +782,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         IERC20Upgradeable(underlying).safeTransferFrom(msg.sender, address(this), amount);
         IERC20Upgradeable(underlying).forceApprove(address(dsaVToken), amount);
         uint256 mintError = dsaVToken.mintBehalf(positionAccount, amount);
-        if (mintError != 0) revert MintBehalfFailed(mintError);
+        if (mintError != SUCCESS) revert MintBehalfFailed(mintError);
         uint256 vTokensMinted = dsaVToken.balanceOf(positionAccount) - balanceBefore;
         position.suppliedPrincipal += vTokensMinted;
     }
@@ -817,7 +813,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         ResilientOracleInterface oracle = COMPTROLLER.oracle();
         uint256 shortPrice = oracle.getUnderlyingPrice(address(shortVToken));
 
-        maxBorrowAmount = (maxAdditionalBorrowUSD * 1e18) / shortPrice;
+        maxBorrowAmount = (maxAdditionalBorrowUSD * MANTISSA_ONE) / shortPrice;
     }
 
     /**
@@ -857,7 +853,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         utilization.availableCapitalUSD = values.suppliedPrincipalUSD - utilization.finalCapitalUtilized;
 
         // Calculate withdrawable amount in DSA token terms
-        utilization.withdrawableAmount = (utilization.availableCapitalUSD * 1e18) / values.dsaPrice;
+        utilization.withdrawableAmount = (utilization.availableCapitalUSD * MANTISSA_ONE) / values.dsaPrice;
     }
 
     /**
@@ -929,7 +925,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
         // When DSA == long, principal is tracked in vTokens to separate it from long collateral.
         uint256 exchangeRate = dsaVToken.exchangeRateCurrent();
-        return (position.suppliedPrincipal * exchangeRate) / 1e18;
+        return (position.suppliedPrincipal * exchangeRate) / MANTISSA_ONE;
     }
 
     /**
@@ -951,7 +947,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
                 ? vTokenBalance - position.suppliedPrincipal
                 : 0;
             uint256 exchangeRate = longVToken.exchangeRateCurrent();
-            longBalance = (netVTokens * exchangeRate) / 1e18;
+            longBalance = (netVTokens * exchangeRate) / MANTISSA_ONE;
         } else {
             longBalance = longVToken.balanceOfUnderlying(position.positionAccount);
         }
@@ -985,9 +981,9 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
             revert InvalidOraclePrice();
         }
 
-        values.longValueUSD = (longCollateral * longPrice) / 1e18;
-        values.borrowValueUSD = (shortDebt * values.shortPrice) / 1e18;
-        values.suppliedPrincipalUSD = (suppliedPrincipal * values.dsaPrice) / 1e18;
+        values.longValueUSD = (longCollateral * longPrice) / MANTISSA_ONE;
+        values.borrowValueUSD = (shortDebt * values.shortPrice) / MANTISSA_ONE;
+        values.suppliedPrincipalUSD = (suppliedPrincipal * values.dsaPrice) / MANTISSA_ONE;
     }
 
     /**
