@@ -3,9 +3,7 @@ pragma solidity 0.8.28;
 
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { AddressUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
-import {
-    IERC20Upgradeable
-} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import { IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import { SafeERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import { IComptroller, IVToken } from "../Interfaces.sol";
 import { ILeverageStrategiesManager } from "../LeverageManager/ILeverageStrategiesManager.sol";
@@ -77,6 +75,14 @@ contract PositionAccount is Initializable, IPositionAccount {
         uint256 collateralAmount,
         uint256 borrowedAmount
     );
+
+    /**
+     * @notice Emitted when dust (remaining token balance) is transferred to the position owner
+     * @param token Address of the ERC20 token transferred
+     * @param owner Address of the position account owner receiving the dust
+     * @param amount Amount of tokens transferred
+     */
+    event DustTransferredToOwner(address indexed token, address indexed owner, uint256 amount);
 
     /// @notice Thrown when caller is not the authorized RelativePositionManager
     error UnauthorizedCaller();
@@ -223,6 +229,7 @@ contract PositionAccount is Initializable, IPositionAccount {
         uint256 balance = IERC20Upgradeable(token).balanceOf(address(this));
         if (balance > 0) {
             IERC20Upgradeable(token).safeTransfer(owner, balance);
+            emit DustTransferredToOwner(token, owner, balance);
         }
     }
 

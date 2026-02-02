@@ -2,7 +2,9 @@
 pragma solidity 0.8.28;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import {
+    ReentrancyGuardUpgradeable
+} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import {
     SafeERC20Upgradeable,
     IERC20Upgradeable
@@ -11,7 +13,6 @@ import { ClonesUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/Clo
 
 import { IVToken, IComptroller } from "../Interfaces.sol";
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
-import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
 import { LeverageStrategiesManager } from "../LeverageManager/LeverageStrategiesManager.sol";
 import { IRelativePositionManager } from "./IRelativePositionManager.sol";
 import { IPositionAccount } from "./IPositionAccount.sol";
@@ -27,14 +28,8 @@ import { IPositionAccount } from "./IPositionAccount.sol";
 contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, IRelativePositionManager {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
-    /// @dev USD values for long collateral, short debt, and supplied principal (and prices used for conversions)
-    struct PositionValuesUSD {
-        uint256 longValueUSD;
-        uint256 borrowValueUSD;
-        uint256 suppliedPrincipalUSD;
-        uint256 dsaPrice;
-        uint256 shortPrice;
-    }
+    /// @dev Success return value for Comptroller operations (e.g. enterMarketBehalf)
+    uint256 private constant SUCCESS = 0;
 
     /// @dev Mantissa for fixed-point arithmetic (1e18 = 100%)
     uint256 private constant MANTISSA_ONE = 1e18;
@@ -54,10 +49,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
     /// @notice Implementation contract for PositionAccount clones
     address public immutable POSITION_ACCOUNT_IMPLEMENTATION;
 
-    /// @notice The swap helper contract
-    SwapHelper public immutable SWAP_HELPER;
-
-    /// @notice Array of supported DSA vToken markets
+    /// @notice Array of supported DSA (Default Settlement Asset) vToken markets
     address[] public dsaVTokens;
 
     /// @notice Mapping from user => longAsset => shortAsset => Position data
@@ -68,34 +60,28 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
     /**
      * @notice Contract constructor
-     * @dev Sets immutable variables and disables initializers
-     * @param comptroller The Venus comptroller contract address
-     * @param leverageManager The leverage strategies manager contract address
-     * @param swapHelper The swap helper contract address
-     * @param positionAccountImpl Implementation contract for PositionAccount clones
+     * @dev Sets immutable variables (COMPTROLLER, LEVERAGE_MANAGER, POSITION_ACCOUNT_IMPLEMENTATION) and disables initializers.
+     *      Swap helper is obtained from the leverage manager at call time. DSA vTokens must be added via addDSAVToken after deployment.
+     * @param comptroller The Venus Comptroller contract address
+     * @param leverageManager The LeverageStrategiesManager contract address (provides swap helper for enter/exit leverage)
+     * @param positionAccountImpl Implementation contract for PositionAccount EIP-1167 clones
      */
-    constructor(address comptroller, address leverageManager, address swapHelper, address positionAccountImpl) {
-        if (
-            comptroller == address(0) ||
-            leverageManager == address(0) ||
-            swapHelper == address(0) ||
-            positionAccountImpl == address(0)
-        ) {
+    constructor(address comptroller, address leverageManager, address positionAccountImpl) {
+        if (comptroller == address(0) || leverageManager == address(0) || positionAccountImpl == address(0)) {
             revert ZeroAddress();
         }
 
         COMPTROLLER = IComptroller(comptroller);
         LEVERAGE_MANAGER = LeverageStrategiesManager(leverageManager);
-        SWAP_HELPER = SwapHelper(swapHelper);
         POSITION_ACCOUNT_IMPLEMENTATION = positionAccountImpl;
 
         _disableInitializers();
     }
 
     /**
-     * @notice Initializes the contract
-     * @dev Sets up Ownable2Step and ReentrancyGuard.
-     *      DSA vTokens should be added separately using addDSAVToken function.
+     * @notice Initializes the upgradeable contract
+     * @dev Sets up Ownable2Step and ReentrancyGuard. Call once after deployment (or via proxy).
+     *      DSA vTokens must be added by the owner via addDSAVToken before users can activate positions.
      */
     function initialize() external initializer {
         __Ownable2Step_init();
@@ -107,82 +93,72 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
      * @dev Deploys a new PositionAccount contract if one doesn't exist for this user/asset combination.
      *      The desired leverage must be set during activation and will be used to validate borrow amounts
      *      in openPosition operations.
-     *      Validates that longAsset and shortAsset are different, listed markets, and not vBNB.
-     * @param longAsset The vToken market address for the asset to long
-     * @param shortAsset The vToken market address for the asset to short
+     * @param longVToken The vToken market address for the asset to long
+     * @param shortVToken The vToken market address for the asset to short
      * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
      * @param initialPrincipal Optional initial principal amount to supply
      * @param desiredLeverage The target leverage ratio for this position (in mantissa, e.g., 2e18 = 2x leverage)
      */
     function activatePosition(
-        address longAsset,
-        address shortAsset,
+        address longVToken,
+        address shortVToken,
         uint8 dsaIndex,
         uint256 initialPrincipal,
         uint256 desiredLeverage
     ) external nonReentrant {
-        if (longAsset == address(0) || shortAsset == address(0)) {
+        if (longVToken == address(0) || shortVToken == address(0)) {
             revert ZeroAddress();
         }
 
-        // Validate that markets are listed
-        checkMarketListed(longAsset);
-        checkMarketListed(shortAsset);
+        checkMarketListed(longVToken);
+        checkMarketListed(shortVToken);
 
-        // Validate DSA index
-        if (dsaIndex >= dsaVTokens.length) {
-            revert InvalidDSA();
-        }
-
-        address dsaVToken = dsaVTokens[dsaIndex];
-        if (dsaVToken == address(0)) {
-            revert InvalidDSA();
-        }
-        checkMarketListed(dsaVToken);
+        // Validate and resolve DSA vToken from index
+        IVToken dsaVToken = _getValidatedDSAVToken(dsaIndex);
 
         if (desiredLeverage < MIN_LEVERAGE || desiredLeverage > MAX_LEVERAGE) {
             revert InvalidLeverage();
         }
 
-        Position storage position = positions[msg.sender][longAsset][shortAsset];
+        Position storage position = positions[msg.sender][longVToken][shortVToken];
 
         if (position.isActive) {
             revert PositionAlreadyExists();
         }
 
-        // If reactivating and user wants to change DSA asset, they must first withdraw current DSA supplied (no matter if supplying new amount or not)
+        // If reactivating and user wants to change DSA asset, they must first withdraw current DSA supplied
         if (position.positionAccount != address(0) && dsaIndex != position.dsaIndex) {
             revert WithdrawPrincipalBeforeChangingDSA();
         }
 
-        // Deploy position account if it doesn't exist (sets positionAccount and immutable fields in _deployPositionAccount)
+        // Deploy position account if it doesn't exist (sets immutable fields in _deployPositionAccount)
         if (position.positionAccount == address(0)) {
-            _deployPositionAccount(msg.sender, longAsset, shortAsset);
+            _deployPositionAccount(msg.sender, longVToken, shortVToken);
         }
 
-        // Increment cycle ID on each activation (completes previous cycle when reactivating)
+        // Increment cycle ID on each activation and set mutabale fields
         position.cycleId++;
-
         position.isActive = true;
         position.dsaIndex = dsaIndex;
         position.effectiveLeverage = desiredLeverage;
 
         // Enter DSA market on behalf of position account (to use as collateral)
-        _enterMarket(position.positionAccount, dsaVToken);
+        _validateAndEnterMarket(position.positionAccount, dsaVToken);
 
-        // Supply additional principal if provided (transfer and mint only the new amount)
         if (initialPrincipal > 0) {
-            _supplyPrincipalToPositionAccount(position.positionAccount, IVToken(dsaVToken), initialPrincipal);
+            _supplyPrincipalToPositionAccount(position, dsaVToken, initialPrincipal);
         }
 
-        // Store supplied principal as vToken amount (existing + newly minted)
-        position.suppliedPrincipal = IVToken(dsaVToken).balanceOf(position.positionAccount);
+        // At this point, no long asset has been supplied yet, so the current vToken balance
+        // (existing + newly minted) fully represents the principal.
+        // This is safe even if DSA == long, since no long position exists yet.
+        position.suppliedPrincipal = dsaVToken.balanceOf(position.positionAccount);
 
         emit PositionActivated(
             msg.sender,
-            longAsset,
-            shortAsset,
-            dsaVToken,
+            longVToken,
+            shortVToken,
+            address(dsaVToken),
             position.positionAccount,
             position.cycleId,
             initialPrincipal,
@@ -193,38 +169,37 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
     /**
      * @notice Supplies additional principal to an active position
      * @dev Can be called multiple times to increase collateral.
-     *      Validates that the provided DSA index matches the position's configured DSA.
-     * @param longAsset The vToken market address for the long asset
-     * @param shortAsset The vToken market address for the short asset
+     * @param longVToken The vToken market address for the long asset
+     * @param shortVToken The vToken market address for the short asset
      * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
      * @param amount Amount of DSA underlying to supply
      */
-    function supplyPrincipal(
-        address longAsset,
-        address shortAsset,
+    function increasePrincipal(
+        address longVToken,
+        address shortVToken,
         uint8 dsaIndex,
         uint256 amount
     ) public nonReentrant {
         if (amount == 0) revert ZeroAmount();
 
-        Position storage position = positions[msg.sender][longAsset][shortAsset];
-
+        Position storage position = positions[msg.sender][longVToken][shortVToken];
         if (!position.isActive) {
             revert PositionNotActive();
         }
 
-        // Validate that the provided DSA index matches the position's configured DSA
-        if (dsaIndex != position.dsaIndex) {
-            revert InvalidDSA();
-        }
+        IVToken dsaVToken = _getValidatedPositionDSAVToken(position, dsaIndex);
 
         address positionAccount = position.positionAccount;
-        IVToken dsaVToken = IVToken(dsaVTokens[dsaIndex]);
-        checkMarketListed(address(dsaVToken));
+        _supplyPrincipalToPositionAccount(position, dsaVToken, amount);
 
-        position.suppliedPrincipal += _supplyPrincipalToPositionAccount(positionAccount, dsaVToken, amount);
-
-        emit PrincipalSupplied(msg.sender, positionAccount, address(dsaVToken), amount, position.suppliedPrincipal);
+        emit PrincipalSupplied(
+            msg.sender,
+            positionAccount,
+            position.cycleId,
+            address(dsaVToken),
+            amount,
+            position.suppliedPrincipal
+        );
     }
 
     /**
@@ -232,9 +207,10 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
      * @dev Can be called multiple times to scale the position. Optionally supply additional principal
      *      via additionalPrincipal; otherwise uses existing principal. Requires either existing principal
      *      (from activation or prior supply) or additionalPrincipal > 0. Validates that shortAmount
-     *      doesn't exceed the maximum allowed based on capital utilization.
+     *      doesn't exceed the maximum allowed based on capital utilization. dsaIndex must match the position's DSA.
      * @param longVToken The vToken market for the asset to long
      * @param shortVToken The vToken market for the asset to short
+     * @param dsaIndex Index of the DSA vToken for this position (must match position)
      * @param additionalPrincipal Additional principal to supply this call (0 if none)
      * @param shortAmount Amount to borrow in shortAsset terms (must not exceed max calculated borrow)
      * @param minLongAmount Minimum amount of long asset expected from swap (protects against slippage)
@@ -243,6 +219,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
     function openPosition(
         IVToken longVToken,
         IVToken shortVToken,
+        uint8 dsaIndex,
         uint256 additionalPrincipal,
         uint256 shortAmount,
         uint256 minLongAmount,
@@ -260,19 +237,19 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         // Must have principal (existing or supplied this call) to collateralize the borrow
         if (position.suppliedPrincipal == 0 && additionalPrincipal == 0) revert InsufficientPrincipal();
 
+        IVToken dsaVToken = _getValidatedPositionDSAVToken(position, dsaIndex);
         address positionAccount = position.positionAccount;
-        IVToken dsaVToken = IVToken(dsaVTokens[position.dsaIndex]);
 
         if (additionalPrincipal > 0) {
-            position.suppliedPrincipal += _supplyPrincipalToPositionAccount(positionAccount, dsaVToken, additionalPrincipal);
+            _supplyPrincipalToPositionAccount(position, dsaVToken, additionalPrincipal);
         }
 
-        uint256 maxBorrowAmount = _calculateMaxBorrow(msg.sender, longVToken, shortVToken, dsaVToken);
+        uint256 maxBorrowAmount = _calculateMaxBorrowAllowed(msg.sender, longVToken, shortVToken, dsaVToken);
         if (shortAmount > maxBorrowAmount) revert BorrowAmountExceedsMaximum();
 
         IPositionAccount(positionAccount).enterLeverage(
             longVToken,
-            0, // no collateral seed; collateral comes from swap
+            0, // no collateral seed; DSA is used as Seed
             shortVToken,
             shortAmount,
             minLongAmount,
@@ -280,8 +257,8 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         );
 
         // Transfer any dust from LM (sent to position account) to user
-        _transferDustToUser(positionAccount, longVToken.underlying());
-        _transferDustToUser(positionAccount, shortVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
 
         emit PositionOpened(
             msg.sender,
@@ -300,7 +277,6 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
      * @notice Closes a position partially or fully
      * @dev Supports partial closing. After closing, validates that remaining debt doesn't exceed
      *      the maximum allowed borrow based on supplied principal and effective leverage.
-     *      If position is partially closed, ensures leverage constraint is still satisfied.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param collateralAmountToRedeem Amount of long collateral to redeem
@@ -336,22 +312,11 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
             swapData
         );
 
-        // Transfer any dust from LM (sent to position account) to user
-        _transferDustToUser(positionAccount, longVToken.underlying());
-        _transferDustToUser(positionAccount, shortVToken.underlying());
-
-        // After closing, validate that leverage is still within acceptable range
         // If position is partially closed, validate leverage constraint is still satisfied
         uint256 remainingShortDebt = shortVToken.borrowBalanceStored(positionAccount);
         if (remainingShortDebt > 0) {
-            IVToken dsaVToken = IVToken(dsaVTokens[position.dsaIndex]);
-            PositionValuesUSD memory values = _getPositionValuesUSD(
-                position,
-                longVToken,
-                shortVToken,
-                dsaVToken,
-                remainingShortDebt
-            );
+            IVToken dsaVToken = _getValidatedPositionDSAVToken(position, position.dsaIndex);
+            PositionValuesUSD memory values = _getPositionValuesUSD(position, longVToken, shortVToken, dsaVToken);
             // maxAllowedBorrowUSD = suppliedPrincipalUSD * effectiveLeverage
             uint256 maxAllowedBorrowUSD = (values.suppliedPrincipalUSD * position.effectiveLeverage) / MANTISSA_ONE;
             if (values.borrowValueUSD > maxAllowedBorrowUSD) {
@@ -359,22 +324,23 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
             }
         }
 
+        // Transfer any dust from LM (sent to position account) to user
+        _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
+
         emit PositionClosed(msg.sender, positionAccount, position.cycleId);
     }
 
     /**
      * @notice Closes a position with profit (longValueUSD > shortDebtUSD)
-     * @dev Repay: only params needed for exitLeverage; borrow amount read from state.
-     *      Profit: user supplies redeem amount for swap, swap calldata, minOut. If supplied redeem amount is less than
-     *      current excess long, we redeem full excess, run swap, and transfer to user both the swapped amount (DSA)
-     *      and any extra redeemed collateral (long) that was not swapped.
-     *      Principal is not withdrawn here; user withdraws separately via withdrawPrincipal or deactivatePosition.
+     * @dev Repay: exitLeverage; borrow from state. Reverts if minAmountOutRepay < short debt.
+     *      Profit: exact-in swap amountToRedeemForProfitSwap long→DSA (reverts if > excess long). User gets DSA + extra long. Principal not withdrawn.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param collateralAmountToRedeemForRepay Amount of long to redeem for repay swap (passed to exitLeverage)
      * @param swapDataRepay Swap #1: long → short for debt repayment
-     * @param minAmountOutRepay Minimum short out from repay swap (required for debt + flash loan fee)
-     * @param amountToRedeemForProfitSwap Amount of excess long to use in profit swap (if less than actual excess, we redeem full and transfer extra to user)
+     * @param minAmountOutRepay Minimum short out from repay swap (must be >= current short debt)
+     * @param amountToRedeemForProfitSwap Exact amount of excess long to swap long→DSA; must not exceed excess long
      * @param minAmountOutProfit Minimum DSA out from profit swap
      * @param swapDataProfit Swap #2: long → DSA for profit realization
      */
@@ -385,46 +351,46 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         bytes calldata swapDataRepay,
         uint256 minAmountOutRepay,
         uint256 amountToRedeemForProfitSwap,
-        uint256 minAmountOutProfit,
-        bytes calldata swapDataProfit
+        bytes calldata swapDataProfit,
+        uint256 minAmountOutProfit
     ) external nonReentrant {
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         if (!position.isActive) revert PositionNotActive();
 
         address positionAccount = position.positionAccount;
-        uint256 borrowedAmountToRepay = shortVToken.borrowBalanceCurrent(positionAccount);
-        if (borrowedAmountToRepay == 0) revert NoShortDebtToRepay();
+        uint256 currentShortDebt = shortVToken.borrowBalanceCurrent(positionAccount);
 
-        IVToken dsaVToken = IVToken(dsaVTokens[position.dsaIndex]);
-        PositionValuesUSD memory values = _getPositionValuesUSD(position, longVToken, shortVToken, dsaVToken, 0);
+        if (minAmountOutRepay < currentShortDebt) revert MinAmountOutRepayBelowDebt();
+
+        IVToken dsaVToken = _getValidatedPositionDSAVToken(position, position.dsaIndex);
+        PositionValuesUSD memory values = _getPositionValuesUSD(position, longVToken, shortVToken, dsaVToken);
 
         if (values.longValueUSD <= values.borrowValueUSD) revert NotProfitScenario();
 
-        address longUnderlying = longVToken.underlying();
-        address dsaUnderlying = dsaVToken.underlying();
+        //    If there is no debt, skip repay and allow user to redeem collateral by swapping to DSA.
+        if (currentShortDebt > 0) {
+            IPositionAccount(positionAccount).exitLeverage(
+                longVToken,
+                collateralAmountToRedeemForRepay,
+                shortVToken,
+                currentShortDebt,
+                minAmountOutRepay,
+                swapDataRepay
+            );
 
-        // 1. Repay: only pass through what exitLeverage needs; borrow amount from state.
-        IPositionAccount(positionAccount).exitLeverage(
-            longVToken,
-            collateralAmountToRedeemForRepay,
-            shortVToken,
-            borrowedAmountToRepay,
-            minAmountOutRepay,
-            swapDataRepay
-        );
-
-        if (shortVToken.borrowBalanceStored(positionAccount) > 0) {
-            revert ShortDebtNotFullyRepaid();
+            if (shortVToken.borrowBalanceStored(positionAccount) > 0) {
+                revert ShortDebtNotFullyRepaid();
+            }
         }
 
         // 2. Profit: redeem (full excess if user amount < current), swap, transfer swapped amount + extra collateral to user.
         uint256 excessLong = _getLongCollateralBalance(position, longVToken);
+        if (excessLong < amountToRedeemForProfitSwap) revert InsufficientExcessLongForProfitSwap();
         if (excessLong > 0) {
             _realizeProfitFromExcessLong(
                 positionAccount,
                 longVToken,
-                longUnderlying,
-                dsaUnderlying,
+                dsaVToken,
                 excessLong,
                 amountToRedeemForProfitSwap,
                 minAmountOutProfit,
@@ -433,9 +399,9 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         }
 
         // Transfer any dust from LM (sent to position account) to user
-        _transferDustToUser(positionAccount, longVToken.underlying());
-        _transferDustToUser(positionAccount, shortVToken.underlying());
-        _transferDustToUser(positionAccount, dsaVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
 
         // Deactivate position; user may withdraw principal or start a new cycle via activatePosition
         position.isActive = false;
@@ -444,74 +410,82 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
     /**
      * @notice Closes a position with loss (longValueUSD < shortDebtUSD)
-     * @dev First exitLeverage (long→short) redeems full long (computed: if DSA==long, principal withdrawn first then long balance; else long underlying balance).
-     *      Second exitLeverage (DSA→short) for remaining debt. Any dust transferred to user.
-     *      UI shows when longValueUSD < shortDebtUSD. Requires two swap calldata from backend.
+     * @dev First exitLeverage (long→short): redeems longAmountToRedeemForFirstSwap (exact-in; reverts if > available long).
+     *      Any remaining long is redeemed and transferred to user. Second exitLeverage (DSA→short) for remaining debt.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param borrowedAmountToRepayFirst Short debt to repay in first exit (Exact-In)
+     * @param longAmountToRedeemForFirstSwap Exact long to redeem for first swap (swapHelper pulls this); must not exceed available long
      * @param minAmountOutFirst Minimum short out from first swap
      * @param swapDataFirst Swap #1: long → short
-     * @param dsaAmountToRedeemForRepay DSA principal to redeem for second repayment
-     * @param borrowedAmountToRepaySecond Remaining short debt to repay (Exact-In)
-     * @param minAmountOutSecond Minimum short out from second swap
+     * @param dsaAmountToRedeemForRepay DSA to redeem for second repayment
+     * @param minAmountOutSecond Minimum short out from second swap (must be >= remaining short debt)
      * @param swapDataSecond Swap #2: DSA → short
      */
     function closeWithLoss(
         IVToken longVToken,
         IVToken shortVToken,
         uint256 borrowedAmountToRepayFirst,
+        uint256 longAmountToRedeemForFirstSwap,
         uint256 minAmountOutFirst,
         bytes calldata swapDataFirst,
         uint256 dsaAmountToRedeemForRepay,
-        uint256 borrowedAmountToRepaySecond,
         uint256 minAmountOutSecond,
         bytes calldata swapDataSecond
     ) external nonReentrant {
-        if (borrowedAmountToRepayFirst == 0 || borrowedAmountToRepaySecond == 0) revert ZeroFlashLoanAmount();
-
+        if (borrowedAmountToRepayFirst == 0) revert ZeroFlashLoanAmount();
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         if (!position.isActive) revert PositionNotActive();
 
-        // Require short debt (USD) > long collateral (USD) for loss scenario
         address positionAccount = position.positionAccount;
-        IVToken dsaVToken = IVToken(dsaVTokens[position.dsaIndex]);
-        PositionValuesUSD memory values = _getPositionValuesUSD(position, longVToken, shortVToken, dsaVToken, 0);
+        IVToken dsaVToken = _getValidatedPositionDSAVToken(position, position.dsaIndex);
+        PositionValuesUSD memory values = _getPositionValuesUSD(position, longVToken, shortVToken, dsaVToken);
         if (values.borrowValueUSD <= values.longValueUSD) revert NotLossScenario();
 
-        // Compute long amount to redeem: if DSA==long, use only the long part (total minus principal); else use full long underlying balance
-        uint256 amountToRedeemFirst = address(longVToken) == address(dsaVToken)
-            ? _getLongCollateralBalance(position, longVToken)
-            : longVToken.balanceOfUnderlying(positionAccount);
+        // 1. First exitLeverage (long → short): redeem exact amount for swap; swapHelper pulls this
+        if (longAmountToRedeemForFirstSwap > 0) {
+            IPositionAccount(positionAccount).exitLeverage(
+                longVToken,
+                longAmountToRedeemForFirstSwap,
+                shortVToken,
+                borrowedAmountToRepayFirst,
+                minAmountOutFirst,
+                swapDataFirst
+            );
+        }
 
-        // 1. First execution: exitLeverage (long → short) full long redeem; LM repays borrowedAmountToRepayFirst, sends remainder to user
-        IPositionAccount(positionAccount).exitLeverage(
-            longVToken,
-            amountToRedeemFirst,
-            shortVToken,
-            borrowedAmountToRepayFirst,
-            minAmountOutFirst,
-            swapDataFirst
-        );
+        // 2. Second exitLeverage (DSA → short): close position completely; use current short debt
+        uint256 currentShortDebtSecond = shortVToken.borrowBalanceCurrent(positionAccount);
+        if (currentShortDebtSecond > 0) {
+            if (minAmountOutSecond < currentShortDebtSecond) revert MinAmountOutSecondBelowDebt();
+            IPositionAccount(positionAccount).exitLeverage(
+                dsaVToken,
+                dsaAmountToRedeemForRepay,
+                shortVToken,
+                currentShortDebtSecond,
+                minAmountOutSecond,
+                swapDataSecond
+            );
+            if (shortVToken.borrowBalanceStored(positionAccount) > 0) revert ShortDebtNotFullyRepaid();
+        }
 
-        // 2. Second execution: exitLeverage (DSA → short) remaining debt via position account wrapper
-        IPositionAccount(positionAccount).exitLeverage(
-            dsaVToken,
-            dsaAmountToRedeemForRepay,
-            shortVToken,
-            borrowedAmountToRepaySecond,
-            minAmountOutSecond,
-            swapDataSecond
-        );
+        // Redeem any remaining long and transfer to user
+        uint256 remainingLong = _getLongCollateralBalance(position, longVToken);
+        if (remainingLong > 0) {
+            uint256 err = longVToken.redeemUnderlyingBehalf(positionAccount, remainingLong);
+            if (err != 0) revert RedeemBehalfFailed(err);
+            IERC20Upgradeable longUnderlying = IERC20Upgradeable(longVToken.underlying());
+            uint256 balance = longUnderlying.balanceOf(address(this));
+            if (balance > 0) longUnderlying.safeTransfer(msg.sender, balance);
+        }
+
+        position.suppliedPrincipal = dsaVToken.balanceOf(positionAccount);
 
         // Transfer any dust from LM (sent to position account) to user
-        _transferDustToUser(positionAccount, longVToken.underlying());
-        _transferDustToUser(positionAccount, shortVToken.underlying());
-        _transferDustToUser(positionAccount, dsaVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
 
-        // Update supplied principal to actual remaining DSA vToken balance.
-        // Safe when long==DSA: the long part was already spent in the first exit to repay borrow, so remainder is principal only.
-        position.suppliedPrincipal = dsaVToken.balanceOf(positionAccount);
         position.isActive = false;
         emit PositionClosed(msg.sender, positionAccount, position.cycleId);
     }
@@ -528,7 +502,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
 
         address positionAccount = position.positionAccount;
-        IVToken dsaVToken = IVToken(dsaVTokens[position.dsaIndex]);
+        IVToken dsaVToken = _getValidatedPositionDSAVToken(position, position.dsaIndex);
 
         if (!position.isActive) {
             // Inactive: withdraw complete principal (e.g. after closeWithProfit principal left in)
@@ -542,43 +516,42 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
             revert InsufficientWithdrawableAmount();
         }
 
-        uint256 exchangeRate = dsaVToken.exchangeRateCurrent();
+        uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
         uint256 redeemError = dsaVToken.redeemUnderlyingBehalf(positionAccount, amount);
         if (redeemError != 0) {
-            revert RedeemBehalfFailed();
+            revert RedeemBehalfFailed(redeemError);
         }
+        uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
 
         address underlying = dsaVToken.underlying();
         IERC20Upgradeable(underlying).safeTransfer(msg.sender, amount);
 
-        // suppliedPrincipal is in vTokens; subtract vTokens equivalent of amount redeemed
-        position.suppliedPrincipal -= (amount * 1e18) / exchangeRate;
+        position.suppliedPrincipal -= (vTokensBefore - vTokensAfter);
 
         emit PrincipalWithdrawn(msg.sender, positionAccount, address(dsaVToken), amount, position.suppliedPrincipal);
     }
 
     /**
      * @notice Deactivates a position account
-     * @dev Removes DSA selection and resets leverage. Withdraws all remaining principal back to the user.
-     *      User can activate with new DSA later. The DSA asset is retrieved from the position data (set during activation).
-     * @param longAsset The vToken market address for the long asset
-     * @param shortAsset The vToken market address for the short asset
+     * @dev Reverts if position still has long collateral or short debt (PositionNotFullyClosed).
+     *      Withdraws all remaining DSA principal to the user, then sets isActive and effectiveLeverage to false/0.
+     *      User may activate again later (possibly with a different DSA via dsaIndex).
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
      */
-    function deactivatePosition(address longAsset, address shortAsset) external nonReentrant {
-        Position storage position = positions[msg.sender][longAsset][shortAsset];
+    function deactivatePosition(IVToken longVToken, IVToken shortVToken) external nonReentrant {
+        Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
 
         if (!position.isActive) {
             revert PositionNotActive();
         }
 
         address positionAccount = position.positionAccount;
-        IVToken longVToken = IVToken(longAsset);
-        IVToken shortVToken = IVToken(shortAsset);
-        IVToken dsaVToken = IVToken(dsaVTokens[position.dsaIndex]);
+        IVToken dsaVToken = _getValidatedPositionDSAVToken(position, position.dsaIndex);
 
         // Check that position is fully closed: no long collateral and no short debt
         uint256 longCollateral = _getLongCollateralBalance(position, longVToken);
-        uint256 shortDebt = shortVToken.borrowBalanceStored(positionAccount);
+        uint256 shortDebt = shortVToken.borrowBalanceCurrent(positionAccount);
 
         if (longCollateral > 0 || shortDebt > 0) {
             revert PositionNotFullyClosed();
@@ -620,26 +593,59 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
     }
 
     /**
+     * @notice Returns the address at which the PositionAccount would be deployed for the given user and markets
+     * @dev Uses the same salt as _deployPositionAccount (keccak256(user, longVToken, shortVToken)).
+     *      Returns the address that cloneDeterministic would deploy to if called by this contract.
+     * @param user User address
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @return predicted The predicted PositionAccount address (same as after activatePosition for that user/long/short)
+     */
+    function getPositionAccountAddress(
+        address user,
+        IVToken longVToken,
+        IVToken shortVToken
+    ) external view returns (address predicted) {
+        bytes32 salt = keccak256(abi.encodePacked(user, address(longVToken), address(shortVToken)));
+        return ClonesUpgradeable.predictDeterministicAddress(POSITION_ACCOUNT_IMPLEMENTATION, salt, address(this));
+    }
+
+    /**
+     * @notice Returns the position data for a user and asset pair
+     * @param user User address
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @return position The Position struct (user, longVToken, shortVToken, dsaIndex, positionAccount, suppliedPrincipal, effectiveLeverage, cycleId, isActive)
+     */
+    function getPosition(
+        address user,
+        IVToken longVToken,
+        IVToken shortVToken
+    ) external view returns (Position memory position) {
+        return positions[user][address(longVToken)][address(shortVToken)];
+    }
+
+    /**
      * @notice Executes an arbitrary call on behalf of a position account
-     * @dev Allows privileged operations like emergency fund rescue or contract migrations.
-     * @param positionAccount Address of the position account
+     * @dev Only the position account owner (msg.sender) may request a call. Reverts with UnauthorizedAccess if positionAccount.owner() != msg.sender.
+     * @param positionAccount Address of the position account (must be owned by msg.sender)
      * @param target Target contract address
      * @param data Encoded call data
      */
     function executePositionAccountCall(address positionAccount, address target, bytes calldata data) external {
-        // TODO: Add ACM-based access control here
+        if (IPositionAccount(positionAccount).owner() != msg.sender) revert UnauthorizedAccess();
         IPositionAccount(positionAccount).executeCall(target, data);
-
         emit GenericCallExecuted(positionAccount, target, data);
     }
 
     /**
-     * @notice Calculates withdrawal utilization for a position
+     * @notice Calculates capital utilization for a position
+     * @dev Computes how much capital is being used vs available. See IRelativePositionManager for full description.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param dsaVToken The vToken market for the DSA asset
-     * @return utilization Utilization information
+     * @return utilization Utilization information including available capital and withdrawable amount
      */
     function getUtilizationInfo(
         address user,
@@ -652,7 +658,8 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
     /**
      * @notice Calculates the maximum allowed borrow amount for a position
-     * @param user Address of the user
+     * @dev Uses getUtilizationInfo internally. See IRelativePositionManager for full description.
+     * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param dsaVToken The vToken market for the DSA asset
@@ -664,7 +671,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         IVToken shortVToken,
         IVToken dsaVToken
     ) external returns (uint256 maxBorrowAmount) {
-        return _calculateMaxBorrow(user, longVToken, shortVToken, dsaVToken);
+        return _calculateMaxBorrowAllowed(user, longVToken, shortVToken, dsaVToken);
     }
 
     /**
@@ -675,11 +682,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
      * @param longAsset Long asset vToken address
      * @param shortAsset Short asset vToken address
      */
-    function _deployPositionAccount(
-        address user,
-        address longAsset,
-        address shortAsset
-    ) internal {
+    function _deployPositionAccount(address user, address longAsset, address shortAsset) internal {
         bytes32 salt = keccak256(abi.encodePacked(user, longAsset, shortAsset));
         address positionAccount = ClonesUpgradeable.cloneDeterministic(POSITION_ACCOUNT_IMPLEMENTATION, salt);
 
@@ -692,54 +695,140 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         Position storage position = positions[user][longAsset][shortAsset];
         position.positionAccount = positionAccount;
         position.user = user;
-        position.longAsset = longAsset;
-        position.shortAsset = shortAsset;
+        position.longVToken = longAsset;
+        position.shortVToken = shortAsset;
     }
 
     /**
-     * @notice Returns USD values of long collateral, short debt (borrow), and supplied principal
-     * @param position The position data
+     * @notice Redeems excess long (full amount), swaps up to user amount long→DSA, transfers swapped DSA + extra collateral to user
+     * @dev If amountToRedeemForProfitSwap < current excess long, we still redeem full excess, swap the intended amount,
+     *      and transfer to user both the swapped amount (DSA) and the extra redeemed collateral (long).
+     * @param positionAccount The position account from which long is redeemed
+     * @param longVToken Long market vToken
+     * @param dsaVToken DSA (collateral) market vToken
+     * @param excessLongToRedeem Full amount of long underlying to redeem from the position account
+     * @param amountToRedeemForProfitSwap Amount of redeemed long to swap long→DSA (exact-in)
+     * @param minAmountOutProfit Minimum DSA underlying out from the swap
+     * @param swapDataProfit Calldata for the long→DSA swap
+     */
+    function _realizeProfitFromExcessLong(
+        address positionAccount,
+        IVToken longVToken,
+        IVToken dsaVToken,
+        uint256 excessLongToRedeem,
+        uint256 amountToRedeemForProfitSwap,
+        uint256 minAmountOutProfit,
+        bytes calldata swapDataProfit
+    ) internal {
+        IERC20Upgradeable longUnderlying = IERC20Upgradeable(longVToken.underlying());
+        IERC20Upgradeable dsaUnderlying = IERC20Upgradeable(dsaVToken.underlying());
+
+        // Always redeem full excess (if user supplied amount < current excess, we still redeem full)
+        uint256 redeemErr = longVToken.redeemUnderlyingBehalf(positionAccount, excessLongToRedeem);
+        if (redeemErr != 0) revert RedeemBehalfFailed(redeemErr);
+
+        uint256 longBalance = longUnderlying.balanceOf(address(this));
+
+        if (amountToRedeemForProfitSwap > 0) {
+            _performSwap(
+                longUnderlying,
+                amountToRedeemForProfitSwap,
+                dsaUnderlying,
+                minAmountOutProfit,
+                swapDataProfit
+            );
+        }
+
+        uint256 dsaBalance = dsaUnderlying.balanceOf(address(this));
+        if (dsaBalance > 0) {
+            dsaUnderlying.safeTransfer(msg.sender, dsaBalance);
+        }
+
+        // Transfer extra redeemed collateral (long) that was not swapped
+        uint256 extraLong = longBalance - amountToRedeemForProfitSwap;
+        if (extraLong > 0) {
+            longUnderlying.safeTransfer(msg.sender, extraLong);
+        }
+    }
+
+    /**
+     * @notice Withdraws complete principal: redeems all DSA from position account, transfers underlying to user, and zeros suppliedPrincipal
+     */
+    function _withdrawCompletePrincipalToUser(
+        address positionAccount,
+        IVToken dsaVToken,
+        address dsaUnderlying,
+        Position storage position
+    ) internal {
+        if (dsaVToken.balanceOfUnderlying(positionAccount) == 0) {
+            position.suppliedPrincipal = 0;
+            return;
+        }
+        uint256 err = dsaVToken.redeemUnderlyingBehalf(positionAccount, type(uint256).max);
+        if (err != 0) revert RedeemBehalfFailed(err);
+        uint256 received = IERC20Upgradeable(dsaUnderlying).balanceOf(address(this));
+        if (received > 0) {
+            IERC20Upgradeable(dsaUnderlying).safeTransfer(msg.sender, received);
+        }
+        position.suppliedPrincipal = 0;
+    }
+
+    /**
+     * @notice Transfers DSA underlying from msg.sender to this contract, approves and mints vTokens to the position account
+     * @param position The position whose principal should be increased
+     * @param dsaVToken The DSA vToken market
+     * @param amount Amount of underlying to transfer and mint
+     */
+    function _supplyPrincipalToPositionAccount(Position storage position, IVToken dsaVToken, uint256 amount) internal {
+        address positionAccount = position.positionAccount;
+        uint256 balanceBefore = dsaVToken.balanceOf(positionAccount);
+        address underlying = dsaVToken.underlying();
+        IERC20Upgradeable(underlying).safeTransferFrom(msg.sender, address(this), amount);
+        IERC20Upgradeable(underlying).forceApprove(address(dsaVToken), amount);
+        uint256 mintError = dsaVToken.mintBehalf(positionAccount, amount);
+        if (mintError != 0) revert MintBehalfFailed(mintError);
+        uint256 vTokensMinted = dsaVToken.balanceOf(positionAccount) - balanceBefore;
+        position.suppliedPrincipal += vTokensMinted;
+    }
+
+    /**
+     * @notice Calculates the maximum allowed borrow amount for a position
+     * @param user Address of the user
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param dsaVToken The vToken market for the DSA asset
-     * @param shortDebtOverride If non-zero, use this as short debt amount instead of current borrow balance (e.g. remaining debt after partial close)
-     * @return values Struct with longValueUSD, borrowValueUSD, suppliedPrincipalUSD, dsaPrice, shortPrice
+     * @return maxBorrowAmount Maximum amount that can be borrowed in shortAsset terms
      */
-    function _getPositionValuesUSD(
-        Position memory position,
+    function _calculateMaxBorrowAllowed(
+        address user,
         IVToken longVToken,
         IVToken shortVToken,
-        IVToken dsaVToken,
-        uint256 shortDebtOverride
-    ) internal returns (PositionValuesUSD memory values) {
-        address positionAccount = position.positionAccount;
-        uint256 longCollateral = _getLongCollateralBalance(position, longVToken);
-        uint256 shortDebt = shortDebtOverride != 0
-            ? shortDebtOverride
-            : shortVToken.borrowBalanceCurrent(positionAccount);
-        uint256 suppliedPrincipalUnderlying = _getSuppliedPrincipalUnderlying(position.suppliedPrincipal, dsaVToken);
+        IVToken dsaVToken
+    ) internal returns (uint256 maxBorrowAmount) {
+        Position memory position = positions[user][address(longVToken)][address(shortVToken)];
 
+        // Get utilization info which calculates available capital
+        UtilizationInfo memory utilization = _getUtilizationInfo(user, longVToken, shortVToken, dsaVToken);
+
+        // Calculate max additional borrow amount: availableCapital * effectiveLeverage
+        uint256 maxAdditionalBorrowUSD = (utilization.availableCapitalUSD * position.effectiveLeverage) / MANTISSA_ONE;
+
+        // Convert to shortAsset amount
         ResilientOracleInterface oracle = COMPTROLLER.oracle();
-        uint256 longPrice = oracle.getUnderlyingPrice(address(longVToken));
-        values.shortPrice = oracle.getUnderlyingPrice(address(shortVToken));
-        values.dsaPrice = oracle.getUnderlyingPrice(address(dsaVToken));
+        uint256 shortPrice = oracle.getUnderlyingPrice(address(shortVToken));
 
-        if (longPrice == 0 || values.shortPrice == 0 || values.dsaPrice == 0) {
-            revert InvalidOraclePrice();
-        }
-
-        values.longValueUSD = (longCollateral * longPrice) / 1e18;
-        values.borrowValueUSD = (shortDebt * values.shortPrice) / 1e18;
-        values.suppliedPrincipalUSD = (suppliedPrincipalUnderlying * values.dsaPrice) / 1e18;
+        maxBorrowAmount = (maxAdditionalBorrowUSD * 1e18) / shortPrice;
     }
 
     /**
-     * @notice Calculates withdrawal utilization for a position
+     * @notice Calculates capital utilization for a position (used for max borrow and withdrawable amount)
+     * @dev Computes actualCapitalUtilized (LTV-based), nominalCapitalUtilized (leverage-based), caps by supplied principal,
+     *      then availableCapitalUSD and withdrawableAmount in DSA terms.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param dsaVToken The vToken market for the DSA asset
-     * @return utilization Utilization information
+     * @return utilization Struct with actualCapitalUtilized, nominalCapitalUtilized, finalCapitalUtilized, availableCapitalUSD, withdrawableAmount
      */
     function _getUtilizationInfo(
         address user,
@@ -748,8 +837,7 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
         IVToken dsaVToken
     ) internal returns (UtilizationInfo memory utilization) {
         Position memory position = positions[user][address(longVToken)][address(shortVToken)];
-
-        PositionValuesUSD memory values = _getPositionValuesUSD(position, longVToken, shortVToken, dsaVToken, 0);
+        PositionValuesUSD memory values = _getPositionValuesUSD(position, longVToken, shortVToken, dsaVToken);
 
         (, uint256 dsaLTV, ) = COMPTROLLER.markets(address(dsaVToken));
         (, uint256 longLTV, ) = COMPTROLLER.markets(address(longVToken));
@@ -773,55 +861,75 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
     }
 
     /**
-     * @notice Internal: Calculates the maximum allowed borrow amount for a position
-     * @param user Address of the user
-     * @param longVToken The vToken market for the long asset
-     * @param shortVToken The vToken market for the short asset
-     * @param dsaVToken The vToken market for the DSA asset
-     * @return maxBorrowAmount Maximum amount that can be borrowed in shortAsset terms
+     * @notice Performs token swap via the LeverageManager's SwapHelper
+     * @dev Transfers tokenIn to SwapHelper, executes param (calldata), then verifies tokenOut received >= minAmountOut.
+     *      Reverts with TokenSwapCallFailed if the call fails, SlippageExceeded if output < minAmountOut.
+     * @param tokenIn The input token (transferred to SwapHelper)
+     * @param amountIn The amount of input tokens to swap
+     * @param tokenOut The output token (received by this contract)
+     * @param minAmountOut The minimum acceptable amount of output tokens (slippage protection)
+     * @param param The encoded swap calldata for the SwapHelper
+     * @return amountOut The actual amount of output tokens received
      */
-    function _calculateMaxBorrow(
-        address user,
-        IVToken longVToken,
-        IVToken shortVToken,
-        IVToken dsaVToken
-    ) internal returns (uint256 maxBorrowAmount) {
-        Position memory position = positions[user][address(longVToken)][address(shortVToken)];
+    function _performSwap(
+        IERC20Upgradeable tokenIn,
+        uint256 amountIn,
+        IERC20Upgradeable tokenOut,
+        uint256 minAmountOut,
+        bytes calldata param
+    ) internal returns (uint256 amountOut) {
+        address swapHelperAddr = address(LEVERAGE_MANAGER.swapHelper());
+        tokenIn.safeTransfer(swapHelperAddr, amountIn);
 
-        if (!position.isActive || position.effectiveLeverage == 0) {
-            return 0;
-        }
+        uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
 
-        // Get utilization info which calculates available capital
-        UtilizationInfo memory utilization = _getUtilizationInfo(user, longVToken, shortVToken, dsaVToken);
+        (bool success, ) = swapHelperAddr.call(param);
+        if (!success) revert TokenSwapCallFailed();
 
-        // Calculate max additional borrow amount: availableCapital * effectiveLeverage
-        uint256 maxAdditionalBorrowUSD = (utilization.availableCapitalUSD * position.effectiveLeverage) / MANTISSA_ONE;
+        uint256 tokenOutBalanceAfter = tokenOut.balanceOf(address(this));
+        amountOut = tokenOutBalanceAfter - tokenOutBalanceBefore;
+        if (amountOut < minAmountOut) revert SlippageExceeded();
 
-        // Convert to shortAsset amount
-        ResilientOracleInterface oracle = COMPTROLLER.oracle();
-        uint256 shortPrice = oracle.getUnderlyingPrice(address(shortVToken));
-
-        if (shortPrice == 0) {
-            revert InvalidOraclePrice();
-        }
-
-        maxBorrowAmount = (maxAdditionalBorrowUSD * 1e18) / shortPrice;
+        return amountOut;
     }
 
     /**
-     * @notice Converts supplied principal from vToken amount to underlying amount using current exchange rate
-     * @param suppliedPrincipalVTokens Supplied principal stored in vToken amount
+     * @notice Transfers token dust from position account to the position owner (msg.sender from the user's perspective)
+     * @dev Calls PositionAccount.transferDustToOwner which is only callable by this manager; dust goes to account owner.
+     * @param positionAccount Address of the position account holding the dust
+     * @param tokenAddress Address of the ERC20 token to transfer
+     */
+    function _transferDustFromAccountToUser(address positionAccount, address tokenAddress) internal {
+        IPositionAccount(positionAccount).transferDustToOwner(tokenAddress);
+    }
+
+    /**
+     * @notice Converts supplied principal to underlying amount, handling DSA==long and DSA!=long cases
+     * @dev When DSA != long asset, all DSA underlying on the position account is considered principal,
+     *      so we can read it directly. When DSA == long asset, we must use the stored principal vTokens
+     *      to avoid counting long collateral as principal.
+     * @param position The position data (holds suppliedPrincipal and positionAccount)
+     * @param longVToken The long asset vToken
      * @param dsaVToken The DSA vToken
-     * @return underlying amount equivalent to the vToken principal
+     * @return underlying amount equivalent to the principal
      */
     function _getSuppliedPrincipalUnderlying(
-        uint256 suppliedPrincipalVTokens,
+        Position memory position,
+        IVToken longVToken,
         IVToken dsaVToken
     ) internal returns (uint256) {
-        if (suppliedPrincipalVTokens == 0) return 0;
+        if (position.suppliedPrincipal == 0) return 0;
+
+        address positionAccount = position.positionAccount;
+
+        // If DSA and long are different assets, all DSA underlying on the position is principal.
+        if (address(dsaVToken) != address(longVToken)) {
+            return dsaVToken.balanceOfUnderlying(positionAccount);
+        }
+
+        // When DSA == long, principal is tracked in vTokens to separate it from long collateral.
         uint256 exchangeRate = dsaVToken.exchangeRateCurrent();
-        return (suppliedPrincipalVTokens * exchangeRate) / 1e18;
+        return (position.suppliedPrincipal * exchangeRate) / 1e18;
     }
 
     /**
@@ -850,150 +958,85 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
     }
 
     /**
-     * @notice Enters a market on behalf of the position account
-     * @param positionAccount Address of the position account
-     * @param vToken Address of the vToken market to enter
+     * @notice Returns USD values of long collateral, short debt (borrow), and supplied principal
+     * @param position The position data
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @param dsaVToken The vToken market for the DSA asset
+     * @return values Struct with longValueUSD, borrowValueUSD, suppliedPrincipalUSD, dsaPrice, shortPrice
      */
-    function _enterMarket(address positionAccount, address vToken) internal {
-        uint256 enterMarketError = COMPTROLLER.enterMarketBehalf(positionAccount, vToken);
-        if (enterMarketError != 0) {
-            revert EnterMarketFailed();
-        }
-    }
-
-    /**
-     * @notice Transfers DSA underlying from msg.sender to this contract, approves and mints vTokens to the position account
-     * @param positionAccount Address of the position account to receive the minted vTokens
-     * @param dsaVToken The DSA vToken market
-     * @param amount Amount of underlying to transfer and mint
-     * @return vTokensMinted vToken balance increase of the position account (for updating suppliedPrincipal)
-     */
-    function _supplyPrincipalToPositionAccount(
-        address positionAccount,
-        IVToken dsaVToken,
-        uint256 amount
-    ) internal returns (uint256 vTokensMinted) {
-        uint256 balanceBefore = dsaVToken.balanceOf(positionAccount);
-        address underlying = dsaVToken.underlying();
-        IERC20Upgradeable(underlying).safeTransferFrom(msg.sender, address(this), amount);
-        IERC20Upgradeable(underlying).approve(address(dsaVToken), amount);
-        uint256 mintError = dsaVToken.mintBehalf(positionAccount, amount);
-        if (mintError != 0) revert MintBehalfFailed();
-        vTokensMinted = dsaVToken.balanceOf(positionAccount) - balanceBefore;
-    }
-
-    /**
-     * @notice Transfers token dust from position account to the position owner (msg.sender from the user's perspective)
-     * @dev Calls PositionAccount.transferDustToOwner which is only callable by this manager; dust goes to account owner.
-     * @param positionAccount Address of the position account holding the dust
-     * @param tokenAddress Address of the ERC20 token to transfer
-     */
-    function _transferDustToUser(address positionAccount, address tokenAddress) internal {
-        IPositionAccount(positionAccount).transferDustToOwner(tokenAddress);
-    }
-
-    /**
-     * @notice Performs token swap via the SwapHelper contract (same pattern as LeverageStrategiesManager)
-     * @dev Transfers tokens to SwapHelper and executes the swap. Output tokens are expected to be sent to this contract.
-     * @param tokenIn The input token to be swapped
-     * @param amountIn The amount of input tokens to swap
-     * @param tokenOut The output token to receive from the swap
-     * @param minAmountOut The minimum acceptable amount of output tokens
-     * @param param The encoded swap instructions/calldata for the SwapHelper
-     * @return amountOut The actual amount of output tokens received from the swap
-     */
-    function _performSwap(
-        IERC20Upgradeable tokenIn,
-        uint256 amountIn,
-        IERC20Upgradeable tokenOut,
-        uint256 minAmountOut,
-        bytes calldata param
-    ) internal returns (uint256 amountOut) {
-        tokenIn.safeTransfer(address(SWAP_HELPER), amountIn);
-
-        uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
-
-        (bool success, ) = address(SWAP_HELPER).call(param);
-        if (!success) revert TokenSwapCallFailed();
-
-        uint256 tokenOutBalanceAfter = tokenOut.balanceOf(address(this));
-        amountOut = tokenOutBalanceAfter - tokenOutBalanceBefore;
-        if (amountOut < minAmountOut) revert SlippageExceeded();
-
-        return amountOut;
-    }
-
-    /**
-     * @notice Redeems excess long (full amount), swaps up to user amount long→DSA, transfers swapped DSA + extra collateral to user
-     * @dev If amountToRedeemForProfitSwap < current excess long, we still redeem full excess, swap the intended amount,
-     *      and transfer to user both the swapped amount (DSA) and the extra redeemed collateral (long).
-     */
-    function _realizeProfitFromExcessLong(
-        address positionAccount,
+    function _getPositionValuesUSD(
+        Position memory position,
         IVToken longVToken,
-        address longUnderlying,
-        address dsaUnderlying,
-        uint256 excessLongToRedeem,
-        uint256 amountToRedeemForProfitSwap,
-        uint256 minAmountOutProfit,
-        bytes calldata swapDataProfit
-    ) internal {
-        // Always redeem full excess (if user supplied amount < current excess, we still redeem full)
-        uint256 redeemErr = longVToken.redeemUnderlyingBehalf(positionAccount, excessLongToRedeem);
-        if (redeemErr != 0) revert RedeemBehalfFailed();
+        IVToken shortVToken,
+        IVToken dsaVToken
+    ) internal returns (PositionValuesUSD memory values) {
+        address positionAccount = position.positionAccount;
+        uint256 longCollateral = _getLongCollateralBalance(position, longVToken);
+        uint256 shortDebt = shortVToken.borrowBalanceCurrent(positionAccount);
+        uint256 suppliedPrincipal = _getSuppliedPrincipalUnderlying(position, longVToken, dsaVToken);
 
-        IERC20Upgradeable longAsset = IERC20Upgradeable(longUnderlying);
-        uint256 longBalance = longAsset.balanceOf(address(this));
+        ResilientOracleInterface oracle = COMPTROLLER.oracle();
+        uint256 longPrice = oracle.getUnderlyingPrice(address(longVToken));
+        values.shortPrice = oracle.getUnderlyingPrice(address(shortVToken));
+        values.dsaPrice = oracle.getUnderlyingPrice(address(dsaVToken));
 
-        // Amount to send to swap: min(user amount, actual balance). Rest is extra collateral to transfer to user.
-        uint256 amountForSwap = amountToRedeemForProfitSwap > longBalance ? longBalance : amountToRedeemForProfitSwap;
-        if (amountForSwap > 0) {
-            _performSwap(
-                longAsset,
-                amountForSwap,
-                IERC20Upgradeable(dsaUnderlying),
-                minAmountOutProfit,
-                swapDataProfit
-            );
+        if (longPrice == 0 || values.shortPrice == 0 || values.dsaPrice == 0) {
+            revert InvalidOraclePrice();
         }
 
-        uint256 dsaBalance = IERC20Upgradeable(dsaUnderlying).balanceOf(address(this));
-        if (dsaBalance > 0) {
-            IERC20Upgradeable(dsaUnderlying).safeTransfer(msg.sender, dsaBalance);
-        }
-
-        // Transfer extra redeemed collateral (long) that was not swapped
-        uint256 extraLong = longBalance - amountForSwap;
-        if (extraLong > 0) {
-            longAsset.safeTransfer(msg.sender, extraLong);
-        }
+        values.longValueUSD = (longCollateral * longPrice) / 1e18;
+        values.borrowValueUSD = (shortDebt * values.shortPrice) / 1e18;
+        values.suppliedPrincipalUSD = (suppliedPrincipal * values.dsaPrice) / 1e18;
     }
 
     /**
-     * @notice Withdraws complete principal: redeems all DSA from position account, transfers underlying to user, and zeros suppliedPrincipal
+     * @notice Returns the DSA vToken for a position and validates that the provided index matches
+     * @param position The position storage pointer
+     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
+     * @return dsaVToken The validated DSA vToken market
      */
-    function _withdrawCompletePrincipalToUser(
-        address positionAccount,
-        IVToken dsaVToken,
-        address dsaUnderlying,
-        Position storage position
-    ) internal {
-        if (dsaVToken.balanceOfUnderlying(positionAccount) == 0) {
-            position.suppliedPrincipal = 0;
-            return;
+    function _getValidatedPositionDSAVToken(
+        Position storage position,
+        uint8 dsaIndex
+    ) internal view returns (IVToken dsaVToken) {
+        if (dsaIndex != position.dsaIndex) {
+            revert InvalidDSA();
         }
-        uint256 err = dsaVToken.redeemUnderlyingBehalf(positionAccount, type(uint256).max);
-        if (err != 0) revert RedeemBehalfFailed();
-        uint256 received = IERC20Upgradeable(dsaUnderlying).balanceOf(address(this));
-        if (received > 0) {
-            IERC20Upgradeable(dsaUnderlying).safeTransfer(msg.sender, received);
-        }
-        position.suppliedPrincipal = 0;
+        dsaVToken = _getValidatedDSAVToken(dsaIndex);
     }
 
     /**
-     * @notice Validates that a market is listed and supported
-     * @param asset Asset address to validate
+     * @notice Returns the DSA vToken for a given index and validates address and market listed
+     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
+     * @return dsaVToken The validated DSA vToken market
+     */
+    function _getValidatedDSAVToken(uint8 dsaIndex) internal view returns (IVToken dsaVToken) {
+        address dsaVTokenAddr = dsaVTokens[dsaIndex];
+        if (dsaVTokenAddr == address(0)) {
+            revert InvalidDSA();
+        }
+        dsaVToken = IVToken(dsaVTokenAddr);
+        checkMarketListed(dsaVTokenAddr);
+    }
+
+    /**
+     * @notice Enters a market on behalf of the user if not already a member
+     * @dev Skips enter if COMPTROLLER.checkMembership(user, market) is true; otherwise calls enterMarketBehalf and reverts on failure.
+     * @param user Address to enter the market on behalf of (e.g. position account)
+     * @param market The vToken market to enter
+     */
+    function _validateAndEnterMarket(address user, IVToken market) internal {
+        if (!COMPTROLLER.checkMembership(user, market)) {
+            uint256 err = COMPTROLLER.enterMarketBehalf(user, address(market));
+            if (err != SUCCESS) revert EnterMarketFailed(err);
+        }
+    }
+
+    /**
+     * @notice Validates that a market is listed in the Comptroller and is not vBNB
+     * @dev Reverts with AssetNotListed if not listed, VBNBNotSupported if asset is the leverage manager's vBNB.
+     * @param asset The vToken market address to validate
      */
     function checkMarketListed(address asset) internal view {
         IVToken vToken = IVToken(asset);
@@ -1008,6 +1051,9 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
     /**
      * @notice Returns the maximum of two values
+     * @param a First value
+     * @param b Second value
+     * @return The greater of a and b
      */
     function max(uint256 a, uint256 b) internal pure returns (uint256) {
         return a >= b ? a : b;
@@ -1015,6 +1061,9 @@ contract RelativePositionManager is Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
     /**
      * @notice Returns the minimum of two values
+     * @param a First value
+     * @param b Second value
+     * @return The lesser of a and b
      */
     function min(uint256 a, uint256 b) internal pure returns (uint256) {
         return a <= b ? a : b;
