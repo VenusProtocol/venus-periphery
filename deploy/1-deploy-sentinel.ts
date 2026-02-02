@@ -22,14 +22,13 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     deterministicDeployment: false,
     args: [resilientOracle],
     proxy: {
-      owner: timelock,
+      owner: network.live ? timelock : deployer,
       proxyContract: "OptimizedTransparentProxy",
       execute: {
         methodName: "initialize",
         args: [accessControlManager],
       },
     },
-    waitConfirmations: 2,
   });
 
   await deploy("UniswapOracle", {
@@ -39,14 +38,13 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     deterministicDeployment: false,
     args: [resilientOracle],
     proxy: {
-      owner: timelock,
+      owner: network.live ? timelock : deployer,
       proxyContract: "OptimizedTransparentProxy",
       execute: {
         methodName: "initialize",
         args: [accessControlManager],
       },
     },
-    waitConfirmations: 2,
   });
 
   await deploy("SentinelOracle", {
@@ -63,7 +61,6 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
         args: [accessControlManager],
       },
     },
-    waitConfirmations: network.live ? 2 : 1,
   });
 
   const sentinelOracle = await hre.ethers.getContract("SentinelOracle");
@@ -82,7 +79,6 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
         args: [accessControlManager],
       },
     },
-    waitConfirmations: network.live ? 2 : 1,
   });
 
   const deviationSentinel = await hre.ethers.getContract("DeviationSentinel");
@@ -104,32 +100,6 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   if ((await pancakeSwapOracle.owner()) == deployer) {
     await pancakeSwapOracle.transferOwnership(timelock);
   }
-
-  // Verify implementation contracts
-  const pancakeSwapOracleImpl = await deployments.get("PancakeSwapOracle_Implementation");
-  const uniswapOracleImpl = await deployments.get("UniswapOracle_Implementation");
-  const sentinelOracleImpl = await deployments.get("SentinelOracle_Implementation");
-  const deviationSentinelImpl = await deployments.get("DeviationSentinel_Implementation");
-
-  await hre.run("verify:verify", {
-    address: pancakeSwapOracleImpl.address,
-    constructorArguments: [resilientOracle],
-  });
-
-  await hre.run("verify:verify", {
-    address: uniswapOracleImpl.address,
-    constructorArguments: [resilientOracle],
-  });
-
-  await hre.run("verify:verify", {
-    address: sentinelOracleImpl.address,
-    constructorArguments: [],
-  });
-
-  await hre.run("verify:verify", {
-    address: deviationSentinelImpl.address,
-    constructorArguments: [corePool, resilientOracle, sentinelOracle.address],
-  });
 };
 
 export default func;
