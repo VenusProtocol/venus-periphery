@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.28;
 
-import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import {
+    ReentrancyGuardUpgradeable
+} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import {
     SafeERC20Upgradeable,
     IERC20Upgradeable
@@ -43,8 +45,8 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     /// @notice The leverage strategies manager contract
     LeverageStrategiesManager public immutable LEVERAGE_MANAGER;
 
-    /// @notice Implementation contract for PositionAccount clones
-    address public immutable POSITION_ACCOUNT_IMPLEMENTATION;
+    /// @notice Implementation contract for PositionAccount clones (settable via governance)
+    address public POSITION_ACCOUNT_IMPLEMENTATION;
 
     /// @notice Array of supported DSA (Default Settlement Asset) vToken markets
     address[] public dsaVTokens;
@@ -57,20 +59,17 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
 
     /**
      * @notice Contract constructor
-     * @dev Sets immutable variables (COMPTROLLER, LEVERAGE_MANAGER, POSITION_ACCOUNT_IMPLEMENTATION) and disables initializers.
-     *      Swap helper is obtained from the leverage manager at call time. DSA vTokens must be added via addDSAVToken after deployment.
      * @param comptroller The Venus Comptroller contract address
      * @param leverageManager The LeverageStrategiesManager contract address (provides swap helper for enter/exit leverage)
-     * @param positionAccountImpl Implementation contract for PositionAccount EIP-1167 clones
+     * @custom:oz-upgrades-unsafe-allow constructor
      */
-    constructor(address comptroller, address leverageManager, address positionAccountImpl) {
-        if (comptroller == address(0) || leverageManager == address(0) || positionAccountImpl == address(0)) {
+    constructor(address comptroller, address leverageManager) {
+        if (comptroller == address(0) || leverageManager == address(0)) {
             revert ZeroAddress();
         }
 
         COMPTROLLER = IComptroller(comptroller);
         LEVERAGE_MANAGER = LeverageStrategiesManager(leverageManager);
-        POSITION_ACCOUNT_IMPLEMENTATION = positionAccountImpl;
 
         _disableInitializers();
     }
@@ -82,6 +81,57 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
         __ReentrancyGuard_init();
+    }
+
+    /**
+     * @notice Updates the implementation contract used for PositionAccount clones
+     * @dev Callable only by governance via AccessControlManager. Must be set before any positions are activated.
+     * @param positionAccountImpl Implementation contract for PositionAccount EIP-1167 clones
+     */
+    function setPositionAccountImplementation(address positionAccountImpl) external {
+        _checkAccessAllowed("setPositionAccountImplementation(address)");
+
+        if (positionAccountImpl == address(0)) {
+            revert ZeroAddress();
+        }
+
+        address oldImpl = POSITION_ACCOUNT_IMPLEMENTATION;
+        if (oldImpl == positionAccountImpl) {
+            revert SamePositionAccountImplementation();
+        }
+
+        POSITION_ACCOUNT_IMPLEMENTATION = positionAccountImpl;
+        emit PositionAccountImplementationUpdated(oldImpl, positionAccountImpl);
+    }
+
+    /**
+     * @notice Adds a new DSA vToken to the supported list
+     * @dev Index will be the current length of the array. Callable only by Governance.
+     * @param dsaVToken The vToken market address to add as a supported DSA
+     */
+    function addDSAVToken(address dsaVToken) external {
+        _checkAccessAllowed("addDSAVToken(address)");
+        if (dsaVToken == address(0)) {
+            revert ZeroAddress();
+        }
+
+        checkMarketListed(dsaVToken);
+        dsaVTokens.push(dsaVToken);
+
+        emit DSAVTokenAdded(dsaVToken, uint8(dsaVTokens.length - 1));
+    }
+
+    /**
+     * @notice Executes an arbitrary call on behalf of a position account
+     * @dev Callable by governance, Allows operations like emergency fund rescues.
+     * @param positionAccount Address of the position account
+     * @param target Target contract address
+     * @param data Encoded call data
+     */
+    function executePositionAccountCall(address positionAccount, address target, bytes calldata data) external {
+        _checkAccessAllowed("executePositionAccountCall(address,address,bytes)");
+        IPositionAccount(positionAccount).executeCall(target, data);
+        emit GenericCallExecuted(positionAccount, target, data);
     }
 
     /**
@@ -564,23 +614,6 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     }
 
     /**
-     * @notice Adds a new DSA vToken to the supported list
-     * @dev Index will be the current length of the array. Callable only by Governance.
-     * @param dsaVToken The vToken market address to add as a supported DSA
-     */
-    function addDSAVToken(address dsaVToken) external {
-        _checkAccessAllowed("addDSAVToken(address)");
-        if (dsaVToken == address(0)) {
-            revert ZeroAddress();
-        }
-
-        checkMarketListed(dsaVToken);
-        dsaVTokens.push(dsaVToken);
-
-        emit DSAVTokenAdded(dsaVToken, uint8(dsaVTokens.length - 1));
-    }
-
-    /**
      * @notice Returns the total number of supported DSA vTokens
      * @return count The number of DSA vTokens in the array
      */
@@ -602,6 +635,10 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         IVToken longVToken,
         IVToken shortVToken
     ) external view returns (address predicted) {
+        if (POSITION_ACCOUNT_IMPLEMENTATION == address(0)) {
+            revert PositionAccountImplementationNotSet();
+        }
+
         bytes32 salt = keccak256(abi.encodePacked(user, address(longVToken), address(shortVToken)));
         return ClonesUpgradeable.predictDeterministicAddress(POSITION_ACCOUNT_IMPLEMENTATION, salt, address(this));
     }
@@ -619,19 +656,6 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         IVToken shortVToken
     ) external view returns (Position memory position) {
         return positions[user][address(longVToken)][address(shortVToken)];
-    }
-
-    /**
-     * @notice Executes an arbitrary call on behalf of a position account
-     * @dev Callable by governance, Allows operations like emergency fund rescues.
-     * @param positionAccount Address of the position account
-     * @param target Target contract address
-     * @param data Encoded call data
-     */
-    function executePositionAccountCall(address positionAccount, address target, bytes calldata data) external {
-        _checkAccessAllowed("executePositionAccountCall(address,address,bytes)");
-        IPositionAccount(positionAccount).executeCall(target, data);
-        emit GenericCallExecuted(positionAccount, target, data);
     }
 
     /**
@@ -679,6 +703,10 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @param shortAsset Short asset vToken address
      */
     function _deployPositionAccount(address user, address longAsset, address shortAsset) internal {
+        if (POSITION_ACCOUNT_IMPLEMENTATION == address(0)) {
+            revert PositionAccountImplementationNotSet();
+        }
+
         bytes32 salt = keccak256(abi.encodePacked(user, longAsset, shortAsset));
         address positionAccount = ClonesUpgradeable.cloneDeterministic(POSITION_ACCOUNT_IMPLEMENTATION, salt);
 
@@ -693,6 +721,8 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         position.user = user;
         position.longVToken = longAsset;
         position.shortVToken = shortAsset;
+
+        emit PositionAccountDeployed(user, longAsset, shortAsset, positionAccount);
     }
 
     /**

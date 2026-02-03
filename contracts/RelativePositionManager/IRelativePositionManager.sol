@@ -146,6 +146,12 @@ interface IRelativePositionManager {
     /// @custom:error SlippageExceeded when swap output is below the minimum required
     error SlippageExceeded();
 
+    /// @custom:error PositionAccountImplementationNotSet when trying to deploy or compute position accounts before implementation is configured
+    error PositionAccountImplementationNotSet();
+
+    /// @custom:error SamePositionAccountImplementation when setter is called with the current implementation address
+    error SamePositionAccountImplementation();
+
     /// @notice Emitted when a user activates a position account
     /// @param user Address of the user
     /// @param longAsset Address of the long asset
@@ -248,6 +254,23 @@ interface IRelativePositionManager {
     /// @param target Target contract address
     /// @param data Call data
     event GenericCallExecuted(address indexed positionAccount, address target, bytes data);
+
+    /// @notice Emitted when the PositionAccount implementation address is updated
+    /// @param oldImplementation Previous implementation address (zero if first set)
+    /// @param newImplementation New implementation address
+    event PositionAccountImplementationUpdated(address indexed oldImplementation, address indexed newImplementation);
+
+    /// @notice Emitted when a new PositionAccount clone is deployed for a user and asset pair
+    /// @param user Owner of the position account
+    /// @param longAsset Long asset vToken address
+    /// @param shortAsset Short asset vToken address
+    /// @param positionAccount Address of the deployed PositionAccount clone
+    event PositionAccountDeployed(
+        address indexed user,
+        address indexed longAsset,
+        address indexed shortAsset,
+        address positionAccount
+    );
 
     /**
      * @notice Activates a position account for the user with specified asset pair and DSA
@@ -417,6 +440,14 @@ interface IRelativePositionManager {
         IVToken longVToken,
         IVToken shortVToken
     ) external view returns (address predicted);
+
+    /**
+     * @notice Updates the implementation contract used for PositionAccount clones
+     * @dev Callable only by accounts with ACM permission for setPositionAccountImplementation(address).
+     *      Must be configured before any position accounts can be deployed or predicted.
+     * @param positionAccountImpl Implementation contract for PositionAccount EIP-1167 clones
+     */
+    function setPositionAccountImplementation(address positionAccountImpl) external;
 
     /**
      * @notice Returns the position data for a user and asset pair
