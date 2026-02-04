@@ -176,6 +176,25 @@ const setupFixture = async (): Promise<SetupFixture> => {
   await comptroller.setWhiteListFlashLoanAccount(leverageManager.address, true);
   await setBalance(comptroller.address, parseEther("10"));
 
+  // Set collateral factor for markets so getUtilizationInfo does not divide by zero (actualCapitalUtilized uses dsaLTV/longLTV)
+  const collateralFactorMantissa = parseEther("0.8");
+  const liquidationThresholdMantissa = parseEther("0.85");
+  await comptroller["setCollateralFactor(address,uint256,uint256)"](
+    collateralMarket.address,
+    collateralFactorMantissa,
+    liquidationThresholdMantissa,
+  );
+  await comptroller["setCollateralFactor(address,uint256,uint256)"](
+    borrowMarket.address,
+    collateralFactorMantissa,
+    liquidationThresholdMantissa,
+  );
+  await comptroller["setCollateralFactor(address,uint256,uint256)"](
+    dsaMarket.address,
+    collateralFactorMantissa,
+    liquidationThresholdMantissa,
+  );
+
   // Supply liquidity to markets so flash loans can execute; top up admin for test transfers
   await collateralToken.connect(admin).faucet(parseEther("100"));
   await borrowToken.connect(admin).faucet(parseEther("100"));
@@ -228,11 +247,18 @@ const setupFixture = async (): Promise<SetupFixture> => {
 };
 
 /**
- * Creates swap multicall: sweeps tokenOut to recipient; optionally consumes tokenIn by sweeping it to dead address.
- * When tokenIn is provided, the multicall includes a sweep of tokenIn from swapHelper to dead address (caller
- * must ensure tokenIn is sent to swapHelper separately). Avoids leaving tokenIn on swapHelper.
- * When sweepExactAmount is provided, uses genericCall(token.transfer(recipient, sweepExactAmount)) instead of
- * full sweep, so the rest of token stays on SwapHelper (e.g. for a second multicall in the same flow).
+ * Creates a "fake swap" multicall based only on transfers and sweeps.
+ *
+ * Flow:
+ * - The test first transfers `amount` of `token` to `swapHelper`.
+ * - This helper then builds a multicall that:
+ *   - Optionally sweeps `tokenIn` from `swapHelper` to the dead address, so any amount
+ *     sent by the Leverage Manager is burned instead of remaining on `swapHelper`.
+ *   - Sweeps the full balance of `token` from `swapHelper` to `recipient`
+ *     (typically the Leverage Manager).
+ *
+ * This avoids using a real AMM swap while still exercising the RPM / LM integration
+ * and prevents side effects from any pre‑existing balances on `swapHelper`.
  */
 async function createSwapMulticallData(
   swapHelper: SwapHelper,
@@ -241,7 +267,6 @@ async function createSwapMulticallData(
   amount: BigNumber,
   salt: string,
   tokenIn?: EIP20Interface,
-  sweepExactAmount?: BigNumber,
 ): Promise<string> {
   const SWAP_TOKEN_IN_CONSUME_ADDRESS = "0x000000000000000000000000000000000000dEaD";
 
@@ -253,12 +278,11 @@ async function createSwapMulticallData(
   if (tokenIn != null) {
     calls.push(swapHelper.interface.encodeFunctionData("sweep", [tokenIn.address, SWAP_TOKEN_IN_CONSUME_ADDRESS]));
   }
-  if (sweepExactAmount != null) {
-    const transferData = token.interface.encodeFunctionData("transfer", [recipient, sweepExactAmount]);
-    calls.push(swapHelper.interface.encodeFunctionData("genericCall", [token.address, transferData]));
-  } else {
-    calls.push(swapHelper.interface.encodeFunctionData("sweep", [token.address, recipient]));
-  }
+  // Use a genericCall to perform an exact transfer of `amount` of `token` from
+  // SwapHelper to the recipient. This avoids depending on whatever residual
+  // balance is on SwapHelper and makes the effective "swap output" predictable.
+  const transferData = token.interface.encodeFunctionData("transfer", [recipient, amount]);
+  calls.push(swapHelper.interface.encodeFunctionData("genericCall", [token.address, transferData]));
   const domain = {
     chainId: network.config.chainId,
     name: "VenusSwap",
@@ -421,7 +445,13 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .activatePosition(ethers.constants.AddressZero, borrowMarket.address, 0, 0, parseEther("2")),
+          .activatePosition(
+            ethers.constants.AddressZero,
+            borrowMarket.address,
+            dsaIndex,
+            noAdditionalPrincipal,
+            parseEther("2"),
+          ),
       ).to.be.revertedWithCustomError(relativePositionManager, "ZeroAddress");
     });
 
@@ -429,7 +459,13 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .activatePosition(collateralMarket.address, ethers.constants.AddressZero, 0, 0, parseEther("2")),
+          .activatePosition(
+            collateralMarket.address,
+            ethers.constants.AddressZero,
+            dsaIndex,
+            noAdditionalPrincipal,
+            parseEther("2"),
+          ),
       ).to.be.revertedWithCustomError(relativePositionManager, "ZeroAddress");
     });
 
@@ -437,7 +473,13 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .activatePosition(unlistedMarket.address, borrowMarket.address, 0, 0, parseEther("2")),
+          .activatePosition(
+            unlistedMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            noAdditionalPrincipal,
+            parseEther("2"),
+          ),
       ).to.be.revertedWithCustomError(relativePositionManager, "AssetNotListed");
     });
 
@@ -445,7 +487,7 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .activatePosition(vBNBMarket.address, borrowMarket.address, 0, 0, parseEther("2")),
+          .activatePosition(vBNBMarket.address, borrowMarket.address, dsaIndex, noAdditionalPrincipal, parseEther("2")),
       ).to.be.revertedWithCustomError(relativePositionManager, "VBNBNotSupported");
     });
 
@@ -453,7 +495,13 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .activatePosition(collateralMarket.address, vBNBMarket.address, 0, 0, parseEther("2")),
+          .activatePosition(
+            collateralMarket.address,
+            vBNBMarket.address,
+            dsaIndex,
+            noAdditionalPrincipal,
+            parseEther("2"),
+          ),
       ).to.be.revertedWithCustomError(relativePositionManager, "VBNBNotSupported");
     });
 
@@ -461,7 +509,13 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("0.5")),
+          .activatePosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            noAdditionalPrincipal,
+            parseEther("0.5"),
+          ),
       ).to.be.revertedWithCustomError(relativePositionManager, "InvalidLeverage");
     });
 
@@ -469,7 +523,13 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("11")),
+          .activatePosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            noAdditionalPrincipal,
+            parseEther("11"),
+          ),
       ).to.be.revertedWithCustomError(relativePositionManager, "InvalidLeverage");
     });
 
@@ -484,7 +544,13 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("2")),
+          .activatePosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            noAdditionalPrincipal,
+            parseEther("2"),
+          ),
       )
         .to.emit(relativePositionManager, "PositionActivated")
         .to.emit(relativePositionManager, "PositionAccountDeployed")
@@ -508,11 +574,23 @@ describe("RelativePositionManager", () => {
     it("should revert when activating the same position again", async () => {
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("2"));
+        .activatePosition(
+          collateralMarket.address,
+          borrowMarket.address,
+          dsaIndex,
+          noAdditionalPrincipal,
+          parseEther("2"),
+        );
       await expect(
         relativePositionManager
           .connect(alice)
-          .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("2")),
+          .activatePosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            noAdditionalPrincipal,
+            parseEther("2"),
+          ),
       ).to.be.revertedWithCustomError(relativePositionManager, "PositionAlreadyExists");
     });
 
@@ -523,7 +601,7 @@ describe("RelativePositionManager", () => {
 
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, amount, parseEther("2"));
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, amount, parseEther("2"));
 
       const position = await relativePositionManager.getPosition(
         aliceAddress,
@@ -537,7 +615,13 @@ describe("RelativePositionManager", () => {
       // First activation to deploy and activate position account (no principal yet)
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("2"));
+        .activatePosition(
+          collateralMarket.address,
+          borrowMarket.address,
+          dsaIndex,
+          noAdditionalPrincipal,
+          parseEther("2"),
+        );
 
       const positionAfterFirst = await relativePositionManager.getPosition(
         aliceAddress,
@@ -565,7 +649,7 @@ describe("RelativePositionManager", () => {
 
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, newPrincipal, parseEther("2"));
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, newPrincipal, parseEther("2"));
 
       const positionAfterSecond = await relativePositionManager.getPosition(
         aliceAddress,
@@ -582,12 +666,20 @@ describe("RelativePositionManager", () => {
     beforeEach(async () => {
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("2"));
+        .activatePosition(
+          collateralMarket.address,
+          borrowMarket.address,
+          dsaIndex,
+          noAdditionalPrincipal,
+          parseEther("2"),
+        );
     });
 
     it("should revert when amount is zero", async () => {
       await expect(
-        relativePositionManager.connect(alice).increasePrincipal(collateralMarket.address, borrowMarket.address, 0, 0),
+        relativePositionManager
+          .connect(alice)
+          .increasePrincipal(collateralMarket.address, borrowMarket.address, dsaIndex, 0),
       ).to.be.revertedWithCustomError(relativePositionManager, "ZeroAmount");
     });
 
@@ -600,7 +692,7 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(bob)
-          .increasePrincipal(collateralMarket.address, borrowMarket.address, 0, parseEther("1")),
+          .increasePrincipal(collateralMarket.address, borrowMarket.address, dsaIndex, parseEther("1")),
       ).to.be.revertedWithCustomError(relativePositionManager, "PositionNotActive");
     });
 
@@ -630,7 +722,7 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .increasePrincipal(collateralMarket.address, borrowMarket.address, 0, amount),
+          .increasePrincipal(collateralMarket.address, borrowMarket.address, dsaIndex, amount),
       ).to.emit(relativePositionManager, "PrincipalSupplied");
 
       const positionAfter = await relativePositionManager.getPosition(
@@ -851,7 +943,7 @@ describe("RelativePositionManager", () => {
       await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, principalAmount, parseEther("2"));
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
       const openSwapData = await createSwapMulticallData(
         swapHelper,
         collateralToken,
@@ -898,7 +990,7 @@ describe("RelativePositionManager", () => {
       await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, principalAmount, parseEther("2"));
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
       const shortAmount = parseEther("1");
       const openSwapData = await createSwapMulticallData(
         swapHelper,
@@ -967,7 +1059,7 @@ describe("RelativePositionManager", () => {
       await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, principalAmount, parseEther("2"));
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
 
       // Open position with same oracle price (default 1:1) for all assets
       const shortAmount = parseEther("1");
@@ -995,20 +1087,22 @@ describe("RelativePositionManager", () => {
         );
 
       // After open: set oracle so long price = 2× short (longValueUSD > borrowValueUSD, profit scenario; round numbers for easier calc)
-      resilientOracle.getUnderlyingPrice.whenCalledWith(collateralMarket.address).returns(parseUnits("2", 18));
-      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(parseUnits("1", 18));
-      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(parseUnits("1", 18));
+      const longPrice = parseUnits("2", 18);
+      const shortPrice = parseUnits("1", 18);
+      const dsaPrice = parseUnits("1", 18);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(collateralMarket.address).returns(longPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(shortPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(dsaPrice);
 
-      const positionAccountAddr = await relativePositionManager.getPositionAccountAddress(
+      const positionBefore = await relativePositionManager.getPosition(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
       );
+      const positionAccountAddr = positionBefore.positionAccount;
 
       // create swapData for profit swap
       const SLIPPAGE_BPS = 500; // 5%
-      const longPrice = parseUnits("2", 18);
-      const dsaPrice = parseUnits("1", 18);
 
       // Minimum short we need to repay (exact borrow balance)
       const currentShortDebt = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
@@ -1092,7 +1186,7 @@ describe("RelativePositionManager", () => {
       await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, principalAmount, parseEther("2"));
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
 
       // Open position with same oracle price (default 1:1) for all assets
       const shortAmount = parseEther("1");
@@ -1119,21 +1213,23 @@ describe("RelativePositionManager", () => {
         );
 
       // After open: set oracle so long price < short price → borrowValueUSD > longValueUSD (loss scenario)
-      resilientOracle.getUnderlyingPrice.whenCalledWith(collateralMarket.address).returns(parseUnits("0.8", 18));
-      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(parseUnits("1", 18));
-      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(parseUnits("1", 18));
+      const longPrice = parseUnits("0.8", 18);
+      const shortPrice = parseUnits("1", 18);
+      const dsaPrice = parseUnits("1", 18);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(collateralMarket.address).returns(longPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(shortPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(dsaPrice);
 
-      const positionAccountAddr = await relativePositionManager.getPositionAccountAddress(
+      const positionBefore = await relativePositionManager.getPosition(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
       );
+      const positionAccountAddr = positionBefore.positionAccount;
       const currentShortDebt = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
       const currentLongBalance = await collateralMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
 
       // First swap: redeem part of current long (e.g. only what is "used" in swap); remaining long is transferred to user as dust
-      const longPrice = parseUnits("0.8", 18);
-      const shortPrice = parseUnits("1", 18);
       const SLIPPAGE_BPS = 500; // 5%
       const LONG_PCT_FOR_FIRST_SWAP = 95; // use 95% of long in first swap, 5% remains as collateral dust to user
       const longAmountToRedeemForFirstSwap = currentLongBalance.mul(LONG_PCT_FOR_FIRST_SWAP).div(100);
@@ -1157,7 +1253,6 @@ describe("RelativePositionManager", () => {
         repayFirstSwapAmount,
         ethers.utils.formatBytes32String("loss-first"),
         collateralToken, // tokenIn: long redeemed for first repay is consumed by sweep to dead
-        repayFirstSwapAmount, // sweep exact amount so second swap's borrowToken stays on SwapHelper
       );
 
       const swapDataSecond = await createSwapMulticallData(
@@ -1171,7 +1266,6 @@ describe("RelativePositionManager", () => {
 
       const minAmountOutSecond = remainingDebt;
       // Second swap DSA → short: at oracle price (dsa=1, short=1) we need remainingDebt of DSA; with 5% slippage redeem more so output ≥ remainingDebt
-      const dsaPrice = parseUnits("1", 18);
       const theoreticalDsaForRemainingDebt = remainingDebt.mul(shortPrice).div(dsaPrice);
       const dsaAmountToRedeemForRepay = theoreticalDsaForRemainingDebt.mul(10000).div(10000 - SLIPPAGE_BPS);
 
@@ -1309,17 +1403,12 @@ describe("RelativePositionManager", () => {
           openSwapData,
         );
 
-      const positionAccountAddr = await relativePositionManager.getPositionAccountAddress(
-        aliceAddress,
-        dsaMarket.address,
-        borrowMarket.address,
-      );
-
       const positionBefore = await relativePositionManager.getPosition(
         aliceAddress,
         dsaMarket.address,
         borrowMarket.address,
       );
+      const positionAccountAddr = positionBefore.positionAccount;
       const principalVTokensBefore = positionBefore.suppliedPrincipal;
       const debtBefore = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
       const longBefore = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
@@ -1389,28 +1478,24 @@ describe("RelativePositionManager", () => {
           openSwapData,
         );
 
-      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(parseUnits("2", 18));
-      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(parseUnits("1", 18));
+      const longPrice = parseUnits("2", 18);
+      const shortPrice = parseUnits("1", 18);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(longPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(shortPrice);
 
-      const positionAccountAddr = await relativePositionManager.getPositionAccountAddress(
+      const positionBeforeLoss = await relativePositionManager.getPosition(
         aliceAddress,
         dsaMarket.address,
         borrowMarket.address,
       );
-      const positionBefore = await relativePositionManager.getPosition(
-        aliceAddress,
-        dsaMarket.address,
-        borrowMarket.address,
-      );
-      const principalVTokensBefore = positionBefore.suppliedPrincipal;
+      const principalVTokensBefore = positionBeforeLoss.suppliedPrincipal;
+      const positionAccountAddr = positionBeforeLoss.positionAccount;
 
       // Repay leg: at oracle price long=2, short=1, repaying full short debt requires
       // theoreticalLongForRepay = currentShortDebt * (shortPrice / longPrice) = debt * 0.5 long.
       // With 5% buffer we redeem slightly more long and also send 2% extra short through the swap helper
       // so there is dust that can be returned to the user.
       const currentShortDebt = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
-      const longPrice = parseUnits("2", 18);
-      const shortPrice = parseUnits("1", 18);
       const SLIPPAGE_BPS = 500; // 5%
       const theoreticalLongForRepay = currentShortDebt.mul(shortPrice).div(longPrice); // debt * 0.5
       const collateralAmountToRedeemForRepay = theoreticalLongForRepay.mul(10000 + SLIPPAGE_BPS).div(10000); // +5% buffer
@@ -1499,14 +1584,17 @@ describe("RelativePositionManager", () => {
 
       // Make this a loss scenario by dropping long/DSA price after open:
       // use long/DSA price = 0.8 and short price = 1 so longValueUSD < shortDebtUSD.
-      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(parseUnits("0.8", 18));
-      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(parseUnits("1", 18));
+      const longPrice = parseUnits("0.8", 18);
+      const shortPrice = parseUnits("1", 18);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(longPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(shortPrice);
 
-      const positionAccountAddr = await relativePositionManager.getPositionAccountAddress(
+      const positionBefore = await relativePositionManager.getPosition(
         aliceAddress,
         dsaMarket.address,
         borrowMarket.address,
       );
+      const positionAccountAddr = positionBefore.positionAccount;
       const currentShortDebt = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
 
       const SLIPPAGE_BPS = 500; // 5%
@@ -1518,8 +1606,6 @@ describe("RelativePositionManager", () => {
         borrowMarket.address,
       );
       const longAmountToRedeemForFirstSwap = longOnlyUnderlying;
-      const longPrice = parseUnits("0.8", 18);
-      const shortPrice = parseUnits("1", 18);
       const theoreticalShortFromLong = longAmountToRedeemForFirstSwap.mul(longPrice).div(shortPrice);
       const borrowedAmountToRepayFirst = theoreticalShortFromLong.mul(10000 - SLIPPAGE_BPS).div(10000);
       const remainingDebt = currentShortDebt.sub(borrowedAmountToRepayFirst);
@@ -1533,7 +1619,6 @@ describe("RelativePositionManager", () => {
         repayFirstSwapAmount,
         ethers.utils.formatBytes32String("usdt-same-market-loss-first"),
         dsaToken,
-        repayFirstSwapAmount,
       );
       const swapDataSecond = await createSwapMulticallData(
         swapHelper,
@@ -1544,11 +1629,6 @@ describe("RelativePositionManager", () => {
         dsaToken,
       );
 
-      const positionBefore = await relativePositionManager.getPosition(
-        aliceAddress,
-        dsaMarket.address,
-        borrowMarket.address,
-      );
       const principalVTokensBefore = positionBefore.suppliedPrincipal;
 
       const minAmountOutFirst = borrowedAmountToRepayFirst;
@@ -1600,10 +1680,8 @@ describe("RelativePositionManager", () => {
         borrowMarket.address,
         dsaMarket.address,
       );
-      // With no long/short and only principal supplied:
-      // - The full principal (10) is withdrawable, because there is no borrow against it yet.
-      // - Only the portion allowed by the DSA collateral factor (e.g. 80%) is counted as available capital (8),
-      //   since this is the amount that can be used as backing for new borrow.
+      // With no long/short and only principal supplied: available capital is capped by DSA collateral factor (e.g. 80%).
+      // availableCapitalUSD = 10 * 0.8 = 8; full principal (10) is withdrawable in DSA terms.
       expect(utilization.availableCapitalUSD).to.equal(parseEther("8"));
       expect(utilization.withdrawableAmount).to.equal(parseEther("10"));
     });
@@ -1621,10 +1699,240 @@ describe("RelativePositionManager", () => {
         borrowMarket.address,
         dsaMarket.address,
       );
-      // Max borrow is derived from available capital and the configured effective leverage.
-      // With available capital 8 (principal 10 constrained by collateral factor) and effectiveLeverage = 2,
-      // this evaluates to 16 when oracle prices are 1.
+      // Max borrow = availableCapitalUSD * effectiveLeverage / shortPrice. With available capital 8 and effectiveLeverage = 2, maxBorrow = 16.
       expect(maxBorrow).to.equal(parseEther("16"));
+    });
+
+    it("should return utilization with different oracle prices (DSA and short)", async () => {
+      const principalAmount = parseEther("10");
+      await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
+      await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
+      await relativePositionManager
+        .connect(alice)
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
+
+      // First check output at default prices (all 1)
+      const utilizationAtPrice1 = await relativePositionManager.callStatic.getUtilizationInfo(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      const maxBorrowAtPrice1 = await relativePositionManager.callStatic.calculateMaxBorrow(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      // At default prices: available capital capped by DSA collateral factor (80%) → 8; withdrawable 10 (DSA terms); maxBorrow = 8 * 2 = 16
+      expect(utilizationAtPrice1.availableCapitalUSD).to.equal(parseEther("8"));
+      expect(utilizationAtPrice1.withdrawableAmount).to.equal(parseEther("10"));
+      expect(maxBorrowAtPrice1).to.equal(parseEther("16"));
+
+      // Change prices: DSA = 2, short = 1, long = 1 (same account, same position)
+      const dsaPrice = parseUnits("2", 18);
+      const shortPrice = parseUnits("1", 18);
+      const longPrice = parseUnits("1", 18);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(collateralMarket.address).returns(longPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(shortPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(dsaPrice);
+
+      const utilizationAtPrice2 = await relativePositionManager.callStatic.getUtilizationInfo(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      const maxBorrowAtPrice2 = await relativePositionManager.callStatic.calculateMaxBorrow(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      // At DSA price 2: suppliedPrincipalUSD = 20, no borrow → availableCapitalUSD = 20; withdrawable = 20/2 = 10 (DSA terms); maxBorrow = 20 * 2 / 1 = 40
+      expect(utilizationAtPrice2.availableCapitalUSD).to.equal(parseEther("20"));
+      expect(utilizationAtPrice2.withdrawableAmount).to.equal(parseEther("10"));
+      expect(maxBorrowAtPrice2).to.equal(parseEther("40"));
+
+      // Same account: after price change, availableCapitalUSD and maxBorrow increased
+      expect(utilizationAtPrice2.availableCapitalUSD).to.be.gt(utilizationAtPrice1.availableCapitalUSD);
+      expect(maxBorrowAtPrice2).to.be.gt(maxBorrowAtPrice1);
+    });
+
+    it("should return lower available capital and max borrow when position has open borrow", async () => {
+      const principalAmount = parseEther("10");
+      await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
+      await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
+      await relativePositionManager
+        .connect(alice)
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
+
+      // Baseline: no open long/short yet
+      const utilizationBefore = await relativePositionManager.callStatic.getUtilizationInfo(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      const maxBorrowBefore = await relativePositionManager.callStatic.calculateMaxBorrow(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+
+      const shortAmount = parseEther("8");
+      const minLongAmount = parseEther("0.1");
+      const openSwapData = await createSwapMulticallData(
+        swapHelper,
+        collateralToken,
+        leverageManager.address,
+        parseEther("7"),
+        ethers.utils.formatBytes32String("util-open-borrow"),
+        borrowToken,
+      );
+      await relativePositionManager
+        .connect(alice)
+        .openPosition(
+          collateralMarket.address,
+          borrowMarket.address,
+          dsaIndex,
+          noAdditionalPrincipal,
+          shortAmount,
+          minLongAmount,
+          openSwapData,
+        );
+
+      const utilization = await relativePositionManager.callStatic.getUtilizationInfo(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      const maxBorrow = await relativePositionManager.callStatic.calculateMaxBorrow(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      // After opening borrow, capital is utilized so available and max borrow should be lower than before
+      expect(utilization.availableCapitalUSD).to.be.lt(utilizationBefore.availableCapitalUSD);
+      expect(utilization.withdrawableAmount).to.be.lt(utilizationBefore.withdrawableAmount);
+      expect(maxBorrow).to.be.lt(maxBorrowBefore);
+    });
+
+    it("should return zero available capital and max borrow when position has no principal", async () => {
+      await relativePositionManager
+        .connect(alice)
+        .activatePosition(
+          collateralMarket.address,
+          borrowMarket.address,
+          dsaIndex,
+          noAdditionalPrincipal,
+          parseEther("2"),
+        );
+
+      const utilization = await relativePositionManager.callStatic.getUtilizationInfo(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      expect(utilization.availableCapitalUSD).to.equal(0);
+      expect(utilization.withdrawableAmount).to.equal(0);
+
+      const maxBorrow = await relativePositionManager.callStatic.calculateMaxBorrow(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      expect(maxBorrow).to.equal(0);
+    });
+
+    it("should show 0 available for borrow after scaling position to max (use full available capacity)", async () => {
+      const principalAmount = parseEther("10");
+      await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
+      await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
+      await relativePositionManager
+        .connect(alice)
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
+
+      // Open initial position
+      const shortAmount = parseEther("2");
+      const minLongAmount = parseEther("1");
+      const openSwapData = await createSwapMulticallData(
+        swapHelper,
+        collateralToken,
+        leverageManager.address,
+        parseEther("1.5"),
+        ethers.utils.formatBytes32String("util-scale-open"),
+        borrowToken,
+      );
+      await relativePositionManager
+        .connect(alice)
+        .openPosition(
+          collateralMarket.address,
+          borrowMarket.address,
+          dsaIndex,
+          noAdditionalPrincipal,
+          shortAmount,
+          minLongAmount,
+          openSwapData,
+        );
+
+      // After initial open: principal 10, borrow 2 → availableCapitalUSD and maxBorrow from contract (used to scale position to max next)
+      const utilizationAfterOpen = await relativePositionManager.callStatic.getUtilizationInfo(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      const maxBorrowAvailable = await relativePositionManager.callStatic.calculateMaxBorrow(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      expect(utilizationAfterOpen.availableCapitalUSD).to.equal(parseEther("19"));
+      expect(maxBorrowAvailable).to.equal(parseEther("38"));
+
+      // Scale position by borrowing the full available amount (use up all available capacity)
+      const scaleSwapData = await createSwapMulticallData(
+        swapHelper,
+        collateralToken,
+        leverageManager.address,
+        maxBorrowAvailable,
+        ethers.utils.formatBytes32String("util-scale-max"),
+        borrowToken,
+      );
+      await relativePositionManager
+        .connect(alice)
+        .openPosition(
+          collateralMarket.address,
+          borrowMarket.address,
+          dsaIndex,
+          noAdditionalPrincipal,
+          maxBorrowAvailable,
+          parseEther("1"),
+          scaleSwapData,
+        );
+
+      // After scaling to max, available for borrow should be 0
+      const utilizationAfterScale = await relativePositionManager.callStatic.getUtilizationInfo(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      const maxBorrowAfterScale = await relativePositionManager.callStatic.calculateMaxBorrow(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+        dsaMarket.address,
+      );
+      expect(utilizationAfterScale.availableCapitalUSD).to.equal(0);
+      expect(maxBorrowAfterScale).to.equal(0);
     });
   });
 
@@ -1656,6 +1964,39 @@ describe("RelativePositionManager", () => {
       ).to.emit(relativePositionManager, "PrincipalWithdrawn");
       const balanceAfter = await dsaToken.balanceOf(aliceAddress);
       expect(balanceAfter.sub(balanceBefore)).to.equal(withdrawAmount);
+    });
+
+    it("should allow full principal withdrawal when position is inactive", async () => {
+      const principalAmount = parseEther("20");
+      await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
+      await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
+
+      // Activate with principal and no open long/short
+      await relativePositionManager
+        .connect(alice)
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
+
+      // Deactivate withdraws all principal to user; position becomes inactive with suppliedPrincipal = 0
+      await relativePositionManager.connect(alice).deactivatePosition(collateralMarket.address, borrowMarket.address);
+
+      // Inactive path: withdrawPrincipal calls _withdrawCompletePrincipalToUser; nothing left so no event, no transfer
+      const balanceBefore = await dsaToken.balanceOf(aliceAddress);
+      await relativePositionManager
+        .connect(alice)
+        .withdrawPrincipal(collateralMarket.address, borrowMarket.address, principalAmount);
+      const balanceAfter = await dsaToken.balanceOf(aliceAddress);
+
+      // User already received principal from deactivate; withdrawPrincipal with 0 balance does not emit PrincipalWithdrawn
+      expect(balanceAfter).to.equal(balanceBefore);
+      expect(balanceAfter).to.equal(principalAmount);
+
+      const position = await relativePositionManager.getPosition(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+      );
+      expect(position.isActive).to.be.false;
+      expect(position.suppliedPrincipal).to.equal(0);
     });
   });
 
@@ -1703,10 +2044,21 @@ describe("RelativePositionManager", () => {
       ).to.be.revertedWithCustomError(relativePositionManager, "PositionNotFullyClosed");
     });
 
-    it("should succeed when position is active with no open collateral or debt", async () => {
+    it("should succeed when position is active with principal but no open collateral or debt", async () => {
+      // Activate a position with some principal supplied but no open long/short; in this state
+      // deactivation should be allowed and all principal should be withdrawn back to the user.
+      const principalAmount = parseEther("20");
+      await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
+      await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
+
       await relativePositionManager
         .connect(alice)
-        .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("2"));
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
+
+      // After activation Alice's DSA balance is 0; deactivate will return principal to her
+      const aliceBalanceBeforeDeactivate = await dsaToken.balanceOf(aliceAddress);
+      expect(aliceBalanceBeforeDeactivate).to.equal(0);
+
       await expect(
         relativePositionManager.connect(alice).deactivatePosition(collateralMarket.address, borrowMarket.address),
       ).to.emit(relativePositionManager, "PositionDeactivated");
@@ -1716,7 +2068,25 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
+
+      const positionAccountAddr = position.positionAccount;
+
       expect(position.isActive).to.be.false;
+      // No principal should remain recorded on the position after deactivation
+      expect(position.suppliedPrincipal).to.equal(0);
+
+      // All three assets (collateral, borrow and DSA principal market) should have zero
+      // balances for the position account after deactivation.
+      const collateralAfter = await collateralMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
+      const borrowAfter = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
+      const dsaUnderlyingAfter = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
+      expect(collateralAfter).to.equal(0);
+      expect(borrowAfter).to.equal(0);
+      expect(dsaUnderlyingAfter).to.equal(0);
+
+      // Principal was withdrawn to user by deactivatePosition
+      const aliceBalanceAfter = await dsaToken.balanceOf(aliceAddress);
+      expect(aliceBalanceAfter.sub(aliceBalanceBeforeDeactivate)).to.equal(principalAmount);
     });
   });
 });

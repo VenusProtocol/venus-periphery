@@ -794,17 +794,14 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         address dsaUnderlying,
         Position storage position
     ) internal {
-        if (dsaVToken.balanceOfUnderlying(positionAccount) == 0) {
-            position.suppliedPrincipal = 0;
-            return;
-        }
-        uint256 err = dsaVToken.redeemUnderlyingBehalf(positionAccount, type(uint256).max);
-        if (err != SUCCESS) revert RedeemBehalfFailed(err);
-        uint256 received = IERC20Upgradeable(dsaUnderlying).balanceOf(address(this));
-        if (received > 0) {
+        uint256 underlyingBalance = dsaVToken.balanceOfUnderlying(positionAccount);
+        if (underlyingBalance > 0) {
+            uint256 err = dsaVToken.redeemUnderlyingBehalf(positionAccount, underlyingBalance);
+            if (err != SUCCESS) revert RedeemBehalfFailed(err);
+            uint256 received = IERC20Upgradeable(dsaUnderlying).balanceOf(address(this));
             IERC20Upgradeable(dsaUnderlying).safeTransfer(msg.sender, received);
+            position.suppliedPrincipal = 0;
         }
-        position.suppliedPrincipal = 0;
     }
 
     /**
