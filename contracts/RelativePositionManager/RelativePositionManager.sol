@@ -753,6 +753,16 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
 
         uint256 longBalance = longUnderlying.balanceOf(address(this));
 
+        // Special case: when long and DSA underlyings are the same (including the case where longVToken == dsaVToken),
+        // there is no need to perform a swap – profit is already in the DSA asset. Transfer all redeemed long/DSA
+        // directly to the user and return.
+        if (address(longUnderlying) == address(dsaUnderlying)) {
+            if (longBalance > 0) {
+                longUnderlying.safeTransfer(msg.sender, longBalance);
+            }
+            return;
+        }
+
         if (amountToRedeemForProfitSwap > 0) {
             _performSwap(
                 longUnderlying,
@@ -1012,6 +1022,26 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         values.longValueUSD = (longCollateral * longPrice) / MANTISSA_ONE;
         values.borrowValueUSD = (shortDebt * values.shortPrice) / MANTISSA_ONE;
         values.suppliedPrincipalUSD = (suppliedPrincipal * values.dsaPrice) / MANTISSA_ONE;
+    }
+
+    /**
+     * @notice Returns the actual long collateral balance in underlying for a given user/position,
+     *         excluding DSA principal when the DSA and long assets share the same vToken market.
+     * @dev This is a public wrapper around `_getLongCollateralBalance` intended primarily for tests
+     *      and off-chain monitoring. It is not marked view because it may call `exchangeRateCurrent`
+     *      on the vToken, which can update state.
+     * @param user The position owner
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @return longBalance The long collateral balance in underlying units (principal excluded when shared market)
+     */
+    function getLongCollateralBalance(
+        address user,
+        IVToken longVToken,
+        IVToken shortVToken
+    ) external returns (uint256 longBalance) {
+        Position storage position = positions[user][address(longVToken)][address(shortVToken)];
+        return _getLongCollateralBalance(position, longVToken);
     }
 
     /**
