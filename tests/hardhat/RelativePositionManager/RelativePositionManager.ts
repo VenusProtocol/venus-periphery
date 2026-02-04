@@ -662,7 +662,7 @@ describe("RelativePositionManager", () => {
     });
   });
 
-  describe("increasePrincipal", () => {
+  describe("supplyPrincipal", () => {
     beforeEach(async () => {
       await relativePositionManager
         .connect(alice)
@@ -679,7 +679,7 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .increasePrincipal(collateralMarket.address, borrowMarket.address, dsaIndex, 0),
+          .supplyPrincipal(collateralMarket.address, borrowMarket.address, dsaIndex, 0),
       ).to.be.revertedWithCustomError(relativePositionManager, "ZeroAmount");
     });
 
@@ -692,7 +692,7 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(bob)
-          .increasePrincipal(collateralMarket.address, borrowMarket.address, dsaIndex, parseEther("1")),
+          .supplyPrincipal(collateralMarket.address, borrowMarket.address, dsaIndex, parseEther("1")),
       ).to.be.revertedWithCustomError(relativePositionManager, "PositionNotActive");
     });
 
@@ -703,7 +703,7 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .increasePrincipal(collateralMarket.address, borrowMarket.address, 1, parseEther("1")),
+          .supplyPrincipal(collateralMarket.address, borrowMarket.address, 1, parseEther("1")),
       ).to.be.revertedWithCustomError(relativePositionManager, "InvalidDSA");
     });
 
@@ -722,7 +722,7 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(alice)
-          .increasePrincipal(collateralMarket.address, borrowMarket.address, dsaIndex, amount),
+          .supplyPrincipal(collateralMarket.address, borrowMarket.address, dsaIndex, amount),
       ).to.emit(relativePositionManager, "PrincipalSupplied");
 
       const positionAfter = await relativePositionManager.getPosition(
@@ -1147,11 +1147,11 @@ describe("RelativePositionManager", () => {
             collateralMarket.address,
             borrowMarket.address,
             collateralAmountToRedeemForRepay,
-            swapDataRepay,
             currentShortDebt,
+            swapDataRepay,
             amountToRedeemForProfitSwap,
-            swapDataProfit,
             minAmountOutProfit,
+            swapDataProfit,
           ),
       ).to.emit(relativePositionManager, "PositionClosedWithProfit");
 
@@ -1411,10 +1411,17 @@ describe("RelativePositionManager", () => {
       const positionAccountAddr = positionBefore.positionAccount;
       const principalVTokensBefore = positionBefore.suppliedPrincipal;
       const debtBefore = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
-      const longBefore = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
+      const totalUnderlyingBefore = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
+      // When long == DSA, only the excess over principal is redeemable as long collateral; do not redeem more than that
+      const longCollateral = await relativePositionManager.callStatic.getLongCollateralBalance(
+        aliceAddress,
+        dsaMarket.address,
+        borrowMarket.address,
+      );
+      expect(longCollateral).to.be.gt(0);
 
       const debtToRepay = debtBefore.mul(4).div(10);
-      const collateralToRedeem = longBefore.mul(5).div(10);
+      const collateralToRedeem = longCollateral.mul(5).div(10); // redeem at most 50% of long collateral
       const exitSwapData = await createSwapMulticallData(
         swapHelper,
         borrowToken,
@@ -1444,7 +1451,7 @@ describe("RelativePositionManager", () => {
       const debtAfter = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
       const longAfter = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
       expect(debtAfter).to.be.lt(debtBefore);
-      expect(longAfter).to.be.lt(longBefore);
+      expect(longAfter).to.be.lt(totalUnderlyingBefore);
     });
 
     it("closeWithProfit: should close fully and keep suppliedPrincipal vTokens unchanged (profit realized in same underlying)", async () => {
@@ -1531,11 +1538,11 @@ describe("RelativePositionManager", () => {
             dsaMarket.address,
             borrowMarket.address,
             collateralAmountToRedeemForRepay,
-            swapDataRepay,
             currentShortDebt,
+            swapDataRepay,
             amountToRedeemForProfitSwap,
-            swapDataProfit,
             minAmountOutProfit,
+            swapDataProfit,
           ),
       ).to.emit(relativePositionManager, "PositionClosedWithProfit");
 
@@ -1678,7 +1685,6 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       // With no long/short and only principal supplied: available capital is capped by DSA collateral factor (e.g. 80%).
       // availableCapitalUSD = 10 * 0.8 = 8; full principal (10) is withdrawable in DSA terms.
@@ -1697,7 +1703,6 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       // Max borrow = availableCapitalUSD * effectiveLeverage / shortPrice. With available capital 8 and effectiveLeverage = 2, maxBorrow = 16.
       expect(maxBorrow).to.equal(parseEther("16"));
@@ -1716,13 +1721,11 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       const maxBorrowAtPrice1 = await relativePositionManager.callStatic.calculateMaxBorrow(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       // At default prices: available capital capped by DSA collateral factor (80%) → 8; withdrawable 10 (DSA terms); maxBorrow = 8 * 2 = 16
       expect(utilizationAtPrice1.availableCapitalUSD).to.equal(parseEther("8"));
@@ -1741,13 +1744,11 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       const maxBorrowAtPrice2 = await relativePositionManager.callStatic.calculateMaxBorrow(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       // At DSA price 2: suppliedPrincipalUSD = 20, no borrow → availableCapitalUSD = 20; withdrawable = 20/2 = 10 (DSA terms); maxBorrow = 20 * 2 / 1 = 40
       expect(utilizationAtPrice2.availableCapitalUSD).to.equal(parseEther("20"));
@@ -1772,13 +1773,11 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       const maxBorrowBefore = await relativePositionManager.callStatic.calculateMaxBorrow(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
 
       const shortAmount = parseEther("8");
@@ -1807,13 +1806,11 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       const maxBorrow = await relativePositionManager.callStatic.calculateMaxBorrow(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       // After opening borrow, capital is utilized so available and max borrow should be lower than before
       expect(utilization.availableCapitalUSD).to.be.lt(utilizationBefore.availableCapitalUSD);
@@ -1836,7 +1833,6 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       expect(utilization.availableCapitalUSD).to.equal(0);
       expect(utilization.withdrawableAmount).to.equal(0);
@@ -1845,7 +1841,6 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       expect(maxBorrow).to.equal(0);
     });
@@ -1886,13 +1881,11 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       const maxBorrowAvailable = await relativePositionManager.callStatic.calculateMaxBorrow(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       expect(utilizationAfterOpen.availableCapitalUSD).to.equal(parseEther("19"));
       expect(maxBorrowAvailable).to.equal(parseEther("38"));
@@ -1923,13 +1916,11 @@ describe("RelativePositionManager", () => {
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       const maxBorrowAfterScale = await relativePositionManager.callStatic.calculateMaxBorrow(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
-        dsaMarket.address,
       );
       expect(utilizationAfterScale.availableCapitalUSD).to.equal(0);
       expect(maxBorrowAfterScale).to.equal(0);

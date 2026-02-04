@@ -16,7 +16,8 @@ interface IRelativePositionManager {
         address user; // User who owns this position (immutable)
         address longVToken; // Long vToken market (immutable)
         address shortVToken; // Short vToken market (immutable)
-        uint8 dsaIndex; // Index of DSA in dsaVTokens array (immutable)
+        uint8 dsaIndex; // Index of DSA in dsaVTokens array (set on activation)
+        address dsaVToken; // DSA vToken market (set on activation; no re-validation needed in same cycle)
         address positionAccount; // Address of the PositionAccount contract (immutable)
         uint256 suppliedPrincipal; // Total DSA supplied as collateral, in vToken amount (mutable)
         uint256 effectiveLeverage; // Leverage ratio (mutable)
@@ -60,10 +61,7 @@ interface IRelativePositionManager {
     /// @custom:error InsufficientPrincipal when supplied principal is insufficient
     error InsufficientPrincipal();
 
-    /// @custom:error LeverageTooHigh when leverage exceeds maximum allowed
-    error LeverageTooHigh();
-
-    /// @custom:error InvalidLeverage when leverage is invalid (0 or too low)
+    /// @custom:error InvalidLeverage when leverage is invalid (0 or too low or exceeds max)
     error InvalidLeverage();
 
     /// @custom:error BorrowAmountExceedsMaximum when borrow amount exceeds the calculated maximum based on capital utilization
@@ -71,15 +69,6 @@ interface IRelativePositionManager {
 
     /// @custom:error InsufficientWithdrawableAmount when trying to withdraw more than allowed
     error InsufficientWithdrawableAmount();
-
-    /// @custom:error UnauthorizedAccess when caller is not authorized
-    error UnauthorizedAccess();
-
-    /// @custom:error InvalidPositionAccount when position account address is invalid
-    error InvalidPositionAccount();
-
-    /// @custom:error DelegateCallFailed when generic call fails
-    error DelegateCallFailed();
 
     /// @custom:error ZeroAddress when a zero address is provided
     error ZeroAddress();
@@ -109,9 +98,6 @@ interface IRelativePositionManager {
     /// @custom:error ZeroFlashLoanAmount when flash loan amount is zero
     error ZeroFlashLoanAmount();
 
-    /// @custom:error NoShortDebtToRepay when closeWithProfit is called but position has no short debt to repay
-    error NoShortDebtToRepay();
-
     /// @custom:error ShortDebtNotFullyRepaid when repay step did not clear all short debt (insufficient swap output)
     error ShortDebtNotFullyRepaid();
 
@@ -121,9 +107,6 @@ interface IRelativePositionManager {
     /// @custom:error NotLossScenario when closeWithLoss is called but short debt (USD) is not greater than long collateral (USD)
     error NotLossScenario();
 
-    /// @custom:error InsufficientLongForFirstSwap when longAmountToRedeemForFirstSwap exceeds available long collateral
-    error InsufficientLongForFirstSwap();
-
     /// @custom:error MinAmountOutSecondBelowDebt when minAmountOutSecond is less than remaining short debt (second swap)
     error MinAmountOutSecondBelowDebt();
 
@@ -132,9 +115,6 @@ interface IRelativePositionManager {
 
     /// @custom:error InsufficientExcessLongForProfitSwap when excess long collateral is less than amountToRedeemForProfitSwap (exact-in swap requires at least that much)
     error InsufficientExcessLongForProfitSwap();
-
-    /// @custom:error ExitMarketFailed when exiting market fails
-    error ExitMarketFailed();
 
     /// @custom:error RedeemBehalfFailed when redeeming vTokens on behalf fails
     /// @param errorCode Error code returned by the vToken redeemUnderlyingBehalf call
@@ -292,15 +272,14 @@ interface IRelativePositionManager {
     ) external;
 
     /**
-     * @notice Increases principal for an active position
-     * @dev Can be called multiple times to add collateral. If position is open, this scales the position.
-     *      Validates that the provided DSA index matches the position's configured DSA.
-     * @param longAsset The vToken market address for the long asset
-     * @param shortAsset The vToken market address for the short asset
+     * @notice Supplies additional principal to an active position
+     * @dev Can be called multiple times to increase collateral.
+     * @param longVToken The vToken market address for the long asset
+     * @param shortVToken The vToken market address for the short asset
      * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
      * @param amount Amount of DSA underlying to supply
      */
-    function increasePrincipal(address longAsset, address shortAsset, uint8 dsaIndex, uint256 amount) external;
+    function supplyPrincipal(address longVToken, address shortVToken, uint8 dsaIndex, uint256 amount) external;
 
     /**
      * @notice Opens a leveraged position or scales an existing one (borrow short, swap to long)
@@ -351,21 +330,21 @@ interface IRelativePositionManager {
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param collateralAmountToRedeemForRepay Amount of long to redeem for repay swap (passed to exitLeverage)
-     * @param swapDataRepay Swap #1: long → short for debt repayment
      * @param minAmountOutRepay Minimum short out from repay swap (must be >= current short debt)
+     * @param swapDataRepay Swap #1: long → short for debt repayment
      * @param amountToRedeemForProfitSwap Exact amount of excess long to swap long→DSA; must not exceed excess long
-     * @param swapDataProfit Swap #2: long → DSA for profit realization
      * @param minAmountOutProfit Minimum DSA out from profit swap
+     * @param swapDataProfit Swap #2: long → DSA for profit realization
      */
     function closeWithProfit(
         IVToken longVToken,
         IVToken shortVToken,
         uint256 collateralAmountToRedeemForRepay,
-        bytes calldata swapDataRepay,
         uint256 minAmountOutRepay,
+        bytes calldata swapDataRepay,
         uint256 amountToRedeemForProfitSwap,
-        bytes calldata swapDataProfit,
-        uint256 minAmountOutProfit
+        uint256 minAmountOutProfit,
+        bytes calldata swapDataProfit
     ) external;
 
     /**
@@ -454,13 +433,40 @@ interface IRelativePositionManager {
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @return position The Position struct (user, longVToken, shortVToken, dsaIndex, positionAccount, suppliedPrincipal, effectiveLeverage, cycleId, isActive)
+     * @return position The Position struct (user, longVToken, shortVToken, dsaIndex, dsaVToken, positionAccount, suppliedPrincipal, effectiveLeverage, cycleId, isActive)
      */
     function getPosition(
         address user,
         IVToken longVToken,
         IVToken shortVToken
     ) external view returns (Position memory position);
+
+    /**
+     * @notice Returns the actual long collateral balance in underlying for a given user/position,
+     *         excluding DSA principal when the DSA and long assets share the same vToken market.
+     * @param user The position owner
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @return longBalance The long collateral balance in underlying units (principal excluded when shared market)
+     */
+    function getLongCollateralBalance(
+        address user,
+        IVToken longVToken,
+        IVToken shortVToken
+    ) external returns (uint256 longBalance);
+
+    /**
+     * @notice Returns the supplied principal balance in underlying units for a given user/position
+     * @param user The position owner
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @return balance The supplied principal in underlying units
+     */
+    function getSuppliedPrincipalBalance(
+        address user,
+        IVToken longVToken,
+        IVToken shortVToken
+    ) external returns (uint256 balance);
 
     /**
      * @notice Executes an arbitrary call on behalf of a position account
@@ -480,35 +486,31 @@ interface IRelativePositionManager {
      *      4. Caps by supplied principal
      *      5. Calculates available capital remaining
      *      6. Calculates withdrawable amount in DSA token terms
-     *      Used by calculateMaxBorrow to determine maximum borrowing capacity.
+     *      Used by calculateMaxBorrow to determine maximum borrowing capacity. DSA is read from the position.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param dsaVToken The vToken market for the DSA asset
      * @return utilization Utilization information including available capital and withdrawable amount
      */
     function getUtilizationInfo(
         address user,
         IVToken longVToken,
-        IVToken shortVToken,
-        IVToken dsaVToken
+        IVToken shortVToken
     ) external returns (UtilizationInfo memory utilization);
 
     /**
      * @notice Calculates the maximum allowed borrow amount for a position
      * @dev Uses getUtilizationInfo internally to get available capital, then calculates:
      *      maxBorrow = availableCapital * effectiveLeverage
-     *      This leverages the sophisticated capital utilization calculation in getUtilizationInfo.
+     *      This leverages the sophisticated capital utilization calculation in getUtilizationInfo. DSA is read from the position.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param dsaVToken The vToken market for the DSA asset
      * @return maxBorrowAmount Maximum amount that can be borrowed in shortAsset terms
      */
     function calculateMaxBorrow(
         address user,
         IVToken longVToken,
-        IVToken shortVToken,
-        IVToken dsaVToken
+        IVToken shortVToken
     ) external returns (uint256 maxBorrowAmount);
 }
