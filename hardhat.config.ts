@@ -327,6 +327,9 @@ const config: HardhatUserConfig = {
       "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol",
     ],
   },
+  mocha: {
+    timeout: 200000, // 200 seconds for fork tests
+  },
 };
 
 export default config;
