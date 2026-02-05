@@ -238,7 +238,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
 
     /**
      * @notice Quotes how much needs to be borrowed in a flash loan to obtain `requiredAmount` after paying `feeRate`.
-     * @dev Convenience helper that exposes the internal `calculateFlashLoanAmount` for external callers.
+     * @dev Convenience helper that exposes the internal `_calculateFlashLoanAmount` for external callers.
      *      Can be used to get the flash loan amount which adjusts the flash loan fee to be repaid from it.
      * @param requiredAmount The amount needed after paying the flash loan fee.
      * @param feeRate The flash loan fee rate, scaled by 1e18.
@@ -248,7 +248,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 requiredAmount,
         uint256 feeRate
     ) external pure returns (uint256 flashLoanAmount) {
-        return calculateFlashLoanAmount(requiredAmount, feeRate);
+        return _calculateFlashLoanAmount(requiredAmount, feeRate);
     }
 
     /**
@@ -282,7 +282,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 wrappedNativeBalance = WRAPPED_NATIVE.balanceOf(address(this));
 
         // Executing flash loan here will trigger the Comptroller contract to call the executeOperation callback to this contract
-        COMPTROLLER.executeFlashLoan(payable(user), payable(address(this)), borrowedMarkets, flashLoanAmounts, "0x");
+        COMPTROLLER.executeFlashLoan(payable(user), payable(address(this)), borrowedMarkets, flashLoanAmounts, "");
 
         _refundDustToUser(user, WRAPPED_NATIVE_MARKET, wrappedNativeBalance);
         _checkAccountSafe(user);
@@ -318,13 +318,13 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 flashLoanFee = WRAPPED_NATIVE_MARKET.flashLoanFeeMantissa();
         flashLoanAmounts[0] = flashLoanFee == 0
             ? debtRepaymentAmount
-            : calculateFlashLoanAmount(debtRepaymentAmount, flashLoanFee);
+            : _calculateFlashLoanAmount(debtRepaymentAmount, flashLoanFee);
 
         operationType = OperationType.SWAP_DEBT_NATIVE_TO_WRAPPED;
         uint256 wrappedNativeBalance = WRAPPED_NATIVE.balanceOf(address(this));
 
         // Executing flash loan here will trigger the Comptroller contract to call the executeOperation callback to this contract
-        COMPTROLLER.executeFlashLoan(payable(user), payable(address(this)), borrowedMarkets, flashLoanAmounts, "0x");
+        COMPTROLLER.executeFlashLoan(payable(user), payable(address(this)), borrowedMarkets, flashLoanAmounts, "");
 
         _refundDustToUser(user, WRAPPED_NATIVE_MARKET, wrappedNativeBalance);
         _checkAccountSafe(user);
@@ -420,7 +420,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
         uint256 flashLoanFee = marketTo.flashLoanFeeMantissa();
         flashLoanAmounts[0] = flashLoanFee == 0
             ? maxDebtAmountToOpen
-            : calculateFlashLoanAmount(maxDebtAmountToOpen, flashLoanFee);
+            : _calculateFlashLoanAmount(maxDebtAmountToOpen, flashLoanFee);
 
         uint256 fromBalanceBeforeDebt = IERC20Upgradeable(marketFrom.underlying()).balanceOf(address(this));
         uint256 toBalanceBeforeDebt = IERC20Upgradeable(marketTo.underlying()).balanceOf(address(this));
@@ -447,7 +447,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param amounts Array with the borrowed underlying amount (single element)
      * @param premiums Array with the flash loan fee amount (single element)
      * @param initiator The address that initiated the flash loan
-     * @param onBehalf The user for whome debt will be opened
+     * @param onBehalf The user for whom debt will be opened
      * @param param Encoded auxiliary data for the operation (e.g., swap multicall)
      * @return success Whether the execution succeeded
      * @return repayAmounts Amounts to approve for flash loan repayment
@@ -776,7 +776,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable,
      * @param feeRate The flash loan fee rate, scaled by 1e18 (e.g. 9e14 = 0.09%).
      * @return flashLoanAmount The total amount to borrow in the flash loan.
      */
-    function calculateFlashLoanAmount(
+    function _calculateFlashLoanAmount(
         uint256 requiredAmount,
         uint256 feeRate
     ) internal pure returns (uint256 flashLoanAmount) {
