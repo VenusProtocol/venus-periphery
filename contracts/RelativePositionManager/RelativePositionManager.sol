@@ -187,7 +187,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         }
 
         // If reactivating and user wants to change DSA asset, they must first withdraw current DSA supplied
-        if (position.positionAccount != address(0) && dsaIndex != position.dsaIndex) {
+        if (dsaIndex != position.dsaIndex && position.suppliedPrincipal > 0) {
             revert WithdrawPrincipalBeforeChangingDSA();
         }
 
