@@ -23,16 +23,22 @@ interface IVToken is IERC20Upgradeable {
 
     function repayBorrowBehalf(address borrower, uint repayAmount) external returns (uint256);
 
-    function redeemUnderlyingBehalf(address redeemer, uint redeemAmount) external returns (uint);
-
     function comptroller() external view returns (IComptroller);
 
     function borrowBalanceStored(address account) external view returns (uint256);
 
     function underlying() external view returns (address);
+
+    function redeemBehalf(address redeemer, uint256 redeemTokens) external returns (uint256);
+
+    function redeemUnderlyingBehalf(address redeemer, uint256 redeemAmount) external returns (uint256);
+
+    function flashLoanFeeMantissa() external view returns (uint256);
 }
 
 interface IVBNB is IVToken {
+    function mint() external payable;
+
     function repayBorrowBehalf(address borrower) external payable;
 
     function liquidateBorrow(address borrower, IVToken vTokenCollateral) external payable;
@@ -56,8 +62,6 @@ interface IComptroller {
     function enterMarkets(address[] calldata vTokens) external returns (uint256[] memory);
 
     function enterMarketBehalf(address onBehalf, address vToken) external returns (uint256);
-
-    function enterMarket(address user, address vToken) external returns (uint256);
 
     function liquidationIncentiveMantissa() external view returns (uint256);
 
@@ -94,6 +98,12 @@ interface IComptroller {
     ) external;
 }
 
+interface IWBNB is IERC20Upgradeable {
+    function deposit() external payable;
+
+    function withdraw(uint256 amount) external;
+}
+
 interface IFlashLoanReceiver {
     /**
      * @notice Executes an operation after receiving the flash-borrowed assets.
@@ -117,12 +127,6 @@ interface IFlashLoanReceiver {
         address onBehalf,
         bytes calldata param
     ) external returns (bool success, uint256[] memory repayAmounts);
-}
-
-interface IWBNB is IERC20Upgradeable {
-    function deposit() external payable;
-
-    function withdraw(uint256 amount) external;
 }
 
 interface IProtocolShareReserve {
