@@ -1962,32 +1962,123 @@ describe("RelativePositionManager", () => {
       await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
       await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
 
-      // Activate with principal and no open long/short
+      // Activate with principal and open/close a position so that the position ends inactive with principal still supplied
       await relativePositionManager
         .connect(alice)
         .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
 
-      // Deactivate withdraws all principal to user; position becomes inactive with suppliedPrincipal = 0
-      await relativePositionManager.connect(alice).deactivatePosition(collateralMarket.address, borrowMarket.address);
+      const shortAmount = parseEther("1");
+      const minLongAmount = parseEther("0.9");
+      const longReceivedAfterSwap = parseEther("0.95");
+      const openSwapData = await createSwapMulticallData(
+        swapHelper,
+        collateralToken,
+        leverageManager.address,
+        longReceivedAfterSwap,
+        ethers.utils.formatBytes32String("withdraw-inactive-open"),
+        borrowToken,
+      );
 
-      // Inactive path: withdrawPrincipal calls _withdrawCompletePrincipalToUser; nothing left so no event, no transfer
-      const balanceBefore = await dsaToken.balanceOf(aliceAddress);
       await relativePositionManager
         .connect(alice)
-        .withdrawPrincipal(collateralMarket.address, borrowMarket.address, principalAmount);
-      const balanceAfter = await dsaToken.balanceOf(aliceAddress);
+        .openPosition(
+          collateralMarket.address,
+          borrowMarket.address,
+          dsaIndex,
+          noAdditionalPrincipal,
+          shortAmount,
+          minLongAmount,
+          openSwapData,
+        );
 
-      // User already received principal from deactivate; withdrawPrincipal with 0 balance does not emit PrincipalWithdrawn
-      expect(balanceAfter).to.equal(balanceBefore);
-      expect(balanceAfter).to.equal(principalAmount);
-
-      const position = await relativePositionManager.getPosition(
+      // Close the position fully with profit so that only principal remains and position becomes inactive
+      const positionBeforeClose = await relativePositionManager.getPosition(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
       );
-      expect(position.isActive).to.be.false;
-      expect(position.suppliedPrincipal).to.equal(0);
+      const positionAccountAddr = positionBeforeClose.positionAccount;
+      const currentShortDebt = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
+
+      // Reuse the same profit-close pattern as the dedicated closeWithProfit tests
+      const longPrice = parseUnits("2", 18);
+      const shortPrice = parseUnits("1", 18);
+      const dsaPrice = parseUnits("1", 18);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(collateralMarket.address).returns(longPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(shortPrice);
+      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(dsaPrice);
+
+      const SLIPPAGE_BPS = 500; // 5%
+
+      const repaySwapAmount = currentShortDebt.mul(102).div(100);
+      const collateralAmountToRedeemForRepay = parseEther("0.53");
+      const excessLong = longReceivedAfterSwap.sub(collateralAmountToRedeemForRepay);
+
+      const swapDataRepay = await createSwapMulticallData(
+        swapHelper,
+        borrowToken,
+        leverageManager.address,
+        repaySwapAmount,
+        ethers.utils.formatBytes32String("withdraw-inactive-profit-repay"),
+        collateralToken,
+      );
+
+      const amountToRedeemForProfitSwap = excessLong;
+      const theoreticalDsaOut = amountToRedeemForProfitSwap.mul(longPrice).div(dsaPrice);
+      const minAmountOutProfit = theoreticalDsaOut.mul(10000 - SLIPPAGE_BPS).div(10000);
+      const dsaOutActual = minAmountOutProfit.add(parseEther("0.01"));
+
+      const swapDataProfit = await createSwapMulticallData(
+        swapHelper,
+        dsaToken,
+        relativePositionManager.address,
+        dsaOutActual,
+        ethers.utils.formatBytes32String("withdraw-inactive-profit"),
+        collateralToken,
+      );
+
+      await relativePositionManager
+        .connect(alice)
+        .closeWithProfit(
+          collateralMarket.address,
+          borrowMarket.address,
+          collateralAmountToRedeemForRepay,
+          currentShortDebt,
+          swapDataRepay,
+          amountToRedeemForProfitSwap,
+          minAmountOutProfit,
+          swapDataProfit,
+        );
+
+      const positionAfterClose = await relativePositionManager.getPosition(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+      );
+      expect(positionAfterClose.isActive).to.be.false;
+
+      // Fetch principal balance in underlying units using the contract helper
+      const principalUnderlyingBefore = await relativePositionManager.callStatic.getSuppliedPrincipalBalance(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+      );
+      expect(principalUnderlyingBefore).to.be.gt(0);
+
+      // Now withdraw the remaining principal from an inactive position using underlying amount
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .withdrawPrincipal(collateralMarket.address, borrowMarket.address, principalUnderlyingBefore),
+      ).to.emit(relativePositionManager, "PrincipalWithdrawn");
+
+      const positionAfterWithdraw = await relativePositionManager.getPosition(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+      );
+      expect(positionAfterWithdraw.isActive).to.be.false;
+      expect(positionAfterWithdraw.suppliedPrincipal).to.equal(0);
     });
   });
 

@@ -115,9 +115,6 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      */
     function addDSAVToken(address dsaVToken) external {
         _checkAccessAllowed("addDSAVToken(address)");
-        if (dsaVToken == address(0)) {
-            revert ZeroAddress();
-        }
 
         checkMarketListed(dsaVToken);
         dsaVTokens.push(dsaVToken);
@@ -166,8 +163,8 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 initialPrincipal,
         uint256 effectiveLeverage
     ) external nonReentrant {
-        if (longVToken == address(0) || shortVToken == address(0)) {
-            revert ZeroAddress();
+        if (longVToken == shortVToken) {
+            revert SameMarketNotAllowed();
         }
 
         checkMarketListed(longVToken);
@@ -277,6 +274,10 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 minLongAmount,
         bytes calldata swapData
     ) external nonReentrant {
+        if (address(longVToken) == address(shortVToken)) {
+            revert SameMarketNotAllowed();
+        }
+
         if (shortAmount == 0) revert ZeroBorrowAmount();
 
         checkMarketListed(address(longVToken));
@@ -349,13 +350,23 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 minAmountOutAfterSwap,
         bytes calldata swapData
     ) external nonReentrant {
+        if (address(longVToken) == address(shortVToken)) {
+            revert SameMarketNotAllowed();
+        }
+
         if (borrowedAmountToRepay == 0) revert ZeroFlashLoanAmount();
+
+        checkMarketListed(address(longVToken));
+        checkMarketListed(address(shortVToken));
 
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
 
         if (!position.isActive) revert PositionNotActive();
 
         address positionAccount = position.positionAccount;
+
+        // Revert early if there is no short debt to close
+        if (shortVToken.borrowBalanceCurrent(positionAccount) == 0) revert ZeroDebt();
 
         // Close position via position account wrapper (forwards to LeverageManager)
         IPositionAccount(positionAccount).exitLeverage(
@@ -368,7 +379,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         );
 
         // If partially closed: remaining borrow must not exceed (principal × leverage)
-        uint256 remainingShortDebt = shortVToken.borrowBalanceStored(positionAccount);
+        uint256 remainingShortDebt = shortVToken.borrowBalanceCurrent(positionAccount);
         if (remainingShortDebt > 0) {
             PositionValuesUSD memory values = _getPositionValuesUSD(position);
             uint256 maxBorrowUSD = (values.suppliedPrincipalUSD * position.effectiveLeverage) / MANTISSA_ONE;
@@ -411,6 +422,13 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 minAmountOutProfit,
         bytes calldata swapDataProfit
     ) external nonReentrant {
+        if (address(longVToken) == address(shortVToken)) {
+            revert SameMarketNotAllowed();
+        }
+
+        checkMarketListed(address(longVToken));
+        checkMarketListed(address(shortVToken));
+
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         if (!position.isActive) revert PositionNotActive();
 
@@ -489,11 +507,20 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 minAmountOutSecond,
         bytes calldata swapDataSecond
     ) external nonReentrant {
-        if (borrowedAmountToRepayFirst == 0) revert ZeroFlashLoanAmount();
+        if (address(longVToken) == address(shortVToken)) {
+            revert SameMarketNotAllowed();
+        }
+
+        checkMarketListed(address(longVToken));
+        checkMarketListed(address(shortVToken));
+
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         if (!position.isActive) revert PositionNotActive();
-
         address positionAccount = position.positionAccount;
+
+        // Revert early if there is no short debt to close
+        if (shortVToken.borrowBalanceCurrent(positionAccount) == 0) revert ZeroDebt();
+
         PositionValuesUSD memory values = _getPositionValuesUSD(position);
         if (values.borrowValueUSD <= values.longValueUSD) revert NotLossScenario();
 
@@ -522,13 +549,14 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
                 minAmountOutSecond,
                 swapDataSecond
             );
-            if (shortVToken.borrowBalanceStored(positionAccount) > 0) revert ShortDebtNotFullyRepaid();
-            position.suppliedPrincipal = dsaVToken.balanceOf(positionAccount);
         }
 
         // Redeem any remaining long and transfer to user
         uint256 remainingLong = _getLongCollateralBalance(position);
         _redeemUnderlyingToUser(longVToken, positionAccount, remainingLong);
+
+        if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert ShortDebtNotFullyRepaid();
+        position.suppliedPrincipal = dsaVToken.balanceOf(positionAccount);
 
         // Transfer any dust from LM (sent to position account) to user
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
@@ -554,22 +582,17 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     function withdrawPrincipal(IVToken longVToken, IVToken shortVToken, uint256 amount) external nonReentrant {
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         address positionAccount = position.positionAccount;
-        IVToken dsaVToken = IVToken(position.dsaVToken);
+        if (positionAccount == address(0)) revert ZeroAddress();
+        if (amount == 0 || amount > _getSuppliedPrincipalBalance(position, longVToken, IVToken(position.dsaVToken)))
+            revert InsufficientWithdrawableAmount();
 
-        if (!position.isActive) {
-            // Inactive: redeem all DSA principal and transfer to user (e.g. after closeWithProfit principal left in)
-            uint256 underlyingBalance = dsaVToken.balanceOfUnderlying(positionAccount);
-            _redeemUnderlyingToUser(dsaVToken, positionAccount, underlyingBalance);
-            position.suppliedPrincipal = 0;
-            if (underlyingBalance > 0) {
-                emit PrincipalWithdrawn(msg.sender, positionAccount, address(dsaVToken), underlyingBalance, 0);
-            }
-            return;
+        if (position.isActive) {
+            // Active: redeem only based on utilization
+            UtilizationInfo memory utilization = _getUtilizationInfo(msg.sender, longVToken, shortVToken);
+            if (amount > utilization.withdrawableAmount) revert InsufficientWithdrawableAmount();
         }
 
-        UtilizationInfo memory utilization = _getUtilizationInfo(msg.sender, longVToken, shortVToken);
-        if (amount > utilization.withdrawableAmount) revert InsufficientWithdrawableAmount();
-
+        IVToken dsaVToken = IVToken(position.dsaVToken);
         uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
         _redeemUnderlyingToUser(dsaVToken, positionAccount, amount);
         uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
@@ -785,7 +808,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 minAmountOutProfit,
         bytes calldata swapDataProfit
     ) internal {
-        if (shortVToken.borrowBalanceStored(positionAccount) > 0) revert ShortDebtNotFullyRepaid();
+        if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert ShortDebtNotFullyRepaid();
 
         uint256 excessLongToRedeem = _getLongCollateralBalance(position);
         if (excessLongToRedeem == 0) return;
@@ -1086,18 +1109,15 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
 
     /**
      * @notice Validates that a market is listed in the Comptroller and is not vBNB
-     * @dev Reverts with AssetNotListed if not listed, VBNBNotSupported if asset is the leverage manager's vBNB.
-     * @param asset The vToken market address to validate
+     * @dev Reverts with AssetNotListed if not listed, VBNBNotSupported if market is the leverage manager's vBNB.
+     * @param market The vToken market address to validate
      */
-    function checkMarketListed(address asset) internal view {
-        IVToken vToken = IVToken(asset);
-        (bool isListed, , ) = COMPTROLLER.markets(address(vToken));
-        if (!isListed) {
-            revert AssetNotListed();
-        }
-        if (vToken == LEVERAGE_MANAGER.vBNB()) {
-            revert VBNBNotSupported();
-        }
+    function checkMarketListed(address market) internal view {
+        if (market == address(0)) revert ZeroAddress();
+
+        (bool isListed, , ) = COMPTROLLER.markets(market);
+        if (!isListed) revert AssetNotListed();
+        if (market == address(LEVERAGE_MANAGER.vBNB())) revert VBNBNotSupported();
     }
 
     /**

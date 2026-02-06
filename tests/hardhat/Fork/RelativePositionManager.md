@@ -62,7 +62,6 @@ Scenario:
 1. Activate position with DSA principal
 2. Open position using 3 tokens (DSA, Long, Short)
 3. Validate:
-
    - Supplied principal
    - Borrowed amount
    - Long collateral
@@ -145,13 +144,11 @@ Expected:
 Scenario:
 
 - Apply repeated price changes:
-
   - Long ↑ / ↓
   - Short ↑ / ↓
   - DSA ↑ / ↓
 
 - After each change:
-
   - Check utilization
   - Check max borrow
   - Check withdrawable amount
@@ -170,7 +167,6 @@ Scenario:
 
 1. Manipulate prices until position is close to liquidation
 2. Validate:
-
    - Utilization
    - Withdrawable amount ≈ 0
    - Borrow capacity ≈ 0
@@ -193,7 +189,6 @@ Scenario:
 1. Activate with principal
 2. Open position
 3. Validate:
-
    - Swap executed
    - Debt created
    - Collateral supplied
@@ -208,7 +203,6 @@ Scenario:
 1. Call `openPosition` again
 2. Scale leverage
 3. Validate:
-
    - Borrow increases
    - Long increases
    - Utilization updates
@@ -222,7 +216,6 @@ Scenario:
 1. Perform multiple opens and closes
 2. Track dust balances
 3. Validate:
-
    - Dust sent to user
    - No stuck tokens
    - No residual balances
@@ -244,7 +237,6 @@ Scenario:
 
 - Close part of position
 - Validate:
-
   - Reduced debt
   - Reduced collateral
   - Updated utilization
@@ -268,7 +260,6 @@ Scenario:
 - Increase long price
 - Close with profit
 - Validate:
-
   - Debt fully repaid
   - Profit transferred
   - Position deactivated
@@ -282,7 +273,6 @@ Scenario:
 - Decrease long price
 - Close with loss
 - Validate:
-
   - Multi-step repayment
   - Remaining principal updated
   - Collateral transferred
@@ -396,4 +386,3 @@ Each fork test should log:
 Used for debugging failures.
 
 ---
-

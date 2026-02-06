@@ -98,6 +98,12 @@ interface IRelativePositionManager {
     /// @custom:error ZeroFlashLoanAmount when flash loan amount is zero
     error ZeroFlashLoanAmount();
 
+    /// @custom:error ZeroDebt when there is no short debt to close
+    error ZeroDebt();
+
+    /// @custom:error SameMarketNotAllowed when long and short markets are identical
+    error SameMarketNotAllowed();
+
     /// @custom:error ShortDebtNotFullyRepaid when repay step did not clear all short debt (insufficient swap output)
     error ShortDebtNotFullyRepaid();
 
