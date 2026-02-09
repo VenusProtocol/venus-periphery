@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import {
     SafeERC20Upgradeable,
     IERC20Upgradeable
@@ -22,7 +23,12 @@ import { IPositionAccount } from "./IPositionAccount.sol";
  *      trading relative prices rather than traditional leverage. Uses 3-token logic (DSA + Long + Short)
  *      and deploys isolated PositionAccount contracts for each position.
  */
-contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeable, IRelativePositionManager {
+contract RelativePositionManager is
+    AccessControlledV8,
+    ReentrancyGuardUpgradeable,
+    PausableUpgradeable,
+    IRelativePositionManager
+{
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @dev Success return value for Comptroller operations (e.g. enterMarketBehalf)
@@ -86,6 +92,25 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
         __ReentrancyGuard_init();
+        __Pausable_init();
+    }
+
+    /**
+     * @notice Pauses state-changing user operations on the manager (activation, opening/closing, principal changes)
+     * @dev Callable only by governance via AccessControlManager. View and admin functions remain available.
+     */
+    function pause() external {
+        _checkAccessAllowed("pause()");
+        _pause();
+    }
+
+    /**
+     * @notice Unpauses state-changing user operations on the manager
+     * @dev Callable only by governance via AccessControlManager.
+     */
+    function unpause() external {
+        _checkAccessAllowed("unpause()");
+        _unpause();
     }
 
     /**
@@ -168,7 +193,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint8 dsaIndex,
         uint256 initialPrincipal,
         uint256 effectiveLeverage
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _checkSameMarket(longVToken, shortVToken);
 
         checkMarketListed(longVToken);
@@ -233,7 +258,11 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @custom:error Throw PositionNotActive if the position is not active.
      * @custom:event Emits PrincipalSupplied event.
      */
-    function supplyPrincipal(address longVToken, address shortVToken, uint256 amount) public nonReentrant {
+    function supplyPrincipal(
+        address longVToken,
+        address shortVToken,
+        uint256 amount
+    ) public nonReentrant whenNotPaused {
         if (amount == 0) revert ZeroAmount();
         Position storage position = positions[msg.sender][longVToken][shortVToken];
 
@@ -266,7 +295,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 shortAmount,
         uint256 minLongAmount,
         bytes calldata swapData
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _checkSameMarket(address(longVToken), address(shortVToken));
 
         if (shortAmount == 0) revert ZeroBorrowAmount();
@@ -344,7 +373,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 amountToRedeemForProfitSwap,
         uint256 minAmountOutProfit,
         bytes calldata swapDataProfit
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _checkSameMarket(address(longVToken), address(shortVToken));
 
         checkMarketListed(address(longVToken));
@@ -442,7 +471,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 dsaAmountToRedeemForRepay,
         uint256 minAmountOutSecond,
         bytes calldata swapDataSecond
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _checkSameMarket(address(longVToken), address(shortVToken));
 
         checkMarketListed(address(longVToken));
@@ -534,7 +563,11 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @custom:error Throw RedeemBehalfFailed if redeem fails.
      * @custom:event Emits PrincipalWithdrawn event when principal is withdrawn (active or inactive).
      */
-    function withdrawPrincipal(IVToken longVToken, IVToken shortVToken, uint256 amount) external nonReentrant {
+    function withdrawPrincipal(
+        IVToken longVToken,
+        IVToken shortVToken,
+        uint256 amount
+    ) external nonReentrant whenNotPaused {
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         address positionAccount = position.positionAccount;
         if (positionAccount == address(0)) revert ZeroAddress();
@@ -568,7 +601,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @custom:error Throw PositionNotFullyClosed if long collateral or short debt remains.
      * @custom:event Emits PositionDeactivated event.
      */
-    function deactivatePosition(IVToken longVToken, IVToken shortVToken) external nonReentrant {
+    function deactivatePosition(IVToken longVToken, IVToken shortVToken) external nonReentrant whenNotPaused {
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
 
         if (!position.isActive) revert PositionNotActive();

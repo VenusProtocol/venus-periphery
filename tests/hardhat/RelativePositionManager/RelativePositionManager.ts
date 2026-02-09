@@ -412,6 +412,70 @@ describe("RelativePositionManager", () => {
     });
   });
 
+  describe("pause", () => {
+    it("should block state-changing user operations when paused", async () => {
+      await relativePositionManager.connect(admin).pause();
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("2")),
+      ).to.be.revertedWith("Pausable: paused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .supplyPrincipal(collateralMarket.address, borrowMarket.address, parseEther("1")),
+      ).to.be.revertedWith("Pausable: paused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .openPosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            noAdditionalPrincipal,
+            parseEther("1"),
+            0,
+            "0x",
+          ),
+      ).to.be.revertedWith("Pausable: paused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .closeWithProfit(collateralMarket.address, borrowMarket.address, BPS_100_PCT, 0, 0, "0x", 0, 0, "0x"),
+      ).to.be.revertedWith("Pausable: paused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .closeWithLoss(collateralMarket.address, borrowMarket.address, BPS_100_PCT, 0, 0, 0, "0x", 0, 0, "0x"),
+      ).to.be.revertedWith("Pausable: paused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .withdrawPrincipal(collateralMarket.address, borrowMarket.address, parseEther("1")),
+      ).to.be.revertedWith("Pausable: paused");
+
+      await expect(
+        relativePositionManager.connect(alice).deactivatePosition(collateralMarket.address, borrowMarket.address),
+      ).to.be.revertedWith("Pausable: paused");
+    });
+
+    it("should allow activation again after unpause", async () => {
+      await relativePositionManager.connect(admin).pause();
+      await relativePositionManager.connect(admin).unpause();
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .activatePosition(collateralMarket.address, borrowMarket.address, 0, 0, parseEther("2")),
+      ).to.not.be.reverted;
+    });
+  });
+
   describe("addDSAVToken", () => {
     it("should add DSA vToken and emit event", async () => {
       expect(await relativePositionManager.getDSAVTokensCount()).to.equal(1);

@@ -457,6 +457,18 @@ interface IRelativePositionManager {
     function executePositionAccountCall(address positionAccount, address target, bytes calldata data) external;
 
     /**
+     * @notice Pauses state-changing user operations on the manager (activation, open/close, principal changes).
+     * @dev Callable only by governance via AccessControlManager.
+     */
+    function pause() external;
+
+    /**
+     * @notice Unpauses state-changing user operations on the manager.
+     * @dev Callable only by governance via AccessControlManager.
+     */
+    function unpause() external;
+
+    /**
      * @notice Calculates capital utilization for a position
      * @dev Computes how much capital is being used vs available:
      *      1. Calculates actual capital utilized (based on collateral LTV ratios)
