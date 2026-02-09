@@ -37,6 +37,13 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     /// @dev Minimum leverage ratio (1x)
     uint256 private constant MIN_LEVERAGE = MANTISSA_ONE;
 
+    /// @dev Proportional close in percentage: 100 = 100%, 1 = 1% minimum
+    uint256 private constant PROPORTIONAL_CLOSE_MIN = 1;
+    uint256 private constant PROPORTIONAL_CLOSE_MAX = 100;
+
+    /// @dev Tolerance for proportional close: 100 = 1% margin of error // TBD (also can make a setter for this)
+    uint256 private constant PROPORTIONAL_CLOSE_TOLERANCE = 1;
+
     /// @notice The Venus comptroller contract
     IComptroller public immutable COMPTROLLER;
 
@@ -163,9 +170,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 initialPrincipal,
         uint256 effectiveLeverage
     ) external nonReentrant {
-        if (longVToken == shortVToken) {
-            revert SameMarketNotAllowed();
-        }
+        _checkSameMarket(longVToken, shortVToken);
 
         checkMarketListed(longVToken);
         checkMarketListed(shortVToken);
@@ -221,27 +226,19 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
 
     /**
      * @notice Supplies additional principal to an active position
-     * @dev Can be called multiple times to increase collateral.
+     * @dev Can be called multiple times to increase collateral. DSA is taken from the position (set on activation).
      * @param longVToken The vToken market address for the long asset
      * @param shortVToken The vToken market address for the short asset
-     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
      * @param amount Amount of DSA underlying to supply
      * @custom:error Throw ZeroAmount if amount is zero.
      * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:error Throw InvalidDSA if dsaIndex does not match the position's DSA.
      * @custom:event Emits PrincipalSupplied event.
      */
-    function supplyPrincipal(
-        address longVToken,
-        address shortVToken,
-        uint8 dsaIndex,
-        uint256 amount
-    ) public nonReentrant {
+    function supplyPrincipal(address longVToken, address shortVToken, uint256 amount) public nonReentrant {
         if (amount == 0) revert ZeroAmount();
         Position storage position = positions[msg.sender][longVToken][shortVToken];
 
         if (!position.isActive) revert PositionNotActive();
-        if (dsaVTokens[dsaIndex] != position.dsaVToken) revert InvalidDSA();
         _supplyPrincipalToPositionAccount(position, IVToken(position.dsaVToken), amount);
     }
 
@@ -250,10 +247,9 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @dev Can be called multiple times to scale the position. Optionally supply additional principal
      *      via additionalPrincipal; otherwise uses existing principal. Requires either existing principal
      *      (from activation or prior supply) or additionalPrincipal > 0. Validates that shortAmount
-     *      doesn't exceed the maximum allowed based on capital utilization. dsaIndex must match the position's DSA.
+     *      doesn't exceed the maximum allowed based on capital utilization. DSA is taken from the position (set on activation).
      * @param longVToken The vToken market for the asset to long
      * @param shortVToken The vToken market for the asset to short
-     * @param dsaIndex Index of the DSA vToken for this position (must match position)
      * @param additionalPrincipal Additional principal to supply this call (0 if none)
      * @param shortAmount Amount to borrow in shortAsset terms (must not exceed max calculated borrow)
      * @param minLongAmount Minimum amount of long asset expected from swap (protects against slippage)
@@ -261,22 +257,18 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @custom:error Throw ZeroBorrowAmount if shortAmount is zero.
      * @custom:error Throw PositionNotActive if the position is not active.
      * @custom:error Throw InsufficientPrincipal if no principal exists and additionalPrincipal is zero.
-     * @custom:error Throw InvalidDSA if dsaIndex does not match the position's DSA.
      * @custom:error Throw BorrowAmountExceedsMaximum if shortAmount exceeds max allowed borrow.
      * @custom:event Emits PositionOpened event (and PrincipalSupplied if additionalPrincipal > 0).
      */
     function openPosition(
         IVToken longVToken,
         IVToken shortVToken,
-        uint8 dsaIndex,
         uint256 additionalPrincipal,
         uint256 shortAmount,
         uint256 minLongAmount,
         bytes calldata swapData
     ) external nonReentrant {
-        if (address(longVToken) == address(shortVToken)) {
-            revert SameMarketNotAllowed();
-        }
+        _checkSameMarket(address(longVToken), address(shortVToken));
 
         if (shortAmount == 0) revert ZeroBorrowAmount();
 
@@ -290,7 +282,6 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         // Must have principal (existing or supplied this call) to collateralize the borrow
         if (position.suppliedPrincipal == 0 && additionalPrincipal == 0) revert InsufficientPrincipal();
 
-        if (dsaVTokens[dsaIndex] != position.dsaVToken) revert InvalidDSA();
         IVToken dsaVToken = IVToken(position.dsaVToken);
 
         if (additionalPrincipal > 0) {
@@ -328,103 +319,31 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     }
 
     /**
-     * @notice Closes a position partially or fully
-     * @dev Supports partial closing. After closing, validates that remaining debt doesn't exceed
-     *      the maximum allowed borrow based on supplied principal and effective leverage.
+     * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
+     * @dev Repay amount is derived from BPS (not passed). Total long (repay + profit) is validated against BPS (1% tolerance).
+     *      minAmountOutRepay must be >= calculated repay amount (slippage protection).
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param collateralAmountToRedeem Amount of long collateral to redeem
-     * @param borrowedAmountToRepay Amount of short debt to repay via flash loan
-     * @param minAmountOutAfterSwap Minimum amount out expected after swap (slippage protection)
-     * @param swapData Swap instructions for converting long asset to short asset for repayment
-     * @custom:error Throw ZeroFlashLoanAmount if borrowedAmountToRepay is zero.
-     * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:error Throw BorrowAmountExceedsMaximum if remaining debt after partial close exceeds (principal × leverage).
-     * @custom:event Emits PositionClosed event.
-     */
-    function closePosition(
-        IVToken longVToken,
-        IVToken shortVToken,
-        uint256 collateralAmountToRedeem,
-        uint256 borrowedAmountToRepay,
-        uint256 minAmountOutAfterSwap,
-        bytes calldata swapData
-    ) external nonReentrant {
-        if (address(longVToken) == address(shortVToken)) {
-            revert SameMarketNotAllowed();
-        }
-
-        if (borrowedAmountToRepay == 0) revert ZeroFlashLoanAmount();
-
-        checkMarketListed(address(longVToken));
-        checkMarketListed(address(shortVToken));
-
-        Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
-
-        if (!position.isActive) revert PositionNotActive();
-
-        address positionAccount = position.positionAccount;
-
-        // Revert early if there is no short debt to close
-        if (shortVToken.borrowBalanceCurrent(positionAccount) == 0) revert ZeroDebt();
-
-        // Close position via position account wrapper (forwards to LeverageManager)
-        IPositionAccount(positionAccount).exitLeverage(
-            longVToken,
-            collateralAmountToRedeem,
-            shortVToken,
-            borrowedAmountToRepay,
-            minAmountOutAfterSwap,
-            swapData
-        );
-
-        // If partially closed: remaining borrow must not exceed (principal × leverage)
-        uint256 remainingShortDebt = shortVToken.borrowBalanceCurrent(positionAccount);
-        if (remainingShortDebt > 0) {
-            PositionValuesUSD memory values = _getPositionValuesUSD(position);
-            uint256 maxBorrowUSD = (values.suppliedPrincipalUSD * position.effectiveLeverage) / MANTISSA_ONE;
-            if (values.borrowValueUSD > maxBorrowUSD) revert BorrowAmountExceedsMaximum();
-        }
-
-        // Transfer any dust from LM (sent to position account) to user
-        _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
-        _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
-
-        emit PositionClosed(msg.sender, positionAccount, position.cycleId, remainingShortDebt);
-    }
-
-    /**
-     * @notice Closes a position with profit (longValueUSD > shortDebtUSD)
-     * @dev Repay: exitLeverage; borrow from state. Reverts if minAmountOutRepay < short debt.
-     *      Profit: exact-in swap amountToRedeemForProfitSwap long→DSA (reverts if > excess long). User gets DSA + extra long. Principal not withdrawn.
-     * @param longVToken The vToken market for the long asset
-     * @param shortVToken The vToken market for the short asset
-     * @param collateralAmountToRedeemForRepay Amount of long to redeem for repay swap (passed to exitLeverage)
-     * @param minAmountOutRepay Minimum short out from repay swap (must be >= current short debt)
+     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param collateralAmountToRedeem Amount of long to redeem for repay swap (validated against BPS)
+     * @param minAmountOutRepay Minimum short out from repay swap (must be >= calculated repay amount for this BPS)
      * @param swapDataRepay Swap #1: long → short for debt repayment
-     * @param amountToRedeemForProfitSwap Exact amount of excess long to swap long→DSA; must not exceed excess long
+     * @param amountToRedeemForProfitSwap Amount of long to swap long→DSA as profit (can be non-zero for partial or full close)
      * @param minAmountOutProfit Minimum DSA out from profit swap
      * @param swapDataProfit Swap #2: long → DSA for profit realization
-     * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:error Throw MinAmountOutRepayBelowDebt if minAmountOutRepay is less than current short debt.
-     * @custom:error Throw NotProfitScenario if long value (USD) is not greater than short debt (USD).
-     * @custom:error Throw ShortDebtNotFullyRepaid if debt remains after repay.
-     * @custom:error Throw InsufficientExcessLongForProfitSwap if amountToRedeemForProfitSwap exceeds excess long.
-     * @custom:event Emits PositionClosedWithProfit event.
      */
     function closeWithProfit(
         IVToken longVToken,
         IVToken shortVToken,
-        uint256 collateralAmountToRedeemForRepay,
+        uint256 closeFractionBps,
+        uint256 collateralAmountToRedeem,
         uint256 minAmountOutRepay,
         bytes calldata swapDataRepay,
         uint256 amountToRedeemForProfitSwap,
         uint256 minAmountOutProfit,
         bytes calldata swapDataProfit
     ) external nonReentrant {
-        if (address(longVToken) == address(shortVToken)) {
-            revert SameMarketNotAllowed();
-        }
+        _checkSameMarket(address(longVToken), address(shortVToken));
 
         checkMarketListed(address(longVToken));
         checkMarketListed(address(shortVToken));
@@ -433,72 +352,84 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         if (!position.isActive) revert PositionNotActive();
 
         address positionAccount = position.positionAccount;
-        uint256 currentShortDebt = shortVToken.borrowBalanceCurrent(positionAccount);
 
-        if (minAmountOutRepay < currentShortDebt) revert MinAmountOutRepayBelowDebt();
+        uint256 amountToRepay = _validateProfitClose(
+            position,
+            closeFractionBps,
+            collateralAmountToRedeem + amountToRedeemForProfitSwap,
+            minAmountOutRepay
+        );
 
-        PositionValuesUSD memory values = _getPositionValuesUSD(position);
-        if (values.longValueUSD <= values.borrowValueUSD) revert NotProfitScenario();
+        if (amountToRepay > 0 && collateralAmountToRedeem == 0) revert ProportionalCloseAmountOutOfTolerance();
 
-        // If there is no debt, skip repay and allow user to redeem collateral by swapping to DSA.
-        if (currentShortDebt > 0) {
+        // Proportional repay via exitLeverage (amountToRepay already includes 100% tolerance bump when applicable)
+        if (amountToRepay > 0) {
             IPositionAccount(positionAccount).exitLeverage(
                 longVToken,
-                collateralAmountToRedeemForRepay,
+                collateralAmountToRedeem,
                 shortVToken,
-                currentShortDebt,
+                amountToRepay,
                 minAmountOutRepay,
                 swapDataRepay
             );
         }
 
-        IVToken dsaVToken = IVToken(position.dsaVToken);
+        // Realize profit: redeem amountToRedeemForProfitSwap and swap to DSA
+        if (amountToRedeemForProfitSwap > 0) {
+            IVToken dsaVToken = IVToken(position.dsaVToken);
 
-        // 2. Profit: redeem (full excess if user amount < current), swap, transfer swapped amount + extra collateral to user.
-        _realizeProfitFromExcessLong(
-            positionAccount,
-            position,
-            longVToken,
-            shortVToken,
-            dsaVToken,
-            amountToRedeemForProfitSwap,
-            minAmountOutProfit,
-            swapDataProfit
-        );
+            _redeemLongAndSwapToDSA(
+                positionAccount,
+                longVToken,
+                dsaVToken,
+                amountToRedeemForProfitSwap,
+                minAmountOutProfit,
+                swapDataProfit
+            );
+            emit ProfitConverted(msg.sender, positionAccount, amountToRedeemForProfitSwap);
+            _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
+        }
 
-        // Transfer any dust from LM (sent to position account) to user
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
         _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
-        _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
 
-        // Deactivate position; user may withdraw principal or start a new cycle via activatePosition
-        position.isActive = false;
-        emit PositionClosedWithProfit(msg.sender, positionAccount, position.cycleId);
+        uint256 longDustRedeemed = 0;
+        if (closeFractionBps == PROPORTIONAL_CLOSE_MAX) {
+            if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert PositionNotFullyClosed();
+            longDustRedeemed = _getLongCollateralBalance(position);
+            _redeemUnderlyingToUser(longVToken, positionAccount, longDustRedeemed);
+            position.isActive = false;
+        }
+
+        emit PositionClosed(
+            msg.sender,
+            positionAccount,
+            position.cycleId,
+            closeFractionBps,
+            amountToRepay,
+            collateralAmountToRedeem + amountToRedeemForProfitSwap,
+            0,
+            longDustRedeemed
+        );
     }
 
     /**
-     * @notice Closes a position with loss (longValueUSD < shortDebtUSD)
-     * @dev First exitLeverage (long→short): redeems longAmountToRedeemForFirstSwap (exact-in; reverts if > available long).
-     *      Any remaining long is redeemed and transferred to user. Second exitLeverage (DSA→short) for remaining debt.
-     * @param longVToken The vToken market for the long asset
-     * @param shortVToken The vToken market for the short asset
-     * @param borrowedAmountToRepayFirst Short debt to repay in first exit (Exact-In)
-     * @param longAmountToRedeemForFirstSwap Exact long to redeem for first swap (swapHelper pulls this); must not exceed available long
-     * @param minAmountOutFirst Minimum short out from first swap
-     * @param swapDataFirst Swap #1: long → short
-     * @param dsaAmountToRedeemForRepay DSA to redeem for second repayment
-     * @param minAmountOutSecond Minimum short out from second swap (must be >= remaining short debt)
-     * @param swapDataSecond Swap #2: DSA → short
-     * @custom:error Throw ZeroFlashLoanAmount if borrowedAmountToRepayFirst is zero.
-     * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:error Throw NotLossScenario if short debt (USD) is not greater than long value (USD).
-     * @custom:error Throw MinAmountOutSecondBelowDebt if minAmountOutSecond is less than remaining short debt.
-     * @custom:error Throw ShortDebtNotFullyRepaid if short debt remains after second exit.
-     * @custom:event Emits PositionClosed and PositionClosedWithLoss events.
+     * @notice Closes a position with loss proportionally (BPS-based, same pattern as closeWithProfit)
+     * @dev First exit: long/short amounts derived from BPS; user passes borrowedAmountToRepayFirst (validated in [0, expectedShort]).
+     *      Second exit: DSA→short for remaining debt. The second repay amount is fully calculated in the contract
+     *      as `expectedShort - borrowedAmountToRepayFirst`; minAmountOutSecond only bounds the swap output and must
+     *      be >= this internally calculated repay amount (slippage protection).
+     *      This function also supports scenarios where only one leg (long or DSA) is available, e.g. after liquidation,
+     *      by allowing either the first or second exit to be effectively skipped (amounts set to zero).
+     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param borrowedAmountToRepayFirst Short to repay in first exit (validated: 0 <= value <= BPS-derived expected short)
+     * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within 1% tolerance)
+     * @param minAmountOutFirst Minimum short out from first swap (must be >= borrowedAmountToRepayFirst)
      */
     function closeWithLoss(
         IVToken longVToken,
         IVToken shortVToken,
+        uint256 closeFractionBps,
         uint256 borrowedAmountToRepayFirst,
         uint256 longAmountToRedeemForFirstSwap,
         uint256 minAmountOutFirst,
@@ -507,9 +438,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 minAmountOutSecond,
         bytes calldata swapDataSecond
     ) external nonReentrant {
-        if (address(longVToken) == address(shortVToken)) {
-            revert SameMarketNotAllowed();
-        }
+        _checkSameMarket(address(longVToken), address(shortVToken));
 
         checkMarketListed(address(longVToken));
         checkMarketListed(address(shortVToken));
@@ -518,13 +447,17 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         if (!position.isActive) revert PositionNotActive();
         address positionAccount = position.positionAccount;
 
-        // Revert early if there is no short debt to close
         if (shortVToken.borrowBalanceCurrent(positionAccount) == 0) revert ZeroDebt();
 
-        PositionValuesUSD memory values = _getPositionValuesUSD(position);
-        if (values.borrowValueUSD <= values.longValueUSD) revert NotLossScenario();
+        uint256 amountToRepaySecond = _validateLossClose(
+            position,
+            closeFractionBps,
+            borrowedAmountToRepayFirst,
+            longAmountToRedeemForFirstSwap,
+            minAmountOutFirst,
+            minAmountOutSecond
+        );
 
-        // 1. First exitLeverage (long → short): redeem exact amount for swap; swapHelper pulls this
         if (longAmountToRedeemForFirstSwap > 0) {
             IPositionAccount(positionAccount).exitLeverage(
                 longVToken,
@@ -536,36 +469,43 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
             );
         }
 
-        // 2. Second exitLeverage (DSA → short): close position completely; use current short debt
         IVToken dsaVToken = IVToken(position.dsaVToken);
-        uint256 currentShortDebtSecond = shortVToken.borrowBalanceCurrent(positionAccount);
-        if (currentShortDebtSecond > 0) {
-            if (minAmountOutSecond < currentShortDebtSecond) revert MinAmountOutSecondBelowDebt();
+
+        // 2. Second exitLeverage (DSA → short): amountToRepaySecond = shortDebt - borrowedAmountToRepayFirst
+        if (amountToRepaySecond > 0) {
             IPositionAccount(positionAccount).exitLeverage(
                 dsaVToken,
                 dsaAmountToRedeemForRepay,
                 shortVToken,
-                currentShortDebtSecond,
+                amountToRepaySecond,
                 minAmountOutSecond,
                 swapDataSecond
             );
+            _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
         }
-
-        // Redeem any remaining long and transfer to user
-        uint256 remainingLong = _getLongCollateralBalance(position);
-        _redeemUnderlyingToUser(longVToken, positionAccount, remainingLong);
-
-        if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert ShortDebtNotFullyRepaid();
-        position.suppliedPrincipal = dsaVToken.balanceOf(positionAccount);
 
         // Transfer any dust from LM (sent to position account) to user
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
         _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
-        _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
 
-        position.isActive = false;
-        emit PositionClosed(msg.sender, positionAccount, position.cycleId, 0);
-        emit PositionClosedWithLoss(msg.sender, positionAccount, position.cycleId);
+        uint256 longDustRedeemed = 0;
+        if (closeFractionBps == PROPORTIONAL_CLOSE_MAX) {
+            if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert PositionNotFullyClosed();
+            longDustRedeemed = _getLongCollateralBalance(position);
+            _redeemUnderlyingToUser(longVToken, positionAccount, longDustRedeemed);
+            position.isActive = false;
+        }
+
+        emit PositionClosed(
+            msg.sender,
+            positionAccount,
+            position.cycleId,
+            closeFractionBps,
+            borrowedAmountToRepayFirst + amountToRepaySecond,
+            longAmountToRedeemForFirstSwap,
+            dsaAmountToRedeemForRepay,
+            longDustRedeemed
+        );
     }
 
     /**
@@ -785,62 +725,38 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     }
 
     /**
-     * @notice Redeems excess long (full amount), swaps up to user amount long→DSA, transfers swapped DSA + extra collateral to user
-     * @dev Pre-requires no open short debt (caller must have repaid). Computes excess long from position; if zero, no-op.
-     *      If amountToRedeemForProfitSwap < current excess long, we still redeem full excess, swap the intended amount,
-     *      and transfer to user both the swapped amount (DSA) and the extra redeemed collateral (long).
+     * @notice Redeems a given amount of long from the position account and swaps it to DSA (or transfers if long == DSA)
+     * @dev Used for proportional close with profit: partial or full close can have a "profit" slice swapped to DSA.
+     *      Does not require zero short debt (unlike _realizeProfitFromExcessLong).
      * @param positionAccount The position account from which long is redeemed
-     * @param position The position (used to compute excess long collateral)
      * @param longVToken Long market vToken
-     * @param shortVToken Short market vToken (used to assert no borrow remains)
-     * @param dsaVToken DSA (collateral) market vToken
-     * @param amountToRedeemForProfitSwap Amount of redeemed long to swap long→DSA (exact-in)
-     * @param minAmountOutProfit Minimum DSA underlying out from the swap
+     * @param dsaVToken DSA market vToken
+     * @param amountToRedeem Amount of long underlying to redeem and swap to DSA
+     * @param minAmountOutProfit Minimum DSA out from the swap
      * @param swapDataProfit Calldata for the long→DSA swap
      */
-    function _realizeProfitFromExcessLong(
+    function _redeemLongAndSwapToDSA(
         address positionAccount,
-        Position memory position,
         IVToken longVToken,
-        IVToken shortVToken,
         IVToken dsaVToken,
-        uint256 amountToRedeemForProfitSwap,
+        uint256 amountToRedeem,
         uint256 minAmountOutProfit,
         bytes calldata swapDataProfit
     ) internal {
-        if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert ShortDebtNotFullyRepaid();
-
-        uint256 excessLongToRedeem = _getLongCollateralBalance(position);
-        if (excessLongToRedeem == 0) return;
-        if (excessLongToRedeem < amountToRedeemForProfitSwap) revert InsufficientExcessLongForProfitSwap();
-
+        if (amountToRedeem == 0) return;
         IERC20Upgradeable longUnderlying = IERC20Upgradeable(longVToken.underlying());
         IERC20Upgradeable dsaUnderlying = IERC20Upgradeable(dsaVToken.underlying());
 
-        // Always redeem full excess (if user supplied amount < current excess, we still redeem full)
-        uint256 redeemErr = longVToken.redeemUnderlyingBehalf(positionAccount, excessLongToRedeem);
-        if (redeemErr != SUCCESS) revert RedeemBehalfFailed(redeemErr);
+        uint256 err = longVToken.redeemUnderlyingBehalf(positionAccount, amountToRedeem);
+        if (err != SUCCESS) revert RedeemBehalfFailed(err);
 
-        // Special case: when long and DSA underlyings are the same (including the case where longVToken == dsaVToken),
-        // there is no need to perform a swap – profit is already in the DSA asset. Transfer all redeemed long/DSA
-        // directly to the user and return.
         if (address(longUnderlying) == address(dsaUnderlying)) {
             _transferContractBalanceToUser(longUnderlying);
             return;
         }
 
-        // When nothing to swap, transfer all redeemed long to user and skip swap call
-        if (amountToRedeemForProfitSwap == 0) {
-            _transferContractBalanceToUser(longUnderlying);
-            return;
-        }
-
-        // Swap long → DSA and transfer DSA to user
-        _performSwap(longUnderlying, amountToRedeemForProfitSwap, dsaUnderlying, minAmountOutProfit, swapDataProfit);
+        _performSwap(longUnderlying, amountToRedeem, dsaUnderlying, minAmountOutProfit, swapDataProfit);
         _transferContractBalanceToUser(dsaUnderlying);
-
-        // Transfer extra redeemed collateral (long) that was not swapped
-        _transferContractBalanceToUser(longUnderlying);
     }
 
     /**
@@ -1030,6 +946,98 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     }
 
     /**
+     * @notice Returns expected proportional amounts and tolerance band for a close (BPS of current balance/debt)
+     * @dev Reverts with InvalidCloseFractionBps if closeFractionBps is not in [1, 100].
+     * @param position The position (long balance and positionAccount from position; short debt from position.shortVToken)
+     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @return expectedLong Amount of long to redeem (BPS of current long balance)
+     * @return expectedShort Amount of short to repay (BPS of current short debt)
+     * @return longMin Minimum long amount within PROPORTIONAL_CLOSE_TOLERANCE
+     * @return longMax Maximum long amount within PROPORTIONAL_CLOSE_TOLERANCE
+     */
+    function _getProportionalCloseAmounts(
+        Position memory position,
+        uint256 closeFractionBps
+    ) internal returns (uint256 expectedLong, uint256 expectedShort, uint256 longMin, uint256 longMax) {
+        if (closeFractionBps < PROPORTIONAL_CLOSE_MIN || closeFractionBps > PROPORTIONAL_CLOSE_MAX)
+            revert InvalidCloseFractionBps();
+        uint256 longBalance = _getLongCollateralBalance(position);
+        IVToken shortVToken = IVToken(position.shortVToken);
+        uint256 shortDebt = shortVToken.borrowBalanceCurrent(position.positionAccount);
+        expectedLong = (longBalance * closeFractionBps) / PROPORTIONAL_CLOSE_MAX;
+        expectedShort = (shortDebt * closeFractionBps) / PROPORTIONAL_CLOSE_MAX;
+        longMin = (expectedLong * (PROPORTIONAL_CLOSE_MAX - PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+        longMax = (expectedLong * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+    }
+
+    /**
+     * @notice Validates proportional close for profit path and returns amount to repay
+     * @dev Validates totalLongAmount (repay + profit) within 1% of BPS expected. Reverts if out of band.
+     * @param totalLongAmount Sum of long to redeem for repay and for profit swap (collateralAmountToRedeem + amountToRedeemForProfitSwap)
+     * @param minAmountOutRepay User's minimum expected short from repay swap; validated against exact expected short (not bumped)
+     * @return amountToRepay Short amount to use for repay call (includes 100% tolerance bump when applicable)
+     */
+    function _validateProfitClose(
+        Position memory position,
+        uint256 closeFractionBps,
+        uint256 totalLongAmount,
+        uint256 minAmountOutRepay
+    ) internal returns (uint256 amountToRepay) {
+        (uint256 expectedLong, uint256 expectedShort, uint256 longMin, uint256 longMax) = _getProportionalCloseAmounts(
+            position,
+            closeFractionBps
+        );
+        if (expectedLong == 0 && totalLongAmount != 0) revert NonZeroLongAmountWhenExpectedZero();
+        if (totalLongAmount < longMin || totalLongAmount > longMax) revert ProportionalCloseAmountOutOfTolerance();
+        // Validate minAmountOut against exact expected short (not bumped)
+        if (expectedShort > 0 && minAmountOutRepay < expectedShort) revert MinAmountOutRepayBelowDebt();
+        amountToRepay = expectedShort;
+        // For 100% close, add tolerance so we send slightly more to cover interest during flash loan; LM caps actual repay to current debt
+        if (closeFractionBps == PROPORTIONAL_CLOSE_MAX && expectedShort > 0) {
+            amountToRepay =
+                (expectedShort * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+        }
+    }
+
+    /**
+     * @notice Validates loss close first exit and returns calculated second repay amount
+     * @dev (1) longAmountToRedeemForFirstSwap must be within PROPORTIONAL_CLOSE_TOLERANCE of expected long.
+     *      (2) borrowedAmountToRepayFirst within tolerance of expected short.
+     *      (3) amountToRepaySecond = shortDebt - borrowedAmountToRepayFirst; validate minAmountOutSecond >= amountToRepaySecond.
+     * @return amountToRepaySecond shortDebt - borrowedAmountToRepayFirst (use for second exit)
+     */
+    function _validateLossClose(
+        Position memory position,
+        uint256 closeFractionBps,
+        uint256 borrowedAmountToRepayFirst,
+        uint256 longAmountToRedeemForFirstSwap,
+        uint256 minAmountOutFirst,
+        uint256 minAmountOutSecond
+    ) internal returns (uint256 amountToRepaySecond) {
+        if (borrowedAmountToRepayFirst > 0 && minAmountOutFirst < borrowedAmountToRepayFirst)
+            revert MinAmountOutRepayBelowDebt();
+
+        (, uint256 expectedShort, uint256 longMin, uint256 longMax) = _getProportionalCloseAmounts(
+            position,
+            closeFractionBps
+        );
+        if (longAmountToRedeemForFirstSwap < longMin || longAmountToRedeemForFirstSwap > longMax)
+            revert ProportionalCloseAmountOutOfTolerance();
+
+        // (2) First-exit short repay within BPS tolerance of expected short
+        if (borrowedAmountToRepayFirst > expectedShort) revert ProportionalCloseAmountOutOfTolerance();
+
+        // (3) Second repay = expectedShort - first repay; validate minAmountOutSecond against exact amount, then add tolerance for 100% close
+        amountToRepaySecond = expectedShort - borrowedAmountToRepayFirst;
+        if (amountToRepaySecond > 0 && minAmountOutSecond < amountToRepaySecond) revert MinAmountOutSecondBelowDebt();
+        if (closeFractionBps == PROPORTIONAL_CLOSE_MAX && amountToRepaySecond > 0) {
+            amountToRepaySecond =
+                (amountToRepaySecond * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) /
+                PROPORTIONAL_CLOSE_MAX;
+        }
+    }
+
+    /**
      * @notice Gets the actual long collateral balance, excluding DSA principal if DSA == long asset
      * @param position The position data (longVToken read from position)
      * @return longBalance The actual long collateral balance in underlying (excluding DSA principal if DSA == long)
@@ -1105,6 +1113,15 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
             uint256 err = COMPTROLLER.enterMarketBehalf(user, address(market));
             if (err != SUCCESS) revert EnterMarketFailed(err);
         }
+    }
+
+    /**
+     * @notice Reverts if long and short market are the same
+     * @param longVToken Long market address
+     * @param shortVToken Short market address
+     */
+    function _checkSameMarket(address longVToken, address shortVToken) internal pure {
+        if (longVToken == shortVToken) revert SameMarketNotAllowed();
     }
 
     /**

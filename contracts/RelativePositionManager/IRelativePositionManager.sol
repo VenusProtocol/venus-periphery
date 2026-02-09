@@ -138,6 +138,15 @@ interface IRelativePositionManager {
     /// @custom:error SamePositionAccountImplementation when setter is called with the current implementation address
     error SamePositionAccountImplementation();
 
+    /// @custom:error ProportionalCloseAmountOutOfTolerance when user-provided close amounts are not within 1% of BPS-derived expected amounts
+    error ProportionalCloseAmountOutOfTolerance();
+
+    /// @custom:error NonZeroLongAmountWhenExpectedZero when proportional close expects zero long (no long to close) but user passed non-zero total long amount
+    error NonZeroLongAmountWhenExpectedZero();
+
+    /// @custom:error InvalidCloseFractionBps when closeFractionBps is not between 1 and 100 (percentage)
+    error InvalidCloseFractionBps();
+
     /// @notice Emitted when a user activates a position account
     /// @param user Address of the user
     /// @param longAsset Address of the long asset
@@ -196,20 +205,39 @@ interface IRelativePositionManager {
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
     /// @param cycleId The cycle ID of the position
-    /// @param remainingDebt Remaining short debt on the position account after the close (0 if fully closed)
-    event PositionClosed(address indexed user, address indexed positionAccount, uint256 cycleId, uint256 remainingDebt);
+    /// @param closeFractionBps Proportion closed in percentage (100 = 100%)
+    /// @param amountRepaid Short debt repaid in this close
+    /// @param amountRedeemed Long collateral redeemed in this close
+    /// @param amountRedeemedDsa DSA amount redeemed in this close (loss close second leg; 0 for profit close)
+    /// @param longDustRedeemed Remaining long collateral redeemed and transferred to user on 100% close (0 for partial close)
+    event PositionClosed(
+        address indexed user,
+        address indexed positionAccount,
+        uint256 cycleId,
+        uint256 closeFractionBps,
+        uint256 amountRepaid,
+        uint256 amountRedeemed,
+        uint256 amountRedeemedDsa,
+        uint256 longDustRedeemed
+    );
 
-    /// @notice Emitted when a position is closed with profit (debt repaid, profit realized). Principal remains; user withdraws separately.
+    /// @notice Emitted when long is converted to profit (DSA) during closeWithProfit
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
-    /// @param cycleId The cycle ID of the position
-    event PositionClosedWithProfit(address indexed user, address indexed positionAccount, uint256 cycleId);
+    /// @param amountConvertedToProfit Long amount redeemed and swapped to DSA as profit
+    event ProfitConverted(address indexed user, address indexed positionAccount, uint256 amountConvertedToProfit);
 
     /// @notice Emitted when a position is closed with loss (debt repaid, position fully closed).
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
     /// @param cycleId The cycle ID of the position
-    event PositionClosedWithLoss(address indexed user, address indexed positionAccount, uint256 cycleId);
+    /// @param redeemedToken Token (vToken) redeemed in this close leg
+    event PositionClosedWithLoss(
+        address indexed user,
+        address indexed positionAccount,
+        uint256 cycleId,
+        address redeemedToken
+    );
 
     /// @notice Emitted when principal is withdrawn
     /// @param user Address of the user
@@ -279,22 +307,20 @@ interface IRelativePositionManager {
 
     /**
      * @notice Supplies additional principal to an active position
-     * @dev Can be called multiple times to increase collateral.
+     * @dev Can be called multiple times to increase collateral. DSA is taken from the position (set on activation).
      * @param longVToken The vToken market address for the long asset
      * @param shortVToken The vToken market address for the short asset
-     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
      * @param amount Amount of DSA underlying to supply
      */
-    function supplyPrincipal(address longVToken, address shortVToken, uint8 dsaIndex, uint256 amount) external;
+    function supplyPrincipal(address longVToken, address shortVToken, uint256 amount) external;
 
     /**
      * @notice Opens a leveraged position or scales an existing one (borrow short, swap to long)
      * @dev Can be called multiple times to scale the position. Optionally supply additional principal
      *      via additionalPrincipal; otherwise uses existing principal. Validates that shortAmount doesn't
-     *      exceed the maximum allowed based on capital utilization. dsaIndex must match the position's DSA (set during activation).
+     *      exceed the maximum allowed based on capital utilization. DSA is taken from the position (set during activation).
      * @param longVToken The vToken market for the asset to long
      * @param shortVToken The vToken market for the asset to short
-     * @param dsaIndex Index of the DSA vToken for this position (must match position)
      * @param additionalPrincipal Additional principal to supply this call (0 if none)
      * @param shortAmount Amount to borrow in shortAsset terms (must not exceed max calculated borrow)
      * @param minLongAmount Minimum amount of long asset expected from swap (protects against slippage)
@@ -303,7 +329,6 @@ interface IRelativePositionManager {
     function openPosition(
         IVToken longVToken,
         IVToken shortVToken,
-        uint8 dsaIndex,
         uint256 additionalPrincipal,
         uint256 shortAmount,
         uint256 minLongAmount,
@@ -311,41 +336,14 @@ interface IRelativePositionManager {
     ) external;
 
     /**
-     * @notice Closes a position partially or fully
-     * @dev Supports partial closing. Validates that remaining leverage doesn't exceed effective leverage.
-     * @param longVToken The vToken market for the long asset
-     * @param shortVToken The vToken market for the short asset
-     * @param collateralAmountToRedeem Amount of long collateral to redeem
-     * @param borrowedAmountToRepay Amount of short debt to repay via flash loan
-     * @param minAmountOutAfterSwap Minimum amount out expected after swap (slippage protection)
-     * @param swapData Swap instructions for converting long asset to short asset for repayment
-     */
-    function closePosition(
-        IVToken longVToken,
-        IVToken shortVToken,
-        uint256 collateralAmountToRedeem,
-        uint256 borrowedAmountToRepay,
-        uint256 minAmountOutAfterSwap,
-        bytes calldata swapData
-    ) external;
-
-    /**
-     * @notice Closes a position with profit (longValueUSD > shortDebtUSD)
-     * @dev Repay: exitLeverage; borrow from state. Reverts if minAmountOutRepay < short debt.
-     *      Profit: exact-in swap amountToRedeemForProfitSwap long→DSA (reverts if > excess long). User gets DSA + extra long. Principal not withdrawn.
-     * @param longVToken The vToken market for the long asset
-     * @param shortVToken The vToken market for the short asset
-     * @param collateralAmountToRedeemForRepay Amount of long to redeem for repay swap (passed to exitLeverage)
-     * @param minAmountOutRepay Minimum short out from repay swap (must be >= current short debt)
-     * @param swapDataRepay Swap #1: long → short for debt repayment
-     * @param amountToRedeemForProfitSwap Exact amount of excess long to swap long→DSA; must not exceed excess long
-     * @param minAmountOutProfit Minimum DSA out from profit swap
-     * @param swapDataProfit Swap #2: long → DSA for profit realization
+     * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
+     * @dev Repay amount is derived from BPS. Total long validated against BPS (1% tolerance). minAmountOutRepay must be >= calculated repay.
      */
     function closeWithProfit(
         IVToken longVToken,
         IVToken shortVToken,
-        uint256 collateralAmountToRedeemForRepay,
+        uint256 closeFractionBps,
+        uint256 collateralAmountToRedeem,
         uint256 minAmountOutRepay,
         bytes calldata swapDataRepay,
         uint256 amountToRedeemForProfitSwap,
@@ -354,23 +352,24 @@ interface IRelativePositionManager {
     ) external;
 
     /**
-     * @notice Closes a position with loss (longValueUSD < shortDebtUSD)
-     * @dev First exitLeverage (long→short): redeems longAmountToRedeemForFirstSwap (exact-in; reverts if > available long).
-     *      Any remaining long is redeemed and transferred to user. Second exitLeverage (DSA→short): remaining short debt
-     *      is read from state; reverts if minAmountOutSecond < that debt. suppliedPrincipal set to remaining DSA vToken balance.
+     * @notice Closes a position with loss proportionally
+     * @dev closeFractionBps: 100 = 100%, 1 = 1% min. First-exit long is proportion-derived; short repay in [0, expectedShort].
+     *      First exit long→short, second exit DSA→short for remainder. Position fully closed.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param borrowedAmountToRepayFirst Short debt to repay in first exit (Exact-In)
-     * @param longAmountToRedeemForFirstSwap Exact long to redeem for first swap (swapHelper pulls this); must not exceed available long
-     * @param minAmountOutFirst Minimum short out from first swap
-     * @param swapDataFirst Swap #1: long → short
-     * @param dsaAmountToRedeemForRepay DSA to redeem for second repayment
-     * @param minAmountOutSecond Minimum short out from second swap (must be >= remaining short debt; remaining debt read in-function)
-     * @param swapDataSecond Swap #2: DSA → short
+     * @param closeFractionBps Proportion to close in percentage (100 = 100%)
+     * @param borrowedAmountToRepayFirst Short to repay in first exit (0 <= value <= BPS-derived expected short)
+     * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within 1% tolerance)
+     * @param minAmountOutFirst Minimum amount out from first swap (must be >= borrowedAmountToRepayFirst when first repay > 0)
+     * @param swapDataFirst Calldata for first swap (long → short)
+     * @param dsaAmountToRedeemForRepay DSA to redeem for second exit repay
+     * @param minAmountOutSecond Minimum amount out from second swap
+     * @param swapDataSecond Calldata for second swap (DSA → short)
      */
     function closeWithLoss(
         IVToken longVToken,
         IVToken shortVToken,
+        uint256 closeFractionBps,
         uint256 borrowedAmountToRepayFirst,
         uint256 longAmountToRedeemForFirstSwap,
         uint256 minAmountOutFirst,
