@@ -478,11 +478,11 @@ describe("RelativePositionManager", () => {
 
   describe("addDSAVToken", () => {
     it("should add DSA vToken and emit event", async () => {
-      expect(await relativePositionManager.getDSAVTokensCount()).to.equal(1);
+      expect(await relativePositionManager.dsaVTokenIndexCounter()).to.equal(1);
       await expect(relativePositionManager.connect(admin).addDSAVToken(usdcMarket.address))
         .to.emit(relativePositionManager, "DSAVTokenAdded")
         .withArgs(usdcMarket.address, 1);
-      expect(await relativePositionManager.getDSAVTokensCount()).to.equal(2);
+      expect(await relativePositionManager.dsaVTokenIndexCounter()).to.equal(2);
     });
 
     it("should revert when adding zero address", async () => {
@@ -507,6 +507,40 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager.connect(admin).addDSAVToken(vBNBMarket.address),
       ).to.be.revertedWithCustomError(relativePositionManager, "VBNBNotSupported");
+    });
+  });
+
+  describe("setDSAVTokenActive", () => {
+    it("should allow using DSA when active, block when disabled, and allow again when re-enabled", async () => {
+      // Initial DSA (index 0) is configured in the fixture and active
+      expect(await relativePositionManager.dsaVTokenIndexCounter()).to.equal(1);
+
+      // 1) Alice can activate with DSA index 0 while it is active
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .activatePosition(dsaMarket.address, borrowMarket.address, 0, 0, parseEther("2")),
+      ).to.emit(relativePositionManager, "PositionActivated");
+
+      // 2) Governance disables this DSA for new activations
+      await relativePositionManager.connect(admin).setDSAVTokenActive(0, false);
+
+      // 3) Another user (bob) attempting to activate with the same DSA index should now fail
+      const [, , bob] = await ethers.getSigners();
+      await expect(
+        relativePositionManager
+          .connect(bob)
+          .activatePosition(dsaMarket.address, borrowMarket.address, 0, 0, parseEther("2")),
+      ).to.be.revertedWithCustomError(relativePositionManager, "DSAInactive");
+
+      // 4) Re-enable the DSA and activation should succeed again for bob
+      await relativePositionManager.connect(admin).setDSAVTokenActive(0, true);
+
+      await expect(
+        relativePositionManager
+          .connect(bob)
+          .activatePosition(dsaMarket.address, borrowMarket.address, 0, 0, parseEther("2")),
+      ).to.emit(relativePositionManager, "PositionActivated");
     });
   });
 

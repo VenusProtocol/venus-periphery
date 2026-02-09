@@ -59,8 +59,14 @@ contract RelativePositionManager is
     /// @notice Implementation contract for PositionAccount clones (settable via governance)
     address public POSITION_ACCOUNT_IMPLEMENTATION;
 
-    /// @notice Array of supported DSA (Default Settlement Asset) vToken markets
-    address[] public dsaVTokens;
+    /// @notice Counter / next index for newly added DSA vTokens (also equals current count)
+    uint8 public dsaVTokenIndexCounter;
+
+    /// @notice Mapping from DSA index to supported DSA (Default Settlement Asset) vToken markets
+    mapping(uint8 => address) public dsaVTokens;
+
+    /// @notice Tracks whether a given DSA vToken is currently active for new activations
+    mapping(address => bool) public isDsaVTokenActive;
 
     /// @notice Mapping from user => longAsset => shortAsset => Position data
     mapping(address => mapping(address => mapping(address => Position))) public positions;
@@ -147,11 +153,30 @@ contract RelativePositionManager is
      */
     function addDSAVToken(address dsaVToken) external {
         _checkAccessAllowed("addDSAVToken(address)");
-
         checkMarketListed(dsaVToken);
-        dsaVTokens.push(dsaVToken);
 
-        emit DSAVTokenAdded(dsaVToken, uint8(dsaVTokens.length - 1));
+        uint8 index = dsaVTokenIndexCounter;
+        dsaVTokens[index] = dsaVToken;
+        isDsaVTokenActive[dsaVToken] = true;
+        ++dsaVTokenIndexCounter;
+
+        emit DSAVTokenAdded(dsaVToken, index);
+    }
+
+    /**
+     * @notice Updates the active flag for a configured DSA vToken, controlling whether it can be used for new activations
+     * @dev Callable only by governance via AccessControlManager. Does not affect already active positions,
+     *      which may continue to close or withdraw principal using the previously selected DSA.
+     * @param dsaIndex Index of the DSA vToken in the internal mapping
+     * @param active New active flag (true to allow new activations, false to block them)
+     */
+    function setDSAVTokenActive(uint8 dsaIndex, bool active) external {
+        _checkAccessAllowed("setDSAVTokenActive(uint8,bool)");
+        if (dsaIndex >= dsaVTokenIndexCounter) revert InvalidDSA();
+        address dsaVToken = dsaVTokens[dsaIndex];
+        if (dsaVToken == address(0)) revert InvalidDSA();
+        if (isDsaVTokenActive[dsaVToken] == active) revert SameDSAActiveStatus();
+        isDsaVTokenActive[dsaVToken] = active;
     }
 
     /**
@@ -653,15 +678,10 @@ contract RelativePositionManager is
      * @return dsaVTokensList Array of DSA vToken addresses
      */
     function getDsaVTokens() external view returns (address[] memory dsaVTokensList) {
-        return dsaVTokens;
-    }
-
-    /**
-     * @notice Returns the total number of supported DSA vTokens
-     * @return count The number of DSA vTokens in the array
-     */
-    function getDSAVTokensCount() external view returns (uint256 count) {
-        return dsaVTokens.length;
+        dsaVTokensList = new address[](dsaVTokenIndexCounter);
+        for (uint8 i = 0; i < dsaVTokenIndexCounter; i++) {
+            dsaVTokensList[i] = dsaVTokens[i];
+        }
     }
 
     /**
@@ -1149,11 +1169,16 @@ contract RelativePositionManager is
      * @return dsaVToken The validated DSA vToken market
      */
     function _getValidatedDSAVToken(uint8 dsaIndex) internal view returns (IVToken dsaVToken) {
-        if (dsaIndex >= dsaVTokens.length) revert InvalidDSA();
+        // Index must be within the configured range
+        if (dsaIndex >= dsaVTokenIndexCounter) revert InvalidDSA();
+
+        // DSA address must be non-zero and configured
         address dsaVTokenAddr = dsaVTokens[dsaIndex];
-        if (dsaVTokenAddr == address(0)) {
-            revert InvalidDSA();
-        }
+        if (dsaVTokenAddr == address(0)) revert InvalidDSA();
+
+        // DSA must be marked active for new activations (can be turned off via governance)
+        if (!isDsaVTokenActive[dsaVTokenAddr]) revert DSAInactive();
+
         dsaVToken = IVToken(dsaVTokenAddr);
         checkMarketListed(dsaVTokenAddr);
     }

@@ -52,8 +52,14 @@ interface IRelativePositionManager {
     /// @custom:error PositionNotFullyClosed when trying to deactivate a position that still has collateral or debt
     error PositionNotFullyClosed();
 
-    /// @custom:error InvalidDSA when DSA asset is not valid
+    /// @custom:error InvalidDSA when DSA index or address is not valid
     error InvalidDSA();
+
+    /// @custom:error DSAInactive when a DSA vToken is configured but not active for new activations
+    error DSAInactive();
+
+    /// @custom:error SameDSAActiveStatus when setDSAVTokenActive is called with the current active flag
+    error SameDSAActiveStatus();
 
     /// @custom:error WithdrawPrincipalBeforeChangingDSA when user tries to change DSA asset without first withdrawing current principal
     error WithdrawPrincipalBeforeChangingDSA();
@@ -254,6 +260,12 @@ interface IRelativePositionManager {
     );
 
     /**
+     * @notice Returns the number of configured DSA vTokens (also the next index to assign)
+     * @return count Current value of the DSA vToken index counter
+     */
+    function dsaVTokenIndexCounter() external view returns (uint8 count);
+
+    /**
      * @notice Activates a position account for the user with specified asset pair and DSA
      * @dev Deploys a new PositionAccount contract if one doesn't exist for this user/asset combination.
      *      The effective leverage must be set during activation and will be used to validate borrow amounts
@@ -373,17 +385,20 @@ interface IRelativePositionManager {
     function addDSAVToken(address dsaVToken) external;
 
     /**
-     * @notice Returns the total number of supported DSA vTokens
-     * @return count The number of DSA vTokens in the array
-     */
-    function getDSAVTokensCount() external view returns (uint256 count);
-
-    /**
      * @notice Returns the full list of configured DSA vToken markets
      * @dev Convenience helper for frontends; underlying storage is the public dsaVTokens array.
      * @return dsaVTokensList Array of DSA vToken addresses
      */
     function getDsaVTokens() external view returns (address[] memory dsaVTokensList);
+
+    /**
+     * @notice Updates the active flag for a configured DSA vToken, controlling whether it can be used for new activations
+     * @dev Callable only by accounts with ACM permission for setDSAVTokenActive(uint8,bool).
+     *      Does not affect already active positions, which may continue to close or withdraw principal.
+     * @param dsaIndex Index of the DSA vToken in the internal mapping
+     * @param active New active flag (true to allow new activations, false to block them)
+     */
+    function setDSAVTokenActive(uint8 dsaIndex, bool active) external;
 
     /**
      * @notice Returns the address at which the PositionAccount would be deployed for the given user and markets
