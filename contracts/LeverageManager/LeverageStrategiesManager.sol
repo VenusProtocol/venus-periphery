@@ -8,8 +8,10 @@ import {
     IERC20Upgradeable
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
-import { IVToken, IComptroller, IFlashLoanReceiver } from "../Interfaces.sol";
+import { IFlashLoanReceiver } from "../Interfaces/IFlashLoanReceiver.sol";
 import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
+import { IVToken } from "../Interfaces/IVToken.sol";
+import { IComptroller } from "../Interfaces/IComptroller.sol";
 
 import { ILeverageStrategiesManager } from "./ILeverageStrategiesManager.sol";
 

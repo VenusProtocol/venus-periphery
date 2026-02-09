@@ -2,6 +2,12 @@
   "name": "bsctestnet",
   "chainId": "97",
   "addresses": {
+    "DeviationSentinel": "0x9245d72712548707809D66848e63B8E2B169F3c1",
+    "DeviationSentinel_Implementation": "0x4f84B6Bbd8f8cD4702Ec79A41715dAcC4Ce8188c",
+    "DeviationSentinel_Proxy": "0x9245d72712548707809D66848e63B8E2B169F3c1",
+    "SentinelOracle": "0xa4f2B03919BAAdCA80C31406412C7Ee059A579D3",
+    "SentinelOracle_Implementation": "0x95fab31B827E5071eD3421B85F02169Dc5814100",
+    "SentinelOracle_Proxy": "0xa4f2B03919BAAdCA80C31406412C7Ee059A579D3",
     "SwapHelper": "0x55Fa097cA59BAc70C1ba488BEb11A5F6bf7019Eb"
   }
 }

@@ -1705,15 +1705,15 @@ __metadata:
   linkType: hard
 
 "@nomicfoundation/hardhat-ethers@npm:^3.0.0":
-  version: 3.1.2
-  resolution: "@nomicfoundation/hardhat-ethers@npm:3.1.2"
+  version: 3.1.3
+  resolution: "@nomicfoundation/hardhat-ethers@npm:3.1.3"
   dependencies:
     debug: ^4.1.1
     lodash.isequal: ^4.5.0
   peerDependencies:
     ethers: ^6.14.0
-    hardhat: ^2.26.0
-  checksum: df3310799b8589aca384fdf2780460f573ee9f64c9fb3d4fd72424689c07d4f9a4643cf48890d0e9909211ce1e14395a9cbbba5f7f5e42d725241de16818d569
+    hardhat: ^2.28.0
+  checksum: e42bd298fbd6b747524cd9a84712dae7c094bbc6d0cc93a3cbec8a6907f06ac5c81d46e82e74cbc91fab3effed5ebe2906988eb674064b8f2305a4c2f9b12a7b
   languageName: node
   linkType: hard
 
@@ -2967,11 +2967,11 @@ __metadata:
   linkType: hard
 
 "@types/node@npm:*":
-  version: 25.0.0
-  resolution: "@types/node@npm:25.0.0"
+  version: 25.0.2
+  resolution: "@types/node@npm:25.0.2"
   dependencies:
     undici-types: ~7.16.0
-  checksum: 42f69ea82cacd3ee2f1824e52f156398720b94d968ae75db16293c1c441d305976183eb338f5e778c68e157451118a9d60b81af3f1ea9cedf761bd34b1942b96
+  checksum: b7abfefd226ad074bc837fb6fe539f15adcae38d4a7792ca5fe4ff967c6f759730a956f628f9a59060c32f69c89f5eadc18d8d5c53f8c4e2f395af85751cd936
   languageName: node
   linkType: hard
 
@@ -5401,8 +5401,8 @@ __metadata:
   linkType: hard
 
 "es-abstract@npm:^1.23.2, es-abstract@npm:^1.23.5, es-abstract@npm:^1.23.9, es-abstract@npm:^1.24.0":
-  version: 1.24.0
-  resolution: "es-abstract@npm:1.24.0"
+  version: 1.24.1
+  resolution: "es-abstract@npm:1.24.1"
   dependencies:
     array-buffer-byte-length: ^1.0.2
     arraybuffer.prototype.slice: ^1.0.4
@@ -5458,7 +5458,7 @@ __metadata:
     typed-array-length: ^1.0.7
     unbox-primitive: ^1.1.0
     which-typed-array: ^1.1.19
-  checksum: 06b3d605e56e3da9d16d4db2629a42dac1ca31f2961a41d15c860422a266115e865b43e82d6b9da81a0fabbbb65ebc12fb68b0b755bc9dbddacb6bf7450e96df
+  checksum: 84896f97ac812bd9d884f1e5372ae71dbdbef364d2e178defdb712a0aae8c9df66f447b472ad54e3e1fa5aa9a84f3c11b5f35007d629cf975699c5f885aeb0c5
   languageName: node
   linkType: hard
 
