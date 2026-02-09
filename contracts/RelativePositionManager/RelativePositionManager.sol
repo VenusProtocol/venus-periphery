@@ -140,7 +140,6 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     function executePositionAccountCall(address positionAccount, address target, bytes calldata data) external {
         _checkAccessAllowed("executePositionAccountCall(address,address,bytes)");
         IPositionAccount(positionAccount).executeCall(target, data);
-        emit GenericCallExecuted(positionAccount, target, data);
     }
 
     /**
@@ -322,6 +321,9 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
      * @dev Repay amount is derived from BPS (not passed). Total long (repay + profit) is validated against BPS (1% tolerance).
      *      minAmountOutRepay must be >= calculated repay amount (slippage protection).
+     *      Principal (DSA) collateral is not touched directly by this function; any unused principal remains on the
+     *      position account and can be reused in a new cycle, withdrawn later via `withdrawPrincipal`, or fully swept
+     *      on `deactivatePosition`.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
@@ -421,6 +423,9 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      *      be >= this internally calculated repay amount (slippage protection).
      *      This function also supports scenarios where only one leg (long or DSA) is available, e.g. after liquidation,
      *      by allowing either the first or second exit to be effectively skipped (amounts set to zero).
+     *      Any remaining principal (DSA) that is not consumed in the loss scenario stays on the position account even
+     *      after a full close; it can later be moved to the user by calling `withdrawPrincipal` or by calling
+     *      `deactivatePosition`, which fully redeems remaining DSA collateral to the user.
      * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
      * @param borrowedAmountToRepayFirst Short to repay in first exit (validated: 0 <= value <= BPS-derived expected short)
      * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within 1% tolerance)
@@ -449,6 +454,14 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
 
         if (shortVToken.borrowBalanceCurrent(positionAccount) == 0) revert ZeroDebt();
 
+        // When using DSA principal to repay in the second leg, ensure the requested amount does not exceed
+        // the available principal balance (and later update principal accounting accordingly).
+        IVToken dsaVToken = IVToken(position.dsaVToken);
+        if (dsaAmountToRedeemForRepay > 0) {
+            uint256 principalUnderlying = _getSuppliedPrincipalBalance(position, longVToken, dsaVToken);
+            if (dsaAmountToRedeemForRepay > principalUnderlying) revert InsufficientWithdrawableAmount();
+        }
+
         uint256 amountToRepaySecond = _validateLossClose(
             position,
             closeFractionBps,
@@ -469,10 +482,9 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
             );
         }
 
-        IVToken dsaVToken = IVToken(position.dsaVToken);
-
         // 2. Second exitLeverage (DSA → short): amountToRepaySecond = shortDebt - borrowedAmountToRepayFirst
         if (amountToRepaySecond > 0) {
+            uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
             IPositionAccount(positionAccount).exitLeverage(
                 dsaVToken,
                 dsaAmountToRedeemForRepay,
@@ -481,6 +493,9 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
                 minAmountOutSecond,
                 swapDataSecond
             );
+            uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
+            // Reduce suppliedPrincipal by the vTokens actually burned from DSA for this repay leg
+            position.suppliedPrincipal -= (vTokensBefore - vTokensAfter);
             _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
         }
 
@@ -598,6 +613,14 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
 
         bytes32 salt = keccak256(abi.encodePacked(user, address(longVToken), address(shortVToken)));
         return ClonesUpgradeable.predictDeterministicAddress(POSITION_ACCOUNT_IMPLEMENTATION, salt, address(this));
+    }
+
+    /**
+     * @notice Returns the full list of configured DSA vToken markets
+     * @return dsaVTokensList Array of DSA vToken addresses
+     */
+    function getDsaVTokens() external view returns (address[] memory dsaVTokensList) {
+        return dsaVTokens;
     }
 
     /**

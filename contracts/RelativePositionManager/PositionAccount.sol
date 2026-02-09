@@ -34,11 +34,11 @@ contract PositionAccount is Initializable, IPositionAccount {
     /// @notice Address of the position account owner (different for each clone)
     address public owner;
 
-    /// @notice Address of the long asset vToken for this position
-    address public longAsset;
+    /// @notice Address of the long vToken for this position
+    address public longVToken;
 
-    /// @notice Address of the short asset vToken for this position
-    address public shortAsset;
+    /// @notice Address of the short vToken for this position
+    address public shortVToken;
 
     /**
      * @notice Emitted when a generic call is executed
@@ -127,20 +127,20 @@ contract PositionAccount is Initializable, IPositionAccount {
 
     /**
      * @notice Initializes a new position account clone
-     * @dev Can only be called once per clone. Sets the owner, long/short assets, and delegates to both managers.
+     * @dev Can only be called once per clone. Sets the owner, long/short vTokens, and delegates to both managers.
      * @param owner_ Address of the position account owner
-     * @param longAsset_ Address of the long asset (vToken)
-     * @param shortAsset_ Address of the short asset (vToken)
+     * @param longVToken_ Address of the long market vToken
+     * @param shortVToken_ Address of the short market vToken
      * @custom:error ZeroAddress if any of the addresses is zero.
      */
-    function initialize(address owner_, address longAsset_, address shortAsset_) external initializer {
-        if (owner_ == address(0) || longAsset_ == address(0) || shortAsset_ == address(0)) {
+    function initialize(address owner_, address longVToken_, address shortVToken_) external initializer {
+        if (owner_ == address(0) || longVToken_ == address(0) || shortVToken_ == address(0)) {
             revert ZeroAddress();
         }
 
         owner = owner_;
-        longAsset = longAsset_;
-        shortAsset = shortAsset_;
+        longVToken = longVToken_;
+        shortVToken = shortVToken_;
 
         // Approve delegates for both managers to act on behalf of this account
         COMPTROLLER.updateDelegate(RELATIVE_POSITION_MANAGER, true);

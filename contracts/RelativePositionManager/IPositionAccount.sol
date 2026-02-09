@@ -13,12 +13,12 @@ import { IComptroller, IVToken } from "../Interfaces.sol";
 interface IPositionAccount {
     /**
      * @notice Initializes a new position account clone
-     * @dev Can only be called once per clone. Sets the owner, long/short assets, and delegates to manager.
+     * @dev Can only be called once per clone. Sets the owner, long/short vTokens, and delegates to manager.
      * @param owner_ Address of the position account owner
-     * @param longAsset_ Address of the long asset (vToken)
-     * @param shortAsset_ Address of the short asset (vToken)
+     * @param longVToken_ Address of the long market vToken
+     * @param shortVToken_ Address of the short market vToken
      */
-    function initialize(address owner_, address longAsset_, address shortAsset_) external;
+    function initialize(address owner_, address longVToken_, address shortVToken_) external;
 
     /**
      * @notice Forwards enterLeverage to the LeverageStrategiesManager on behalf of this position account
@@ -99,14 +99,14 @@ interface IPositionAccount {
     function owner() external view returns (address owner);
 
     /**
-     * @notice Gets the long asset (vToken) for this position
-     * @return longAsset Address of the long asset vToken
+     * @notice Gets the long vToken for this position
+     * @return longVToken Address of the long market vToken
      */
-    function longAsset() external view returns (address longAsset);
+    function longVToken() external view returns (address longVToken);
 
     /**
-     * @notice Gets the short asset (vToken) for this position
-     * @return shortAsset Address of the short asset vToken
+     * @notice Gets the short vToken for this position
+     * @return shortVToken Address of the short market vToken
      */
-    function shortAsset() external view returns (address shortAsset);
+    function shortVToken() external view returns (address shortVToken);
 }

@@ -95,32 +95,17 @@ interface IRelativePositionManager {
     /// @custom:error ZeroBorrowAmount when borrow amount is zero
     error ZeroBorrowAmount();
 
-    /// @custom:error ZeroFlashLoanAmount when flash loan amount is zero
-    error ZeroFlashLoanAmount();
-
     /// @custom:error ZeroDebt when there is no short debt to close
     error ZeroDebt();
 
     /// @custom:error SameMarketNotAllowed when long and short markets are identical
     error SameMarketNotAllowed();
 
-    /// @custom:error ShortDebtNotFullyRepaid when repay step did not clear all short debt (insufficient swap output)
-    error ShortDebtNotFullyRepaid();
-
-    /// @custom:error NotProfitScenario when closeWithProfit is called but long collateral value (USD) is not greater than short debt (USD)
-    error NotProfitScenario();
-
-    /// @custom:error NotLossScenario when closeWithLoss is called but short debt (USD) is not greater than long collateral (USD)
-    error NotLossScenario();
-
     /// @custom:error MinAmountOutSecondBelowDebt when minAmountOutSecond is less than remaining short debt (second swap)
     error MinAmountOutSecondBelowDebt();
 
     /// @custom:error MinAmountOutRepayBelowDebt when minAmountOutRepay is less than current short debt
     error MinAmountOutRepayBelowDebt();
-
-    /// @custom:error InsufficientExcessLongForProfitSwap when excess long collateral is less than amountToRedeemForProfitSwap (exact-in swap requires at least that much)
-    error InsufficientExcessLongForProfitSwap();
 
     /// @custom:error RedeemBehalfFailed when redeeming vTokens on behalf fails
     /// @param errorCode Error code returned by the vToken redeemUnderlyingBehalf call
@@ -227,18 +212,6 @@ interface IRelativePositionManager {
     /// @param amountConvertedToProfit Long amount redeemed and swapped to DSA as profit
     event ProfitConverted(address indexed user, address indexed positionAccount, uint256 amountConvertedToProfit);
 
-    /// @notice Emitted when a position is closed with loss (debt repaid, position fully closed).
-    /// @param user Address of the user
-    /// @param positionAccount Address of the position account
-    /// @param cycleId The cycle ID of the position
-    /// @param redeemedToken Token (vToken) redeemed in this close leg
-    event PositionClosedWithLoss(
-        address indexed user,
-        address indexed positionAccount,
-        uint256 cycleId,
-        address redeemedToken
-    );
-
     /// @notice Emitted when principal is withdrawn
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
@@ -262,12 +235,6 @@ interface IRelativePositionManager {
     /// @param dsaVToken Address of the DSA vToken added
     /// @param index Index of the DSA vToken in the array
     event DSAVTokenAdded(address indexed dsaVToken, uint8 index);
-
-    /// @notice Emitted when generic call is executed on position account
-    /// @param positionAccount Address of the position account
-    /// @param target Target contract address
-    /// @param data Call data
-    event GenericCallExecuted(address indexed positionAccount, address target, bytes data);
 
     /// @notice Emitted when the PositionAccount implementation address is updated
     /// @param oldImplementation Previous implementation address (zero if first set)
@@ -410,6 +377,13 @@ interface IRelativePositionManager {
      * @return count The number of DSA vTokens in the array
      */
     function getDSAVTokensCount() external view returns (uint256 count);
+
+    /**
+     * @notice Returns the full list of configured DSA vToken markets
+     * @dev Convenience helper for frontends; underlying storage is the public dsaVTokens array.
+     * @return dsaVTokensList Array of DSA vToken addresses
+     */
+    function getDsaVTokens() external view returns (address[] memory dsaVTokensList);
 
     /**
      * @notice Returns the address at which the PositionAccount would be deployed for the given user and markets

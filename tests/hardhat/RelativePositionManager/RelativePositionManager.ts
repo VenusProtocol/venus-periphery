@@ -760,18 +760,19 @@ describe("RelativePositionManager", () => {
       await collateralToken.connect(admin).transfer(positionAccount, transferAmount);
 
       const approveData = collateralToken.interface.encodeFunctionData("approve", [aliceAddress, transferAmount]);
+      const positionAccountContract = await ethers.getContractAt("PositionAccount", positionAccount);
       await expect(
         relativePositionManager
           .connect(admin)
           .executePositionAccountCall(positionAccount, collateralToken.address, approveData),
-      ).to.emit(relativePositionManager, "GenericCallExecuted");
+      ).to.emit(positionAccountContract, "GenericCallExecuted");
 
       const transferData = collateralToken.interface.encodeFunctionData("transfer", [aliceAddress, transferAmount]);
       await expect(
         relativePositionManager
           .connect(admin)
           .executePositionAccountCall(positionAccount, collateralToken.address, transferData),
-      ).to.emit(relativePositionManager, "GenericCallExecuted");
+      ).to.emit(positionAccountContract, "GenericCallExecuted");
 
       expect(await collateralToken.balanceOf(aliceAddress)).to.equal(transferAmount);
     });
