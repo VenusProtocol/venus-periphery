@@ -242,6 +242,12 @@ interface IRelativePositionManager {
     /// @param index Index of the DSA vToken in the array
     event DSAVTokenAdded(address indexed dsaVToken, uint8 index);
 
+    /// @notice Emitted when the active flag for a DSA vToken is updated
+    /// @param dsaVToken Address of the DSA vToken
+    /// @param index Index of the DSA vToken in the internal mapping
+    /// @param active New active flag (true to allow new activations, false to block them)
+    event DSAVTokenActiveUpdated(address indexed dsaVToken, uint8 index, bool active);
+
     /// @notice Emitted when the PositionAccount implementation address is updated
     /// @param oldImplementation Previous implementation address (zero if first set)
     /// @param newImplementation New implementation address

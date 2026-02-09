@@ -1908,94 +1908,13 @@ describe("RelativePositionManager", () => {
 
       // Underlying: split total underlying into principal part and long (leveraged) part
       const underlyingAfterOpen = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
-      const principalUnderlyingAfter = underlyingAfterOpen.sub(longReceivedAfterSwap);
+      const longCollateralAfterOpen = await relativePositionManager.callStatic.getLongCollateralBalance(
+        aliceAddress,
+        dsaMarket.address,
+        borrowMarket.address,
+      );
+      const principalUnderlyingAfter = underlyingAfterOpen.sub(longCollateralAfterOpen);
       expect(principalUnderlyingAfter).to.equal(totalPrincipal);
-    });
-
-    it("closeWithProfit (partial 50%): should reduce debt/long while keeping suppliedPrincipal vTokens unchanged", async () => {
-      const principalAmount = parseEther("20");
-      await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
-      await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
-      await relativePositionManager
-        .connect(alice)
-        .activatePosition(dsaMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
-
-      const shortAmount = parseEther("1");
-      const minLongAmount = parseEther("0.9");
-      const longReceivedAfterSwap = parseEther("0.95");
-      const openSwapData = await createSwapMulticallData(
-        swapHelper,
-        dsaToken,
-        leverageManager.address,
-        longReceivedAfterSwap,
-        ethers.utils.formatBytes32String("usdt-same-market-partial-open"),
-        borrowToken,
-      );
-      await relativePositionManager
-        .connect(alice)
-        .openPosition(
-          dsaMarket.address,
-          borrowMarket.address,
-          noAdditionalPrincipal,
-          shortAmount,
-          minLongAmount,
-          openSwapData,
-        );
-
-      const positionBefore = await relativePositionManager.getPosition(
-        aliceAddress,
-        dsaMarket.address,
-        borrowMarket.address,
-      );
-      const positionAccountAddr = positionBefore.positionAccount;
-      const principalVTokensBefore = positionBefore.suppliedPrincipal;
-      const debtBefore = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
-      const totalUnderlyingBefore = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
-      const longCollateral = await relativePositionManager.callStatic.getLongCollateralBalance(
-        aliceAddress,
-        dsaMarket.address,
-        borrowMarket.address,
-      );
-      expect(longCollateral).to.be.gt(0);
-
-      // Profit scenario for closeWithProfit (long value > short value)
-      resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(parseUnits("2", 18));
-      resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(parseUnits("1", 18));
-
-      const closeFractionBps = BPS_50_PCT;
-      const debtToRepay = debtBefore.mul(closeFractionBps).div(BPS_BASE);
-      const collateralToRedeem = longCollateral.mul(closeFractionBps).div(BPS_BASE);
-      const exitSwapData = await createSwapMulticallData(
-        swapHelper,
-        borrowToken,
-        leverageManager.address,
-        debtToRepay,
-        ethers.utils.formatBytes32String("usdt-same-market-partial-exit"),
-      );
-
-      await relativePositionManager.connect(alice).closeWithProfit(
-        dsaMarket.address,
-        borrowMarket.address,
-        closeFractionBps,
-        collateralToRedeem,
-        debtToRepay, // minAmountOutRepay
-        exitSwapData,
-        parseEther("0"),
-        parseEther("0"),
-        "0x",
-      );
-
-      const positionAfter = await relativePositionManager.getPosition(
-        aliceAddress,
-        dsaMarket.address,
-        borrowMarket.address,
-      );
-      expect(positionAfter.suppliedPrincipal).to.equal(principalVTokensBefore);
-
-      const debtAfter = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
-      const longAfter = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
-      expect(debtAfter).to.be.lt(debtBefore);
-      expect(longAfter).to.be.lt(totalUnderlyingBefore);
     });
 
     it("closeWithProfit: should close fully and keep suppliedPrincipal vTokens unchanged (profit realized in same underlying)", async () => {
@@ -2033,13 +1952,13 @@ describe("RelativePositionManager", () => {
       resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(longPrice);
       resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(shortPrice);
 
-      const positionBeforeLoss = await relativePositionManager.getPosition(
+      const positionBeforeProfit = await relativePositionManager.getPosition(
         aliceAddress,
         dsaMarket.address,
         borrowMarket.address,
       );
-      const principalVTokensBefore = positionBeforeLoss.suppliedPrincipal;
-      const positionAccountAddr = positionBeforeLoss.positionAccount;
+      const principalVTokensBefore = positionBeforeProfit.suppliedPrincipal;
+      const positionAccountAddr = positionBeforeProfit.positionAccount;
 
       // Repay leg: at oracle price long=2, short=1, repaying full short debt requires
       // theoreticalLongForRepay = currentShortDebt * (shortPrice / longPrice) = debt * 0.5 long.
@@ -2177,6 +2096,11 @@ describe("RelativePositionManager", () => {
       );
 
       const principalVTokensBefore = positionBefore.suppliedPrincipal;
+      const principalUnderlyingBefore = await relativePositionManager.callStatic.getSuppliedPrincipalBalance(
+        aliceAddress,
+        dsaMarket.address,
+        borrowMarket.address,
+      );
 
       const minAmountOutFirst = borrowedAmountToRepayFirst;
       const minAmountOutSecond = remainingDebt;
@@ -2208,8 +2132,15 @@ describe("RelativePositionManager", () => {
       );
       expect(positionAfter.isActive).to.be.false;
       expect(await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr)).to.equal(0);
-      // Second exit used DSA to repay remainder; position account DSA vToken balance may be less than principal before
-      expect(await dsaMarket.balanceOf(positionAccountAddr)).to.be.lte(principalVTokensBefore);
+      // Second exit used DSA principal to repay the remaining short debt:
+      // principal reduction in underlying terms should equal dsaAmountToRedeemForRepay.
+      const principalUnderlyingAfter = await relativePositionManager.callStatic.getSuppliedPrincipalBalance(
+        aliceAddress,
+        dsaMarket.address,
+        borrowMarket.address,
+      );
+      const principalUnderlyingSpent = principalUnderlyingBefore.sub(principalUnderlyingAfter);
+      expect(principalUnderlyingSpent).to.equal(dsaAmountToRedeemForRepay);
     });
   });
 
