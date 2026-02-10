@@ -42,11 +42,10 @@ contract PositionAccount is Initializable, IPositionAccount {
 
     /**
      * @notice Emitted when a generic call is executed
-     * @param caller Address that initiated the call
      * @param target Target contract address
      * @param data Call data executed
      */
-    event GenericCallExecuted(address indexed caller, address target, bytes data);
+    event GenericCallExecuted(address indexed target, bytes data);
 
     /**
      * @notice Emitted when enterLeverage is forwarded to the LeverageManager
@@ -89,6 +88,9 @@ contract PositionAccount is Initializable, IPositionAccount {
 
     /// @notice Thrown when a zero address is provided as a parameter
     error ZeroAddress();
+
+    /// @notice Thrown when genericCalls is invoked with invalid calls length (empty or lengths mismatch)
+    error InvalidCallsLength();
 
     /**
      * @notice Modifier to restrict access to only the RelativePositionManager
@@ -234,23 +236,23 @@ contract PositionAccount is Initializable, IPositionAccount {
     }
 
     /**
-     * @notice Executes a generic call to any contract
+     * @notice Executes multiple generic calls to external contracts
      * @dev Only callable by the authorized RelativePositionManager contract.
-     *      This allows the manager to perform operations on behalf of the user.
-     *      Uses AddressUpgradeable.functionCall for safer execution.
-     *      Automatically reverts if the call fails.
-     * @param target Address of the contract to call
-     * @param data Encoded function call data
-     * @return returnData Return data from the call
+     *      Uses AddressUpgradeable.functionCall for safer execution and reverts on failure.
+     * @param targets Array of target contract addresses
+     * @param data Array of encoded function call data
      * @custom:error UnauthorizedCaller if caller is not the RelativePositionManager.
-     * @custom:event Emits GenericCallExecuted.
+     * @custom:error InvalidCallsLength if arrays are empty or lengths mismatch.
      */
-    function executeCall(
-        address target,
-        bytes calldata data
-    ) external onlyRelativePositionManager returns (bytes memory returnData) {
-        returnData = target.functionCall(data);
+    function genericCalls(address[] calldata targets, bytes[] calldata data) external onlyRelativePositionManager {
+        uint256 length = targets.length;
+        if (length == 0 || length != data.length) {
+            revert InvalidCallsLength();
+        }
 
-        emit GenericCallExecuted(msg.sender, target, data);
+        for (uint256 i = 0; i < length; ++i) {
+            targets[i].functionCall(data[i]);
+            emit GenericCallExecuted(targets[i], data[i]);
+        }
     }
 }

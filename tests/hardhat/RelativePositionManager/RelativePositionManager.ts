@@ -845,11 +845,8 @@ describe("RelativePositionManager", () => {
 
     it("should revert when caller is not allowed by ACM", async () => {
       accessControl.isAllowedToCall.returns(false);
-      await expect(
-        relativePositionManager
-          .connect(alice)
-          .executePositionAccountCall(positionAccount, collateralToken.address, "0x"),
-      ).to.be.reverted;
+      await expect(relativePositionManager.connect(alice).executePositionAccountCall(positionAccount, [], [])).to.be
+        .reverted;
       accessControl.isAllowedToCall.returns(true);
     });
 
@@ -862,14 +859,14 @@ describe("RelativePositionManager", () => {
       await expect(
         relativePositionManager
           .connect(admin)
-          .executePositionAccountCall(positionAccount, collateralToken.address, approveData),
+          .executePositionAccountCall(positionAccount, [collateralToken.address], [approveData]),
       ).to.emit(positionAccountContract, "GenericCallExecuted");
 
       const transferData = collateralToken.interface.encodeFunctionData("transfer", [aliceAddress, transferAmount]);
       await expect(
         relativePositionManager
           .connect(admin)
-          .executePositionAccountCall(positionAccount, collateralToken.address, transferData),
+          .executePositionAccountCall(positionAccount, [collateralToken.address], [transferData]),
       ).to.emit(positionAccountContract, "GenericCallExecuted");
 
       expect(await collateralToken.balanceOf(aliceAddress)).to.equal(transferAmount);

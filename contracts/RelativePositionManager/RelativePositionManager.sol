@@ -71,9 +71,6 @@ contract RelativePositionManager is
     /// @notice Mapping from user => longAsset => shortAsset => Position data
     mapping(address => mapping(address => mapping(address => Position))) public positions;
 
-    /// @notice Mapping from user => longAsset => shortAsset => PositionAccount address
-    mapping(address => mapping(address => mapping(address => address))) public positionAccounts;
-
     /**
      * @notice Contract constructor
      * @param comptroller The Venus Comptroller contract address
@@ -149,18 +146,26 @@ contract RelativePositionManager is
      * @param dsaVToken The vToken market address to add as a supported DSA
      * @custom:error Throw ZeroAddress if dsaVToken is zero.
      * @custom:error Throw AssetNotListed if the market is not listed in the Comptroller.
+     * @custom:error Throw DSAVTokenAlreadyAdded if the DSA vToken is already configured.
      * @custom:event Emits DSAVTokenAdded event.
      */
     function addDSAVToken(address dsaVToken) external {
         _checkAccessAllowed("addDSAVToken(address)");
         _checkMarketListed(dsaVToken);
 
-        uint8 index = dsaVTokenIndexCounter;
-        dsaVTokens[index] = dsaVToken;
-        isDsaVTokenActive[dsaVToken] = true;
-        ++dsaVTokenIndexCounter;
+        // Revert if this DSA vToken is already configured
+        uint8 currentCount = dsaVTokenIndexCounter;
+        for (uint8 i = 0; i < currentCount; ++i) {
+            if (dsaVTokens[i] == dsaVToken) {
+                revert DSAVTokenAlreadyAdded();
+            }
+        }
 
-        emit DSAVTokenAdded(dsaVToken, index);
+        dsaVTokens[currentCount] = dsaVToken;
+        isDsaVTokenActive[dsaVToken] = true;
+        dsaVTokenIndexCounter = currentCount + 1;
+
+        emit DSAVTokenAdded(dsaVToken, currentCount);
     }
 
     /**
@@ -184,15 +189,19 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Executes an arbitrary call on behalf of a position account
-     * @dev Callable by governance, Allows operations like emergency fund rescues.
+     * @notice Executes multiple generic calls on behalf of a position account
+     * @dev Callable by governance via AccessControlManager. Intended for emergency or administrative actions.
      * @param positionAccount Address of the position account
-     * @param target Target contract address
-     * @param data Encoded call data
+     * @param targets Array of target contract addresses
+     * @param data Array of encoded function call data
      */
-    function executePositionAccountCall(address positionAccount, address target, bytes calldata data) external {
-        _checkAccessAllowed("executePositionAccountCall(address,address,bytes)");
-        IPositionAccount(positionAccount).executeCall(target, data);
+    function executePositionAccountCall(
+        address positionAccount,
+        address[] calldata targets,
+        bytes[] calldata data
+    ) external {
+        _checkAccessAllowed("executePositionAccountCall(address,address[],bytes[])");
+        IPositionAccount(positionAccount).genericCalls(targets, data);
     }
 
     /**
@@ -223,7 +232,6 @@ contract RelativePositionManager is
         uint256 effectiveLeverage
     ) external nonReentrant whenNotPaused {
         _checkSameMarket(longVToken, shortVToken);
-
         _checkMarketListed(longVToken);
         _checkMarketListed(shortVToken);
 
@@ -325,11 +333,7 @@ contract RelativePositionManager is
         bytes calldata swapData
     ) external nonReentrant whenNotPaused {
         _checkSameMarket(address(longVToken), address(shortVToken));
-
         if (shortAmount == 0) revert ZeroBorrowAmount();
-
-        _checkMarketListed(address(longVToken));
-        _checkMarketListed(address(shortVToken));
 
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
 
@@ -344,7 +348,7 @@ contract RelativePositionManager is
             _supplyPrincipalToPositionAccount(position, dsaVToken, additionalPrincipal);
         }
 
-        uint256 maxBorrowAmount = _calculateMaxBorrowAllowed(msg.sender, longVToken, shortVToken);
+        uint256 maxBorrowAmount = _calculateMaxBorrowAllowed(position);
         if (shortAmount > maxBorrowAmount) revert BorrowAmountExceedsMaximum();
 
         address positionAccount = position.positionAccount;
@@ -411,9 +415,6 @@ contract RelativePositionManager is
         bytes calldata swapDataProfit
     ) external nonReentrant whenNotPaused {
         _checkSameMarket(address(longVToken), address(shortVToken));
-
-        _checkMarketListed(address(longVToken));
-        _checkMarketListed(address(shortVToken));
 
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         if (!position.isActive) revert PositionNotActive();
@@ -522,9 +523,6 @@ contract RelativePositionManager is
     ) external nonReentrant whenNotPaused {
         _checkSameMarket(address(longVToken), address(shortVToken));
 
-        _checkMarketListed(address(longVToken));
-        _checkMarketListed(address(shortVToken));
-
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         if (!position.isActive) revert PositionNotActive();
         address positionAccount = position.positionAccount;
@@ -624,7 +622,7 @@ contract RelativePositionManager is
 
         if (position.isActive) {
             // Active: redeem only based on utilization
-            UtilizationInfo memory utilization = _getUtilizationInfo(msg.sender, longVToken, shortVToken);
+            UtilizationInfo memory utilization = _getUtilizationInfo(position);
             if (amount > utilization.withdrawableAmount) revert InsufficientWithdrawableAmount();
         }
 
@@ -735,7 +733,8 @@ contract RelativePositionManager is
         IVToken longVToken,
         IVToken shortVToken
     ) external returns (UtilizationInfo memory utilization) {
-        return _getUtilizationInfo(user, longVToken, shortVToken);
+        Position memory position = positions[user][address(longVToken)][address(shortVToken)];
+        return _getUtilizationInfo(position);
     }
 
     /**
@@ -751,7 +750,8 @@ contract RelativePositionManager is
         IVToken longVToken,
         IVToken shortVToken
     ) external returns (uint256 maxBorrowAmount) {
-        return _calculateMaxBorrowAllowed(user, longVToken, shortVToken);
+        Position memory position = positions[user][address(longVToken)][address(shortVToken)];
+        return _calculateMaxBorrowAllowed(position);
     }
 
     /**
@@ -811,8 +811,6 @@ contract RelativePositionManager is
         // Initialize the clone with user-specific data (owner, longAsset, shortAsset)
         // This will automatically approve both RPM and LeverageManager as delegates
         IPositionAccount(positionAccount).initialize(user, longAsset, shortAsset);
-
-        positionAccounts[user][longAsset][shortAsset] = positionAccount;
 
         Position storage position = positions[user][longAsset][shortAsset];
         position.positionAccount = positionAccount;
@@ -919,26 +917,19 @@ contract RelativePositionManager is
 
     /**
      * @notice Calculates the maximum allowed borrow amount for a position
-     * @param user Address of the user
-     * @param longVToken The vToken market for the long asset
-     * @param shortVToken The vToken market for the short asset
+     * @param position In-memory snapshot of the position data
      * @return maxBorrowAmount Maximum amount that can be borrowed in shortAsset terms
      */
-    function _calculateMaxBorrowAllowed(
-        address user,
-        IVToken longVToken,
-        IVToken shortVToken
-    ) internal returns (uint256 maxBorrowAmount) {
-        Position memory position = positions[user][address(longVToken)][address(shortVToken)];
+    function _calculateMaxBorrowAllowed(Position memory position) internal returns (uint256 maxBorrowAmount) {
         // Get utilization info which calculates available capital (DSA from position)
-        UtilizationInfo memory utilization = _getUtilizationInfo(user, longVToken, shortVToken);
+        UtilizationInfo memory utilization = _getUtilizationInfo(position);
 
         // Calculate max additional borrow amount: availableCapital * effectiveLeverage
         uint256 maxAdditionalBorrowUSD = (utilization.availableCapitalUSD * position.effectiveLeverage) / MANTISSA_ONE;
 
         // Convert to shortAsset amount
         ResilientOracleInterface oracle = COMPTROLLER.oracle();
-        uint256 shortPrice = oracle.getUnderlyingPrice(address(shortVToken));
+        uint256 shortPrice = oracle.getUnderlyingPrice(position.shortVToken);
 
         maxBorrowAmount = (maxAdditionalBorrowUSD * MANTISSA_ONE) / shortPrice;
     }
@@ -947,17 +938,11 @@ contract RelativePositionManager is
      * @notice Calculates capital utilization for a position (used for max borrow and withdrawable amount)
      * @dev Computes actualCapitalUtilized (LTV-based), nominalCapitalUtilized (leverage-based), caps by supplied principal,
      *      then availableCapitalUSD and withdrawableAmount in DSA terms.
-     * @param user User address
-     * @param longVToken The vToken market for the long asset
-     * @param shortVToken The vToken market for the short asset
+     * @param position In-memory snapshot of the position data
      * @return utilization Struct with actualCapitalUtilized, nominalCapitalUtilized, finalCapitalUtilized, availableCapitalUSD, withdrawableAmount
      */
-    function _getUtilizationInfo(
-        address user,
-        IVToken longVToken,
-        IVToken shortVToken
-    ) internal returns (UtilizationInfo memory utilization) {
-        Position memory position = positions[user][address(longVToken)][address(shortVToken)];
+    function _getUtilizationInfo(Position memory position) internal returns (UtilizationInfo memory utilization) {
+        IVToken longVToken = IVToken(position.longVToken);
         PositionValuesUSD memory values = _getPositionValuesUSD(position);
         IVToken dsaVToken = IVToken(position.dsaVToken);
 
@@ -1047,24 +1032,34 @@ contract RelativePositionManager is
      * @dev Reverts with InvalidCloseFractionBps if closeFractionBps is not in [1, 100].
      * @param position The position (long balance and positionAccount from position; short debt from position.shortVToken)
      * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
-     * @return expectedLong Amount of long to redeem (BPS of current long balance)
-     * @return expectedShort Amount of short to repay (BPS of current short debt)
-     * @return longMin Minimum long amount within PROPORTIONAL_CLOSE_TOLERANCE
-     * @return longMax Maximum long amount within PROPORTIONAL_CLOSE_TOLERANCE
+     * @return expectedLongToWithdraw Amount of long to redeem (BPS of current long balance)
+     * @return expectedShortToRepay Amount of short to repay (BPS of current short debt)
+     * @return minLongToWithdraw Minimum long amount within PROPORTIONAL_CLOSE_TOLERANCE
+     * @return maxLongToWithdraw Maximum long amount within PROPORTIONAL_CLOSE_TOLERANCE
      */
     function _getProportionalCloseAmounts(
         Position memory position,
         uint256 closeFractionBps
-    ) internal returns (uint256 expectedLong, uint256 expectedShort, uint256 longMin, uint256 longMax) {
+    )
+        internal
+        returns (
+            uint256 expectedLongToWithdraw,
+            uint256 expectedShortToRepay,
+            uint256 minLongToWithdraw,
+            uint256 maxLongToWithdraw
+        )
+    {
         if (closeFractionBps < PROPORTIONAL_CLOSE_MIN || closeFractionBps > PROPORTIONAL_CLOSE_MAX)
             revert InvalidCloseFractionBps();
         uint256 longBalance = _getLongCollateralBalance(position);
         IVToken shortVToken = IVToken(position.shortVToken);
         uint256 shortDebt = shortVToken.borrowBalanceCurrent(position.positionAccount);
-        expectedLong = (longBalance * closeFractionBps) / PROPORTIONAL_CLOSE_MAX;
-        expectedShort = (shortDebt * closeFractionBps) / PROPORTIONAL_CLOSE_MAX;
-        longMin = (expectedLong * (PROPORTIONAL_CLOSE_MAX - PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
-        longMax = (expectedLong * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+        expectedLongToWithdraw = (longBalance * closeFractionBps) / PROPORTIONAL_CLOSE_MAX;
+        expectedShortToRepay = (shortDebt * closeFractionBps) / PROPORTIONAL_CLOSE_MAX;
+        minLongToWithdraw =
+            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX - PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+        maxLongToWithdraw =
+            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
     }
 
     /**
@@ -1080,19 +1075,23 @@ contract RelativePositionManager is
         uint256 totalLongAmount,
         uint256 minAmountOutRepay
     ) internal returns (uint256 amountToRepay) {
-        (uint256 expectedLong, uint256 expectedShort, uint256 longMin, uint256 longMax) = _getProportionalCloseAmounts(
-            position,
-            closeFractionBps
-        );
-        if (expectedLong == 0 && totalLongAmount != 0) revert NonZeroLongAmountWhenExpectedZero();
-        if (totalLongAmount < longMin || totalLongAmount > longMax) revert ProportionalCloseAmountOutOfTolerance();
+        (
+            uint256 expectedLongToWithdraw,
+            uint256 expectedShortToRepay,
+            uint256 minLongToWithdraw,
+            uint256 maxLongToWithdraw
+        ) = _getProportionalCloseAmounts(position, closeFractionBps);
+        if (expectedLongToWithdraw == 0 && totalLongAmount != 0) revert NonZeroLongAmountWhenExpectedZero();
+        if (totalLongAmount < minLongToWithdraw || totalLongAmount > maxLongToWithdraw)
+            revert ProportionalCloseAmountOutOfTolerance();
         // Validate minAmountOut against exact expected short (not bumped)
-        if (expectedShort > 0 && minAmountOutRepay < expectedShort) revert MinAmountOutRepayBelowDebt();
-        amountToRepay = expectedShort;
+        if (expectedShortToRepay > 0 && minAmountOutRepay < expectedShortToRepay) revert MinAmountOutRepayBelowDebt();
+        amountToRepay = expectedShortToRepay;
         // For 100% close, add tolerance so we send slightly more to cover interest during flash loan; LM caps actual repay to current debt
-        if (closeFractionBps == PROPORTIONAL_CLOSE_MAX && expectedShort > 0) {
+        if (closeFractionBps == PROPORTIONAL_CLOSE_MAX && expectedShortToRepay > 0) {
             amountToRepay =
-                (expectedShort * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+                (expectedShortToRepay * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) /
+                PROPORTIONAL_CLOSE_MAX;
         }
     }
 
@@ -1114,18 +1113,20 @@ contract RelativePositionManager is
         if (borrowedAmountToRepayFirst > 0 && minAmountOutFirst < borrowedAmountToRepayFirst)
             revert MinAmountOutRepayBelowDebt();
 
-        (, uint256 expectedShort, uint256 longMin, uint256 longMax) = _getProportionalCloseAmounts(
-            position,
-            closeFractionBps
-        );
-        if (longAmountToRedeemForFirstSwap < longMin || longAmountToRedeemForFirstSwap > longMax)
+        (
+            ,
+            uint256 expectedShortToRepay,
+            uint256 minLongToWithdraw,
+            uint256 maxLongToWithdraw
+        ) = _getProportionalCloseAmounts(position, closeFractionBps);
+        if (longAmountToRedeemForFirstSwap < minLongToWithdraw || longAmountToRedeemForFirstSwap > maxLongToWithdraw)
             revert ProportionalCloseAmountOutOfTolerance();
 
         // (2) First-exit short repay within BPS tolerance of expected short
-        if (borrowedAmountToRepayFirst > expectedShort) revert ProportionalCloseAmountOutOfTolerance();
+        if (borrowedAmountToRepayFirst > expectedShortToRepay) revert ProportionalCloseAmountOutOfTolerance();
 
         // (3) Second repay = expectedShort - first repay; validate minAmountOutSecond against exact amount, then add tolerance for 100% close
-        amountToRepaySecond = expectedShort - borrowedAmountToRepayFirst;
+        amountToRepaySecond = expectedShortToRepay - borrowedAmountToRepayFirst;
         if (amountToRepaySecond > 0 && minAmountOutSecond < amountToRepaySecond) revert MinAmountOutSecondBelowDebt();
         if (closeFractionBps == PROPORTIONAL_CLOSE_MAX && amountToRepaySecond > 0) {
             amountToRepaySecond =

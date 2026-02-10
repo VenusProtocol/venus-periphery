@@ -66,13 +66,12 @@ interface IPositionAccount {
     function transferDustToOwner(address token) external;
 
     /**
-     * @notice Executes a generic call to any contract
-     * @dev Only callable by the authorized RelativePositionManager contract
-     * @param target Address of the contract to call
-     * @param data Encoded function call data
-     * @return returnData Return data from the call
+     * @notice Executes multiple generic calls to external contracts on behalf of the position account
+     * @dev Only callable by the authorized RelativePositionManager contract.
+     * @param targets Array of target contract addresses
+     * @param data Array of encoded function call data
      */
-    function executeCall(address target, bytes calldata data) external returns (bytes memory returnData);
+    function genericCalls(address[] calldata targets, bytes[] calldata data) external;
 
     /**
      * @notice Gets the Comptroller contract

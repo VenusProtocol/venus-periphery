@@ -61,6 +61,9 @@ interface IRelativePositionManager {
     /// @custom:error SameDSAActiveStatus when setDSAVTokenActive is called with the current active flag
     error SameDSAActiveStatus();
 
+    /// @custom:error DSAVTokenAlreadyAdded when trying to add an already configured DSA vToken
+    error DSAVTokenAlreadyAdded();
+
     /// @custom:error WithdrawPrincipalBeforeChangingDSA when user tries to change DSA asset without first withdrawing current principal
     error WithdrawPrincipalBeforeChangingDSA();
 
@@ -469,13 +472,17 @@ interface IRelativePositionManager {
     ) external returns (uint256 balance);
 
     /**
-     * @notice Executes an arbitrary call on behalf of a position account
+     * @notice Executes multiple generic calls on behalf of a position account
      * @dev Callable by governance, Allows operations like emergency fund rescues.
      * @param positionAccount Address of the position account
-     * @param target Target contract address
-     * @param data Encoded call data
+     * @param targets Array of target contract addresses
+     * @param data Array of encoded function call data
      */
-    function executePositionAccountCall(address positionAccount, address target, bytes calldata data) external;
+    function executePositionAccountCall(
+        address positionAccount,
+        address[] calldata targets,
+        bytes[] calldata data
+    ) external;
 
     /**
      * @notice Pauses state-changing user operations on the manager (activation, open/close, principal changes).
