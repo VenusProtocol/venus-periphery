@@ -1,4 +1,5 @@
 import { FakeContract, smock } from "@defi-wonderland/smock";
+import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { loadFixture, setBalance } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { BigNumber, Contract, Signer, Wallet } from "ethers";
@@ -1381,7 +1382,9 @@ describe("RelativePositionManager", () => {
         );
 
       // --- Events ---
-      await expect(closeTx).to.emit(relativePositionManager, "ProfitConverted");
+      await expect(closeTx)
+        .to.emit(relativePositionManager, "ProfitConverted")
+        .withArgs(aliceAddress, positionAccountAddr, amountToRedeemForProfitSwap, anyValue);
       await expect(closeTx).to.emit(relativePositionManager, "PositionClosed");
 
       // --- Transfers: position account ---
@@ -1390,30 +1393,30 @@ describe("RelativePositionManager", () => {
       expect(positionLongUnderlyingAfter).to.equal(0);
       expect(positionShortDebtAfter).to.equal(0);
 
-      // --- Transfers: user ---
+      // --- Principal / user balances ---
       // Repay leg: LM received repaySwapAmount from mock swap; used currentShortDebt to repay; dust = repaySwapAmount - currentShortDebt → user
       const expectedBorrowDustToUser = repaySwapAmount.sub(currentShortDebt);
       const aliceBorrowAfter = await borrowToken.balanceOf(aliceAddress);
       expect(aliceBorrowAfter.sub(aliceBorrowBefore)).to.equal(expectedBorrowDustToUser);
 
-      // Profit leg: user receives dsaOutActual (swept to RPM then transferred to user)
+      // Profit leg: profit is now retained as additional DSA principal on the position (no DSA transfer to user)
       const aliceDsaAfter = await dsaToken.balanceOf(aliceAddress);
-      expect(aliceDsaAfter.sub(aliceDsaBefore)).to.equal(dsaOutActual);
+      expect(aliceDsaAfter.sub(aliceDsaBefore)).to.equal(0);
 
       // No collateral dust in this setup (all long used in repay + profit swaps)
       const aliceCollateralAfter = await collateralToken.balanceOf(aliceAddress);
       expect(aliceCollateralAfter.sub(aliceCollateralBefore)).to.equal(0);
 
-      // --- Position state: 100% close deactivates the position ---
+      // --- Position state: 100% close does NOT deactivate the position automatically ---
       const positionAfter = await relativePositionManager.getPosition(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
       );
-      expect(positionAfter.isActive).to.be.false;
+      expect(positionAfter.isActive).to.be.true;
     });
 
-    it("closeWithProfit: when no debt but long available, 100% close redeems full long as profit and transfers to user", async () => {
+    it("closeWithProfit: when no debt but long available, 100% close redeems full long as profit and retains it as principal", async () => {
       const principalAmount = parseEther("20");
       const effectiveLeverage = parseEther("2");
       const shortAmount = parseEther("1");
@@ -1479,21 +1482,24 @@ describe("RelativePositionManager", () => {
         collateralToken,
       );
 
-      await expect(
-        relativePositionManager
-          .connect(alice)
-          .closeWithProfit(
-            collateralMarket.address,
-            borrowMarket.address,
-            closeFractionBps,
-            collateralToRedeem,
-            zeroAmount,
-            swapDataRepay,
-            fullLongAsProfit,
-            minAmountOutProfit,
-            swapDataProfit,
-          ),
-      ).to.emit(relativePositionManager, "PositionClosed");
+      const closeTx = await relativePositionManager
+        .connect(alice)
+        .closeWithProfit(
+          collateralMarket.address,
+          borrowMarket.address,
+          closeFractionBps,
+          collateralToRedeem,
+          zeroAmount,
+          swapDataRepay,
+          fullLongAsProfit,
+          minAmountOutProfit,
+          swapDataProfit,
+        );
+
+      await expect(closeTx)
+        .to.emit(relativePositionManager, "ProfitConverted")
+        .withArgs(aliceAddress, positionAccountAddr, fullLongAsProfit, anyValue);
+      await expect(closeTx).to.emit(relativePositionManager, "PositionClosed");
 
       expect(await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr)).to.equal(0);
       expect(await collateralMarket.callStatic.balanceOfUnderlying(positionAccountAddr)).to.equal(0);
@@ -1502,7 +1508,7 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      expect(positionAfter.isActive).to.be.false;
+      expect(positionAfter.isActive).to.be.true;
     });
   });
 
@@ -1848,7 +1854,8 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      expect(positionAfter.isActive).to.be.false;
+      // 100% close does not deactivate; explicit deactivatePosition is required to flip isActive
+      expect(positionAfter.isActive).to.be.true;
     });
   });
 
@@ -1914,7 +1921,7 @@ describe("RelativePositionManager", () => {
       expect(principalUnderlyingAfter).to.equal(totalPrincipal);
     });
 
-    it("closeWithProfit: should close fully and keep suppliedPrincipal vTokens unchanged (profit realized in same underlying)", async () => {
+    it("closeWithProfit: should close fully and increase suppliedPrincipal vTokens (profit realized in same underlying)", async () => {
       const principalAmount = parseEther("20");
       await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
       await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
@@ -1990,29 +1997,39 @@ describe("RelativePositionManager", () => {
       // (handled inside _realizeProfitFromExcessLong), so we can pass empty calldata here.
       const swapDataProfit = "0x";
 
-      await expect(
-        relativePositionManager.connect(alice).closeWithProfit(
-          dsaMarket.address,
-          borrowMarket.address,
-          BPS_100_PCT, // 100% close
-          collateralAmountToRedeemForRepay,
-          currentShortDebt, // minAmountOutRepay
-          swapDataRepay,
-          amountToRedeemForProfitSwap,
-          minAmountOutProfit,
-          swapDataProfit,
-        ),
-      ).to.emit(relativePositionManager, "PositionClosed");
+      const closeTx = await relativePositionManager.connect(alice).closeWithProfit(
+        dsaMarket.address,
+        borrowMarket.address,
+        BPS_100_PCT, // 100% close
+        collateralAmountToRedeemForRepay,
+        currentShortDebt, // minAmountOutRepay
+        swapDataRepay,
+        amountToRedeemForProfitSwap,
+        minAmountOutProfit,
+        swapDataProfit,
+      );
+
+      await expect(closeTx)
+        .to.emit(relativePositionManager, "ProfitConverted")
+        .withArgs(aliceAddress, positionAccountAddr, amountToRedeemForProfitSwap, anyValue);
+      await expect(closeTx).to.emit(relativePositionManager, "PositionClosed");
 
       const positionAfter = await relativePositionManager.getPosition(
         aliceAddress,
         dsaMarket.address,
         borrowMarket.address,
       );
-      expect(positionAfter.isActive).to.be.false;
-      expect(positionAfter.suppliedPrincipal).to.equal(principalVTokensBefore);
+      expect(positionAfter.isActive).to.be.true;
+
+      // Principal vTokens should increase by exactly the amount implied by the profit leg and current exchange rate.
+      const exchangeRate = await dsaMarket.callStatic.exchangeRateCurrent();
+      const MANTISSA_ONE = BigNumber.from("1000000000000000000");
+      const expectedPrincipalAfter = principalVTokensBefore.add(
+        amountToRedeemForProfitSwap.mul(MANTISSA_ONE).div(exchangeRate),
+      );
+      expect(positionAfter.suppliedPrincipal).to.equal(expectedPrincipalAfter);
       expect(await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr)).to.equal(0);
-      expect(await dsaMarket.balanceOf(positionAccountAddr)).to.equal(principalVTokensBefore);
+      expect(await dsaMarket.balanceOf(positionAccountAddr)).to.equal(positionAfter.suppliedPrincipal);
     });
 
     it("closeWithLoss: should close fully; second exit uses same market as DSA/long and reduces principal vTokens", async () => {
@@ -2127,7 +2144,8 @@ describe("RelativePositionManager", () => {
         dsaMarket.address,
         borrowMarket.address,
       );
-      expect(positionAfter.isActive).to.be.false;
+      // 100% close does not deactivate; explicit deactivatePosition is required to flip isActive
+      expect(positionAfter.isActive).to.be.true;
       expect(await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr)).to.equal(0);
       // Second exit used DSA principal to repay the remaining short debt:
       // principal reduction in underlying terms should equal dsaAmountToRedeemForRepay.
@@ -2628,49 +2646,31 @@ describe("RelativePositionManager", () => {
       );
       expect(positionAfterClose.suppliedPrincipal).to.be.gt(0);
       expect(positionAfterClose.dsaIndex).to.equal(initialDsaIndex);
-      expect(positionAfterClose.isActive).to.be.false;
+      // After 100% close the position remains active; principal is still supplied.
+      expect(positionAfterClose.isActive).to.be.true;
+
+      // For DSA change tests we now explicitly deactivate to enforce the invariant that
+      // inactive positions have no supplied principal.
+      await relativePositionManager.connect(alice).deactivatePosition(collateralMarket.address, borrowMarket.address);
+
+      const positionAfterDeactivate = await relativePositionManager.getPosition(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+      );
+      expect(positionAfterDeactivate.isActive).to.be.false;
+      expect(positionAfterDeactivate.suppliedPrincipal).to.equal(0);
     });
 
-    it("should revert when changing DSA if principal is not withdrawn", async () => {
-      // After beforeEach, position is inactive with suppliedPrincipal > 0. Activating with newDsaIndex without withdrawing reverts.
-      await expect(
-        relativePositionManager
-          .connect(alice)
-          .activatePosition(
-            collateralMarket.address,
-            borrowMarket.address,
-            newDsaIndex,
-            noAdditionalPrincipal,
-            parseEther("2"),
-          ),
-      ).to.be.revertedWithCustomError(relativePositionManager, "WithdrawPrincipalBeforeChangingDSA");
-    });
-
-    it("should allow reactivation with new DSA after full principal withdrawal and deactivation", async () => {
+    it("should allow reactivation with new DSA after full close and explicit deactivation", async () => {
       const positionBefore = await relativePositionManager.getPosition(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
       );
-      expect(positionBefore.suppliedPrincipal).to.be.gt(0);
-      // After 100% close in beforeEach, position is already inactive; no need to call deactivatePosition
       expect(positionBefore.isActive).to.be.false;
-
-      const principalUnderlying = await relativePositionManager.callStatic.getSuppliedPrincipalBalance(
-        aliceAddress,
-        collateralMarket.address,
-        borrowMarket.address,
-      );
-      await relativePositionManager
-        .connect(alice)
-        .withdrawPrincipal(collateralMarket.address, borrowMarket.address, principalUnderlying);
-
-      const positionAfterWithdraw = await relativePositionManager.getPosition(
-        aliceAddress,
-        collateralMarket.address,
-        borrowMarket.address,
-      );
-      expect(positionAfterWithdraw.suppliedPrincipal).to.equal(0);
+      // After deactivatePosition in beforeEach, principal should have been fully withdrawn
+      expect(positionBefore.suppliedPrincipal).to.equal(0);
 
       await expect(
         relativePositionManager

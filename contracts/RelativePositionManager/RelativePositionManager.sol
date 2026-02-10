@@ -248,11 +248,6 @@ contract RelativePositionManager is
             revert PositionAlreadyExists();
         }
 
-        // If reactivating and user wants to change DSA asset, they must first withdraw current DSA supplied
-        if (dsaIndex != position.dsaIndex && position.suppliedPrincipal > 0) {
-            revert WithdrawPrincipalBeforeChangingDSA();
-        }
-
         // Deploy position account if it doesn't exist (sets immutable fields in _deployPositionAccount)
         if (position.positionAccount == address(0)) {
             _deployPositionAccount(msg.sender, longVToken, shortVToken);
@@ -440,20 +435,17 @@ contract RelativePositionManager is
             );
         }
 
-        // Realize profit: redeem amountToRedeemForProfitSwap and swap to DSA
+        // Realize profit: redeem amountToRedeemForProfitSwap and swap to DSA (converted to principal)
         if (amountToRedeemForProfitSwap > 0) {
-            IVToken dsaVToken = IVToken(position.dsaVToken);
-
             _redeemLongAndSwapToDSA(
+                position,
                 positionAccount,
                 longVToken,
-                dsaVToken,
+                IVToken(position.dsaVToken),
                 amountToRedeemForProfitSwap,
                 minAmountOutProfit,
                 swapDataProfit
             );
-            emit ProfitConverted(msg.sender, positionAccount, amountToRedeemForProfitSwap);
-            _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
         }
 
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
@@ -464,7 +456,6 @@ contract RelativePositionManager is
             if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert PositionNotFullyClosed();
             longDustRedeemed = _getLongCollateralBalance(position);
             _redeemUnderlyingToUser(longVToken, positionAccount, longDustRedeemed);
-            position.isActive = false;
         }
 
         emit PositionClosed(
@@ -583,7 +574,6 @@ contract RelativePositionManager is
             if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert PositionNotFullyClosed();
             longDustRedeemed = _getLongCollateralBalance(position);
             _redeemUnderlyingToUser(longVToken, positionAccount, longDustRedeemed);
-            position.isActive = false;
         }
 
         emit PositionClosed(
@@ -599,16 +589,17 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Withdraws principal from a position (partial when active, full when inactive)
-     * @dev When active: calculates utilization and withdraws up to the requested amount.
-     *      When inactive: redeems all DSA underlying from position account and transfers to user.
+     * @notice Withdraws principal from an active position, subject to utilization constraints
+     * @dev Only callable when the position is active. Calculates utilization and withdraws up to the
+     *      requested amount, bounded by the withdrawable principal derived from utilization.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param amount Amount to withdraw (only used when position is active)
+     * @param amount Amount to withdraw
      * @custom:error Throw ZeroAddress if no position account exists for this user/markets pair.
+     * @custom:error Throw PositionNotActive if the position is not active.
      * @custom:error Throw InsufficientWithdrawableAmount if amount is zero or exceeds withdrawable principal.
      * @custom:error Throw RedeemBehalfFailed if redeem fails.
-     * @custom:event Emits PrincipalWithdrawn event when principal is withdrawn (active or inactive).
+     * @custom:event Emits PrincipalWithdrawn event when principal is withdrawn.
      */
     function withdrawPrincipal(
         IVToken longVToken,
@@ -618,13 +609,12 @@ contract RelativePositionManager is
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         address positionAccount = position.positionAccount;
         if (positionAccount == address(0)) revert ZeroAddress();
-        if (amount == 0 || amount > _getSuppliedPrincipalBalance(position)) revert InsufficientWithdrawableAmount();
+        if (!position.isActive) revert PositionNotActive();
+        if (amount == 0) revert ZeroAmount();
 
-        if (position.isActive) {
-            // Active: redeem only based on utilization
-            UtilizationInfo memory utilization = _getUtilizationInfo(position);
-            if (amount > utilization.withdrawableAmount) revert InsufficientWithdrawableAmount();
-        }
+        // Active: redeem only based on utilization
+        UtilizationInfo memory utilization = _getUtilizationInfo(position);
+        if (amount > utilization.withdrawableAmount) revert InsufficientWithdrawableAmount();
 
         IVToken dsaVToken = IVToken(position.dsaVToken);
         uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
@@ -665,7 +655,7 @@ contract RelativePositionManager is
         _redeemUnderlyingToUser(dsaVToken, positionAccount, underlyingBalance);
         position.suppliedPrincipal = 0;
 
-        emit PositionDeactivated(msg.sender, positionAccount, position.cycleId);
+        emit PositionDeactivated(msg.sender, positionAccount, position.cycleId, address(dsaVToken), underlyingBalance);
 
         // Reset position state
         position.isActive = false;
@@ -822,17 +812,22 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Redeems a given amount of long from the position account and swaps it to DSA (or transfers if long == DSA)
-     * @dev Used for proportional close with profit: partial or full close can have a "profit" slice swapped to DSA.
-     *      Does not require zero short debt (unlike _realizeProfitFromExcessLong).
-     * @param positionAccount The position account from which long is redeemed
+     * @notice Redeems a given amount of long from the position account and swaps it to DSA,
+     *         then supplies the resulting DSA as additional principal on the same position.
+     * @dev Used for proportional close with profit: partial or full close can have a "profit" slice converted
+     *      into DSA principal. Does not require zero short debt (unlike _realizeProfitFromExcessLong).
+     *      When DSA and long share the same vToken market, no redeem/mint cycle is required; the function
+     *      simply reclassifies part of the long collateral as principal in storage.
+     * @param position The Position storage reference whose principal should be increased
+     * @param positionAccount The position account from which long is conceptually redeemed
      * @param longVToken Long market vToken
      * @param dsaVToken DSA market vToken
-     * @param amountToRedeem Amount of long underlying to redeem and swap to DSA
+     * @param amountToRedeem Amount of long underlying to convert into DSA principal
      * @param minAmountOutProfit Minimum DSA out from the swap
      * @param swapDataProfit Calldata for the long→DSA swap
      */
     function _redeemLongAndSwapToDSA(
+        Position storage position,
         address positionAccount,
         IVToken longVToken,
         IVToken dsaVToken,
@@ -840,20 +835,40 @@ contract RelativePositionManager is
         uint256 minAmountOutProfit,
         bytes calldata swapDataProfit
     ) internal {
-        if (amountToRedeem == 0) return;
         IERC20Upgradeable longUnderlying = IERC20Upgradeable(longVToken.underlying());
         IERC20Upgradeable dsaUnderlying = IERC20Upgradeable(dsaVToken.underlying());
-
-        uint256 err = longVToken.redeemUnderlyingBehalf(positionAccount, amountToRedeem);
-        if (err != SUCCESS) revert RedeemBehalfFailed(err);
+        uint256 vTokensMinted;
 
         if (address(longUnderlying) == address(dsaUnderlying)) {
-            _transferContractBalanceToUser(longUnderlying);
-            return;
+            // no on-chain redeem/swap/mint required. Reclassify long vTokens as principal.
+            uint256 exchangeRate = dsaVToken.exchangeRateCurrent();
+            vTokensMinted = (amountToRedeem * MANTISSA_ONE) / exchangeRate;
+        } else {
+            // Redeem long underlying from the position account to this contract
+            uint256 err = longVToken.redeemUnderlyingBehalf(positionAccount, amountToRedeem);
+            if (err != SUCCESS) revert RedeemBehalfFailed(err);
+
+            uint256 amountOut = _performSwap(
+                longUnderlying,
+                amountToRedeem,
+                dsaUnderlying,
+                minAmountOutProfit,
+                swapDataProfit
+            );
+
+            // Supply the received DSA underlying as additional principal to the same position account.
+            uint256 balanceBefore = dsaVToken.balanceOf(positionAccount);
+            dsaUnderlying.forceApprove(address(dsaVToken), amountOut);
+            uint256 mintError = dsaVToken.mintBehalf(positionAccount, amountOut);
+            if (mintError != SUCCESS) revert MintBehalfFailed(mintError);
+            uint256 balanceAfter = dsaVToken.balanceOf(positionAccount) - balanceBefore;
+
+            vTokensMinted = balanceAfter;
         }
 
-        _performSwap(longUnderlying, amountToRedeem, dsaUnderlying, minAmountOutProfit, swapDataProfit);
-        _transferContractBalanceToUser(dsaUnderlying);
+        // Update principal state
+        position.suppliedPrincipal += vTokensMinted;
+        emit ProfitConverted(position.user, positionAccount, amountToRedeem, position.suppliedPrincipal);
     }
 
     /**
@@ -867,15 +882,6 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Transfers this contract's full balance of the given token to msg.sender (no-op if balance is 0)
-     * @param token The ERC20 token to transfer
-     */
-    function _transferContractBalanceToUser(IERC20Upgradeable token) internal {
-        uint256 balance = token.balanceOf(address(this));
-        if (balance > 0) token.safeTransfer(msg.sender, balance);
-    }
-
-    /**
      * @notice Redeems underlying from a vToken on behalf of an account and transfers the received underlying to msg.sender
      * @param vToken The vToken market to redeem from
      * @param fromAccount The account on whose behalf to redeem (e.g. position account)
@@ -885,7 +891,12 @@ contract RelativePositionManager is
         if (amount == 0) return;
         uint256 err = vToken.redeemUnderlyingBehalf(fromAccount, amount);
         if (err != SUCCESS) revert RedeemBehalfFailed(err);
-        _transferContractBalanceToUser(IERC20Upgradeable(vToken.underlying()));
+        IERC20Upgradeable underlying = IERC20Upgradeable(vToken.underlying());
+        uint256 balance = underlying.balanceOf(address(this));
+        if (balance > 0) {
+            underlying.safeTransfer(msg.sender, balance);
+            emit UnderlyingTransferred(address(underlying), fromAccount, msg.sender, balance);
+        }
     }
 
     /**

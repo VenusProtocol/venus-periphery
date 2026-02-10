@@ -64,9 +64,6 @@ interface IRelativePositionManager {
     /// @custom:error DSAVTokenAlreadyAdded when trying to add an already configured DSA vToken
     error DSAVTokenAlreadyAdded();
 
-    /// @custom:error WithdrawPrincipalBeforeChangingDSA when user tries to change DSA asset without first withdrawing current principal
-    error WithdrawPrincipalBeforeChangingDSA();
-
     /// @custom:error InsufficientPrincipal when supplied principal is insufficient
     error InsufficientPrincipal();
 
@@ -218,8 +215,14 @@ interface IRelativePositionManager {
     /// @notice Emitted when long is converted to profit (DSA) during closeWithProfit
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
-    /// @param amountConvertedToProfit Long amount redeemed and swapped to DSA as profit
-    event ProfitConverted(address indexed user, address indexed positionAccount, uint256 amountConvertedToProfit);
+    /// @param amountConvertedToProfit Long amount redeemed and swapped to DSA as profit (underlying terms)
+    /// @param newTotalPrincipal New total principal amount in vTokens after conversion
+    event ProfitConverted(
+        address indexed user,
+        address indexed positionAccount,
+        uint256 amountConvertedToProfit,
+        uint256 newTotalPrincipal
+    );
 
     /// @notice Emitted when principal is withdrawn
     /// @param user Address of the user
@@ -238,7 +241,23 @@ interface IRelativePositionManager {
     /// @notice Emitted when a position is deactivated
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
-    event PositionDeactivated(address indexed user, address indexed positionAccount, uint256 cycleId);
+    /// @param cycleId The cycle ID of the position
+    /// @param dsaAsset Address of the DSA asset used for principal
+    /// @param amountWithdrawn Amount of DSA underlying withdrawn on deactivation
+    event PositionDeactivated(
+        address indexed user,
+        address indexed positionAccount,
+        uint256 cycleId,
+        address dsaAsset,
+        uint256 amountWithdrawn
+    );
+
+    /// @notice Emitted when underlying tokens are transferred from this contract to a user
+    /// @param token Address of the underlying ERC20 token
+    /// @param from Account on whose behalf the underlying was redeemed
+    /// @param to Recipient address (typically msg.sender)
+    /// @param amount Amount of underlying transferred
+    event UnderlyingTransferred(address indexed token, address indexed from, address indexed to, uint256 amount);
 
     /// @notice Emitted when a new DSA vToken is added
     /// @param dsaVToken Address of the DSA vToken added
