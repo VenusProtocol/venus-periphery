@@ -1,3 +1,8 @@
+## 1.2.0-dev.2 (2026-02-10)
+
+* Merge pull request #49 from VenusProtocol/feat/vpd-349 ([4ee07ab](https://github.com/VenusProtocol/venus-periphery/commit/4ee07ab)), closes [#49](https://github.com/VenusProtocol/venus-periphery/issues/49)
+* feat: add DeviationSentinel Certik audit report ([ae16c4b](https://github.com/VenusProtocol/venus-periphery/commit/ae16c4b))
+
 ## 1.2.0-dev.1 (2026-02-09)
 
 * Merge branch 'develop' into feat/vpd-349 ([488caf5](https://github.com/VenusProtocol/venus-periphery/commit/488caf5))
