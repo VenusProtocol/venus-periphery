@@ -132,6 +132,9 @@ interface IRelativePositionManager {
     /// @custom:error ProportionalCloseAmountOutOfTolerance when user-provided close amounts are not within 1% of BPS-derived expected amounts
     error ProportionalCloseAmountOutOfTolerance();
 
+    /// @custom:error InvalidCollateralFactor when a market's collateral factor is configured to be >= 100%
+    error InvalidCollateralFactor();
+
     /// @custom:error NonZeroLongAmountWhenExpectedZero when proportional close expects zero long (no long to close) but user passed non-zero total long amount
     error NonZeroLongAmountWhenExpectedZero();
 
