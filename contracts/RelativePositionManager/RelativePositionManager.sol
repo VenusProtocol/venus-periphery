@@ -299,6 +299,7 @@ contract RelativePositionManager is
         Position storage position = positions[msg.sender][longVToken][shortVToken];
 
         if (!position.isActive) revert PositionNotActive();
+
         _supplyPrincipalToPositionAccount(position, IVToken(position.dsaVToken), amount);
     }
 
@@ -521,6 +522,7 @@ contract RelativePositionManager is
 
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
         if (!position.isActive) revert PositionNotActive();
+
         address positionAccount = position.positionAccount;
         if (shortVToken.borrowBalanceCurrent(positionAccount) == 0) revert ZeroDebt();
 
@@ -613,6 +615,7 @@ contract RelativePositionManager is
         address positionAccount = position.positionAccount;
         if (positionAccount == address(0)) revert ZeroAddress();
         if (!position.isActive) revert PositionNotActive();
+
         if (amount == 0) revert ZeroAmount();
 
         // Active: redeem only based on utilization
@@ -644,6 +647,7 @@ contract RelativePositionManager is
         Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
 
         if (!position.isActive) revert PositionNotActive();
+
         address positionAccount = position.positionAccount;
 
         // Check that position is fully closed: no long collateral and no short debt
@@ -761,6 +765,7 @@ contract RelativePositionManager is
         IVToken shortVToken
     ) external returns (uint256 longBalance) {
         Position storage position = positions[user][address(longVToken)][address(shortVToken)];
+
         return _getLongCollateralBalance(position);
     }
 
@@ -779,6 +784,7 @@ contract RelativePositionManager is
         IVToken shortVToken
     ) external returns (uint256 balance) {
         Position storage position = positions[user][address(longVToken)][address(shortVToken)];
+
         return _getSuppliedPrincipalBalance(position);
     }
 
@@ -1056,33 +1062,6 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Converts supplied principal to underlying amount, handling DSA==long and DSA!=long cases
-     * @dev When DSA != long asset, all DSA underlying on the position account is considered principal,
-     *      so we can read it directly. When DSA == long asset, we must use the stored principal vTokens
-     *      to avoid counting long collateral as principal.
-     * @param position The position data (holds suppliedPrincipal and positionAccount)
-     * @return balance of principal in underlying units
-     */
-    function _getSuppliedPrincipalBalance(Position memory position) internal returns (uint256) {
-        if (position.suppliedPrincipal == 0) return 0;
-
-        address positionAccount = position.positionAccount;
-        if (positionAccount == address(0)) revert ZeroAddress();
-
-        IVToken longVToken = IVToken(position.longVToken);
-        IVToken dsaVToken = IVToken(position.dsaVToken);
-
-        // When DSA == long, principal is tracked in vTokens to separate it from long collateral.
-        if (address(dsaVToken) == address(longVToken)) {
-            uint256 exchangeRate = dsaVToken.exchangeRateCurrent();
-            return (position.suppliedPrincipal * exchangeRate) / MANTISSA_ONE;
-        }
-
-        // DSA and long are different assets: all DSA underlying on the position is principal.
-        return dsaVToken.balanceOfUnderlying(positionAccount);
-    }
-
-    /**
      * @notice Returns expected proportional amounts and tolerance band for a close (BPS of current balance/debt)
      * @dev Reverts with InvalidCloseFractionBps if closeFractionBps is not in [1, 100].
      * @param position The position (long balance and positionAccount from position; short debt from position.shortVToken)
@@ -1197,6 +1176,53 @@ contract RelativePositionManager is
     }
 
     /**
+     * @notice Splits the position account's vToken balance into effective principal and long collateral vTokens
+     * @dev Intended for use only within the DSA == LONG branch of _getSuppliedPrincipalBalance and
+     *      _getLongCollateralBalance. External liquidations can seize vTokens without updating RPM state,
+     *      so stored suppliedPrincipal may exceed the actual vToken balance. This function caps principal
+     *      at the actual balance and returns the remainder as long collateral vTokens.
+     * @param position The position data
+     * @return dsaVTokens The effective principal in vToken units (capped at actual balance)
+     * @return longVTokens The remaining vTokens attributed to long collateral
+     */
+    function _splitPrincipalAndLongVTokens(
+        Position memory position
+    ) internal view returns (uint256 dsaVTokens, uint256 longVTokens) {
+        uint256 vTokenBalance = IVToken(position.dsaVToken).balanceOf(position.positionAccount);
+        // Cap principal at actual balance: external liquidations can seize vTokens without updating stored suppliedPrincipal
+        dsaVTokens = position.suppliedPrincipal > vTokenBalance ? vTokenBalance : position.suppliedPrincipal;
+        longVTokens = vTokenBalance - dsaVTokens;
+    }
+
+    /**
+     * @notice Converts supplied principal to underlying amount, handling DSA==long and DSA!=long cases
+     * @dev When DSA != long asset, all DSA underlying on the position account is considered principal,
+     *      so we can read it directly. When DSA == long asset, we must use the stored principal vTokens
+     *      to avoid counting long collateral as principal.
+     * @param position The position data (holds suppliedPrincipal and positionAccount)
+     * @return balance of principal in underlying units
+     */
+    function _getSuppliedPrincipalBalance(Position memory position) internal returns (uint256) {
+        if (position.suppliedPrincipal == 0) return 0;
+
+        address positionAccount = position.positionAccount;
+        if (positionAccount == address(0)) revert ZeroAddress();
+
+        IVToken longVToken = IVToken(position.longVToken);
+        IVToken dsaVToken = IVToken(position.dsaVToken);
+
+        // When DSA == long, principal is tracked in vTokens to separate it from long collateral.
+        if (address(dsaVToken) == address(longVToken)) {
+            (uint256 dsaVTokens, ) = _splitPrincipalAndLongVTokens(position);
+            uint256 exchangeRate = dsaVToken.exchangeRateCurrent();
+            return (dsaVTokens * exchangeRate) / MANTISSA_ONE;
+        }
+
+        // DSA and long are different assets: all DSA underlying on the position is principal.
+        return dsaVToken.balanceOfUnderlying(positionAccount);
+    }
+
+    /**
      * @notice Gets the actual long collateral balance, excluding DSA principal if DSA == long asset
      * @param position The position data (longVToken read from position)
      * @return longBalance The actual long collateral balance in underlying (excluding DSA principal if DSA == long)
@@ -1209,13 +1235,11 @@ contract RelativePositionManager is
         IVToken dsaVToken = IVToken(position.dsaVToken);
 
         if (address(longVToken) == address(dsaVToken)) {
-            // Same asset: vToken balance minus principal vTokens, then convert to underlying.
-            // After a partial close, vToken balance may be less than suppliedPrincipal; treat long collateral as 0.
-            uint256 vTokenBalance = longVToken.balanceOf(positionAccount);
-            if (vTokenBalance <= position.suppliedPrincipal) return 0;
-            uint256 netVTokens = vTokenBalance - position.suppliedPrincipal;
+            // Same asset: split vToken balance into principal and long collateral portions.
+            (, uint256 longVTokensNet) = _splitPrincipalAndLongVTokens(position);
+            if (longVTokensNet == 0) return 0;
             uint256 exchangeRate = longVToken.exchangeRateCurrent();
-            return (netVTokens * exchangeRate) / MANTISSA_ONE;
+            return (longVTokensNet * exchangeRate) / MANTISSA_ONE;
         }
 
         return longVToken.balanceOfUnderlying(positionAccount);

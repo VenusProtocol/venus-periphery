@@ -15,11 +15,13 @@ import {
   IVToken,
   LeverageStrategiesManager,
   RelativePositionManager,
+  ResilientOracleInterface__factory,
   SwapHelper,
   VBep20Delegator__factory,
+  VBep20Interface__factory,
   VToken__factory,
 } from "../../../typechain";
-import { forking, initMainnetUser, setBalance } from "./utils";
+import { forking, initMainnetUser } from "./utils";
 
 // --- Mainnet constants (BSC) ---
 const COMPTROLLER_ADDRESS = "0xfd36e2c2a6789db23113685031d7f16329158384";
@@ -39,8 +41,45 @@ const vSHORT_ADDRESS = "0xf508fCD89b8bd15579dc79A6827cB4686A3592c8"; // vETH
 
 // A whale we can fund/impersonate
 const DSA_WHALE = DSA_ADDRESS; // token itself holds large supply
+// Real whale for SHORT (ETH) on BSC for liquidation tests (must hold underlying ETH)
+const SHORT_WHALE_LIQUIDATION = "0x8894E0a0c962CB723c1976a4421c95949bE2D4E3"; // Binance 8
+
+// Chainlink oracle on BSC (used as main in ResilientOracle when manipulating price)
+const CHAINLINK_ORACLE = "0x1B2103441A0A108daD8848D8F5d790e4D402921F";
 
 let saltCounter = 0;
+
+/**
+ * Sets the oracle price for an asset by configuring ResilientOracle to use only Chainlink
+ * as main (pivot/fallback zero) and calling setDirectPrice on the Chainlink oracle.
+ * Uses NORMAL_TIMELOCK so must be called while impersonating timelock.
+ * @param comptroller Comptroller (connected with timelock signer)
+ * @param asset Underlying asset address (e.g. LONG_ADDRESS, DSA_ADDRESS)
+ * @param price New price in 18 decimals (mantissa)
+ */
+async function setOraclePrice(comptroller: ComptrollerMock, asset: string, price: BigNumber): Promise<void> {
+  const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseEther("1"));
+  const resilientOracleAddr = await comptroller.oracle();
+
+  // Connect like Chainlink: ResilientOracle has setTokenConfig((address,address[3],bool[3],bool))
+  const resilientOracle = new ethers.Contract(
+    resilientOracleAddr,
+    [
+      "function setTokenConfig((address asset, address[3] oracles, bool[3] enableFlagsForOracles, bool cachingEnabled))",
+    ],
+    timelock,
+  );
+
+  await resilientOracle.setTokenConfig({
+    asset,
+    oracles: [CHAINLINK_ORACLE, ethers.constants.AddressZero, ethers.constants.AddressZero],
+    enableFlagsForOracles: [true, false, false],
+    cachingEnabled: false,
+  });
+
+  const chainlinkOracle = ChainlinkOracle__factory.connect(CHAINLINK_ORACLE, timelock);
+  await chainlinkOracle.setDirectPrice(asset, price);
+}
 
 async function getSwapData(
   tokenIn: string,
@@ -369,6 +408,7 @@ async function setupRpmForkFixture(): Promise<RpmForkFixture> {
 // --- Tests ---
 forking(80929690, () => {
   let rpm: RelativePositionManager;
+  let comptroller: ComptrollerMock;
   let dsa: IERC20;
   let long: IERC20;
   let short: IERC20;
@@ -388,7 +428,7 @@ forking(80929690, () => {
     });
 
     beforeEach(async () => {
-      ({ rpm, dsa, long, short, longVToken, shortVToken, leverageManager, dsaVToken } =
+      ({ rpm, comptroller, dsa, long, short, longVToken, shortVToken, leverageManager, dsaVToken } =
         await loadFixture(setupRpmForkFixture));
       [, alice] = await ethers.getSigners();
     });
@@ -1970,140 +2010,31 @@ forking(80929690, () => {
       });
     });
 
-    describe.skip("liquidation scenarios", () => {
-      // TODO: These tests require:
-      // 1. Price oracle manipulation to make positions underwater
-      // 2. Proper whale addresses for token transfers (not using token contract as whale)
-      // 3. Integration with Chainlink/Binance oracle price feeds for realistic liquidation scenarios
+    describe("liquidation scenarios", () => {
+      let liquidator: any;
+      let shortToken: IERC20;
+      let shortVTokenLiquidate: any;
 
-      it("liquidate position and seize DSA token", async () => {
-        const INITIAL_PRINCIPAL = parseEther("10000");
-        const DSA_AMOUNT = parseEther("5000"); // USDC to supply as principal
-        const SHORT_AMOUNT = parseEther("3"); // ETH to borrow (higher leverage to make liquidatable)
-        const LONG_AMOUNT = parseEther("3000"); // WBNB to receive
+      beforeEach(async () => {
+        const [, , signer] = await ethers.getSigners();
+        liquidator = signer;
 
-        // Fund Alice with DSA tokens
-        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
-        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
-        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
+        // Set liquidator contract so this signer is allowed to call liquidateBorrow
+        const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseEther("1"));
+        await comptroller.connect(timelock)._setLiquidatorContract(liquidator.address);
 
-        // ========================================
-        // STEP 1: Activate Position
-        // ========================================
-        const leverage = parseEther("3"); // 3x leverage (more aggressive)
-        await rpm
-          .connect(alice)
-          .activatePosition(longVToken.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
+        // Fund liquidator with SHORT tokens upfront
+        shortToken = IERC20__factory.connect(SHORT_ADDRESS, ethers.provider);
+        const shortWhaleSigner = await initMainnetUser(SHORT_WHALE_LIQUIDATION, parseEther("1"));
+        await shortToken.connect(shortWhaleSigner).transfer(liquidator.address, parseEther("10"));
 
-        const position = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        const positionAccount = position.positionAccount;
-
-        // ========================================
-        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
-        // ========================================
-        const minLong = LONG_AMOUNT.mul(98).div(100); // 2% slippage
-
-        const openSwapData = await getManipulatedSwapData(
-          SHORT_ADDRESS,
-          LONG_ADDRESS,
-          SHORT_AMOUNT,
-          LONG_AMOUNT,
-          leverageManager.address,
-        );
-
-        await rpm.connect(alice).openPosition(
-          longVToken.address,
-          shortVToken.address,
-          0, // No additional principal
-          SHORT_AMOUNT,
-          minLong,
-          openSwapData,
-        );
-
-        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
-        const longBalanceAfterOpen = await longVToken.callStatic.balanceOfUnderlying(positionAccount);
-        const dsaBalanceAfterOpen = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
-
-        // VALIDATION: Verify position is active and has balances
-        const positionAfterOpen = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        expect(positionAfterOpen.isActive).to.eq(true, "Position should be active after opening");
-        expect(shortDebtAfterOpen).to.be.gt(0, "Should have short debt");
-        expect(longBalanceAfterOpen).to.be.gt(0, "Should have long collateral");
-        expect(dsaBalanceAfterOpen).to.be.gt(0, "Should have DSA principal");
-
-        // ========================================
-        // STEP 3: Simulate price drop to make position liquidatable
-        // ========================================
-        // TODO: In a real test, you would manipulate oracle prices or wait for interest accrual
-        // For now, we'll note that liquidation would occur when:
-        // - LONG token value drops significantly, OR
-        // - SHORT debt increases due to interest, OR
-        // - DSA collateral value drops
-        // Making the position's health factor < 1
-
-        // ========================================
-        // STEP 4: Liquidate and seize DSA token
-        // ========================================
-        // Get a liquidator account
-        const [, , liquidator] = await ethers.getSigners();
-
-        // Fund liquidator with SHORT tokens to repay debt
-        const shortToken = IERC20__factory.connect(SHORT_ADDRESS, ethers.provider);
-        const shortWhale = SHORT_ADDRESS;
-        const shortWhaleSigner = await initMainnetUser(shortWhale, parseEther("1"));
-        const repayAmount = shortDebtAfterOpen.div(2); // Liquidate 50% of debt
-        await shortToken.connect(shortWhaleSigner).transfer(liquidator.address, repayAmount);
-        await shortToken.connect(liquidator).approve(shortVToken.address, repayAmount);
-
-        // Record balances before liquidation
-        const liquidatorDsaBalanceBefore = await dsa.balanceOf(liquidator.address);
-        const dsaBalanceBeforeLiquidation = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
-
-        // Execute liquidation targeting DSA collateral
-        // Note: This assumes the position is actually underwater
-        // In real scenario, you'd need to ensure health factor < 1
-        try {
-          await shortVToken.connect(liquidator).liquidateBorrow(
-            positionAccount,
-            repayAmount,
-            dsaVToken.address, // Seize DSA collateral
-          );
-
-          // Record balances after liquidation
-          const liquidatorDsaBalanceAfter = await dsa.balanceOf(liquidator.address);
-          const dsaBalanceAfterLiquidation = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
-          const shortDebtAfterLiquidation = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
-
-          // VALIDATION: Verify liquidation occurred correctly
-          expect(shortDebtAfterLiquidation).to.be.lt(
-            shortDebtAfterOpen,
-            "Short debt should decrease after liquidation",
-          );
-          expect(dsaBalanceAfterLiquidation).to.be.lt(
-            dsaBalanceBeforeLiquidation,
-            "DSA balance should decrease (seized)",
-          );
-          expect(liquidatorDsaBalanceAfter).to.be.gt(
-            liquidatorDsaBalanceBefore,
-            "Liquidator should receive DSA tokens",
-          );
-
-          // The liquidator gets a liquidation incentive (typically 8-10%)
-          const seizedAmount = dsaBalanceBeforeLiquidation.sub(dsaBalanceAfterLiquidation);
-          expect(seizedAmount).to.be.gt(0, "DSA tokens should be seized");
-        } catch (error: any) {
-          // If liquidation fails, it's likely because position is not underwater
-          // This is expected in a test environment without price manipulation
-          console.log("Liquidation not possible - position not underwater:", error.message);
-          expect(error.message).to.include("INSUFFICIENT_SHORTFALL");
-        }
+        shortVTokenLiquidate = VBep20Interface__factory.connect(vSHORT_ADDRESS, liquidator);
       });
 
-      it("liquidate position, seize LONG, and repay with DSA", async () => {
-        const INITIAL_PRINCIPAL = parseEther("10000");
-        const DSA_AMOUNT = parseEther("5000"); // USDC to supply as principal
-        const SHORT_AMOUNT = parseEther("3"); // ETH to borrow (higher leverage)
-        const LONG_AMOUNT = parseEther("3000"); // WBNB to receive
+      it("liquidate position and seize DSA token", async () => {
+        const INITIAL_PRINCIPAL = parseEther("1000");
+        const SHORT_AMOUNT = parseEther("1.5"); // ETH to borrow
+        const LONG_AMOUNT = parseEther("30"); // WBNB to receive
 
         // Fund Alice with DSA tokens
         const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
@@ -2124,6 +2055,116 @@ forking(80929690, () => {
         // ========================================
         // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
         // ========================================
+        const minLong = LONG_AMOUNT.mul(98).div(100); // 2% slippage
+
+        const openSwapData = await getManipulatedSwapData(
+          SHORT_ADDRESS,
+          LONG_ADDRESS,
+          SHORT_AMOUNT,
+          LONG_AMOUNT,
+          leverageManager.address,
+          vLONG_ADDRESS,
+        );
+
+        await rpm
+          .connect(alice)
+          .openPosition(longVToken.address, shortVToken.address, 0, SHORT_AMOUNT, minLong, openSwapData);
+
+        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+        const dsaBalanceAfterOpen = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
+
+        expect(shortDebtAfterOpen).to.be.gt(0, "Should have short debt");
+        expect(dsaBalanceAfterOpen).to.be.gt(0, "Should have DSA principal");
+
+        // ========================================
+        // STEP 3: Drop LONG (WBNB) price to make position liquidatable
+        // ========================================
+        const oracleAddr = await comptroller.oracle();
+        const oracle = ResilientOracleInterface__factory.connect(oracleAddr, ethers.provider);
+        const wbnbPriceBefore = await oracle.getPrice(LONG_ADDRESS);
+        const wbnbPriceDropped = wbnbPriceBefore.mul(10).div(100); // 90% drop
+        await setOraclePrice(comptroller, LONG_ADDRESS, wbnbPriceDropped);
+
+        // ========================================
+        // STEP 4: Liquidate and seize DSA token
+        // ========================================
+        const repayAmount = shortDebtAfterOpen.div(4); // Liquidate 25% of debt
+        await shortToken.connect(liquidator).approve(vSHORT_ADDRESS, repayAmount);
+
+        const liquidatorVTokenBalanceBefore = await dsaVToken.balanceOf(liquidator.address);
+        const dsaBalanceBeforeLiquidation = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
+        const suppliedPrincipalBeforeLiquidation = await rpm.callStatic.getSuppliedPrincipalBalance(
+          alice.address,
+          longVToken.address,
+          shortVToken.address,
+        );
+        const positionBeforeLiquidation = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
+
+        await shortVTokenLiquidate.liquidateBorrow(
+          positionAccount,
+          repayAmount,
+          dsaVToken.address, // Seize DSA collateral
+        );
+
+        const liquidatorVTokenBalanceAfter = await dsaVToken.balanceOf(liquidator.address);
+        const dsaBalanceAfterLiquidation = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
+        const shortDebtAfterLiquidation = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+
+        expect(shortDebtAfterLiquidation).to.be.lt(shortDebtAfterOpen, "Short debt should decrease after liquidation");
+        expect(dsaBalanceAfterLiquidation).to.be.lt(
+          dsaBalanceBeforeLiquidation,
+          "DSA balance should decrease (seized)",
+        );
+        expect(liquidatorVTokenBalanceAfter).to.be.gt(
+          liquidatorVTokenBalanceBefore,
+          "Liquidator should receive vDSA (collateral) tokens",
+        );
+
+        const seizedAmount = dsaBalanceBeforeLiquidation.sub(dsaBalanceAfterLiquidation);
+        expect(seizedAmount).to.be.gt(0, "DSA tokens should be seized");
+
+        // After seizure of vDSA, supplied principal (supplied DSA) for the position should be reduced
+        const suppliedPrincipalAfterLiquidation = await rpm.callStatic.getSuppliedPrincipalBalance(
+          alice.address,
+          longVToken.address,
+          shortVToken.address,
+        );
+        expect(suppliedPrincipalAfterLiquidation).to.be.lt(
+          suppliedPrincipalBeforeLiquidation,
+          "Supplied principal (supplied token) should be reduced after vToken seizure",
+        );
+
+        // Stored position.suppliedPrincipal (vToken amount) should be same after seizure
+        const positionAfterLiquidation = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
+        expect(positionAfterLiquidation.suppliedPrincipal).to.be.equal(
+          positionBeforeLiquidation.suppliedPrincipal,
+          "Stored position.suppliedPrincipal should be same vToken seizure",
+        );
+      });
+
+      it("liquidate position and seize LONG token", async () => {
+        const INITIAL_PRINCIPAL = parseEther("2000");
+        const SHORT_AMOUNT = parseEther("2"); // ETH to borrow
+        const LONG_AMOUNT = parseEther("40"); // WBNB to receive
+
+        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
+        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
+        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
+
+        // ========================================
+        // STEP 1: Activate Position
+        // ========================================
+        const leverage = parseEther("4"); // 4x leverage
+        await rpm
+          .connect(alice)
+          .activatePosition(longVToken.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
+
+        const position = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
+        const positionAccount = position.positionAccount;
+
+        // ========================================
+        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
+        // ========================================
         const minLong = LONG_AMOUNT.mul(98).div(100);
 
         const openSwapData = await getManipulatedSwapData(
@@ -2132,6 +2173,7 @@ forking(80929690, () => {
           SHORT_AMOUNT,
           LONG_AMOUNT,
           leverageManager.address,
+          vLONG_ADDRESS,
         );
 
         await rpm
@@ -2142,83 +2184,182 @@ forking(80929690, () => {
         const longBalanceAfterOpen = await longVToken.callStatic.balanceOfUnderlying(positionAccount);
         const dsaBalanceAfterOpen = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
 
-        // VALIDATION: Verify position is active
-        const positionAfterOpen = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        expect(positionAfterOpen.isActive).to.eq(true, "Position should be active after opening");
+        expect(shortDebtAfterOpen).to.be.gt(0, "Should have short debt");
+        expect(longBalanceAfterOpen).to.be.gt(0, "Should have long collateral");
+        expect(dsaBalanceAfterOpen).to.be.gt(0, "Should have DSA principal");
 
         // ========================================
-        // STEP 3: Liquidate and seize LONG token
+        // STEP 3: Drop LONG (WBNB) price to make position liquidatable
         // ========================================
-        const [, , liquidator] = await ethers.getSigners();
+        const oracleAddr = await comptroller.oracle();
+        const oracle = ResilientOracleInterface__factory.connect(oracleAddr, ethers.provider);
+        const wbnbPriceBefore = await oracle.getPrice(LONG_ADDRESS);
+        const wbnbPriceDropped = wbnbPriceBefore.mul(10).div(100); // 90% drop
+        await setOraclePrice(comptroller, LONG_ADDRESS, wbnbPriceDropped);
 
-        // Fund liquidator with SHORT tokens
-        const shortToken = IERC20__factory.connect(SHORT_ADDRESS, ethers.provider);
-        const shortWhale = SHORT_ADDRESS;
-        const shortWhaleSigner = await initMainnetUser(shortWhale, parseEther("1"));
-        const repayAmount = shortDebtAfterOpen.div(2); // Liquidate 50% of debt
-        await shortToken.connect(shortWhaleSigner).transfer(liquidator.address, repayAmount);
-        await shortToken.connect(liquidator).approve(shortVToken.address, repayAmount);
+        // ========================================
+        // STEP 4: Liquidate and seize LONG token
+        // ========================================
+        const shortDebtBeforeLiquidation = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+        const repayAmount = shortDebtBeforeLiquidation.div(3); // Liquidate 33% of debt
+        await shortToken.connect(liquidator).approve(vSHORT_ADDRESS, repayAmount);
 
-        // Record balances before liquidation
-        const liquidatorLongBalanceBefore = await long.balanceOf(liquidator.address);
+        const liquidatorVLongBalanceBefore = await longVToken.balanceOf(liquidator.address);
         const longBalanceBeforeLiquidation = await longVToken.callStatic.balanceOfUnderlying(positionAccount);
 
-        // Execute liquidation targeting LONG collateral
-        try {
-          await shortVToken.connect(liquidator).liquidateBorrow(
-            positionAccount,
-            repayAmount,
-            longVToken.address, // Seize LONG collateral
-          );
+        // Verify position is liquidatable (shortfall > 0)
+        const [, , shortfall] = await comptroller.getAccountLiquidity(positionAccount);
+        expect(shortfall).to.be.gt(0, "Position should be liquidatable (shortfall > 0)");
 
-          // Record balances after liquidation
-          const liquidatorLongBalanceAfter = await long.balanceOf(liquidator.address);
-          const longBalanceAfterLiquidation = await longVToken.callStatic.balanceOfUnderlying(positionAccount);
-          const shortDebtAfterLiquidation = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+        await shortVTokenLiquidate.liquidateBorrow(
+          positionAccount,
+          repayAmount,
+          longVToken.address, // Seize LONG collateral
+        );
 
-          // VALIDATION: Verify liquidation occurred correctly
-          expect(shortDebtAfterLiquidation).to.be.lt(shortDebtAfterOpen, "Short debt should decrease");
-          expect(longBalanceAfterLiquidation).to.be.lt(
-            longBalanceBeforeLiquidation,
-            "LONG balance should decrease (seized)",
-          );
-          expect(liquidatorLongBalanceAfter).to.be.gt(
-            liquidatorLongBalanceBefore,
-            "Liquidator should receive LONG tokens",
-          );
+        const liquidatorVLongBalanceAfter = await longVToken.balanceOf(liquidator.address);
+        const longBalanceAfterLiquidation = await longVToken.callStatic.balanceOfUnderlying(positionAccount);
+        const shortDebtAfterLiquidation = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
 
-          const seizedLongAmount = longBalanceBeforeLiquidation.sub(longBalanceAfterLiquidation);
-          expect(seizedLongAmount).to.be.gt(0, "LONG tokens should be seized");
+        expect(shortDebtAfterLiquidation).to.be.lt(
+          shortDebtBeforeLiquidation,
+          "Short debt should decrease after liquidation",
+        );
+        expect(longBalanceAfterLiquidation).to.be.lt(
+          longBalanceBeforeLiquidation,
+          "LONG balance should decrease (seized)",
+        );
+        expect(liquidatorVLongBalanceAfter).to.be.gt(
+          liquidatorVLongBalanceBefore,
+          "Liquidator should receive vLONG (vToken) as seized collateral",
+        );
 
-          // ========================================
-          // STEP 4: User repays remaining debt using DSA
-          // ========================================
-          // After partial liquidation, user can use their DSA to repay the rest
-          const remainingDebt = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+        const seizedLongAmount = longBalanceBeforeLiquidation.sub(longBalanceAfterLiquidation);
+        expect(seizedLongAmount).to.be.gt(0, "LONG tokens should be seized");
 
-          if (remainingDebt.gt(0)) {
-            // Calculate how much DSA needed to repay remaining SHORT debt
-            // This would involve swapping DSA → SHORT
-            const dsaToSwap = remainingDebt.mul(5000).div(1); // Approximate USDC amount needed
+        // Position still has DSA and remaining debt; user could close with DSA later
+        const remainingDebt = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+        expect(remainingDebt).to.be.gt(0, "Remaining debt after partial liquidation");
+        expect(dsaBalanceAfterOpen).to.be.gt(0, "Should still have DSA to repay with");
+      });
 
-            const repaySwapData = await getManipulatedSwapData(
-              DSA_ADDRESS,
-              SHORT_ADDRESS,
-              dsaToSwap,
-              remainingDebt,
-              rpm.address,
-            );
+      it("liquidate position and seize DSA token when LONG = DSA", async () => {
+        const INITIAL_PRINCIPAL = parseEther("8000");
+        const SHORT_AMOUNT = parseEther("1"); // ETH to borrow
+        const LONG_AMOUNT = parseEther("3000"); // USDC as LONG (same token as DSA)
 
-            // Close remaining position with DSA
-            // Note: This is a conceptual test - actual implementation may vary
-            console.log("Remaining debt can be repaid using DSA principal");
-            expect(dsaBalanceAfterOpen).to.be.gt(0, "Should still have DSA to repay with");
-          }
-        } catch (error: any) {
-          // If liquidation fails, position is not underwater
-          console.log("Liquidation not possible - position not underwater:", error.message);
-          expect(error.message).to.include("INSUFFICIENT_SHORTFALL");
-        }
+        // DSA = LONG = USDC, SHORT = ETH
+        const longVTokenForTest = dsaVToken;
+
+        // Fund Alice with DSA tokens
+        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
+        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
+        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
+
+        // ========================================
+        // STEP 1: Activate Position
+        // ========================================
+        const leverage = parseEther("5"); // 5x leverage
+        await rpm
+          .connect(alice)
+          .activatePosition(longVTokenForTest.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
+
+        const position = await rpm.getPosition(alice.address, longVTokenForTest.address, shortVToken.address);
+        const positionAccount = position.positionAccount;
+
+        // ========================================
+        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
+        // ========================================
+        const minLong = LONG_AMOUNT.mul(98).div(100); // 2% slippage
+
+        const openSwapData = await getManipulatedSwapData(
+          SHORT_ADDRESS,
+          DSA_ADDRESS,
+          SHORT_AMOUNT,
+          LONG_AMOUNT,
+          leverageManager.address,
+          vDSA_ADDRESS, // tokenOutWhaleOverride: vUSDC holds USDC underlying
+        );
+
+        await rpm
+          .connect(alice)
+          .openPosition(longVTokenForTest.address, shortVToken.address, 0, SHORT_AMOUNT, minLong, openSwapData);
+
+        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+        const longCollateralAfterOpen = await rpm.callStatic.getLongCollateralBalance(
+          alice.address,
+          longVTokenForTest.address,
+          shortVToken.address,
+        );
+        // When LONG = DSA, balanceOfUnderlying returns combined long + principal;
+        // use getSuppliedPrincipalBalance to get just the DSA principal portion.
+        const dsaBalanceAfterOpen = await rpm.callStatic.getSuppliedPrincipalBalance(
+          alice.address,
+          longVTokenForTest.address,
+          shortVToken.address,
+        );
+
+        expect(shortDebtAfterOpen).to.be.gt(0, "Should have short debt");
+        expect(longCollateralAfterOpen).to.be.gt(0, "Should have long collateral");
+        expect(dsaBalanceAfterOpen).to.be.gt(0, "Should have DSA principal");
+
+        // ========================================
+        // STEP 3: Drop LONG (DSA/USDC) price to make position liquidatable
+        // ========================================
+        const oracleAddr = await comptroller.oracle();
+        const oracle = ResilientOracleInterface__factory.connect(oracleAddr, ethers.provider);
+        const dsaPriceBefore = await oracle.getPrice(DSA_ADDRESS);
+        const dsaPriceDropped = dsaPriceBefore.mul(10).div(100); // 90% drop
+        await setOraclePrice(comptroller, DSA_ADDRESS, dsaPriceDropped);
+
+        // ========================================
+        // STEP 4: Liquidate and seize DSA (LONG) token
+        // ========================================
+        const shortDebtBeforeLiquidation = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+        const repayAmount = shortDebtBeforeLiquidation.div(5); // Liquidate 20% of debt
+        await shortToken.connect(liquidator).approve(vSHORT_ADDRESS, repayAmount);
+
+        const liquidatorVDSABalanceBefore = await dsaVToken.balanceOf(liquidator.address);
+        const suppliedPrincipalBeforeLiquidation = await rpm.callStatic.getSuppliedPrincipalBalance(
+          alice.address,
+          longVTokenForTest.address,
+          shortVToken.address,
+        );
+
+        // Verify position is liquidatable (shortfall > 0)
+        const [, , shortfall] = await comptroller.getAccountLiquidity(positionAccount);
+        expect(shortfall).to.be.gt(0, "Position should be liquidatable (shortfall > 0)");
+
+        await shortVTokenLiquidate.liquidateBorrow(
+          positionAccount,
+          repayAmount,
+          longVTokenForTest.address, // Seize DSA (which is LONG since LONG = DSA)
+        );
+
+        const liquidatorVDSABalanceAfter = await dsaVToken.balanceOf(liquidator.address);
+        const shortDebtAfterLiquidation = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+        const suppliedPrincipalAfterLiquidation = await rpm.callStatic.getSuppliedPrincipalBalance(
+          alice.address,
+          longVTokenForTest.address,
+          shortVToken.address,
+        );
+
+        // Validate liquidation results
+        expect(shortDebtAfterLiquidation).to.be.lt(
+          shortDebtBeforeLiquidation,
+          "Short debt should decrease after liquidation",
+        );
+
+        expect(suppliedPrincipalAfterLiquidation).to.be.lt(
+          suppliedPrincipalBeforeLiquidation,
+          "DSA principal balance should decrease (seized as LONG collateral)",
+        );
+
+        // Seized collateral is transferred as vToken (vDSA) to liquidator
+        expect(liquidatorVDSABalanceAfter).to.be.gt(
+          liquidatorVDSABalanceBefore,
+          "Liquidator should receive vDSA (seized LONG collateral) tokens",
+        );
       });
     });
   });
