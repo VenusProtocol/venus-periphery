@@ -45,7 +45,7 @@ contract RelativePositionManager is
     uint256 private constant PROPORTIONAL_CLOSE_MAX = 100;
 
     /// @dev Tolerance for proportional close: 100 = 1% margin of error // TBD (also can make a setter for this)
-    uint256 private constant PROPORTIONAL_CLOSE_TOLERANCE = 1;
+    uint256 private constant PROPORTIONAL_CLOSE_TOLERANCE = 2;
 
     /// @notice The Venus comptroller contract
     IComptroller public immutable COMPTROLLER;
@@ -452,11 +452,9 @@ contract RelativePositionManager is
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
         _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
 
-        uint256 longDustRedeemed = 0;
+        uint256 longDustRedeemed;
         if (closeFractionBps == PROPORTIONAL_CLOSE_MAX) {
-            if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert PositionNotFullyClosed();
-            longDustRedeemed = _getLongCollateralBalance(position);
-            _redeemUnderlyingToUser(longVToken, positionAccount, longDustRedeemed);
+            longDustRedeemed = _verifyFullClose(position, longVToken, shortVToken);
         }
 
         emit PositionClosed(
@@ -575,11 +573,9 @@ contract RelativePositionManager is
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
         _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
 
-        uint256 longDustRedeemed = 0;
+        uint256 longDustRedeemed;
         if (closeFractionBps == PROPORTIONAL_CLOSE_MAX) {
-            if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert PositionNotFullyClosed();
-            longDustRedeemed = _getLongCollateralBalance(position);
-            _redeemUnderlyingToUser(longVToken, positionAccount, longDustRedeemed);
+            longDustRedeemed = _verifyFullClose(position, longVToken, shortVToken);
         }
 
         emit PositionClosed(
@@ -894,12 +890,58 @@ contract RelativePositionManager is
     function _redeemUnderlyingToUser(IVToken vToken, address fromAccount, uint256 amount) internal {
         if (amount == 0) return;
         uint256 err = vToken.redeemUnderlyingBehalf(fromAccount, amount);
+
         if (err != SUCCESS) revert RedeemBehalfFailed(err);
         IERC20Upgradeable underlying = IERC20Upgradeable(vToken.underlying());
         uint256 balance = underlying.balanceOf(address(this));
         if (balance > 0) {
             underlying.safeTransfer(msg.sender, balance);
             emit UnderlyingTransferred(address(underlying), fromAccount, msg.sender, balance);
+        }
+    }
+
+    /**
+     * @notice Verifies full close conditions and handles remaining long dust after a 100% close
+     * @dev Only acts when closeFractionBps == 100. Verifies all short debt is repaid, then handles
+     *      remaining long vTokens:
+     *      - If long == DSA: reclassifies remaining long vTokens as principal (redeemed during deactivation)
+     *      - If long != DSA: redeems remaining long vTokens directly to the user
+     *      Uses redeemBehalf (vToken amount) instead of redeemUnderlyingBehalf (underlying amount)
+     *      to avoid precision loss: when a small underlying dust amount is divided by the exchange rate,
+     *      the result can truncate to 0 vTokens, causing the redeem to revert.
+     * @param position The position storage reference
+     * @param longVToken The long market vToken
+     * @param shortVToken The short market vToken
+     * @return longDustRedeemed The underlying amount redeemed (or reclassified) as dust
+     */
+    function _verifyFullClose(
+        Position storage position,
+        IVToken longVToken,
+        IVToken shortVToken
+    ) internal returns (uint256 longDustRedeemed) {
+        address positionAccount = position.positionAccount;
+        if (shortVToken.borrowBalanceCurrent(positionAccount) > 0) revert PositionNotFullyClosed();
+
+        uint256 remainingLongVTokens = longVToken.balanceOf(positionAccount);
+        if (remainingLongVTokens == 0) return 0;
+
+        IVToken dsaVToken = IVToken(position.dsaVToken);
+
+        if (address(longVToken) == address(dsaVToken)) {
+            // Read long collateral (excludes current principal) before reclassifying.
+            longDustRedeemed = _getLongCollateralBalance(position);
+            // Set suppliedPrincipal to the full vToken balance.
+            position.suppliedPrincipal = longVToken.balanceOf(positionAccount);
+        } else {
+            uint256 err = longVToken.redeemBehalf(positionAccount, remainingLongVTokens);
+            if (err != SUCCESS) revert RedeemBehalfFailed(err);
+
+            IERC20Upgradeable underlying = IERC20Upgradeable(longVToken.underlying());
+            longDustRedeemed = underlying.balanceOf(address(this));
+            if (longDustRedeemed > 0) {
+                underlying.safeTransfer(msg.sender, longDustRedeemed);
+                emit UnderlyingTransferred(address(underlying), positionAccount, msg.sender, longDustRedeemed);
+            }
         }
     }
 
@@ -959,8 +1001,6 @@ contract RelativePositionManager is
         uint256 tokenOutBalanceAfter = tokenOut.balanceOf(address(this));
         amountOut = tokenOutBalanceAfter - tokenOutBalanceBefore;
         if (amountOut < minAmountOut) revert SlippageExceeded();
-
-        return amountOut;
     }
 
     /**

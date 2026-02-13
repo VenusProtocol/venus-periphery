@@ -25,6 +25,8 @@ interface IVToken is IERC20Upgradeable {
 
     function redeemUnderlyingBehalf(address redeemer, uint redeemAmount) external returns (uint);
 
+    function redeemBehalf(address redeemer, uint redeemTokens) external returns (uint);
+
     function comptroller() external view returns (IComptroller);
 
     function borrowBalanceStored(address account) external view returns (uint256);
