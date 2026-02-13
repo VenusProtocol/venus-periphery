@@ -17,9 +17,7 @@ import {
   RelativePositionManager,
   ResilientOracleInterface__factory,
   SwapHelper,
-  VBep20Delegator__factory,
   VBep20Interface__factory,
-  VToken__factory,
 } from "../../../typechain";
 import { forking, initMainnetUser } from "./utils";
 
@@ -268,8 +266,8 @@ async function setMaxStalePeriod() {
     {
       name: "USDC (DSA)",
       asset: DSA_ADDRESS,
-      redstoneFeed: "0xeA2511205b959548459A01e358E0A30424dc0B70", // TODO: Add RedStone feed
-      chainlinkFeed: "0x51597f405303C4377E36123cBc172b13269EA163", // TODO: Add Chainlink feed
+      redstoneFeed: "0xeA2511205b959548459A01e358E0A30424dc0B70",
+      chainlinkFeed: "0x51597f405303C4377E36123cBc172b13269EA163",
       binanceSymbol: "USDC",
     },
     {
@@ -282,8 +280,8 @@ async function setMaxStalePeriod() {
     {
       name: "ETH (SHORT)",
       asset: SHORT_ADDRESS,
-      redstoneFeed: "0x9cF19D284862A66378c304ACAcB0E857EBc3F856", // TODO: Add RedStone feed
-      chainlinkFeed: "0xe48a5Fd74d4A5524D76960ef3B52204C0e11fCD1", // TODO: Add Chainlink feed
+      redstoneFeed: "0x9cF19D284862A66378c304ACAcB0E857EBc3F856",
+      chainlinkFeed: "0xe48a5Fd74d4A5524D76960ef3B52204C0e11fCD1",
       binanceSymbol: "ETH",
     },
   ];
@@ -316,28 +314,6 @@ async function setMaxStalePeriod() {
   await binanceOracle.setMaxStalePeriod("BNB", ONE_YEAR);
 }
 
-// TODO: Remove once tests are finalized.
-async function upgradeVTokens() {
-  const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseEther("1"));
-  const UpdatedVToken = await ethers.getContractFactory("VBep20Delegate");
-  const vTokenImpl = await UpdatedVToken.deploy();
-
-  const vUSDC = VBep20Delegator__factory.connect(vDSA_ADDRESS, ethers.provider);
-  const vWBNB = VBep20Delegator__factory.connect(vLONG_ADDRESS, ethers.provider);
-  const vETH = VBep20Delegator__factory.connect(vSHORT_ADDRESS, ethers.provider);
-
-  await vUSDC.connect(timelock)._setImplementation(vTokenImpl.address, false, "0x");
-  await vWBNB.connect(timelock)._setImplementation(vTokenImpl.address, false, "0x");
-  await vETH.connect(timelock)._setImplementation(vTokenImpl.address, false, "0x");
-
-  const acm = IAccessControlManagerV8__factory.connect(ACM_ADDRESS, timelock);
-  for (const vTokenAddress of [vDSA_ADDRESS, vLONG_ADDRESS, vSHORT_ADDRESS]) {
-    await acm.giveCallPermission(vTokenAddress, "setFlashLoanEnabled(bool)", NORMAL_TIMELOCK);
-    const market = VToken__factory.connect(vTokenAddress, timelock);
-    await market.setFlashLoanEnabled(true);
-  }
-}
-
 // --- Forked RPM setup ---
 
 type RpmForkFixture = {
@@ -358,18 +334,10 @@ async function setupRpmForkFixture(): Promise<RpmForkFixture> {
 
   const comptroller = await ComptrollerMock__factory.connect(COMPTROLLER_ADDRESS, timelock);
 
-  // const leverageManager = (await ethers.getContractAt(
-  //   "LeverageStrategiesManager",
-  //   LEVERAGE_STRATEGIES_MANAGER,
-  // )) as LeverageStrategiesManager;
-  const vBNB_ADDRESS = "0xA07c5b74C9B40447a954e1466938b865b6BBea36";
-  const leverageStrategiesManagerFactory = await ethers.getContractFactory("LeverageStrategiesManager");
-  const leverageManager = await upgrades.deployProxy(leverageStrategiesManagerFactory, [], {
-    constructorArgs: [comptroller.address, SWAP_HELPER, vBNB_ADDRESS],
-    initializer: "initialize",
-    unsafeAllow: ["state-variable-immutable"],
-  });
-  await comptroller.setWhiteListFlashLoanAccount(leverageManager.address, true);
+  const leverageManager = (await ethers.getContractAt(
+    "LeverageStrategiesManager",
+    LEVERAGE_STRATEGIES_MANAGER,
+  )) as LeverageStrategiesManager;
 
   const RPMFactory = await ethers.getContractFactory("RelativePositionManager");
   const rpm = (await upgrades.deployProxy(RPMFactory, [ACM_ADDRESS], {
@@ -423,8 +391,6 @@ forking(80929690, () => {
 
     before(async function () {
       await setMaxStalePeriod();
-      // TODO: Remove once tests are finalized
-      await upgradeVTokens();
     });
 
     beforeEach(async () => {
@@ -438,7 +404,7 @@ forking(80929690, () => {
         const INITIAL_PRINCIPAL = parseEther("10000");
         const SHORT_AMOUNT = parseEther("5");
         const leverage = parseEther("2");
-        const closeFractionBps = 50; // Close 50% of position
+        const closeFractionBps = 30; // Close 30% of position
 
         // ========================================
         // SETUP: Fund Alice with DSA tokens
@@ -560,9 +526,9 @@ forking(80929690, () => {
         const shortRepaidTolerance = expectedShortToRepay.mul(2).div(100); // 2% tolerance
         expect(actualShortRepaid).to.be.closeTo(expectedShortToRepay, shortRepaidTolerance as any);
 
-        // Verify remaining balances are approximately 50% (within 2% tolerance)
-        const expectedRemainingShortDebt = shortDebtAfterOpen.mul(50).div(100);
-        const expectedRemainingLongBalance = longBalanceAfterOpen.mul(50).div(100);
+        // Verify remaining balances are approximately (1 - closeFractionBps) of the initial amounts (within 2% tolerance)
+        const expectedRemainingShortDebt = shortDebtAfterOpen.mul(100 - closeFractionBps).div(100);
+        const expectedRemainingLongBalance = longBalanceAfterOpen.mul(100 - closeFractionBps).div(100);
 
         const remainingShortTolerance = expectedRemainingShortDebt.mul(2).div(100); // 2% tolerance
         expect(shortDebtAfterClose).to.be.closeTo(expectedRemainingShortDebt, remainingShortTolerance as any);
@@ -873,9 +839,9 @@ forking(80929690, () => {
       });
 
       it("full close with loss from price movement", async () => {
-        const INITIAL_PRINCIPAL = parseEther("10000");
-        const SHORT_AMOUNT = parseEther("5");
-        const leverage = parseEther("2");
+        const INITIAL_PRINCIPAL = parseEther("15000");
+        const SHORT_AMOUNT = parseEther("3");
+        const leverage = parseEther("3");
         const closeFractionBps = 100; // Full close
 
         // ========================================
@@ -1016,10 +982,10 @@ forking(80929690, () => {
 
     describe("favorable price deviation", () => {
       it("partial close with profit from price movement", async () => {
-        const INITIAL_PRINCIPAL = parseEther("10000");
-        const SHORT_AMOUNT = parseEther("5");
-        const leverage = parseEther("2");
-        const closeFractionBps = 50; // Close 50% of position
+        const INITIAL_PRINCIPAL = parseEther("9000");
+        const SHORT_AMOUNT = parseEther("4");
+        const leverage = parseEther("1.5");
+        const closeFractionBps = 60; // Close 60% of position
 
         // ========================================
         // SETUP: Fund Alice with DSA tokens
@@ -1168,9 +1134,9 @@ forking(80929690, () => {
       });
 
       it("full close with profit from price movement", async () => {
-        const INITIAL_PRINCIPAL = parseEther("10000");
-        const SHORT_AMOUNT = parseEther("5");
-        const leverage = parseEther("2");
+        const INITIAL_PRINCIPAL = parseEther("11000");
+        const SHORT_AMOUNT = parseEther("6");
+        const leverage = parseEther("2.5");
         const closeFractionBps = 100; // Full close
 
         // ========================================
@@ -1320,10 +1286,10 @@ forking(80929690, () => {
       const DSA_WHALE_FOR_SWAP = vDSA_ADDRESS;
 
       it("partial close with loss when LONG = DSA", async () => {
-        const INITIAL_PRINCIPAL = parseEther("10000");
-        const DSA_AMOUNT = parseEther("5000"); // USDC to supply as principal
-        const SHORT_AMOUNT = parseEther("1"); // ETH to borrow
-        const LONG_AMOUNT = parseEther("4000"); // USDC as LONG (same token as DSA, different amount)
+        const INITIAL_PRINCIPAL = parseEther("14000");
+        const DSA_AMOUNT = parseEther("6000"); // USDC to supply as principal
+        const SHORT_AMOUNT = parseEther("1.25"); // ETH to borrow
+        const LONG_AMOUNT = parseEther("4500"); // USDC as LONG (same token as DSA, different amount)
 
         // DSA = LONG = USDC, SHORT = ETH — use fixture dsa, short, shortVToken, dsaVToken
         const dsaAddress = DSA_ADDRESS;
@@ -1506,10 +1472,10 @@ forking(80929690, () => {
       });
 
       it("full close with loss when LONG = DSA", async () => {
-        const INITIAL_PRINCIPAL = parseEther("10000");
-        const DSA_AMOUNT = parseEther("5000"); // USDC to supply as principal
-        const SHORT_AMOUNT = parseEther("1"); // ETH to borrow
-        const LONG_AMOUNT = parseEther("4000"); // USDC as LONG (same token as DSA, different amount)
+        const INITIAL_PRINCIPAL = parseEther("16000");
+        const DSA_AMOUNT = parseEther("7000"); // USDC to supply as principal
+        const SHORT_AMOUNT = parseEther("1.5"); // ETH to borrow
+        const LONG_AMOUNT = parseEther("5000"); // USDC as LONG (same token as DSA, different amount)
 
         // DSA = LONG = USDC, SHORT = ETH — use fixture dsa, short, shortVToken, dsaVToken
         const dsaAddress = DSA_ADDRESS;

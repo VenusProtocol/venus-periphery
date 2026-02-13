@@ -924,7 +924,7 @@ describe("RelativePositionManager", () => {
             minLongAmount,
             swapData,
           ),
-      ).to.be.revertedWithCustomError(relativePositionManager, "ZeroBorrowAmount");
+      ).to.be.revertedWithCustomError(relativePositionManager, "ZeroShortAmount");
     });
 
     it("should revert when no principal and no additional principal", async () => {

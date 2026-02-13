@@ -98,8 +98,8 @@ interface IRelativePositionManager {
     /// @custom:error ZeroAmount when amount is zero
     error ZeroAmount();
 
-    /// @custom:error ZeroBorrowAmount when borrow amount is zero
-    error ZeroBorrowAmount();
+    /// @custom:error ZeroShortAmount when borrow amount is zero
+    error ZeroShortAmount();
 
     /// @custom:error ZeroDebt when there is no short debt to close
     error ZeroDebt();
@@ -135,8 +135,8 @@ interface IRelativePositionManager {
     /// @custom:error InvalidCollateralFactor when a market's collateral factor is configured to be >= 100%
     error InvalidCollateralFactor();
 
-    /// @custom:error NonZeroLongAmountWhenExpectedZero when proportional close expects zero long (no long to close) but user passed non-zero total long amount
-    error NonZeroLongAmountWhenExpectedZero();
+    /// @custom:error InvalidLongAmountToRedeem when proportional close expects zero long (no long to close) but user passed non-zero total long amount
+    error InvalidLongAmountToRedeem();
 
     /// @custom:error InvalidCloseFractionBps when closeFractionBps is not between 1 and 100 (percentage)
     error InvalidCloseFractionBps();
@@ -347,16 +347,25 @@ interface IRelativePositionManager {
 
     /**
      * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
-     * @dev Repay amount is derived from BPS. Total long validated against BPS (1% tolerance). minAmountOutRepay must be >= calculated repay.
+     * @dev Repay amount is derived from BPS. Total long validated against BPS (within PROPORTIONAL_CLOSE_TOLERANCE). minAmountOutRepay must be >= calculated repay.
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param longAmountToRedeemForRepay Amount of long to redeem for the repay leg (validated against BPS)
+     * @param minAmountOutRepay Minimum short out from the repay swap (must be >= calculated repay amount for this BPS)
+     * @param swapDataRepay Swap #1: long → short for debt repayment
+     * @param longAmountToRedeemForProfit Amount of long to redeem and swap long→DSA as profit (can be non-zero for partial or full close)
+     * @param minAmountOutProfit Minimum DSA out from the profit swap
+     * @param swapDataProfit Swap #2: long → DSA for profit realization
      */
     function closeWithProfit(
         IVToken longVToken,
         IVToken shortVToken,
         uint256 closeFractionBps,
-        uint256 collateralAmountToRedeem,
+        uint256 longAmountToRedeemForRepay,
         uint256 minAmountOutRepay,
         bytes calldata swapDataRepay,
-        uint256 amountToRedeemForProfitSwap,
+        uint256 longAmountToRedeemForProfit,
         uint256 minAmountOutProfit,
         bytes calldata swapDataProfit
     ) external;
@@ -368,11 +377,11 @@ interface IRelativePositionManager {
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param closeFractionBps Proportion to close in percentage (100 = 100%)
-     * @param borrowedAmountToRepayFirst Short to repay in first exit (0 <= value <= BPS-derived expected short)
-     * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within 1% tolerance)
+     * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within PROPORTIONAL_CLOSE_TOLERANCE)
+     * @param shortAmountToRepayForFirstSwap Short to repay in first exit (0 <= value <= BPS-derived expected short)
      * @param minAmountOutFirst Minimum amount out from first swap (must be >= borrowedAmountToRepayFirst when first repay > 0)
      * @param swapDataFirst Calldata for first swap (long → short)
-     * @param dsaAmountToRedeemForRepay DSA to redeem for second exit repay
+     * @param dsaAmountToRedeemForSecondSwap DSA to redeem for second exit repay
      * @param minAmountOutSecond Minimum amount out from second swap
      * @param swapDataSecond Calldata for second swap (DSA → short)
      */
@@ -380,11 +389,11 @@ interface IRelativePositionManager {
         IVToken longVToken,
         IVToken shortVToken,
         uint256 closeFractionBps,
-        uint256 borrowedAmountToRepayFirst,
         uint256 longAmountToRedeemForFirstSwap,
+        uint256 shortAmountToRepayForFirstSwap,
         uint256 minAmountOutFirst,
         bytes calldata swapDataFirst,
-        uint256 dsaAmountToRedeemForRepay,
+        uint256 dsaAmountToRedeemForSecondSwap,
         uint256 minAmountOutSecond,
         bytes calldata swapDataSecond
     ) external;
