@@ -387,7 +387,7 @@ forking(80929690, () => {
   let alice: any;
 
   describe("RelativePositionManager forked flows", async function () {
-    this.timeout(800000); // 9 minutes
+    this.timeout(720000); // 12 minutes
 
     before(async function () {
       await setMaxStalePeriod();
@@ -398,6 +398,89 @@ forking(80929690, () => {
         await loadFixture(setupRpmForkFixture));
       [, alice] = await ethers.getSigners();
     });
+
+    /**
+     * Shared helper: funds Alice, activates a position, opens it with manipulated swap data,
+     * records and validates the post-open state, and returns key values for further test steps.
+     */
+    async function activateAndOpenPosition(params: {
+      initialPrincipal: BigNumber;
+      shortAmount: BigNumber;
+      longAmount: BigNumber;
+      leverage: BigNumber;
+      useLongVToken?: IVToken;
+      longAddress?: string;
+      tokenOutWhaleOverride?: string;
+      accrueAfterOpen?: boolean;
+    }): Promise<{
+      positionAccount: string;
+      shortDebtAfterOpen: BigNumber;
+      longBalanceAfterOpen: BigNumber;
+      effectiveLongVToken: IVToken;
+    }> {
+      const effectiveLongVToken = params.useLongVToken ?? longVToken;
+      const effectiveLongAddress = params.longAddress ?? LONG_ADDRESS;
+
+      // Fund Alice with DSA tokens
+      const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
+      await dsa.connect(whaleSigner).transfer(alice.address, params.initialPrincipal);
+      await dsa.connect(alice).approve(rpm.address, params.initialPrincipal);
+
+      // Activate Position
+      await rpm
+        .connect(alice)
+        .activatePosition(
+          effectiveLongVToken.address,
+          shortVToken.address,
+          0,
+          params.initialPrincipal,
+          params.leverage,
+        );
+
+      const position = await rpm.getPosition(alice.address, effectiveLongVToken.address, shortVToken.address);
+      const positionAccount = position.positionAccount;
+      expect(position.isActive).to.eq(true, "Position should be active after activation");
+
+      // Open Position (Borrow SHORT → Swap to LONG)
+      const minLong = params.longAmount.mul(98).div(100);
+      const openSwapData = await getManipulatedSwapData(
+        SHORT_ADDRESS,
+        effectiveLongAddress,
+        params.shortAmount,
+        params.longAmount,
+        leverageManager.address,
+        params.tokenOutWhaleOverride,
+      );
+
+      await rpm
+        .connect(alice)
+        .openPosition(effectiveLongVToken.address, shortVToken.address, 0, params.shortAmount, minLong, openSwapData);
+
+      if (params.accrueAfterOpen) {
+        await effectiveLongVToken.connect(alice).accrueInterest();
+        await shortVToken.connect(alice).accrueInterest();
+      }
+
+      const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
+      const longBalanceAfterOpen = await rpm.callStatic.getLongCollateralBalance(
+        alice.address,
+        effectiveLongVToken.address,
+        shortVToken.address,
+      );
+
+      // Basic validations
+      const shortDebtTolerance = params.shortAmount.mul(1).div(10000);
+      expect(shortDebtAfterOpen).to.be.closeTo(params.shortAmount, shortDebtTolerance as any);
+      expect(longBalanceAfterOpen).to.be.gte(
+        params.longAmount.mul(98).div(100),
+        "Long balance should be >= minimum amount out",
+      );
+
+      const positionAfterOpen = await rpm.getPosition(alice.address, effectiveLongVToken.address, shortVToken.address);
+      expect(positionAfterOpen.isActive).to.eq(true, "Position should be active after opening");
+
+      return { positionAccount, shortDebtAfterOpen, longBalanceAfterOpen, effectiveLongVToken };
+    }
 
     describe("no price deviation (slippage only)", () => {
       it("open + partial close with profit (three distinct tokens)", async () => {
@@ -464,7 +547,7 @@ forking(80929690, () => {
         expect(positionAfterOpen.isActive).to.eq(true, "Position should be active after opening");
 
         // ========================================
-        // STEP 3: Partial Close with Profit (50%)
+        // STEP 3: Partial Close with Profit (30%)
         // ========================================
 
         // Calculate expected amounts based on close fraction
@@ -797,7 +880,7 @@ forking(80929690, () => {
           closeFractionBps,
           longToRedeem,
           shortAmountAfterLongSwap, // Amount we actually get from first swap (not expectedShortToRepay)
-          shortAmountAfterLongSwap, // Min amount out from first swap (same as above needs to be diffrent when flashLoan fee applies)
+          shortAmountAfterLongSwap, // Min amount out from first swap (same as above needs to be different when flashLoan fee applies)
           firstSwapData,
           dsaAmountToSwap,
           shortAmountFromDsaSwap,
@@ -928,7 +1011,7 @@ forking(80929690, () => {
           DSA_ADDRESS,
           SHORT_ADDRESS,
           dsaAmountToSwap,
-          shortAmountFromDsaSwap, // Output with buffer (extra would be transfered back to teh user as dust)
+          shortAmountFromDsaSwap, // Output with buffer (extra would be transferred back to the user as dust)
           leverageManager.address,
         );
 
@@ -1286,75 +1369,26 @@ forking(80929690, () => {
       const DSA_WHALE_FOR_SWAP = vDSA_ADDRESS;
 
       it("partial close with loss when LONG = DSA", async () => {
-        const INITIAL_PRINCIPAL = parseEther("14000");
-        const DSA_AMOUNT = parseEther("6000"); // USDC to supply as principal
-        const SHORT_AMOUNT = parseEther("1.25"); // ETH to borrow
-        const LONG_AMOUNT = parseEther("4500"); // USDC as LONG (same token as DSA, different amount)
-
-        // DSA = LONG = USDC, SHORT = ETH — use fixture dsa, short, shortVToken, dsaVToken
+        const DSA_AMOUNT = parseEther("6000");
         const dsaAddress = DSA_ADDRESS;
         const longAddress = DSA_ADDRESS;
         const shortAddress = SHORT_ADDRESS;
-        const longVToken = dsaVToken;
         const shortToken = short;
 
-        // Fund Alice with DSA tokens
-        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
-        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
-        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
-
-        // ========================================
-        // STEP 1: Activate Position
-        // ========================================
-        const leverage = parseEther("2"); // 2x leverage
-        await rpm
-          .connect(alice)
-          .activatePosition(longVToken.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
-
-        const position = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        const positionAccount = position.positionAccount;
-
-        // ========================================
-        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
-        // ========================================
-        const minLong = LONG_AMOUNT.mul(98).div(100); // 2% slippage
-
-        const openSwapData = await getManipulatedSwapData(
-          shortAddress,
-          longAddress,
-          SHORT_AMOUNT,
-          LONG_AMOUNT,
-          leverageManager.address,
-          DSA_WHALE_FOR_SWAP, // tokenOut = LONG = USDC
-        );
-
-        await rpm.connect(alice).openPosition(
-          longVToken.address,
-          shortVToken.address,
-          0, // No additional principal (already supplied in activatePosition)
-          SHORT_AMOUNT,
-          minLong,
-          openSwapData,
-        );
-
-        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
-        // Use RPM's long collateral (matches _getProportionalCloseAmounts) — when LONG=DSA this excludes principal
-        const longCollateralAfterOpen = await rpm.callStatic.getLongCollateralBalance(
-          alice.address,
-          longVToken.address,
-          shortVToken.address,
-        );
-
-        // VALIDATION 1: Verify short debt matches borrowed amount (within 0.01% tolerance for interest)
-        const shortDebtTolerance = SHORT_AMOUNT.mul(1).div(10000); // 0.01% tolerance
-        expect(shortDebtAfterOpen).to.be.closeTo(SHORT_AMOUNT, shortDebtTolerance as any);
-
-        // VALIDATION 2: Verify long collateral meets or exceeds the minimum amount out from swap
-        expect(longCollateralAfterOpen).to.be.gte(minLong, "Long collateral should be >= minimum amount out");
-
-        // VALIDATION 3: Verify position is active
-        const positionAfterOpen = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        expect(positionAfterOpen.isActive).to.eq(true, "Position should be active after opening");
+        const {
+          positionAccount,
+          shortDebtAfterOpen,
+          longBalanceAfterOpen: longCollateralAfterOpen,
+          effectiveLongVToken: longVToken,
+        } = await activateAndOpenPosition({
+          initialPrincipal: parseEther("14000"),
+          shortAmount: parseEther("1.25"),
+          longAmount: parseEther("4500"),
+          leverage: parseEther("2"),
+          useLongVToken: dsaVToken,
+          longAddress: DSA_ADDRESS,
+          tokenOutWhaleOverride: DSA_WHALE_FOR_SWAP,
+        });
 
         // ========================================
         // STEP 3: Partial Close with Loss (50%)
@@ -1472,77 +1506,27 @@ forking(80929690, () => {
       });
 
       it("full close with loss when LONG = DSA", async () => {
-        const INITIAL_PRINCIPAL = parseEther("16000");
-        const DSA_AMOUNT = parseEther("7000"); // USDC to supply as principal
-        const SHORT_AMOUNT = parseEther("1.5"); // ETH to borrow
-        const LONG_AMOUNT = parseEther("5000"); // USDC as LONG (same token as DSA, different amount)
-
-        // DSA = LONG = USDC, SHORT = ETH — use fixture dsa, short, shortVToken, dsaVToken
+        const DSA_AMOUNT = parseEther("7000");
         const dsaAddress = DSA_ADDRESS;
         const longAddress = DSA_ADDRESS;
         const shortAddress = SHORT_ADDRESS;
-        const longVToken = dsaVToken;
         const shortToken = short;
 
-        // Fund Alice with DSA tokens
-        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
-        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
-        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
-
-        // ========================================
-        // STEP 1: Activate Position
-        // ========================================
-        const leverage = parseEther("2"); // 2x leverage
-        await rpm
-          .connect(alice)
-          .activatePosition(longVToken.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
-
-        const position = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        const positionAccount = position.positionAccount;
-
-        // ========================================
-        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
-        // ========================================
-        const minLong = LONG_AMOUNT.mul(98).div(100); // 2% slippage
-
-        const openSwapData = await getManipulatedSwapData(
-          shortAddress,
-          longAddress,
-          SHORT_AMOUNT,
-          LONG_AMOUNT,
-          leverageManager.address,
-          DSA_WHALE_FOR_SWAP,
-        );
-
-        await rpm.connect(alice).openPosition(
-          longVToken.address,
-          shortVToken.address,
-          0, // No additional principal (already supplied in activatePosition)
-          SHORT_AMOUNT,
-          minLong,
-          openSwapData,
-        );
-
-        await longVToken.connect(alice).accrueInterest();
-        await shortVToken.connect(alice).accrueInterest();
-
-        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
-        const longCollateralAfterOpen = await rpm.callStatic.getLongCollateralBalance(
-          alice.address,
-          longVToken.address,
-          shortVToken.address,
-        );
-
-        // VALIDATION 1: Verify short debt matches borrowed amount (within 0.01% tolerance for interest)
-        const shortDebtTolerance = SHORT_AMOUNT.mul(1).div(10000); // 0.01% tolerance
-        expect(shortDebtAfterOpen).to.be.closeTo(SHORT_AMOUNT, shortDebtTolerance as any);
-
-        // VALIDATION 2: Verify long collateral meets or exceeds the minimum amount out from swap
-        expect(longCollateralAfterOpen).to.be.gte(minLong, "Long collateral should be >= minimum amount out");
-
-        // VALIDATION 3: Verify position is active
-        const positionAfterOpen = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        expect(positionAfterOpen.isActive).to.eq(true, "Position should be active after opening");
+        const {
+          positionAccount,
+          shortDebtAfterOpen,
+          longBalanceAfterOpen: longCollateralAfterOpen,
+          effectiveLongVToken: longVToken,
+        } = await activateAndOpenPosition({
+          initialPrincipal: parseEther("16000"),
+          shortAmount: parseEther("1.5"),
+          longAmount: parseEther("5000"),
+          leverage: parseEther("2"),
+          useLongVToken: dsaVToken,
+          longAddress: DSA_ADDRESS,
+          tokenOutWhaleOverride: DSA_WHALE_FOR_SWAP,
+          accrueAfterOpen: true,
+        });
 
         // ========================================
         // STEP 3: Full Close with Loss (100%)
@@ -1653,77 +1637,24 @@ forking(80929690, () => {
       });
 
       it("partial close with profit when LONG = DSA", async () => {
-        const INITIAL_PRINCIPAL = parseEther("10000");
-        const DSA_AMOUNT = parseEther("5000"); // USDC to supply as principal
-        const SHORT_AMOUNT = parseEther("1"); // ETH to borrow
-        const LONG_AMOUNT = parseEther("4000"); // USDC as LONG (same token as DSA, different amount)
-
-        // DSA = LONG = USDC, SHORT = ETH — use fixture dsa, short, shortVToken, dsaVToken
-        const dsaAddress = DSA_ADDRESS;
         const longAddress = DSA_ADDRESS;
         const shortAddress = SHORT_ADDRESS;
-        const longVToken = dsaVToken;
-        const shortToken = short;
 
-        // Fund Alice with DSA tokens
-        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
-        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
-        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
-
-        // ========================================
-        // STEP 1: Activate Position
-        // ========================================
-        const leverage = parseEther("2"); // 2x leverage
-        await rpm
-          .connect(alice)
-          .activatePosition(longVToken.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
-
-        const position = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        const positionAccount = position.positionAccount;
-
-        // ========================================
-        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
-        // ========================================
-        const minLong = LONG_AMOUNT.mul(98).div(100); // 2% slippage
-
-        const openSwapData = await getManipulatedSwapData(
-          shortAddress,
-          longAddress,
-          SHORT_AMOUNT,
-          LONG_AMOUNT,
-          leverageManager.address,
-          DSA_WHALE_FOR_SWAP,
-        );
-
-        await rpm.connect(alice).openPosition(
-          longVToken.address,
-          shortVToken.address,
-          0, // No additional principal (already supplied in activatePosition)
-          SHORT_AMOUNT,
-          minLong,
-          openSwapData,
-        );
-
-        await longVToken.connect(alice).accrueInterest();
-        await shortVToken.connect(alice).accrueInterest();
-
-        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
-        const longCollateralAfterOpen = await rpm.callStatic.getLongCollateralBalance(
-          alice.address,
-          longVToken.address,
-          shortVToken.address,
-        );
-
-        // VALIDATION 1: Verify short debt matches borrowed amount (within 0.01% tolerance for interest)
-        const shortDebtTolerance = SHORT_AMOUNT.mul(1).div(10000); // 0.01% tolerance
-        expect(shortDebtAfterOpen).to.be.closeTo(SHORT_AMOUNT, shortDebtTolerance as any);
-
-        // VALIDATION 2: Verify long collateral meets or exceeds the minimum amount out from swap
-        expect(longCollateralAfterOpen).to.be.gte(minLong, "Long collateral should be >= minimum amount out");
-
-        // VALIDATION 3: Verify position is active
-        const positionAfterOpen = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        expect(positionAfterOpen.isActive).to.eq(true, "Position should be active after opening");
+        const {
+          positionAccount,
+          shortDebtAfterOpen,
+          longBalanceAfterOpen: longCollateralAfterOpen,
+          effectiveLongVToken: longVToken,
+        } = await activateAndOpenPosition({
+          initialPrincipal: parseEther("10000"),
+          shortAmount: parseEther("1"),
+          longAmount: parseEther("4000"),
+          leverage: parseEther("2"),
+          useLongVToken: dsaVToken,
+          longAddress: DSA_ADDRESS,
+          tokenOutWhaleOverride: DSA_WHALE_FOR_SWAP,
+          accrueAfterOpen: true,
+        });
 
         // ========================================
         // STEP 3: Partial Close with Profit (50%)
@@ -1820,77 +1751,24 @@ forking(80929690, () => {
       });
 
       it("full close with profit when LONG = DSA", async () => {
-        const INITIAL_PRINCIPAL = parseEther("10000");
-        const DSA_AMOUNT = parseEther("5000"); // USDC to supply as principal
-        const SHORT_AMOUNT = parseEther("1"); // ETH to borrow
-        const LONG_AMOUNT = parseEther("4000"); // USDC as LONG (same token as DSA, different amount)
-
-        // DSA = LONG = USDC, SHORT = ETH — use fixture dsa, short, shortVToken, dsaVToken
-        const dsaAddress = DSA_ADDRESS;
         const longAddress = DSA_ADDRESS;
         const shortAddress = SHORT_ADDRESS;
-        const longVToken = dsaVToken;
-        const shortToken = short;
 
-        // Fund Alice with DSA tokens
-        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
-        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
-        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
-
-        // ========================================
-        // STEP 1: Activate Position
-        // ========================================
-        const leverage = parseEther("2"); // 2x leverage
-        await rpm
-          .connect(alice)
-          .activatePosition(longVToken.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
-
-        const position = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        const positionAccount = position.positionAccount;
-
-        // ========================================
-        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
-        // ========================================
-        const minLong = LONG_AMOUNT.mul(98).div(100); // 2% slippage
-
-        const openSwapData = await getManipulatedSwapData(
-          shortAddress,
-          longAddress,
-          SHORT_AMOUNT,
-          LONG_AMOUNT,
-          leverageManager.address,
-          DSA_WHALE_FOR_SWAP,
-        );
-
-        await rpm.connect(alice).openPosition(
-          longVToken.address,
-          shortVToken.address,
-          0, // No additional principal (already supplied in activatePosition)
-          SHORT_AMOUNT,
-          minLong,
-          openSwapData,
-        );
-
-        await longVToken.connect(alice).accrueInterest();
-        await shortVToken.connect(alice).accrueInterest();
-
-        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
-        const longCollateralAfterOpen = await rpm.callStatic.getLongCollateralBalance(
-          alice.address,
-          longVToken.address,
-          shortVToken.address,
-        );
-
-        // VALIDATION 1: Verify short debt matches borrowed amount (within 0.01% tolerance for interest)
-        const shortDebtTolerance = SHORT_AMOUNT.mul(1).div(10000); // 0.01% tolerance
-        expect(shortDebtAfterOpen).to.be.closeTo(SHORT_AMOUNT, shortDebtTolerance as any);
-
-        // VALIDATION 2: Verify long collateral meets or exceeds the minimum amount out from swap
-        expect(longCollateralAfterOpen).to.be.gte(minLong, "Long collateral should be >= minimum amount out");
-
-        // VALIDATION 3: Verify position is active
-        const positionAfterOpen = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        expect(positionAfterOpen.isActive).to.eq(true, "Position should be active after opening");
+        const {
+          positionAccount,
+          shortDebtAfterOpen,
+          longBalanceAfterOpen: longCollateralAfterOpen,
+          effectiveLongVToken: longVToken,
+        } = await activateAndOpenPosition({
+          initialPrincipal: parseEther("10000"),
+          shortAmount: parseEther("1"),
+          longAmount: parseEther("4000"),
+          leverage: parseEther("2"),
+          useLongVToken: dsaVToken,
+          longAddress: DSA_ADDRESS,
+          tokenOutWhaleOverride: DSA_WHALE_FOR_SWAP,
+          accrueAfterOpen: true,
+        });
 
         // ========================================
         // STEP 3: Full Close with Profit (100%)
@@ -1998,47 +1876,15 @@ forking(80929690, () => {
       });
 
       it("liquidate position and seize DSA token", async () => {
-        const INITIAL_PRINCIPAL = parseEther("1000");
-        const SHORT_AMOUNT = parseEther("1.5"); // ETH to borrow
-        const LONG_AMOUNT = parseEther("30"); // WBNB to receive
+        const { positionAccount, shortDebtAfterOpen } = await activateAndOpenPosition({
+          initialPrincipal: parseEther("1000"),
+          shortAmount: parseEther("1.5"),
+          longAmount: parseEther("30"),
+          leverage: parseEther("3"),
+          tokenOutWhaleOverride: vLONG_ADDRESS,
+        });
 
-        // Fund Alice with DSA tokens
-        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
-        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
-        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
-
-        // ========================================
-        // STEP 1: Activate Position
-        // ========================================
-        const leverage = parseEther("3"); // 3x leverage
-        await rpm
-          .connect(alice)
-          .activatePosition(longVToken.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
-
-        const position = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        const positionAccount = position.positionAccount;
-
-        // ========================================
-        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
-        // ========================================
-        const minLong = LONG_AMOUNT.mul(98).div(100); // 2% slippage
-
-        const openSwapData = await getManipulatedSwapData(
-          SHORT_ADDRESS,
-          LONG_ADDRESS,
-          SHORT_AMOUNT,
-          LONG_AMOUNT,
-          leverageManager.address,
-          vLONG_ADDRESS,
-        );
-
-        await rpm
-          .connect(alice)
-          .openPosition(longVToken.address, shortVToken.address, 0, SHORT_AMOUNT, minLong, openSwapData);
-
-        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
         const dsaBalanceAfterOpen = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
-
         expect(shortDebtAfterOpen).to.be.gt(0, "Should have short debt");
         expect(dsaBalanceAfterOpen).to.be.gt(0, "Should have DSA principal");
 
@@ -2109,47 +1955,15 @@ forking(80929690, () => {
       });
 
       it("liquidate position and seize LONG token", async () => {
-        const INITIAL_PRINCIPAL = parseEther("2000");
-        const SHORT_AMOUNT = parseEther("2"); // ETH to borrow
-        const LONG_AMOUNT = parseEther("40"); // WBNB to receive
+        const { positionAccount, shortDebtAfterOpen, longBalanceAfterOpen } = await activateAndOpenPosition({
+          initialPrincipal: parseEther("2000"),
+          shortAmount: parseEther("2"),
+          longAmount: parseEther("40"),
+          leverage: parseEther("4"),
+          tokenOutWhaleOverride: vLONG_ADDRESS,
+        });
 
-        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
-        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
-        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
-
-        // ========================================
-        // STEP 1: Activate Position
-        // ========================================
-        const leverage = parseEther("4"); // 4x leverage
-        await rpm
-          .connect(alice)
-          .activatePosition(longVToken.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
-
-        const position = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        const positionAccount = position.positionAccount;
-
-        // ========================================
-        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
-        // ========================================
-        const minLong = LONG_AMOUNT.mul(98).div(100);
-
-        const openSwapData = await getManipulatedSwapData(
-          SHORT_ADDRESS,
-          LONG_ADDRESS,
-          SHORT_AMOUNT,
-          LONG_AMOUNT,
-          leverageManager.address,
-          vLONG_ADDRESS,
-        );
-
-        await rpm
-          .connect(alice)
-          .openPosition(longVToken.address, shortVToken.address, 0, SHORT_AMOUNT, minLong, openSwapData);
-
-        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
-        const longBalanceAfterOpen = await longVToken.callStatic.balanceOfUnderlying(positionAccount);
         const dsaBalanceAfterOpen = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
-
         expect(shortDebtAfterOpen).to.be.gt(0, "Should have short debt");
         expect(longBalanceAfterOpen).to.be.gt(0, "Should have long collateral");
         expect(dsaBalanceAfterOpen).to.be.gt(0, "Should have DSA principal");
@@ -2210,55 +2024,22 @@ forking(80929690, () => {
       });
 
       it("liquidate position and seize DSA token when LONG = DSA", async () => {
-        const INITIAL_PRINCIPAL = parseEther("8000");
-        const SHORT_AMOUNT = parseEther("1"); // ETH to borrow
-        const LONG_AMOUNT = parseEther("3000"); // USDC as LONG (same token as DSA)
+        const {
+          positionAccount,
+          shortDebtAfterOpen,
+          longBalanceAfterOpen: longCollateralAfterOpen,
+          effectiveLongVToken: longVTokenForTest,
+        } = await activateAndOpenPosition({
+          initialPrincipal: parseEther("8000"),
+          shortAmount: parseEther("1"),
+          longAmount: parseEther("3000"),
+          leverage: parseEther("5"),
+          useLongVToken: dsaVToken,
+          longAddress: DSA_ADDRESS,
+          tokenOutWhaleOverride: vDSA_ADDRESS,
+        });
 
-        // DSA = LONG = USDC, SHORT = ETH
-        const longVTokenForTest = dsaVToken;
-
-        // Fund Alice with DSA tokens
-        const whaleSigner = await initMainnetUser(DSA_WHALE, parseEther("1"));
-        await dsa.connect(whaleSigner).transfer(alice.address, INITIAL_PRINCIPAL);
-        await dsa.connect(alice).approve(rpm.address, INITIAL_PRINCIPAL);
-
-        // ========================================
-        // STEP 1: Activate Position
-        // ========================================
-        const leverage = parseEther("5"); // 5x leverage
-        await rpm
-          .connect(alice)
-          .activatePosition(longVTokenForTest.address, shortVToken.address, 0, INITIAL_PRINCIPAL, leverage);
-
-        const position = await rpm.getPosition(alice.address, longVTokenForTest.address, shortVToken.address);
-        const positionAccount = position.positionAccount;
-
-        // ========================================
-        // STEP 2: Open Position (Borrow SHORT → Swap to LONG)
-        // ========================================
-        const minLong = LONG_AMOUNT.mul(98).div(100); // 2% slippage
-
-        const openSwapData = await getManipulatedSwapData(
-          SHORT_ADDRESS,
-          DSA_ADDRESS,
-          SHORT_AMOUNT,
-          LONG_AMOUNT,
-          leverageManager.address,
-          vDSA_ADDRESS, // tokenOutWhaleOverride: vUSDC holds USDC underlying
-        );
-
-        await rpm
-          .connect(alice)
-          .openPosition(longVTokenForTest.address, shortVToken.address, 0, SHORT_AMOUNT, minLong, openSwapData);
-
-        const shortDebtAfterOpen = await shortVToken.callStatic.borrowBalanceCurrent(positionAccount);
-        const longCollateralAfterOpen = await rpm.callStatic.getLongCollateralBalance(
-          alice.address,
-          longVTokenForTest.address,
-          shortVToken.address,
-        );
-        // When LONG = DSA, balanceOfUnderlying returns combined long + principal;
-        // use getSuppliedPrincipalBalance to get just the DSA principal portion.
+        // When LONG = DSA, use getSuppliedPrincipalBalance for just the DSA principal portion
         const dsaBalanceAfterOpen = await rpm.callStatic.getSuppliedPrincipalBalance(
           alice.address,
           longVTokenForTest.address,
