@@ -239,7 +239,7 @@ contract RelativePositionManager is
         _checkMarketListed(longVToken);
         _checkMarketListed(shortVToken);
         IVToken dsaVToken = _getValidatedDSAVToken(dsaIndex);
-        _checkSameMarket(longVToken, shortVToken, address(dsaVToken));
+        _checkSameMarket(longVToken, shortVToken);
 
         // Validate requested leverage against [MIN_LEVERAGE, maxLeverage]; λ_max = CF_c / (1 - CF_l * (1 - f))
         uint256 maxLeverage = _getMaxLeverage(dsaVToken, longVToken);
@@ -542,8 +542,10 @@ contract RelativePositionManager is
             );
         }
 
+        uint256 dsaAmountRedeemed;
         // 2. Second leg: repay remaining short debt with DSA. When DSA == short use exitSingleAssetLeverage (no swap); else exitLeverage.
         if (amountToRepaySecond > 0) {
+            dsaAmountRedeemed = dsaAmountToRedeemForSecondSwap;
             uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
             if (address(dsaVToken) == address(shortVToken)) {
                 IPositionAccount(positionAccount).exitSingleAssetLeverage(dsaVToken, amountToRepaySecond);
@@ -558,7 +560,7 @@ contract RelativePositionManager is
                 );
             }
             uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
-            // Reduce suppliedPrincipalVTokens by the vTokens actually burned from DSA for this repay leg
+            // Reduce suppliedPrincipalVTokens by the DSA vTokens actually burned for this leg.
             position.suppliedPrincipalVTokens -= (vTokensBefore - vTokensAfter);
             _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
         }
@@ -579,7 +581,7 @@ contract RelativePositionManager is
             closeFractionBps,
             shortAmountToRepayForFirstSwap + amountToRepaySecond,
             longAmountToRedeemForFirstSwap,
-            dsaAmountToRedeemForSecondSwap,
+            dsaAmountRedeemed,
             longDustRedeemed
         );
     }
@@ -617,6 +619,7 @@ contract RelativePositionManager is
         _redeemUnderlyingToUser(dsaVToken, positionAccount, amount);
         uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
 
+        // Reduce suppliedPrincipalVTokens by the DSA vTokens actually burned for this withdraw.
         position.suppliedPrincipalVTokens -= (vTokensBefore - vTokensAfter);
 
         emit PrincipalWithdrawn(
@@ -886,14 +889,14 @@ contract RelativePositionManager is
      */
     function _redeemUnderlyingToUser(IVToken vToken, address fromAccount, uint256 amount) internal {
         if (amount == 0) return;
-        uint256 err = vToken.redeemUnderlyingBehalf(fromAccount, amount);
-
-        if (err != SUCCESS) revert RedeemBehalfFailed(err);
         IERC20Upgradeable underlying = IERC20Upgradeable(vToken.underlying());
-        uint256 balance = underlying.balanceOf(address(this));
-        if (balance > 0) {
-            underlying.safeTransfer(msg.sender, balance);
-            emit UnderlyingTransferred(address(underlying), fromAccount, msg.sender, balance);
+        uint256 balanceBefore = underlying.balanceOf(address(this));
+        uint256 err = vToken.redeemUnderlyingBehalf(fromAccount, amount);
+        if (err != SUCCESS) revert RedeemBehalfFailed(err);
+        uint256 received = underlying.balanceOf(address(this)) - balanceBefore;
+        if (received > 0) {
+            underlying.safeTransfer(msg.sender, received);
+            emit UnderlyingTransferred(address(underlying), fromAccount, msg.sender, received);
         }
     }
 
@@ -941,16 +944,13 @@ contract RelativePositionManager is
         address positionAccount
     ) internal returns (uint256 underlyingRedeemed) {
         uint256 vTokenBalance = vToken.balanceOf(positionAccount);
-        if (vTokenBalance == 0) {
-            return 0;
-        }
+        if (vTokenBalance == 0) return 0;
 
         IERC20Upgradeable underlying = IERC20Upgradeable(vToken.underlying());
+        uint256 balanceBefore = underlying.balanceOf(address(this));
         uint256 err = vToken.redeemBehalf(positionAccount, vTokenBalance);
-
         if (err != SUCCESS) revert RedeemBehalfFailed(err);
-        underlyingRedeemed = underlying.balanceOf(address(this));
-
+        underlyingRedeemed = underlying.balanceOf(address(this)) - balanceBefore;
         if (underlyingRedeemed > 0) {
             underlying.safeTransfer(msg.sender, underlyingRedeemed);
             emit UnderlyingTransferred(address(underlying), positionAccount, msg.sender, underlyingRedeemed);
@@ -1363,9 +1363,8 @@ contract RelativePositionManager is
      * @notice Reverts if long and short market are the same
      * @param longVToken Long market address
      * @param shortVToken Short market address
-     * @param dsaVToken DSA market address
      */
-    function _checkSameMarket(address longVToken, address shortVToken, address dsaVToken) internal pure {
+    function _checkSameMarket(address longVToken, address shortVToken) internal pure {
         if (longVToken == shortVToken) revert SameMarketNotAllowed();
     }
 
