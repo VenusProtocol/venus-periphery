@@ -14,15 +14,15 @@ import { IPMarket } from "./interfaces/IPMarket.sol";
 import { IVenusVToken } from "./interfaces/IVenusVToken.sol";
 import { IVenusComptroller } from "./interfaces/IVenusComptroller.sol";
 import { IWBNB } from "./interfaces/IWBNB.sol";
+import { IPendlePTVaultAdapter } from "./interfaces/IPendlePTVaultAdapter.sol";
 
-/// @title PendlePTVaultAdapter
-/// @author Venus Protocol
-/// @notice Universal adapter that wraps Pendle PT swap and Venus Core deposit/redeem into single
-///         transactions. Users deposit underlying tokens (e.g. USDC, BNB) and receive Venus vTokens.
-///         A single adapter handles all PT markets via an internal market registry.
-/// @dev The adapter does NOT hold user funds or track user positions — all user accounting is managed
-///      by Venus vTokens. The contract should hold zero token balances between transactions.
+/**
+ * @title PendlePTVaultAdapter
+ * @author Venus Protocol
+ * @notice Universal adapter that wraps Pendle PT swap and Venus Core deposit/redeem into single transactions.
+ */
 contract PendlePTVaultAdapter is
+    IPendlePTVaultAdapter,
     Initializable,
     Ownable2StepUpgradeable,
     PausableUpgradeable,
@@ -31,31 +31,13 @@ contract PendlePTVaultAdapter is
     using SafeERC20 for IERC20;
 
     // ═══════════════════════════════════════════════════════════════════════
-    //                              STRUCTS
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /// @notice Configuration for a registered Pendle PT market.
-    struct MarketConfig {
-        address pt; // Principal Token address
-        address sy; // Standardized Yield token
-        address yt; // Yield Token (needed for maturity redeem)
-        address underlying; // User-facing token (USDC, WBNB)
-        address vToken; // Venus VToken market for this PT
-        address comptroller; // Venus Comptroller for the isolated pool
-        uint256 maturity; // PT expiry timestamp
-        bool isActive; // Admin can deactivate without removing config
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
     //                            IMMUTABLES
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice Pendle RouterV4 address — same for all markets on BSC.
-    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     address public immutable PENDLE_ROUTER;
 
     /// @notice Wrapped native token address (WBNB on BSC).
-    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     address public immutable WBNB;
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -68,65 +50,8 @@ contract PendlePTVaultAdapter is
     /// @notice Ordered list of all registered market addresses (for enumeration).
     address[] public marketList;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //                              EVENTS
-    // ═══════════════════════════════════════════════════════════════════════
-
-    event MarketAdded(
-        address indexed pendleMarket,
-        address indexed underlying,
-        address pt,
-        address vToken,
-        address comptroller,
-        uint256 maturity
-    );
-
-    event MarketDeactivated(address indexed pendleMarket);
-
-    event MarketActivated(address indexed pendleMarket);
-
-    event Deposited(
-        address indexed pendleMarket,
-        address indexed user,
-        uint256 underlyingAmount,
-        uint256 ptAmount,
-        uint256 vTokenAmount
-    );
-
-    event Withdrawn(
-        address indexed pendleMarket,
-        address indexed user,
-        uint256 vTokenAmount,
-        uint256 ptAmount,
-        uint256 underlyingAmount
-    );
-
-    event RedeemedAtMaturity(
-        address indexed pendleMarket,
-        address indexed user,
-        uint256 vTokenAmount,
-        uint256 ptAmount,
-        uint256 underlyingAmount
-    );
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                           CUSTOM ERRORS
-    // ═══════════════════════════════════════════════════════════════════════
-
-    error ZeroAmount();
-    error ZeroAddress();
-    error DeadlineExceeded(uint256 deadline, uint256 currentTime);
-    error MarketNotRegistered(address pendleMarket);
-    error MarketNotActive(address pendleMarket);
-    error MarketAlreadyRegistered(address pendleMarket);
-    error MarketNotMatured(uint256 maturity, uint256 currentTime);
-    error MarketAlreadyMatured(uint256 maturity, uint256 currentTime);
-    error InvalidTokenInput(address expected, address received);
-    error InvalidTokenOutput(address expected, address received);
-    error InputAmountMismatch(uint256 expected, uint256 received);
-    error NotNativeMarket(address pendleMarket);
-    error VTokenMintFailed(uint256 errorCode);
-    error VTokenRedeemFailed(uint256 errorCode);
+    /// @dev Reserved storage gap for future upgrades.
+    uint256[48] private __gap;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                             MODIFIERS
@@ -141,7 +66,7 @@ contract PendlePTVaultAdapter is
     /// @dev Reverts if the market has already matured (block.timestamp >= maturity).
     modifier beforeMaturity(address pendleMarket) {
         uint256 mat = markets[pendleMarket].maturity;
-        if (block.timestamp >= mat) revert MarketAlreadyMatured(mat, block.timestamp);
+        if (!(block.timestamp < mat)) revert MarketAlreadyMatured(mat, block.timestamp);
         _;
     }
 
@@ -165,7 +90,6 @@ contract PendlePTVaultAdapter is
     /// @notice Sets immutable router and WBNB addresses. Implementation contract only.
     /// @param pendleRouter_ Pendle RouterV4 address.
     /// @param wbnb_ Wrapped native token (WBNB) address.
-    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address pendleRouter_, address wbnb_) {
         if (pendleRouter_ == address(0)) revert ZeroAddress();
         if (wbnb_ == address(0)) revert ZeroAddress();
@@ -177,7 +101,16 @@ contract PendlePTVaultAdapter is
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //                            INITIALIZER
+    //                          RECEIVE FUNCTION
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Accept native BNB only from WBNB contract (during unwrap).
+    receive() external payable {
+        if (msg.sender != WBNB) revert UnauthorizedSender();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                       EXTERNAL FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice Initializes the proxy state. Called once after proxy deployment.
@@ -193,18 +126,10 @@ contract PendlePTVaultAdapter is
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //                        CORE FUNCTIONS — ERC-20
+    //                        CORE DEPOSIT/WITHDRAW FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Deposit underlying tokens → swap to PT via Pendle → deposit PT into Venus → user receives vTokens.
-    /// @dev User must approve this adapter for `amount` of the underlying token beforehand.
-    /// @param pendleMarket Pendle market address identifying the PT market.
-    /// @param amount Amount of underlying tokens to deposit.
-    /// @param minPtOut Minimum PT to receive from Pendle swap (slippage protection).
-    /// @param guessPtOut Off-chain binary search hint from the Pendle API.
-    /// @param input Token routing configuration from the Pendle API.
-    /// @param limit Limit order fill data (can be empty struct for simple swaps).
-    /// @return netVTokensMinted Amount of vTokens credited to the user.
+    /// @inheritdoc IPendlePTVaultAdapter
     function deposit(
         address pendleMarket,
         uint256 amount,
@@ -238,7 +163,8 @@ contract PendlePTVaultAdapter is
         netVTokensMinted = _mintVTokens(config, netPtOut);
 
         // 4. Auto-enable collateral (best-effort — requires user delegation to adapter)
-        try IVenusComptroller(config.comptroller).enterMarketBehalf(msg.sender, config.vToken) {} catch {}
+        // Ignore return value - if it fails (e.g., user hasn't delegated), deposit still succeeds
+        IVenusComptroller(config.comptroller).enterMarketBehalf(msg.sender, config.vToken);
 
         // 5. Sweep any dust underlying back to user
         _sweepDust(config.underlying, msg.sender);
@@ -246,25 +172,13 @@ contract PendlePTVaultAdapter is
         emit Deposited(pendleMarket, msg.sender, amount, netPtOut, netVTokensMinted);
     }
 
-    /// @notice Withdraw before maturity: redeem vTokens → sell PT on Pendle AMM → user receives underlying.
-    /// @dev User must have delegated to this adapter in the Comptroller beforehand.
-    /// @param pendleMarket Pendle market address.
-    /// @param vTokenAmount Amount of vTokens to redeem.
-    /// @param output Token routing configuration from the Pendle API.
-    /// @param limit Limit order fill data (can be empty struct).
-    /// @return netTokenOut Amount of underlying tokens received by the user.
+    /// @inheritdoc IPendlePTVaultAdapter
     function withdraw(
         address pendleMarket,
         uint256 vTokenAmount,
         TokenOutput calldata output,
         LimitOrderData calldata limit
-    )
-        external
-        whenNotPaused
-        nonReentrant
-        onlyActiveMarket(pendleMarket)
-        returns (uint256 netTokenOut)
-    {
+    ) external whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netTokenOut) {
         if (vTokenAmount == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
@@ -293,13 +207,7 @@ contract PendlePTVaultAdapter is
         emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptBalance, netTokenOut);
     }
 
-    /// @notice Redeem at or after maturity: redeem vTokens → redeem PT 1:1 via SY → user receives underlying.
-    /// @dev No AMM swap — PT is redeemed directly through SY at 1:1 ratio.
-    /// @param pendleMarket Pendle market address.
-    /// @param vTokenAmount Amount of vTokens to redeem.
-    /// @param deadline Transaction deadline timestamp (reverts if exceeded).
-    /// @param output Token routing configuration from the Pendle API.
-    /// @return netTokenOut Amount of underlying tokens received by the user.
+    /// @inheritdoc IPendlePTVaultAdapter
     function redeemAtMaturity(
         address pendleMarket,
         uint256 vTokenAmount,
@@ -335,13 +243,7 @@ contract PendlePTVaultAdapter is
     //                    CORE FUNCTIONS — NATIVE TOKEN
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Deposit native BNB → wrap to WBNB → swap to PT → deposit into Venus → user receives vTokens.
-    /// @param pendleMarket Pendle market address identifying the PT market.
-    /// @param minPtOut Minimum PT to receive from Pendle swap (slippage protection).
-    /// @param guessPtOut Off-chain binary search hint from the Pendle API.
-    /// @param input Token routing configuration from the Pendle API (tokenIn must be WBNB).
-    /// @param limit Limit order fill data (can be empty struct).
-    /// @return netVTokensMinted Amount of vTokens credited to the user.
+    /// @inheritdoc IPendlePTVaultAdapter
     function depositNative(
         address pendleMarket,
         uint256 minPtOut,
@@ -374,8 +276,9 @@ contract PendlePTVaultAdapter is
         // 3. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config, netPtOut);
 
-        // 4. Auto-enable collateral (best-effort)
-        try IVenusComptroller(config.comptroller).enterMarketBehalf(msg.sender, config.vToken) {} catch {}
+        // 4. Auto-enable collateral (best-effort — requires user delegation to adapter)
+        // Ignore return value - if it fails (e.g., user hasn't delegated), deposit still succeeds
+        IVenusComptroller(config.comptroller).enterMarketBehalf(msg.sender, config.vToken);
 
         // 5. Refund any excess WBNB as native BNB
         _refundNativeDust();
@@ -383,24 +286,13 @@ contract PendlePTVaultAdapter is
         emit Deposited(pendleMarket, msg.sender, msg.value, netPtOut, netVTokensMinted);
     }
 
-    /// @notice Withdraw before maturity with native BNB: redeem vTokens → sell PT → unwrap WBNB → user receives BNB.
-    /// @param pendleMarket Pendle market address.
-    /// @param vTokenAmount Amount of vTokens to redeem.
-    /// @param output Token routing configuration from the Pendle API (tokenOut must be WBNB).
-    /// @param limit Limit order fill data (can be empty struct).
-    /// @return netTokenOut Amount of native BNB received by the user.
+    /// @inheritdoc IPendlePTVaultAdapter
     function withdrawNative(
         address pendleMarket,
         uint256 vTokenAmount,
         TokenOutput calldata output,
         LimitOrderData calldata limit
-    )
-        external
-        whenNotPaused
-        nonReentrant
-        onlyActiveMarket(pendleMarket)
-        returns (uint256 netTokenOut)
-    {
+    ) external whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netTokenOut) {
         if (vTokenAmount == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
@@ -434,12 +326,7 @@ contract PendlePTVaultAdapter is
         emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptBalance, netTokenOut);
     }
 
-    /// @notice Redeem at maturity with native BNB: redeem vTokens → redeem PT 1:1 → unwrap WBNB → user receives BNB.
-    /// @param pendleMarket Pendle market address.
-    /// @param vTokenAmount Amount of vTokens to redeem.
-    /// @param deadline Transaction deadline timestamp.
-    /// @param output Token routing configuration from the Pendle API (tokenOut must be WBNB).
-    /// @return netTokenOut Amount of native BNB received by the user.
+    /// @inheritdoc IPendlePTVaultAdapter
     function redeemAtMaturityNative(
         address pendleMarket,
         uint256 vTokenAmount,
@@ -480,11 +367,7 @@ contract PendlePTVaultAdapter is
     //                          ADMIN FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Register a new PT market. Derives PT, SY, YT, and maturity from the Pendle market on-chain.
-    /// @param pendleMarket Pendle AMM market address.
-    /// @param underlying User-facing token address (may differ from SY's underlying).
-    /// @param vToken Venus VToken market address for this PT.
-    /// @param comptroller Venus Comptroller address for the isolated pool.
+    /// @inheritdoc IPendlePTVaultAdapter
     function addMarket(
         address pendleMarket,
         address underlying,
@@ -508,8 +391,8 @@ contract PendlePTVaultAdapter is
             underlying: underlying,
             vToken: vToken,
             comptroller: comptroller,
-            maturity: maturity,
-            isActive: true
+            isActive: true,
+            maturity: maturity
         });
 
         marketList.push(pendleMarket);
@@ -517,36 +400,31 @@ contract PendlePTVaultAdapter is
         emit MarketAdded(pendleMarket, underlying, pt, vToken, comptroller, maturity);
     }
 
-    /// @notice Deactivate a market (blocks new deposits and withdrawals).
-    /// @param pendleMarket Pendle market address to deactivate.
+    /// @inheritdoc IPendlePTVaultAdapter
     function deactivateMarket(address pendleMarket) external onlyOwner {
         if (markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
         markets[pendleMarket].isActive = false;
         emit MarketDeactivated(pendleMarket);
     }
 
-    /// @notice Re-activate a previously deactivated market.
-    /// @param pendleMarket Pendle market address to activate.
+    /// @inheritdoc IPendlePTVaultAdapter
     function activateMarket(address pendleMarket) external onlyOwner {
         if (markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
         markets[pendleMarket].isActive = true;
         emit MarketActivated(pendleMarket);
     }
 
-    /// @notice Pause all deposit/withdraw operations (emergency).
+    /// @inheritdoc IPendlePTVaultAdapter
     function pause() external onlyOwner {
         _pause();
     }
 
-    /// @notice Unpause operations.
+    /// @inheritdoc IPendlePTVaultAdapter
     function unpause() external onlyOwner {
         _unpause();
     }
 
-    /// @notice Recover tokens accidentally sent to the contract.
-    /// @param token ERC-20 token address to sweep.
-    /// @param to Recipient address.
-    /// @param amount Amount to transfer.
+    /// @inheritdoc IPendlePTVaultAdapter
     function sweepTokens(address token, address to, uint256 amount) external onlyOwner {
         if (token == address(0)) revert ZeroAddress();
         if (to == address(0)) revert ZeroAddress();
@@ -557,35 +435,27 @@ contract PendlePTVaultAdapter is
     //                          VIEW FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Get full configuration for a registered market.
-    /// @param pendleMarket Pendle market address.
-    /// @return Full MarketConfig struct.
+    /// @inheritdoc IPendlePTVaultAdapter
     function getMarketConfig(address pendleMarket) external view returns (MarketConfig memory) {
         return markets[pendleMarket];
     }
 
-    /// @notice Get the number of registered markets.
+    /// @inheritdoc IPendlePTVaultAdapter
     function getMarketCount() external view returns (uint256) {
         return marketList.length;
     }
 
-    /// @notice Get all registered market addresses.
+    /// @inheritdoc IPendlePTVaultAdapter
     function getAllMarkets() external view returns (address[] memory) {
         return marketList;
     }
 
-    /// @notice Check if a specific PT market has matured.
-    /// @param pendleMarket Pendle market address.
-    /// @return True if the current timestamp is at or past the market's maturity.
+    /// @inheritdoc IPendlePTVaultAdapter
     function isMatured(address pendleMarket) external view returns (bool) {
-        return block.timestamp >= markets[pendleMarket].maturity;
+        return !(block.timestamp < markets[pendleMarket].maturity);
     }
 
-    /// @notice Check if a user has delegated to this adapter for a specific market's Comptroller.
-    /// @dev Delegation is required for both deposit (enterMarketBehalf) and withdraw (redeemBehalf).
-    /// @param pendleMarket Pendle market address.
-    /// @param user User address to check.
-    /// @return True if the user has approved this adapter as a delegate.
+    /// @inheritdoc IPendlePTVaultAdapter
     function isDelegated(address pendleMarket, address user) external view returns (bool) {
         return IVenusComptroller(markets[pendleMarket].comptroller).approvedDelegates(user, address(this));
     }
@@ -594,14 +464,29 @@ contract PendlePTVaultAdapter is
     //                        INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @dev Validates that the market is registered and active.
+    /**
+     * @notice Validates that the market is registered and active.
+     * @param pendleMarket The Pendle market address to validate.
+     * @dev Reverts with MarketNotRegistered if PT address is zero.
+     *      Reverts with MarketNotActive if market has been deactivated.
+     */
     function _requireActiveMarket(address pendleMarket) internal view {
         MarketConfig storage config = markets[pendleMarket];
         if (config.pt == address(0)) revert MarketNotRegistered(pendleMarket);
         if (!config.isActive) revert MarketNotActive(pendleMarket);
     }
 
-    /// @dev Swaps underlying → PT via Pendle Router. Approves, swaps, and resets approval.
+    /**
+     * @notice Swaps underlying tokens to PT via Pendle Router.
+     * @param underlying The underlying token address to swap from.
+     * @param pendleMarket The Pendle market address for the swap.
+     * @param minPtOut Minimum PT to receive (slippage protection).
+     * @param guessPtOut Off-chain binary search approximation parameters.
+     * @param input Token input configuration from Pendle API.
+     * @param limit Limit order fill data.
+     * @return netPtOut Amount of PT tokens received from the swap.
+     * @dev Approves router, performs swap, then resets approval to zero.
+     */
     function _swapToPt(
         address underlying,
         address pendleMarket,
@@ -625,8 +510,14 @@ contract PendlePTVaultAdapter is
         IERC20(underlying).forceApprove(PENDLE_ROUTER, 0);
     }
 
-    /// @dev Deposits PT into Venus via mintBehalf. Approves, mints, and resets approval.
-    /// @return netVTokensMinted The amount of vTokens minted to msg.sender.
+    /**
+     * @notice Deposits PT into Venus and mints vTokens on behalf of the caller.
+     * @param config The market configuration containing vToken and PT addresses.
+     * @param ptAmount Amount of PT tokens to deposit.
+     * @return netVTokensMinted Amount of vTokens minted to msg.sender.
+     * @dev Approves vToken, calls mintBehalf, then resets approval to zero.
+     *      Reverts with VTokenMintFailed if the mint operation returns non-zero error.
+     */
     function _mintVTokens(MarketConfig storage config, uint256 ptAmount) private returns (uint256 netVTokensMinted) {
         uint256 vTokenBalanceBefore = IVenusVToken(config.vToken).balanceOf(msg.sender);
 
@@ -639,13 +530,28 @@ contract PendlePTVaultAdapter is
         IERC20(config.pt).forceApprove(config.vToken, 0);
     }
 
-    /// @dev Redeems vTokens from Venus on behalf of msg.sender. Underlying (PT) is sent to this adapter.
+    /**
+     * @notice Redeems vTokens from Venus on behalf of the caller.
+     * @param vToken The Venus vToken address to redeem from.
+     * @param vTokenAmount Amount of vTokens to redeem.
+     * @dev Underlying PT tokens are sent to this adapter contract.
+     *      Reverts with VTokenRedeemFailed if the redeem operation returns non-zero error.
+     */
     function _redeemVTokens(address vToken, uint256 vTokenAmount) private {
         uint256 redeemErr = IVenusVToken(vToken).redeemBehalf(msg.sender, vTokenAmount);
         if (redeemErr != 0) revert VTokenRedeemFailed(redeemErr);
     }
 
-    /// @dev Redeems PT 1:1 to underlying via Pendle Router (for ERC-20 markets — sends to msg.sender).
+    /**
+     * @notice Redeems PT 1:1 to underlying via Pendle Router for ERC-20 markets.
+     * @param pt The Principal Token address to redeem.
+     * @param yt The Yield Token address (required for redemption).
+     * @param ptBalance Amount of PT tokens to redeem.
+     * @param output Token output configuration from Pendle API.
+     * @return netTokenOut Amount of underlying tokens received.
+     * @dev Underlying tokens are sent directly to msg.sender.
+     *      Approves router, performs redemption, then resets approval to zero.
+     */
     function _redeemPtToToken(
         address pt,
         address yt,
@@ -664,7 +570,16 @@ contract PendlePTVaultAdapter is
         IERC20(pt).forceApprove(PENDLE_ROUTER, 0);
     }
 
-    /// @dev Redeems PT 1:1 to WBNB via Pendle Router (for native markets — sends to adapter for unwrap).
+    /**
+     * @notice Redeems PT 1:1 to WBNB via Pendle Router for native token markets.
+     * @param pt The Principal Token address to redeem.
+     * @param yt The Yield Token address (required for redemption).
+     * @param ptBalance Amount of PT tokens to redeem.
+     * @param output Token output configuration from Pendle API.
+     * @return netTokenOut Amount of WBNB tokens received.
+     * @dev WBNB is sent to this adapter (not msg.sender) so it can be unwrapped to native BNB.
+     *      Approves router, performs redemption, then resets approval to zero.
+     */
     function _redeemPtToTokenNative(
         address pt,
         address yt,
@@ -683,7 +598,12 @@ contract PendlePTVaultAdapter is
         IERC20(pt).forceApprove(PENDLE_ROUTER, 0);
     }
 
-    /// @dev Transfers any remaining ERC-20 token balance in this contract back to the recipient.
+    /**
+     * @notice Transfers any remaining token balance back to the recipient.
+     * @param token The ERC-20 token address to sweep.
+     * @param to The recipient address.
+     * @dev Used to return dust/leftover tokens after swaps. Only transfers if balance > 0.
+     */
     function _sweepDust(address token, address to) private {
         uint256 dust = IERC20(token).balanceOf(address(this));
         if (dust > 0) {
@@ -691,7 +611,10 @@ contract PendlePTVaultAdapter is
         }
     }
 
-    /// @dev Refunds any remaining WBNB balance as native BNB to msg.sender.
+    /**
+     * @notice Refunds any remaining WBNB balance as native BNB to the caller.
+     * @dev Unwraps WBNB to BNB and sends to msg.sender. Only processes if balance > 0.
+     */
     function _refundNativeDust() private {
         uint256 wbnbDust = IERC20(WBNB).balanceOf(address(this));
         if (wbnbDust > 0) {
@@ -699,20 +622,4 @@ contract PendlePTVaultAdapter is
             Address.sendValue(payable(msg.sender), wbnbDust);
         }
     }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                          RECEIVE / FALLBACK
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /// @notice Accept native BNB only from WBNB contract (during unwrap).
-    receive() external payable {
-        if (msg.sender != WBNB) revert ZeroAddress();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                          STORAGE GAP
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /// @dev Reserved storage gap for future upgrades.
-    uint256[48] private __gap;
 }
