@@ -133,26 +133,26 @@ contract PendlePTVaultAdapter is
         LimitOrderData calldata limit
     ) external whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netVTokensMinted) {
         if (amount == 0) revert ZeroAmount();
+            if (input.tokenIn == address(0)) revert InvalidTokenInput();
 
         MarketConfig storage config = markets[pendleMarket];
 
-        // Validate calldata matches expected market config
-        if (input.tokenIn != config.underlying) revert InvalidTokenInput(config.underlying, input.tokenIn);
+        // Validate calldata consistency
         if (input.netTokenIn != amount) revert InputAmountMismatch(amount, input.netTokenIn);
 
-        // 1. Pull underlying tokens from user → adapter
-        IERC20(config.underlying).safeTransferFrom(msg.sender, address(this), amount);
+        // 1. Pull tokens from user → adapter (accepts any token from Pendle's tokensIn)
+        IERC20(input.tokenIn).safeTransferFrom(msg.sender, address(this), amount);
 
-        // 2. Swap underlying → PT via Pendle Router
-        uint256 netPtOut = _swapToPt(config.underlying, pendleMarket, minPtOut, guessPtOut, input, limit);
+        // 2. Swap tokenIn → PT via Pendle Router (Pendle handles aggregator routing if needed)
+        uint256 netPtOut = _swapToPt(input.tokenIn, pendleMarket, minPtOut, guessPtOut, input, limit);
 
         // 3. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config, netPtOut);
 
-        // 4. Sweep any dust underlying back to user
-        _sweepDust(config.underlying, msg.sender);
+        // 4. Sweep any dust tokenIn back to user
+        _sweepDust(input.tokenIn, msg.sender);
 
-        emit Deposited(pendleMarket, msg.sender, amount, netPtOut, netVTokensMinted);
+        emit Deposited(pendleMarket, msg.sender, input.tokenIn, amount, netPtOut, netVTokensMinted);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
@@ -163,21 +163,20 @@ contract PendlePTVaultAdapter is
         LimitOrderData calldata limit
     ) external whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netTokenOut) {
         if (vTokenAmount == 0) revert ZeroAmount();
+        if (output.tokenOut == address(0)) revert InvalidTokenOutput();
 
         MarketConfig storage config = markets[pendleMarket];
-
-        if (output.tokenOut != config.underlying) revert InvalidTokenOutput(config.underlying, output.tokenOut);
 
         // 1. Redeem vTokens → adapter receives PT
         _redeemVTokens(config.vToken, vTokenAmount);
 
         uint256 ptBalance = IERC20(config.pt).balanceOf(address(this));
 
-        // 2. Swap PT → underlying via Pendle AMM (sent directly to user)
+        // 2. Swap PT → tokenOut via Pendle (sent directly to user, Pendle handles routing)
         IERC20(config.pt).forceApprove(PENDLE_ROUTER, ptBalance);
 
         (netTokenOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactPtForToken(
-            msg.sender, // underlying sent directly to user
+            msg.sender, // tokens sent directly to user
             pendleMarket,
             ptBalance,
             output,
@@ -187,7 +186,7 @@ contract PendlePTVaultAdapter is
         // 3. Reset approvals
         IERC20(config.pt).forceApprove(PENDLE_ROUTER, 0);
 
-        emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptBalance, netTokenOut);
+        emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptBalance, output.tokenOut, netTokenOut);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
@@ -206,20 +205,19 @@ contract PendlePTVaultAdapter is
         returns (uint256 netTokenOut)
     {
         if (vTokenAmount == 0) revert ZeroAmount();
+        if (output.tokenOut == address(0)) revert InvalidTokenOutput();
 
         MarketConfig storage config = markets[pendleMarket];
-
-        if (output.tokenOut != config.underlying) revert InvalidTokenOutput(config.underlying, output.tokenOut);
 
         // 1. Redeem vTokens → adapter receives PT
         _redeemVTokens(config.vToken, vTokenAmount);
 
         uint256 ptBalance = IERC20(config.pt).balanceOf(address(this));
 
-        // 2. Redeem PT 1:1 → underlying via Pendle (sent directly to user)
+        // 2. Redeem PT 1:1 → tokenOut via Pendle (sent directly to user, Pendle handles routing)
         netTokenOut = _redeemPtToToken(config.pt, config.yt, ptBalance, output);
 
-        emit RedeemedAtMaturity(pendleMarket, msg.sender, vTokenAmount, ptBalance, netTokenOut);
+        emit RedeemedAtMaturity(pendleMarket, msg.sender, vTokenAmount, ptBalance, output.tokenOut, netTokenOut);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -238,8 +236,8 @@ contract PendlePTVaultAdapter is
 
         MarketConfig storage config = markets[pendleMarket];
 
-        if (config.underlying != WBNB) revert NotNativeMarket(pendleMarket);
-        if (input.tokenIn != WBNB) revert InvalidTokenInput(WBNB, input.tokenIn);
+        // Validate that tokenIn is WBNB for native deposits
+        if (input.tokenIn != WBNB) revert TokenMustBeWBNB();
         if (input.netTokenIn != msg.value) revert InputAmountMismatch(msg.value, input.netTokenIn);
 
         // 1. Wrap BNB → WBNB
@@ -254,7 +252,7 @@ contract PendlePTVaultAdapter is
         // 4. Refund any excess WBNB as native BNB
         _refundNativeDust();
 
-        emit Deposited(pendleMarket, msg.sender, msg.value, netPtOut, netVTokensMinted);
+        emit Deposited(pendleMarket, msg.sender, WBNB, msg.value, netPtOut, netVTokensMinted);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
@@ -268,8 +266,8 @@ contract PendlePTVaultAdapter is
 
         MarketConfig storage config = markets[pendleMarket];
 
-        if (config.underlying != WBNB) revert NotNativeMarket(pendleMarket);
-        if (output.tokenOut != WBNB) revert InvalidTokenOutput(WBNB, output.tokenOut);
+        // Validate that tokenOut is WBNB for native withdrawals
+        if (output.tokenOut != WBNB) revert TokenMustBeWBNB();
 
         // 1. Redeem vTokens → adapter receives PT
         _redeemVTokens(config.vToken, vTokenAmount);
@@ -294,7 +292,7 @@ contract PendlePTVaultAdapter is
         IWBNB(WBNB).withdraw(netTokenOut);
         Address.sendValue(payable(msg.sender), netTokenOut);
 
-        emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptBalance, netTokenOut);
+        emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptBalance, WBNB, netTokenOut);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
@@ -316,8 +314,8 @@ contract PendlePTVaultAdapter is
 
         MarketConfig storage config = markets[pendleMarket];
 
-        if (config.underlying != WBNB) revert NotNativeMarket(pendleMarket);
-        if (output.tokenOut != WBNB) revert InvalidTokenOutput(WBNB, output.tokenOut);
+        // Validate that tokenOut is WBNB for native redemptions
+        if (output.tokenOut != WBNB) revert TokenMustBeWBNB();
 
         // 1. Redeem vTokens → adapter receives PT
         _redeemVTokens(config.vToken, vTokenAmount);
@@ -331,7 +329,7 @@ contract PendlePTVaultAdapter is
         IWBNB(WBNB).withdraw(netTokenOut);
         Address.sendValue(payable(msg.sender), netTokenOut);
 
-        emit RedeemedAtMaturity(pendleMarket, msg.sender, vTokenAmount, ptBalance, netTokenOut);
+        emit RedeemedAtMaturity(pendleMarket, msg.sender, vTokenAmount, ptBalance, WBNB, netTokenOut);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -341,12 +339,10 @@ contract PendlePTVaultAdapter is
     /// @inheritdoc IPendlePTVaultAdapter
     function addMarket(
         address pendleMarket,
-        address underlying,
         address vToken,
         address comptroller
     ) external onlyOwner {
         if (pendleMarket == address(0)) revert ZeroAddress();
-        if (underlying == address(0)) revert ZeroAddress();
         if (vToken == address(0)) revert ZeroAddress();
         if (comptroller == address(0)) revert ZeroAddress();
         if (markets[pendleMarket].pt != address(0)) revert MarketAlreadyRegistered(pendleMarket);
@@ -360,7 +356,6 @@ contract PendlePTVaultAdapter is
             pt: address(_PT),
             sy: address(_SY),
             yt: address(_YT),
-            underlying: underlying,
             vToken: vToken,
             comptroller: comptroller,
             isActive: true,
@@ -369,7 +364,7 @@ contract PendlePTVaultAdapter is
 
         marketList.push(pendleMarket);
 
-        emit MarketAdded(pendleMarket, underlying, address(_PT), vToken, comptroller, maturity);
+        emit MarketAdded(pendleMarket, address(_PT), vToken, comptroller, maturity);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter

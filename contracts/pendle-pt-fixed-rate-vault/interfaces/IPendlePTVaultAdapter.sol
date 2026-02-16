@@ -23,17 +23,16 @@ interface IPendlePTVaultAdapter {
      * @param pt Principal Token address
      * @param sy Standardized Yield token address
      * @param yt Yield Token address (needed for maturity redemption)
-     * @param underlying User-facing token address (USDC, WBNB)
      * @param vToken Venus VToken market address for this PT
      * @param comptroller Venus Comptroller address for the isolated pool
      * @param isActive Whether this market is currently accepting deposits/withdrawals
      * @param maturity PT expiry timestamp (Unix timestamp)
+     * @dev No longer enforces a single underlying token - accepts any token from Pendle's tokensIn/tokensOut
      */
     struct MarketConfig {
         address pt;
         address sy;
         address yt;
-        address underlying;
         address vToken;
         address comptroller;
         bool isActive;
@@ -47,7 +46,6 @@ interface IPendlePTVaultAdapter {
     /**
      * @notice Emitted when a new PT market is registered in the adapter.
      * @param pendleMarket Pendle market address that was registered
-     * @param underlying User-facing underlying token address
      * @param pt Principal Token address
      * @param vToken Venus VToken market address
      * @param comptroller Venus Comptroller address
@@ -55,7 +53,6 @@ interface IPendlePTVaultAdapter {
      */
     event MarketAdded(
         address indexed pendleMarket,
-        address indexed underlying,
         address indexed pt,
         address vToken,
         address comptroller,
@@ -75,17 +72,19 @@ interface IPendlePTVaultAdapter {
     event MarketActivated(address indexed pendleMarket);
 
     /**
-     * @notice Emitted when a user deposits underlying tokens and receives vTokens.
+     * @notice Emitted when a user deposits tokens and receives vTokens.
      * @param pendleMarket Pendle market address used for the deposit
      * @param user Address of the user who deposited
-     * @param underlyingAmount Amount of underlying tokens deposited by user
+     * @param tokenIn The actual token address that was deposited
+     * @param amountIn Amount of input tokens deposited by user
      * @param ptAmount Amount of PT tokens received from Pendle swap
      * @param vTokenAmount Amount of vTokens minted to the user
      */
     event Deposited(
         address indexed pendleMarket,
-        address user,
-        uint256 indexed underlyingAmount,
+        address indexed user,
+        address tokenIn,
+        uint256 amountIn,
         uint256 indexed ptAmount,
         uint256 vTokenAmount
     );
@@ -96,14 +95,16 @@ interface IPendlePTVaultAdapter {
      * @param user Address of the user who withdrew
      * @param vTokenAmount Amount of vTokens redeemed
      * @param ptAmount Amount of PT tokens sold on Pendle
-     * @param underlyingAmount Amount of underlying tokens received by user
+     * @param tokenOut The actual token address that was received
+     * @param amountOut Amount of output tokens received by user
      */
     event Withdrawn(
         address indexed pendleMarket,
-        address user,
+        address indexed user,
         uint256 vTokenAmount,
         uint256 indexed ptAmount,
-        uint256 indexed underlyingAmount
+        address tokenOut,
+        uint256 amountOut
     );
 
     /**
@@ -112,14 +113,16 @@ interface IPendlePTVaultAdapter {
      * @param user Address of the user who redeemed
      * @param vTokenAmount Amount of vTokens redeemed
      * @param ptAmount Amount of PT tokens redeemed
-     * @param underlyingAmount Amount of underlying tokens received by user
+     * @param tokenOut The actual token address that was received
+     * @param amountOut Amount of output tokens received by user
      */
     event RedeemedAtMaturity(
         address indexed pendleMarket,
-        address user,
+        address indexed user,
         uint256 vTokenAmount,
         uint256 indexed ptAmount,
-        uint256 indexed underlyingAmount
+        address tokenOut,
+        uint256 amountOut
     );
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -174,19 +177,14 @@ interface IPendlePTVaultAdapter {
      */
     error MarketAlreadyMatured(uint256 maturity, uint256 currentTime);
 
-    /**
-     * @notice Error thrown when the input token in the TokenInput calldata does not match the expected underlying token.
-     * @param expected The expected underlying token address
-     * @param received The token address provided in the calldata
-     */
-    error InvalidTokenInput(address expected, address received);
+    /// @notice Error thrown when the TokenInput tokenIn is the zero address.
+    error InvalidTokenInput();
 
-    /**
-     * @notice Error thrown when the output token in the TokenOutput calldata does not match the expected underlying token.
-     * @param expected The expected underlying token address
-     * @param received The token address provided in the calldata
-     */
-    error InvalidTokenOutput(address expected, address received);
+    /// @notice Error thrown when the TokenOutput tokenOut is the zero address.
+    error InvalidTokenOutput();
+
+    /// @notice Error thrown when native deposit/withdraw calldata has tokenIn/tokenOut != WBNB.
+    error TokenMustBeWBNB();
 
     /**
      * @notice Error thrown when the input amount in the calldata does not match the amount parameter.
@@ -194,12 +192,6 @@ interface IPendlePTVaultAdapter {
      * @param received The amount provided in the calldata
      */
     error InputAmountMismatch(uint256 expected, uint256 received);
-
-    /**
-     * @notice Error thrown when attempting to use native token functions on a non-native (non-WBNB) market.
-     * @param pendleMarket The Pendle market address that does not support native token operations
-     */
-    error NotNativeMarket(address pendleMarket);
 
     /**
      * @notice Error thrown when Venus VToken mint operation fails.
@@ -279,8 +271,9 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Deposit native BNB → wrap to WBNB → swap to PT → deposit into Venus → user receives vTokens.
-     * @dev Only works for markets where underlying = WBNB.
+     * @dev Wraps native BNB to WBNB and proceeds with standard deposit flow.
      *      Any excess WBNB is unwrapped and refunded as BNB to the user.
+     *      The input.tokenIn must be WBNB for this function.
      * @param pendleMarket Pendle market address identifying the PT market
      * @param minPtOut Minimum PT to receive from Pendle swap (slippage protection)
      * @param guessPtOut Off-chain binary search hint from the Pendle API
@@ -298,7 +291,8 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Withdraw before maturity with native BNB: redeem vTokens → sell PT → unwrap WBNB → user receives BNB.
-     * @dev Only works for markets where underlying = WBNB.
+     * @dev Unwraps WBNB to native BNB after withdrawal from Pendle.
+     *      The output.tokenOut must be WBNB for this function.
      *      User must have delegated to this adapter in the Comptroller beforehand.
      * @param pendleMarket Pendle market address
      * @param vTokenAmount Amount of vTokens to redeem
@@ -315,7 +309,8 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Redeem at maturity with native BNB: redeem vTokens → redeem PT 1:1 → unwrap WBNB → user receives BNB.
-     * @dev Only works for markets where underlying = WBNB.
+     * @dev Unwraps WBNB to native BNB after redemption from Pendle.
+     *      The output.tokenOut must be WBNB for this function.
      *      No AMM swap — PT is redeemed directly through SY at 1:1 ratio.
      *      User must have delegated to this adapter in the Comptroller beforehand.
      * @param pendleMarket Pendle market address
@@ -339,12 +334,12 @@ interface IPendlePTVaultAdapter {
      * @notice Register a new PT market. Derives PT, SY, YT, and maturity from the Pendle market on-chain.
      * @dev Only callable by the contract owner.
      *      Reads token addresses and maturity directly from the Pendle market contract.
+     *      Accepts any token from Pendle's tokensIn array for deposits.
      * @param pendleMarket Pendle AMM market address to register
-     * @param underlying User-facing token address (may differ from SY's underlying)
      * @param vToken Venus VToken market address for this PT
      * @param comptroller Venus Comptroller address for the isolated pool
      */
-    function addMarket(address pendleMarket, address underlying, address vToken, address comptroller) external;
+    function addMarket(address pendleMarket, address vToken, address comptroller) external;
 
     /**
      * @notice Deactivate a market (blocks new deposits and withdrawals).
