@@ -766,6 +766,59 @@ describe("RelativePositionManager", () => {
     });
   });
 
+  describe("activateAndOpenPosition", () => {
+    it("should activate and open in one call", async () => {
+      const principalAmount = parseEther("20");
+      const shortAmount = parseEther("1");
+      const minLongAmount = parseEther("0.9");
+
+      await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
+      await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
+
+      const swapData = await createSwapMulticallData(
+        swapHelper,
+        collateralToken,
+        leverageManager.address,
+        shortAmount,
+        ethers.utils.formatBytes32String("activate-open-success"),
+      );
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .activateAndOpenPosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            principalAmount,
+            parseEther("2"),
+            shortAmount,
+            minLongAmount,
+            swapData,
+          ),
+      )
+        .to.emit(relativePositionManager, "PositionActivated")
+        .and.to.emit(relativePositionManager, "PositionOpened");
+
+      const position = await relativePositionManager.getPosition(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+      );
+      const positionAccount = position.positionAccount;
+
+      const longCollateral = await collateralMarket.callStatic.balanceOfUnderlying(positionAccount);
+      const dsaSupplied = await dsaMarket.callStatic.balanceOfUnderlying(positionAccount);
+      const borrowOpened = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccount);
+
+      expect(position.isActive).to.be.true;
+      expect(position.cycleId).to.equal(1);
+      expect(longCollateral).to.be.gte(minLongAmount);
+      expect(dsaSupplied).to.equal(principalAmount);
+      expect(borrowOpened).to.equal(shortAmount);
+    });
+  });
+
   describe("supplyPrincipal", () => {
     beforeEach(async () => {
       await relativePositionManager
@@ -2438,6 +2491,43 @@ describe("RelativePositionManager", () => {
       ).to.emit(relativePositionManager, "PrincipalWithdrawn");
       const balanceAfter = await dsaToken.balanceOf(aliceAddress);
       expect(balanceAfter.sub(balanceBefore)).to.equal(withdrawAmount);
+    });
+
+    it("should remain usable and allow withdrawing extra principal minted via mintBehalf", async () => {
+      const [, , bob] = await ethers.getSigners();
+      const principalAmount = parseEther("10");
+      const extraMintAmount = parseEther("3");
+      const totalWithdrawAmount = principalAmount.add(extraMintAmount);
+
+      await dsaToken.connect(admin).transfer(aliceAddress, principalAmount);
+      await dsaToken.connect(alice).approve(relativePositionManager.address, principalAmount);
+      await relativePositionManager
+        .connect(alice)
+        .activatePosition(collateralMarket.address, borrowMarket.address, dsaIndex, principalAmount, parseEther("2"));
+
+      const position = await relativePositionManager.getPosition(
+        aliceAddress,
+        collateralMarket.address,
+        borrowMarket.address,
+      );
+      const positionAccount = position.positionAccount;
+
+      await dsaToken.connect(admin).transfer(await bob.getAddress(), extraMintAmount);
+      await dsaToken.connect(bob).approve(dsaMarket.address, extraMintAmount);
+      await dsaMarket.connect(bob).mintBehalf(positionAccount, extraMintAmount);
+
+      const balanceBefore = await dsaToken.balanceOf(aliceAddress);
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .withdrawPrincipal(collateralMarket.address, borrowMarket.address, totalWithdrawAmount),
+      ).to.emit(relativePositionManager, "PrincipalWithdrawn");
+      const balanceAfter = await dsaToken.balanceOf(aliceAddress);
+
+      expect(balanceAfter.sub(balanceBefore)).to.equal(totalWithdrawAmount);
+      await expect(
+        relativePositionManager.connect(alice).deactivatePosition(collateralMarket.address, borrowMarket.address),
+      ).to.emit(relativePositionManager, "PositionDeactivated");
     });
   });
 

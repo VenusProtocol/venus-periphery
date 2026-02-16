@@ -209,6 +209,52 @@ contract RelativePositionManager is
     }
 
     /**
+     * @notice Activates and opens a position in a single transaction
+     * @dev Runs activatePosition flow first, then openPosition flow.
+     * @param longVToken The vToken market address for the asset to long
+     * @param shortVToken The vToken market address for the asset to short
+     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
+     * @param initialPrincipal initial principal amount to supply during activation
+     * @param effectiveLeverage The target leverage ratio for this position
+     * @param shortAmount Amount to borrow in shortAsset terms
+     * @param minLongAmount Minimum amount of long asset expected from swap
+     * @param swapData Swap instructions for converting shortAsset to longAsset
+     */
+    function activateAndOpenPosition(
+        address longVToken,
+        address shortVToken,
+        uint8 dsaIndex,
+        uint256 initialPrincipal,
+        uint256 effectiveLeverage,
+        uint256 shortAmount,
+        uint256 minLongAmount,
+        bytes calldata swapData
+    ) external whenNotPaused {
+        activatePosition(longVToken, shortVToken, dsaIndex, initialPrincipal, effectiveLeverage);
+        openPosition(IVToken(longVToken), IVToken(shortVToken), 0, shortAmount, minLongAmount, swapData);
+    }
+
+    /**
+     * @notice Supplies additional principal to an active position
+     * @dev Can be called multiple times to increase collateral. DSA is taken from the position (set on activation).
+     * @param longVToken The vToken market address for the long asset
+     * @param shortVToken The vToken market address for the short asset
+     * @param amount Amount of DSA underlying to supply
+     * @custom:error Throw ZeroAmount if amount is zero.
+     * @custom:error Throw PositionNotActive if the position is not active.
+     * @custom:event Emits PrincipalSupplied event.
+     */
+    function supplyPrincipal(
+        address longVToken,
+        address shortVToken,
+        uint256 amount
+    ) external nonReentrant whenNotPaused {
+        if (amount == 0) revert ZeroAmount();
+        Position storage position = _getActivePosition(msg.sender, longVToken, shortVToken);
+        _supplyPrincipalToPositionAccount(position, IVToken(position.dsaVToken), amount);
+    }
+
+    /**
      * @notice Activates a position account for the user with specified asset pair and DSA
      * @dev Deploys a new PositionAccount contract if one doesn't exist for this user/asset combination.
      *      The effective leverage must be set during activation and will be used to validate borrow amounts
@@ -235,7 +281,7 @@ contract RelativePositionManager is
         uint8 dsaIndex,
         uint256 initialPrincipal,
         uint256 effectiveLeverage
-    ) external nonReentrant whenNotPaused {
+    ) public nonReentrant whenNotPaused {
         _checkMarketListed(longVToken);
         _checkMarketListed(shortVToken);
         IVToken dsaVToken = _getValidatedDSAVToken(dsaIndex);
@@ -284,26 +330,6 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Supplies additional principal to an active position
-     * @dev Can be called multiple times to increase collateral. DSA is taken from the position (set on activation).
-     * @param longVToken The vToken market address for the long asset
-     * @param shortVToken The vToken market address for the short asset
-     * @param amount Amount of DSA underlying to supply
-     * @custom:error Throw ZeroAmount if amount is zero.
-     * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:event Emits PrincipalSupplied event.
-     */
-    function supplyPrincipal(
-        address longVToken,
-        address shortVToken,
-        uint256 amount
-    ) external nonReentrant whenNotPaused {
-        if (amount == 0) revert ZeroAmount();
-        Position storage position = _getActivePosition(msg.sender, longVToken, shortVToken);
-        _supplyPrincipalToPositionAccount(position, IVToken(position.dsaVToken), amount);
-    }
-
-    /**
      * @notice Opens a leveraged position or scales an existing one (borrow short, swap to long)
      * @dev Can be called multiple times to scale the position. Optionally supply additional principal
      *      via additionalPrincipal; otherwise uses existing principal. Requires either existing principal
@@ -328,7 +354,7 @@ contract RelativePositionManager is
         uint256 shortAmount,
         uint256 minLongAmount,
         bytes calldata swapData
-    ) external nonReentrant whenNotPaused {
+    ) public nonReentrant whenNotPaused {
         if (shortAmount == 0) revert ZeroShortAmount();
         Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
 
@@ -559,9 +585,13 @@ contract RelativePositionManager is
                     swapDataSecond
                 );
             }
-            uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
-            // Reduce suppliedPrincipalVTokens by the DSA vTokens actually burned for this leg.
-            position.suppliedPrincipalVTokens -= (vTokensBefore - vTokensAfter);
+            // Reduce suppliedPrincipalVTokens by DSA vTokens burned for this leg, clamped to tracked principal.
+            uint256 burned = vTokensBefore - dsaVToken.balanceOf(positionAccount);
+            if (burned > position.suppliedPrincipalVTokens) {
+                position.suppliedPrincipalVTokens = 0;
+            } else {
+                position.suppliedPrincipalVTokens -= burned;
+            }
             _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
         }
 
@@ -605,12 +635,11 @@ contract RelativePositionManager is
         IVToken shortVToken,
         uint256 amount
     ) external nonReentrant whenNotPaused {
+        if (amount == 0) revert ZeroAmount();
+
         Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
         address positionAccount = position.positionAccount;
 
-        if (amount == 0) revert ZeroAmount();
-
-        // Active: redeem only based on utilization
         UtilizationInfo memory utilization = _getUtilizationInfo(position);
         if (amount > utilization.withdrawableAmount) revert InsufficientWithdrawableAmount();
 
@@ -619,8 +648,13 @@ contract RelativePositionManager is
         _redeemUnderlyingToUser(dsaVToken, positionAccount, amount);
         uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
 
-        // Reduce suppliedPrincipalVTokens by the DSA vTokens actually burned for this withdraw.
-        position.suppliedPrincipalVTokens -= (vTokensBefore - vTokensAfter);
+        // Reduce suppliedPrincipalVTokens by DSA vTokens burned for this withdraw, clamped to tracked principal.
+        uint256 burned = vTokensBefore - vTokensAfter;
+        if (burned > position.suppliedPrincipalVTokens) {
+            position.suppliedPrincipalVTokens = 0;
+        } else {
+            position.suppliedPrincipalVTokens -= burned;
+        }
 
         emit PrincipalWithdrawn(
             msg.sender,
@@ -653,11 +687,11 @@ contract RelativePositionManager is
         if (longCollateral > 0 || shortDebt > 0) revert PositionNotFullyClosed();
         IVToken dsaVToken = IVToken(position.dsaVToken);
 
-        // Withdraw any remaining DSA principal to user (for complete withdraw use redeemBehalf insted of redeemUnderlyingToUser)
         position.isActive = false;
         position.suppliedPrincipalVTokens = 0;
-        uint256 underlyingRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
 
+        // Withdraw any remaining DSA principal to user (for complete withdraw use redeemBehalf insted of redeemUnderlyingToUser)
+        uint256 underlyingRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
         emit PositionDeactivated(msg.sender, positionAccount, position.cycleId, address(dsaVToken), underlyingRedeemed);
     }
 
@@ -1237,8 +1271,6 @@ contract RelativePositionManager is
      * @return balance of principal in underlying units
      */
     function _getSuppliedPrincipalBalance(Position storage position) internal returns (uint256) {
-        if (position.suppliedPrincipalVTokens == 0) return 0;
-
         address positionAccount = position.positionAccount;
         if (positionAccount == address(0)) revert ZeroAddress();
 

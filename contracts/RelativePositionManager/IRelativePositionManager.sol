@@ -328,6 +328,29 @@ interface IRelativePositionManager {
     ) external;
 
     /**
+     * @notice Activates and opens a position in a single transaction
+     * @dev Runs activatePosition flow first, then openPosition flow.
+     * @param longVToken The vToken market address for the asset to long
+     * @param shortVToken The vToken market address for the asset to short
+     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
+     * @param initialPrincipal Optional initial principal amount to supply during activation
+     * @param effectiveLeverage The target leverage ratio for this position
+     * @param shortAmount Amount to borrow in shortAsset terms
+     * @param minLongAmount Minimum amount of long asset expected from swap
+     * @param swapData Swap instructions for converting shortAsset to longAsset
+     */
+    function activateAndOpenPosition(
+        address longVToken,
+        address shortVToken,
+        uint8 dsaIndex,
+        uint256 initialPrincipal,
+        uint256 effectiveLeverage,
+        uint256 shortAmount,
+        uint256 minLongAmount,
+        bytes calldata swapData
+    ) external;
+
+    /**
      * @notice Supplies additional principal to an active position
      * @dev Can be called multiple times to increase collateral. DSA is taken from the position (set on activation).
      * @param longVToken The vToken market address for the long asset
