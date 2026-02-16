@@ -334,7 +334,7 @@ contract RelativePositionManager is
         Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
 
         // Must have principal (existing or supplied this call) to collateralize the borrow
-        if (position.suppliedPrincipal == 0 && additionalPrincipal == 0) revert InsufficientPrincipal();
+        if (position.suppliedPrincipalVTokens == 0 && additionalPrincipal == 0) revert InsufficientPrincipal();
         IVToken dsaVToken = IVToken(position.dsaVToken);
 
         if (additionalPrincipal > 0) {
@@ -555,8 +555,8 @@ contract RelativePositionManager is
                 swapDataSecond
             );
             uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
-            // Reduce suppliedPrincipal by the vTokens actually burned from DSA for this repay leg
-            position.suppliedPrincipal -= (vTokensBefore - vTokensAfter);
+            // Reduce suppliedPrincipalVTokens by the vTokens actually burned from DSA for this repay leg
+            position.suppliedPrincipalVTokens -= (vTokensBefore - vTokensAfter);
             _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
         }
 
@@ -614,9 +614,15 @@ contract RelativePositionManager is
         _redeemUnderlyingToUser(dsaVToken, positionAccount, amount);
         uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
 
-        position.suppliedPrincipal -= (vTokensBefore - vTokensAfter);
+        position.suppliedPrincipalVTokens -= (vTokensBefore - vTokensAfter);
 
-        emit PrincipalWithdrawn(msg.sender, positionAccount, address(dsaVToken), amount, position.suppliedPrincipal);
+        emit PrincipalWithdrawn(
+            msg.sender,
+            positionAccount,
+            address(dsaVToken),
+            amount,
+            position.suppliedPrincipalVTokens
+        );
     }
 
     /**
@@ -643,7 +649,7 @@ contract RelativePositionManager is
 
         // Withdraw any remaining DSA principal to user (for complete withdraw use redeemBehalf insted of redeemUnderlyingToUser)
         position.isActive = false;
-        position.suppliedPrincipal = 0;
+        position.suppliedPrincipalVTokens = 0;
         uint256 underlyingRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
 
         emit PositionDeactivated(msg.sender, positionAccount, position.cycleId, address(dsaVToken), underlyingRedeemed);
@@ -688,7 +694,7 @@ contract RelativePositionManager is
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @return position The Position struct (user, longVToken, shortVToken, dsaIndex, dsaVToken, positionAccount, suppliedPrincipal, effectiveLeverage, cycleId, isActive)
+     * @return position The Position struct (user, longVToken, shortVToken, positionAccount, dsaIndex, dsaVToken, suppliedPrincipalVTokens, effectiveLeverage, cycleId, isActive)
      */
     function getPosition(
         address user,
@@ -711,7 +717,7 @@ contract RelativePositionManager is
         IVToken longVToken,
         IVToken shortVToken
     ) external returns (UtilizationInfo memory utilization) {
-        Position memory position = positions[user][address(longVToken)][address(shortVToken)];
+        Position storage position = positions[user][address(longVToken)][address(shortVToken)];
         return _getUtilizationInfo(position);
     }
 
@@ -728,7 +734,7 @@ contract RelativePositionManager is
         IVToken longVToken,
         IVToken shortVToken
     ) external returns (uint256 maxBorrowAmount) {
-        Position memory position = positions[user][address(longVToken)][address(shortVToken)];
+        Position storage position = positions[user][address(longVToken)][address(shortVToken)];
         return _calculateMaxBorrowAllowed(position);
     }
 
@@ -749,7 +755,6 @@ contract RelativePositionManager is
         IVToken shortVToken
     ) external returns (uint256 longBalance) {
         Position storage position = positions[user][address(longVToken)][address(shortVToken)];
-
         return _getLongCollateralBalance(position);
     }
 
@@ -768,7 +773,6 @@ contract RelativePositionManager is
         IVToken shortVToken
     ) external returns (uint256 balance) {
         Position storage position = positions[user][address(longVToken)][address(shortVToken)];
-
         return _getSuppliedPrincipalBalance(position);
     }
 
@@ -857,8 +861,8 @@ contract RelativePositionManager is
         }
 
         // Update principal state
-        position.suppliedPrincipal += vTokensMinted;
-        emit ProfitConverted(position.user, positionAccount, amountToRedeem, position.suppliedPrincipal);
+        position.suppliedPrincipalVTokens += vTokensMinted;
+        emit ProfitConverted(position.user, positionAccount, amountToRedeem, position.suppliedPrincipalVTokens);
     }
 
     /**
@@ -916,8 +920,8 @@ contract RelativePositionManager is
         if (address(longVToken) == address(dsaVToken)) {
             // Read long collateral (excludes current principal) before reclassifying.
             longDustRedeemed = _getLongCollateralBalance(position);
-            // Set suppliedPrincipal to the full vToken balance.
-            position.suppliedPrincipal = longVToken.balanceOf(positionAccount);
+            // Set suppliedPrincipalVTokens to the full vToken balance.
+            position.suppliedPrincipalVTokens = longVToken.balanceOf(positionAccount);
         } else {
             longDustRedeemed = _redeemAllVTokensToUser(longVToken, positionAccount);
         }
@@ -957,7 +961,9 @@ contract RelativePositionManager is
      * @param amount Amount of underlying to transfer and mint
      */
     function _supplyPrincipalToPositionAccount(Position storage position, IVToken dsaVToken, uint256 amount) internal {
+        if (position.longVToken == address(dsaVToken)) _syncSuppliedPrincipal(position);
         address positionAccount = position.positionAccount;
+        
         uint256 balanceBefore = dsaVToken.balanceOf(positionAccount);
         address underlying = dsaVToken.underlying();
         IERC20Upgradeable(underlying).safeTransferFrom(msg.sender, address(this), amount);
@@ -965,7 +971,7 @@ contract RelativePositionManager is
         uint256 mintError = dsaVToken.mintBehalf(positionAccount, amount);
         if (mintError != SUCCESS) revert MintBehalfFailed(mintError);
         uint256 vTokensMinted = dsaVToken.balanceOf(positionAccount) - balanceBefore;
-        position.suppliedPrincipal += vTokensMinted;
+        position.suppliedPrincipalVTokens += vTokensMinted;
 
         emit PrincipalSupplied(
             position.user,
@@ -973,7 +979,7 @@ contract RelativePositionManager is
             position.cycleId,
             address(dsaVToken),
             amount,
-            position.suppliedPrincipal
+            position.suppliedPrincipalVTokens
         );
     }
 
@@ -1013,7 +1019,7 @@ contract RelativePositionManager is
      * @param position In-memory snapshot of the position data
      * @return maxBorrowAmount Maximum amount that can be borrowed in shortAsset terms
      */
-    function _calculateMaxBorrowAllowed(Position memory position) internal returns (uint256 maxBorrowAmount) {
+    function _calculateMaxBorrowAllowed(Position storage position) internal returns (uint256 maxBorrowAmount) {
         // Get utilization info which calculates available capital (DSA from position)
         UtilizationInfo memory utilization = _getUtilizationInfo(position);
 
@@ -1034,7 +1040,7 @@ contract RelativePositionManager is
      * @param position In-memory snapshot of the position data
      * @return utilization Struct with actualCapitalUtilized, nominalCapitalUtilized, finalCapitalUtilized, availableCapitalUSD, withdrawableAmount
      */
-    function _getUtilizationInfo(Position memory position) internal returns (UtilizationInfo memory utilization) {
+    function _getUtilizationInfo(Position storage position) internal returns (UtilizationInfo memory utilization) {
         IVToken longVToken = IVToken(position.longVToken);
         PositionValuesUSD memory values = _getPositionValuesUSD(position);
         IVToken dsaVToken = IVToken(position.dsaVToken);
@@ -1053,7 +1059,7 @@ contract RelativePositionManager is
         utilization.finalCapitalUtilized = max(utilization.actualCapitalUtilized, utilization.nominalCapitalUtilized);
         utilization.finalCapitalUtilized = min(values.suppliedPrincipalUSD, utilization.finalCapitalUtilized);
 
-        // Calculate available capital in USD (finalCapitalUtilized is already capped by suppliedPrincipal)
+        // Calculate available capital in USD (finalCapitalUtilized is already capped by suppliedPrincipalVTokens)
         utilization.availableCapitalUSD = values.suppliedPrincipalUSD - utilization.finalCapitalUtilized;
 
         // Calculate withdrawable amount in DSA token terms
@@ -1072,7 +1078,7 @@ contract RelativePositionManager is
      * @return maxExpectedShortToRepay Expected short + tolerance (for 100% close / first-leg cap in loss close)
      */
     function _getProportionalCloseAmounts(
-        Position memory position,
+        Position storage position,
         uint256 closeFractionBps
     )
         internal
@@ -1112,7 +1118,7 @@ contract RelativePositionManager is
      * @return amountToRepay Short amount to use for repay call (includes 100% tolerance bump when applicable)
      */
     function _validateProfitClose(
-        Position memory position,
+        Position storage position,
         uint256 closeFractionBps,
         uint256 totalLongAmountToRedeem,
         uint256 minAmountOutRepay
@@ -1153,7 +1159,7 @@ contract RelativePositionManager is
      * @return amountToRepaySecond The second-leg short repay amount (expectedShortToRepay - first leg, or 0 when first leg covers full). Caller uses shortAmountToRepayForFirstSwap for the first leg.
      */
     function _validateLossClose(
-        Position memory position,
+        Position storage position,
         uint256 closeFractionBps,
         uint256 longAmountToRedeemForFirstSwap,
         uint256 shortAmountToRepayForFirstSwap,
@@ -1200,22 +1206,23 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Splits the position account's vToken balance into effective principal and long collateral vTokens
-     * @dev Intended for use only within the DSA == LONG branch of _getSuppliedPrincipalBalance and
-     *      _getLongCollateralBalance. External liquidations can seize vTokens without updating RPM state,
-     *      so stored suppliedPrincipal may exceed the actual vToken balance. This function caps principal
-     *      at the actual balance and returns the remainder as long collateral vTokens.
-     * @param position The position data
-     * @return dsaVTokenAmount The effective principal in vToken units (capped at actual balance)
-     * @return longVTokenAmount The remaining vTokens attributed to long collateral
+     * @notice Caps stored suppliedPrincipalVTokens to the position account's DSA vToken balance and emits if updated.
+     * @dev Only meaningful when DSA == long: external liquidations can seize vTokens without updating this contract,
+     *      so stored suppliedPrincipalVTokens may exceed the actual balance. This sync keeps state consistent.
+     * @param position Position to sync (suppliedPrincipalVTokens and positionAccount must be set)
      */
-    function _splitPrincipalAndLongVTokens(
-        Position memory position
-    ) internal view returns (uint256 dsaVTokenAmount, uint256 longVTokenAmount) {
+    function _syncSuppliedPrincipal(Position storage position) internal {
         uint256 vTokenBalance = IVToken(position.dsaVToken).balanceOf(position.positionAccount);
-        // Cap principal at actual balance: external liquidations can seize vTokens without updating stored suppliedPrincipal
-        dsaVTokenAmount = position.suppliedPrincipal > vTokenBalance ? vTokenBalance : position.suppliedPrincipal;
-        longVTokenAmount = vTokenBalance - dsaVTokenAmount;
+        if (position.suppliedPrincipalVTokens > vTokenBalance) {
+            uint256 oldSuppliedPrincipal = position.suppliedPrincipalVTokens;
+            position.suppliedPrincipalVTokens = vTokenBalance;
+            emit RefreshedSuppliedPrincipal(
+                position.user,
+                position.positionAccount,
+                oldSuppliedPrincipal,
+                vTokenBalance
+            );
+        }
     }
 
     /**
@@ -1223,11 +1230,11 @@ contract RelativePositionManager is
      * @dev When DSA != long asset, all DSA underlying on the position account is considered principal,
      *      so we can read it directly. When DSA == long asset, we must use the stored principal vTokens
      *      to avoid counting long collateral as principal.
-     * @param position The position data (holds suppliedPrincipal and positionAccount)
+     * @param position The position data (holds suppliedPrincipalVTokens and positionAccount)
      * @return balance of principal in underlying units
      */
-    function _getSuppliedPrincipalBalance(Position memory position) internal returns (uint256) {
-        if (position.suppliedPrincipal == 0) return 0;
+    function _getSuppliedPrincipalBalance(Position storage position) internal returns (uint256) {
+        if (position.suppliedPrincipalVTokens == 0) return 0;
 
         address positionAccount = position.positionAccount;
         if (positionAccount == address(0)) revert ZeroAddress();
@@ -1237,9 +1244,9 @@ contract RelativePositionManager is
 
         // When DSA == long, principal is tracked in vTokens to separate it from long collateral.
         if (address(dsaVToken) == address(longVToken)) {
-            (uint256 dsaVTokensNet, ) = _splitPrincipalAndLongVTokens(position);
+            _syncSuppliedPrincipal(position);
             uint256 exchangeRate = dsaVToken.exchangeRateCurrent();
-            return (dsaVTokensNet * exchangeRate) / MANTISSA_ONE;
+            return (position.suppliedPrincipalVTokens * exchangeRate) / MANTISSA_ONE;
         }
 
         // DSA and long are different assets: all DSA underlying on the position is principal.
@@ -1248,10 +1255,10 @@ contract RelativePositionManager is
 
     /**
      * @notice Gets the actual long collateral balance, excluding DSA principal if DSA == long asset
-     * @param position The position data (longVToken read from position)
+     * @param position The position data
      * @return longBalance The actual long collateral balance in underlying (excluding DSA principal if DSA == long)
      */
-    function _getLongCollateralBalance(Position memory position) internal returns (uint256 longBalance) {
+    function _getLongCollateralBalance(Position storage position) internal returns (uint256 longBalance) {
         address positionAccount = position.positionAccount;
         if (positionAccount == address(0)) revert ZeroAddress();
 
@@ -1259,8 +1266,10 @@ contract RelativePositionManager is
         IVToken dsaVToken = IVToken(position.dsaVToken);
 
         if (address(longVToken) == address(dsaVToken)) {
-            // Same asset: split vToken balance into principal and long collateral portions.
-            (, uint256 longVTokensNet) = _splitPrincipalAndLongVTokens(position);
+            // Same asset: sync supplied principal, then long collateral = vToken balance minus supplied principal.
+            _syncSuppliedPrincipal(position);
+            uint256 vTokenBalance = longVToken.balanceOf(positionAccount);
+            uint256 longVTokensNet = vTokenBalance - position.suppliedPrincipalVTokens;
             if (longVTokensNet == 0) return 0;
             uint256 exchangeRate = longVToken.exchangeRateCurrent();
             return (longVTokensNet * exchangeRate) / MANTISSA_ONE;
@@ -1274,7 +1283,7 @@ contract RelativePositionManager is
      * @param position The position data (longVToken, shortVToken, dsaVToken read from position)
      * @return values Struct with longValueUSD, borrowValueUSD, suppliedPrincipalUSD, dsaPrice, shortPrice
      */
-    function _getPositionValuesUSD(Position memory position) internal returns (PositionValuesUSD memory values) {
+    function _getPositionValuesUSD(Position storage position) internal returns (PositionValuesUSD memory values) {
         IVToken longVToken = IVToken(position.longVToken);
         IVToken shortVToken = IVToken(position.shortVToken);
         IVToken dsaVToken = IVToken(position.dsaVToken);

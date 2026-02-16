@@ -1946,11 +1946,11 @@ forking(81501196, () => {
           "Supplied principal (supplied token) should be reduced after vToken seizure",
         );
 
-        // Stored position.suppliedPrincipal (vToken amount) should be same after seizure
+        // Stored position.suppliedPrincipalVTokens (vToken amount) should be same after seizure
         const positionAfterLiquidation = await rpm.getPosition(alice.address, longVToken.address, shortVToken.address);
-        expect(positionAfterLiquidation.suppliedPrincipal).to.be.equal(
-          positionBeforeLiquidation.suppliedPrincipal,
-          "Stored position.suppliedPrincipal should be same vToken seizure",
+        expect(positionAfterLiquidation.suppliedPrincipalVTokens).to.be.equal(
+          positionBeforeLiquidation.suppliedPrincipalVTokens,
+          "Stored position.suppliedPrincipalVTokens should be same vToken seizure",
         );
       });
 

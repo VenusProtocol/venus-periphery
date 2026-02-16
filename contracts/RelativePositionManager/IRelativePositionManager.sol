@@ -16,13 +16,13 @@ interface IRelativePositionManager {
         address user; // User who owns this position (immutable)
         address longVToken; // Long vToken market (immutable)
         address shortVToken; // Short vToken market (immutable)
-        uint8 dsaIndex; // Index of DSA in dsaVTokens array (set on activation)
-        address dsaVToken; // DSA vToken market (set on activation; no re-validation needed in same cycle)
         address positionAccount; // Address of the PositionAccount contract (immutable)
-        uint256 suppliedPrincipal; // Total DSA supplied as collateral, in vToken amount (mutable)
-        uint256 effectiveLeverage; // Leverage ratio (mutable)
-        uint256 cycleId; // Current cycle ID, increments on each activation (mutable)
         bool isActive; // Whether position is currently active (mutable)
+        uint8 dsaIndex; // Index of DSA in dsaVTokens array sets on activation (mutable)
+        address dsaVToken; // DSA vToken market address sets on activation (mutable)
+        uint256 suppliedPrincipalVTokens; // Total DSA supplied as collateral, in vToken amount (mutable)
+        uint256 effectiveLeverage; // Leverage ratio sets on activation (mutable)
+        uint256 cycleId; // Current cycle ID, increments on each activation (mutable)
     }
 
     /// @notice Structure for utilization calculation results
@@ -262,6 +262,18 @@ interface IRelativePositionManager {
     /// @param amount Amount of underlying transferred
     event UnderlyingTransferred(address indexed token, address indexed from, address indexed to, uint256 amount);
 
+    /// @notice Emitted when supplied principal is refreshed down to match actual vToken balance (e.g. after liquidation seized vTokens)
+    /// @param user Position owner
+    /// @param positionAccount Position account whose principal was refreshed
+    /// @param oldSuppliedPrincipal Previous suppliedPrincipal (vToken amount)
+    /// @param newSuppliedPrincipal New suppliedPrincipal (capped at actual vToken balance)
+    event RefreshedSuppliedPrincipal(
+        address indexed user,
+        address indexed positionAccount,
+        uint256 oldSuppliedPrincipal,
+        uint256 newSuppliedPrincipal
+    );
+
     /// @notice Emitted when a new DSA vToken is added
     /// @param dsaVToken Address of the DSA vToken added
     /// @param index Index of the DSA vToken in the array
@@ -467,7 +479,7 @@ interface IRelativePositionManager {
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @return position The Position struct (user, longVToken, shortVToken, dsaIndex, dsaVToken, positionAccount, suppliedPrincipal, effectiveLeverage, cycleId, isActive)
+     * @return position The Position struct (user, longVToken, shortVToken, positionAccount, isActive, dsaIndex, dsaVToken, suppliedPrincipalVTokens, effectiveLeverage, cycleId)
      */
     function getPosition(
         address user,

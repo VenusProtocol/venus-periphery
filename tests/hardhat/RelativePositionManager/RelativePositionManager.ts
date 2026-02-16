@@ -712,7 +712,7 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      expect(position.suppliedPrincipal).to.be.gt(0);
+      expect(position.suppliedPrincipalVTokens).to.be.gt(0);
     });
 
     it("should reuse existing position account when reactivating a fully closed position", async () => {
@@ -819,13 +819,13 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      expect(positionAfter.suppliedPrincipal).to.be.gt(positionBefore.suppliedPrincipal);
+      expect(positionAfter.suppliedPrincipalVTokens).to.be.gt(positionBefore.suppliedPrincipalVTokens);
       expect(positionAfter.positionAccount).to.equal(positionBefore.positionAccount);
 
       const vBalanceAfter = await dsaMarket.balanceOf(positionAfter.positionAccount);
       expect(vBalanceAfter).to.be.gt(vBalanceBefore);
       // Supplied principal in manager storage should exactly match the DSA vToken balance
-      expect(positionAfter.suppliedPrincipal).to.equal(vBalanceAfter);
+      expect(positionAfter.suppliedPrincipalVTokens).to.equal(vBalanceAfter);
     });
   });
 
@@ -1877,7 +1877,7 @@ describe("RelativePositionManager", () => {
         borrowMarket.address,
       );
       const positionAccountAddr = positionAfterActivate.positionAccount;
-      const principalVTokensBeforeOpen = positionAfterActivate.suppliedPrincipal;
+      const principalVTokensBeforeOpen = positionAfterActivate.suppliedPrincipalVTokens;
 
       const shortAmount = parseEther("1");
       const minLongAmount = parseEther("0.9");
@@ -1908,7 +1908,7 @@ describe("RelativePositionManager", () => {
         borrowMarket.address,
       );
       // vToken principal should increase
-      expect(positionAfterOpen.suppliedPrincipal).to.be.gt(principalVTokensBeforeOpen);
+      expect(positionAfterOpen.suppliedPrincipalVTokens).to.be.gt(principalVTokensBeforeOpen);
 
       // Underlying: split total underlying into principal part and long (leveraged) part
       const underlyingAfterOpen = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
@@ -1961,7 +1961,7 @@ describe("RelativePositionManager", () => {
         dsaMarket.address,
         borrowMarket.address,
       );
-      const principalVTokensBefore = positionBeforeProfit.suppliedPrincipal;
+      const principalVTokensBefore = positionBeforeProfit.suppliedPrincipalVTokens;
       const positionAccountAddr = positionBeforeProfit.positionAccount;
 
       // Repay leg: at oracle price long=2, short=1, repaying full short debt requires
@@ -2027,9 +2027,9 @@ describe("RelativePositionManager", () => {
       const expectedPrincipalAfter = principalVTokensBefore.add(
         amountToRedeemForProfitSwap.mul(MANTISSA_ONE).div(exchangeRate),
       );
-      expect(positionAfter.suppliedPrincipal).to.equal(expectedPrincipalAfter);
+      expect(positionAfter.suppliedPrincipalVTokens).to.equal(expectedPrincipalAfter);
       expect(await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr)).to.equal(0);
-      expect(await dsaMarket.balanceOf(positionAccountAddr)).to.equal(positionAfter.suppliedPrincipal);
+      expect(await dsaMarket.balanceOf(positionAccountAddr)).to.equal(positionAfter.suppliedPrincipalVTokens);
     });
 
     it("closeWithLoss: should close fully; second exit uses same market as DSA/long and reduces principal vTokens", async () => {
@@ -2109,7 +2109,7 @@ describe("RelativePositionManager", () => {
         dsaToken,
       );
 
-      const principalVTokensBefore = positionBefore.suppliedPrincipal;
+      const principalVTokensBefore = positionBefore.suppliedPrincipalVTokens;
       const principalUnderlyingBefore = await relativePositionManager.callStatic.getSuppliedPrincipalBalance(
         aliceAddress,
         dsaMarket.address,
@@ -2513,7 +2513,7 @@ describe("RelativePositionManager", () => {
 
       expect(position.isActive).to.be.false;
       // No principal should remain recorded on the position after deactivation
-      expect(position.suppliedPrincipal).to.equal(0);
+      expect(position.suppliedPrincipalVTokens).to.equal(0);
 
       // All three assets (collateral, borrow and DSA principal market) should have zero
       // balances for the position account after deactivation.
@@ -2644,7 +2644,7 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      expect(positionAfterClose.suppliedPrincipal).to.be.gt(0);
+      expect(positionAfterClose.suppliedPrincipalVTokens).to.be.gt(0);
       expect(positionAfterClose.dsaIndex).to.equal(initialDsaIndex);
       // After 100% close the position remains active; principal is still supplied.
       expect(positionAfterClose.isActive).to.be.true;
@@ -2659,7 +2659,7 @@ describe("RelativePositionManager", () => {
         borrowMarket.address,
       );
       expect(positionAfterDeactivate.isActive).to.be.false;
-      expect(positionAfterDeactivate.suppliedPrincipal).to.equal(0);
+      expect(positionAfterDeactivate.suppliedPrincipalVTokens).to.equal(0);
     });
 
     it("should allow reactivation with new DSA after full close and explicit deactivation", async () => {
@@ -2670,7 +2670,7 @@ describe("RelativePositionManager", () => {
       );
       expect(positionBefore.isActive).to.be.false;
       // After deactivatePosition in beforeEach, principal should have been fully withdrawn
-      expect(positionBefore.suppliedPrincipal).to.equal(0);
+      expect(positionBefore.suppliedPrincipalVTokens).to.equal(0);
 
       await expect(
         relativePositionManager
