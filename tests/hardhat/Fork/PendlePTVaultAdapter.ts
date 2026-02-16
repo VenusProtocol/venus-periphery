@@ -5,6 +5,7 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import { FORK_MAINNET, forking } from "./utils";
+import { getPendleSwapParams } from "./utils/pendleApi";
 
 const { expect } = chai;
 
@@ -68,9 +69,9 @@ if (FORK_MAINNET) {
         const clisbnbBalance = await clisbnb.balanceOf(user.address);
         console.log("User clisBNB balance after swap:", ethers.utils.formatEther(clisbnbBalance));
 
-        // Deploy PendlePTVaultAdapter implementation with clisBNB as underlying
+        // Deploy PendlePTVaultAdapter implementation
         const PendlePTVaultAdapter = await ethers.getContractFactory("PendlePTVaultAdapter");
-        const implementation = await PendlePTVaultAdapter.deploy(PENDLE_ROUTER_V3, CLISBNB);
+        const implementation = await PendlePTVaultAdapter.deploy(PENDLE_ROUTER_V3, WBNB);
         await implementation.deployed();
 
         // Deploy proxy with a separate admin address
@@ -86,10 +87,9 @@ if (FORK_MAINNET) {
 
         marketAddress = PENDLE_MARKET;
 
-        // Add market to adapter (this internally queries Pendle market for PT, SY, YT, maturity)
+        // Add market to adapter (no underlying token constraint - accepts any token from Pendle's tokensIn)
         await adapter.connect(owner).addMarket(
           marketAddress,
-          CLISBNB, // underlying (clisBNB)
           VTOKEN_PT_CLISBNBX_25JUN2026, // vToken
           COMPTROLLER, // comptroller
         );
@@ -115,41 +115,35 @@ if (FORK_MAINNET) {
         });
 
         it("should successfully deposit clisBNB and receive vPT-clisBNB-25JUN2026", async () => {
-          // Prepare deposit parameters according to Pendle API structure
-          const minPtOut = parseUnits("0.01", 18); // Expect at least 0.01 PT for 0.02 clisBNB (allowing for slippage)
+          console.log("\n=== Fetching parameters from Pendle API ===" );
 
-          // ApproxParams for binary search approximation
-          // These params are typically fetched from Pendle SDK/API
-          const approxParams = {
-            guessMin: parseUnits("0.01", 18), // Adjusted for 0.02 clisBNB deposit
-            guessMax: parseUnits("0.03", 18), // Adjusted for 0.02 clisBNB deposit
-            guessOffchain: parseUnits("0.02", 18), // Initial guess matching deposit amount
-            maxIteration: 256,
-            eps: parseUnits("0.00001", 18), // 0.001% precision
-          };
+          const chainId = 56; // BSC Mainnet
+          const slippage = 0.03; // 3% slippage tolerance
 
-          // TokenInput struct for the swap
-          const tokenInput = {
-            tokenIn: CLISBNB,
-            netTokenIn: depositAmount,
-            tokenMintSy: CLISBNB, // Token that will be used to mint SY (clisBNB is accepted by SY)
-            pendleSwap: "0x0000000000000000000000000000000000000000", // No aggregator swap needed
-            swapData: {
-              swapType: 0, // NONE (no external swap needed since we're using clisBNB directly)
-              extRouter: ethers.constants.AddressZero,
-              extCalldata: "0x",
-              needScale: false,
-            },
-          };
+          // Get market config to extract PT token address
+          const marketConfig = await adapter.getMarketConfig(marketAddress);
+          const ptTokenAddress = marketConfig.pt;
 
-          // LimitOrderData (empty for market order)
-          const limitOrderData = {
-            limitRouter: ethers.constants.AddressZero,
-            epsSkipMarket: 0,
-            normalFills: [],
-            flashFills: [],
-            optData: "0x",
-          };
+          // Fetch all swap parameters from Pendle API
+          const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
+            chainId,
+            CLISBNB,
+            ptTokenAddress,
+            depositAmount,
+            user.address,
+            slippage,
+          );
+
+          console.log("Min PT Out (from API):", ethers.utils.formatEther(minPtOut));
+          console.log("ApproxParams (from API):");
+          console.log("  guessMin:", ethers.utils.formatEther(approxParams.guessMin));
+          console.log("  guessMax:", ethers.utils.formatEther(approxParams.guessMax));
+          console.log("  guessOffchain:", ethers.utils.formatEther(approxParams.guessOffchain));
+          console.log("TokenInput:", {
+            tokenIn: tokenInput.tokenIn,
+            netTokenIn: ethers.utils.formatEther(tokenInput.netTokenIn),
+            tokenMintSy: tokenInput.tokenMintSy,
+          });
 
           // Get balances before
           const userClisbnbBefore = await clisbnb.balanceOf(user.address);
@@ -231,11 +225,13 @@ if (FORK_MAINNET) {
             console.log("\n=== Deposited Event ===");
             console.log("Market:", depositedEvent.args?.pendleMarket);
             console.log("User:", depositedEvent.args?.user);
-            console.log("Underlying Amount:", ethers.utils.formatEther(depositedEvent.args?.underlyingAmount));
+            console.log("Token In:", depositedEvent.args?.tokenIn);
+            console.log("Amount In:", ethers.utils.formatEther(depositedEvent.args?.amountIn));
             console.log("PT Amount:", ethers.utils.formatEther(depositedEvent.args?.ptAmount));
             console.log("vToken Amount:", ethers.utils.formatEther(depositedEvent.args?.vTokenAmount));
 
             expect(depositedEvent.args?.ptAmount.gte(minPtOut)).to.be.true;
+            expect(depositedEvent.args?.tokenIn).to.equal(CLISBNB);
           }
         });
       });
