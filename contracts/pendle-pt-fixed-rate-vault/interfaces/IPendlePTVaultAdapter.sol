@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.25;
 
-import { TokenInput, TokenOutput, ApproxParams, LimitOrderData } from "./IPAllActionV3.sol";
+import { TokenInput, TokenOutput, ApproxParams, LimitOrderData } from "@pendle/core-v2/contracts/interfaces/IPAllActionTypeV3.sol";
 
 /**
  * @title IPendlePTVaultAdapter
@@ -229,14 +229,6 @@ interface IPendlePTVaultAdapter {
      * @param input Token routing configuration from the Pendle API
      * @param limit Limit order fill data (can be empty struct for simple swaps)
      * @return netVTokensMinted Amount of vTokens credited to the user
-     * @custom:error ZeroAmount if amount is 0
-     * @custom:error MarketNotRegistered if pendleMarket is not registered
-     * @custom:error MarketNotActive if market has been deactivated
-     * @custom:error MarketAlreadyMatured if attempting to deposit after maturity
-     * @custom:error InvalidTokenInput if input.tokenIn does not match market's underlying
-     * @custom:error InputAmountMismatch if input.netTokenIn does not match amount
-     * @custom:error VTokenMintFailed if Venus mint operation returns non-zero error
-     * @custom:access whenNotPaused, nonReentrant
      */
     function deposit(
         address pendleMarket,
@@ -256,12 +248,6 @@ interface IPendlePTVaultAdapter {
      * @param output Token routing configuration from the Pendle API
      * @param limit Limit order fill data (can be empty struct)
      * @return netTokenOut Amount of underlying tokens received by the user
-     * @custom:error ZeroAmount if vTokenAmount is 0
-     * @custom:error MarketNotRegistered if pendleMarket is not registered
-     * @custom:error MarketNotActive if market has been deactivated
-     * @custom:error InvalidTokenOutput if output.tokenOut does not match market's underlying
-     * @custom:error VTokenRedeemFailed if Venus redeem operation returns non-zero error
-     * @custom:access whenNotPaused, nonReentrant
      */
     function withdraw(
         address pendleMarket,
@@ -279,14 +265,6 @@ interface IPendlePTVaultAdapter {
      * @param deadline Transaction deadline timestamp (reverts if exceeded)
      * @param output Token routing configuration from the Pendle API
      * @return netTokenOut Amount of underlying tokens received by the user
-     * @custom:error ZeroAmount if vTokenAmount is 0
-     * @custom:error MarketNotRegistered if pendleMarket is not registered
-     * @custom:error MarketNotActive if market has been deactivated
-     * @custom:error MarketNotMatured if called before maturity
-     * @custom:error DeadlineExceeded if block.timestamp > deadline
-     * @custom:error InvalidTokenOutput if output.tokenOut does not match market's underlying
-     * @custom:error VTokenRedeemFailed if Venus redeem operation returns non-zero error
-     * @custom:access whenNotPaused, nonReentrant
      */
     function redeemAtMaturity(
         address pendleMarket,
@@ -309,15 +287,6 @@ interface IPendlePTVaultAdapter {
      * @param input Token routing configuration from the Pendle API (tokenIn must be WBNB)
      * @param limit Limit order fill data (can be empty struct)
      * @return netVTokensMinted Amount of vTokens credited to the user
-     * @custom:error ZeroAmount if msg.value is 0
-     * @custom:error MarketNotRegistered if pendleMarket is not registered
-     * @custom:error MarketNotActive if market has been deactivated
-     * @custom:error MarketAlreadyMatured if attempting to deposit after maturity
-     * @custom:error NotNativeMarket if market's underlying is not WBNB
-     * @custom:error InvalidTokenInput if input.tokenIn is not WBNB
-     * @custom:error InputAmountMismatch if input.netTokenIn does not match msg.value
-     * @custom:error VTokenMintFailed if Venus mint operation returns non-zero error
-     * @custom:access whenNotPaused, nonReentrant, payable
      */
     function depositNative(
         address pendleMarket,
@@ -336,13 +305,6 @@ interface IPendlePTVaultAdapter {
      * @param output Token routing configuration from the Pendle API (tokenOut must be WBNB)
      * @param limit Limit order fill data (can be empty struct)
      * @return netTokenOut Amount of native BNB received by the user
-     * @custom:error ZeroAmount if vTokenAmount is 0
-     * @custom:error MarketNotRegistered if pendleMarket is not registered
-     * @custom:error MarketNotActive if market has been deactivated
-     * @custom:error NotNativeMarket if market's underlying is not WBNB
-     * @custom:error InvalidTokenOutput if output.tokenOut is not WBNB
-     * @custom:error VTokenRedeemFailed if Venus redeem operation returns non-zero error
-     * @custom:access whenNotPaused, nonReentrant
      */
     function withdrawNative(
         address pendleMarket,
@@ -361,15 +323,6 @@ interface IPendlePTVaultAdapter {
      * @param deadline Transaction deadline timestamp
      * @param output Token routing configuration from the Pendle API (tokenOut must be WBNB)
      * @return netTokenOut Amount of native BNB received by the user
-     * @custom:error ZeroAmount if vTokenAmount is 0
-     * @custom:error MarketNotRegistered if pendleMarket is not registered
-     * @custom:error MarketNotActive if market has been deactivated
-     * @custom:error MarketNotMatured if called before maturity
-     * @custom:error NotNativeMarket if market's underlying is not WBNB
-     * @custom:error DeadlineExceeded if block.timestamp > deadline
-     * @custom:error InvalidTokenOutput if output.tokenOut is not WBNB
-     * @custom:error VTokenRedeemFailed if Venus redeem operation returns non-zero error
-     * @custom:access whenNotPaused, nonReentrant
      */
     function redeemAtMaturityNative(
         address pendleMarket,
@@ -390,9 +343,6 @@ interface IPendlePTVaultAdapter {
      * @param underlying User-facing token address (may differ from SY's underlying)
      * @param vToken Venus VToken market address for this PT
      * @param comptroller Venus Comptroller address for the isolated pool
-     * @custom:error ZeroAddress if any address parameter is zero
-     * @custom:error MarketAlreadyRegistered if the market is already registered
-     * @custom:access onlyOwner
      */
     function addMarket(address pendleMarket, address underlying, address vToken, address comptroller) external;
 
@@ -401,8 +351,6 @@ interface IPendlePTVaultAdapter {
      * @dev Only callable by the contract owner.
      *      Deactivation prevents new operations but does not affect existing user positions.
      * @param pendleMarket Pendle market address to deactivate
-     * @custom:error MarketNotRegistered if the market is not registered
-     * @custom:access onlyOwner
      */
     function deactivateMarket(address pendleMarket) external;
 
@@ -410,8 +358,6 @@ interface IPendlePTVaultAdapter {
      * @notice Re-activate a previously deactivated market.
      * @dev Only callable by the contract owner.
      * @param pendleMarket Pendle market address to activate
-     * @custom:error MarketNotRegistered if the market is not registered
-     * @custom:access onlyOwner
      */
     function activateMarket(address pendleMarket) external;
 
@@ -419,14 +365,12 @@ interface IPendlePTVaultAdapter {
      * @notice Pause all deposit/withdraw operations (emergency).
      * @dev Only callable by the contract owner.
      *      When paused, all user-facing functions revert.
-     * @custom:access onlyOwner
      */
     function pause() external;
 
     /**
      * @notice Unpause operations.
      * @dev Only callable by the contract owner.
-     * @custom:access onlyOwner
      */
     function unpause() external;
 
@@ -438,8 +382,6 @@ interface IPendlePTVaultAdapter {
      * @param token ERC-20 token address to sweep
      * @param to Recipient address
      * @param amount Amount to transfer
-     * @custom:error ZeroAddress if token or to address is zero
-     * @custom:access onlyOwner
      */
     function sweepTokens(address token, address to, uint256 amount) external;
 

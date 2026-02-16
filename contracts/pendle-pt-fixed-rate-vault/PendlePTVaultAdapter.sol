@@ -9,8 +9,9 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 
-import { IPAllActionV3, TokenInput, TokenOutput, ApproxParams, LimitOrderData } from "./interfaces/IPAllActionV3.sol";
-import { IPMarket } from "./interfaces/IPMarket.sol";
+import { IPAllActionV3 } from "@pendle/core-v2/contracts/interfaces/IPAllActionV3.sol";
+import { TokenInput, TokenOutput, ApproxParams, LimitOrderData } from "@pendle/core-v2/contracts/interfaces/IPAllActionTypeV3.sol";
+import { IPMarket, IStandardizedYield, IPPrincipalToken, IPYieldToken } from "@pendle/core-v2/contracts/interfaces/IPMarket.sol";
 import { IVenusVToken } from "./interfaces/IVenusVToken.sol";
 import { IVenusComptroller } from "./interfaces/IVenusComptroller.sol";
 import { IWBNB } from "./interfaces/IWBNB.sol";
@@ -130,13 +131,7 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    )
-        external
-        whenNotPaused
-        nonReentrant
-        onlyActiveMarket(pendleMarket)
-        returns (uint256 netVTokensMinted)
-    {
+    ) external whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netVTokensMinted) {
         if (amount == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
@@ -238,14 +233,7 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    )
-        external
-        payable
-        whenNotPaused
-        nonReentrant
-        onlyActiveMarket(pendleMarket)
-        returns (uint256 netVTokensMinted)
-    {
+    ) external payable whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netVTokensMinted) {
         if (msg.value == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
@@ -364,13 +352,14 @@ contract PendlePTVaultAdapter is
         if (markets[pendleMarket].pt != address(0)) revert MarketAlreadyRegistered(pendleMarket);
 
         // Derive token addresses and maturity from Pendle market contract
-        (address sy, address pt, address yt) = IPMarket(pendleMarket).readTokens();
+        // solhint-disable-next-line var-name-mixedcase
+        (IStandardizedYield _SY, IPPrincipalToken _PT, IPYieldToken _YT) = IPMarket(pendleMarket).readTokens();
         uint256 maturity = IPMarket(pendleMarket).expiry();
 
         markets[pendleMarket] = MarketConfig({
-            pt: pt,
-            sy: sy,
-            yt: yt,
+            pt: address(_PT),
+            sy: address(_SY),
+            yt: address(_YT),
             underlying: underlying,
             vToken: vToken,
             comptroller: comptroller,
@@ -380,7 +369,7 @@ contract PendlePTVaultAdapter is
 
         marketList.push(pendleMarket);
 
-        emit MarketAdded(pendleMarket, underlying, pt, vToken, comptroller, maturity);
+        emit MarketAdded(pendleMarket, underlying, address(_PT), vToken, comptroller, maturity);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
