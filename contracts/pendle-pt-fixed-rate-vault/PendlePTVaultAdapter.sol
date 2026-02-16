@@ -63,13 +63,6 @@ contract PendlePTVaultAdapter is
         _;
     }
 
-    /// @dev Reverts if the market has already matured (block.timestamp >= maturity).
-    modifier beforeMaturity(address pendleMarket) {
-        uint256 mat = markets[pendleMarket].maturity;
-        if (!(block.timestamp < mat)) revert MarketAlreadyMatured(mat, block.timestamp);
-        _;
-    }
-
     /// @dev Reverts if the market has not yet matured (block.timestamp < maturity).
     modifier atOrAfterMaturity(address pendleMarket) {
         uint256 mat = markets[pendleMarket].maturity;
@@ -142,7 +135,6 @@ contract PendlePTVaultAdapter is
         whenNotPaused
         nonReentrant
         onlyActiveMarket(pendleMarket)
-        beforeMaturity(pendleMarket)
         returns (uint256 netVTokensMinted)
     {
         if (amount == 0) revert ZeroAmount();
@@ -162,11 +154,7 @@ contract PendlePTVaultAdapter is
         // 3. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config, netPtOut);
 
-        // 4. Auto-enable collateral (best-effort — requires user delegation to adapter)
-        // Ignore return value - if it fails (e.g., user hasn't delegated), deposit still succeeds
-        IVenusComptroller(config.comptroller).enterMarketBehalf(msg.sender, config.vToken);
-
-        // 5. Sweep any dust underlying back to user
+        // 4. Sweep any dust underlying back to user
         _sweepDust(config.underlying, msg.sender);
 
         emit Deposited(pendleMarket, msg.sender, amount, netPtOut, netVTokensMinted);
@@ -256,7 +244,6 @@ contract PendlePTVaultAdapter is
         whenNotPaused
         nonReentrant
         onlyActiveMarket(pendleMarket)
-        beforeMaturity(pendleMarket)
         returns (uint256 netVTokensMinted)
     {
         if (msg.value == 0) revert ZeroAmount();
@@ -276,11 +263,7 @@ contract PendlePTVaultAdapter is
         // 3. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config, netPtOut);
 
-        // 4. Auto-enable collateral (best-effort — requires user delegation to adapter)
-        // Ignore return value - if it fails (e.g., user hasn't delegated), deposit still succeeds
-        IVenusComptroller(config.comptroller).enterMarketBehalf(msg.sender, config.vToken);
-
-        // 5. Refund any excess WBNB as native BNB
+        // 4. Refund any excess WBNB as native BNB
         _refundNativeDust();
 
         emit Deposited(pendleMarket, msg.sender, msg.value, netPtOut, netVTokensMinted);
