@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.28;
 
-import {
-    ReentrancyGuardUpgradeable
-} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import {
     SafeERC20Upgradeable,
@@ -300,7 +298,7 @@ contract RelativePositionManager is
         address longVToken,
         address shortVToken,
         uint256 amount
-    ) public nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotPaused {
         if (amount == 0) revert ZeroAmount();
         Position storage position = _getActivePosition(msg.sender, longVToken, shortVToken);
         _supplyPrincipalToPositionAccount(position, IVToken(position.dsaVToken), amount);
@@ -374,11 +372,11 @@ contract RelativePositionManager is
 
     /**
      * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
-     * @dev Repay amount is derived from BPS (not passed). Total long (repay + profit) is validated against BPS (1% tolerance).
-     *      minAmountOutRepay must be >= calculated repay amount (slippage protection).
+     * @dev Repay amount is derived from given BPS (not passed). Total long (repay + profit) is validated
+     *      against BPS (within PROPORTIONAL_CLOSE_TOLERANCE). minAmountOutRepay must be >= expected repay for this BPS;
+     *      for 100% close, pass slightly more to cover the internal tolerance bump (exact bump not required).
      *      Principal (DSA) collateral is not touched directly by this function; any unused principal remains on the
-     *      position account, withdrawn later via `withdrawPrincipal`, or fully swept
-     *      on `deactivatePosition`.
+     *      position account, withdrawn later via `withdrawPrincipal`, or can be fully swept on `deactivatePosition`.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
@@ -469,12 +467,11 @@ contract RelativePositionManager is
      * @dev
      *      - First exit (long → short): long/short amounts are derived from BPS; the user passes shortAmountToRepayForFirstSwap,
      *        which is validated to be within [0, expectedShort] and minAmountOutFirst must be >= shortAmountToRepayForFirstSwap.
-     *      - Second exit (DSA → short): the second repay amount is fully calculated in the contract as
-     *        `expectedShort - shortAmountToRepayForFirstSwap`; minAmountOutSecond only bounds the swap output and must be
-     *        >= this internally calculated repay amount (slippage protection).
+     *        For 100% close with one leg, shortAmountToRepayForFirstSwap should be slightly higher to cover the internal tolerance bump.
+     *      - Second exit (DSA → short): the second repay amount is calculated as expectedShort - shortAmountToRepayForFirstSwap
+     *        (and bumped for 100% close when > 0). minAmountOutSecond must be >= the calculated second repay (slippage protection; should cover the bump but exact match not required).
      *      - Single-leg scenarios: this function also supports cases where only one leg (long or DSA) is available
      *        (e.g. after liquidation), by allowing either the first or second exit to be effectively skipped
-     *        (amounts set to zero).
      *      - Principal handling: any remaining principal (DSA) that is not consumed in the loss scenario stays on the
      *        position account even after a full close; it can later be moved to the user by calling `withdrawPrincipal`
      *        or by calling `deactivatePosition`, which fully redeems remaining DSA collateral to the user.
@@ -483,10 +480,10 @@ contract RelativePositionManager is
      * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
      * @param longAmountToRedeemForFirstSwap Long amount to redeem for the first swap (validated against BPS within 1% tolerance)
      * @param shortAmountToRepayForFirstSwap Short amount to repay in the first exit (validated: 0 <= value <= BPS-derived expected short)
-     * @param minAmountOutFirst Minimum short out from the first swap (must be >= shortAmountToRepayForFirstSwap)
+     * @param minAmountOutFirst Minimum short out from the first swap (must be >= shortAmountToRepayForFirstSwap
      * @param swapDataFirst Swap #1 calldata: long/DSA → short for the first repay leg
      * @param dsaAmountToRedeemForSecondSwap DSA amount to redeem and use as input for the second repay swap
-     * @param minAmountOutSecond Minimum short out from the second swap (must be >= internally calculated second repay)
+     * @param minAmountOutSecond Minimum short out from the second swap (must be >= internally calculated second repay; for 100% close should cover the bumped amount)
      * @param swapDataSecond Swap #2 calldata: DSA → short for the second repay leg
      * @custom:error Throw PositionNotActive if the position is not active.
      * @custom:error Throw SameMarketNotAllowed if long and short vTokens are identical.
@@ -534,6 +531,7 @@ contract RelativePositionManager is
             minAmountOutSecond
         );
 
+        // 1. First exitLeverage (long → short): repay first leg of short debt from long collateral.
         if (longAmountToRedeemForFirstSwap > 0) {
             IPositionAccount(positionAccount).exitLeverage(
                 longVToken,
@@ -545,7 +543,7 @@ contract RelativePositionManager is
             );
         }
 
-        // 2. Second exitLeverage (DSA → short): amountToRepaySecond = shortDebt - borrowedAmountToRepayFirst
+        // 2. Second exitLeverage (DSA → short): amountToRepaySecond = shortDebt - first leg
         if (amountToRepaySecond > 0) {
             uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
             IPositionAccount(positionAccount).exitLeverage(
@@ -1071,6 +1069,7 @@ contract RelativePositionManager is
      * @return expectedShortToRepay Amount of short to repay (BPS of current short debt)
      * @return minLongToWithdraw Minimum long amount within PROPORTIONAL_CLOSE_TOLERANCE
      * @return maxLongToWithdraw Maximum long amount within PROPORTIONAL_CLOSE_TOLERANCE
+     * @return maxExpectedShortToRepay Expected short + tolerance (for 100% close / first-leg cap in loss close)
      */
     function _getProportionalCloseAmounts(
         Position memory position,
@@ -1081,29 +1080,35 @@ contract RelativePositionManager is
             uint256 expectedLongToWithdraw,
             uint256 expectedShortToRepay,
             uint256 minLongToWithdraw,
-            uint256 maxLongToWithdraw
+            uint256 maxLongToWithdraw,
+            uint256 maxExpectedShortToRepay
         )
     {
         if (closeFractionBps < PROPORTIONAL_CLOSE_MIN || closeFractionBps > PROPORTIONAL_CLOSE_MAX)
             revert InvalidCloseFractionBps();
+
         uint256 longBalance = _getLongCollateralBalance(position);
         IVToken shortVToken = IVToken(position.shortVToken);
         uint256 shortDebt = shortVToken.borrowBalanceCurrent(position.positionAccount);
         expectedLongToWithdraw = (longBalance * closeFractionBps) / PROPORTIONAL_CLOSE_MAX;
         expectedShortToRepay = (shortDebt * closeFractionBps) / PROPORTIONAL_CLOSE_MAX;
+
         minLongToWithdraw =
-            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX - PROPORTIONAL_CLOSE_TOLERANCE)) /
-            PROPORTIONAL_CLOSE_MAX;
+            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX - PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
         maxLongToWithdraw =
-            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) /
-            PROPORTIONAL_CLOSE_MAX;
+            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+        // Cap at actual long collateral balance to prevent out-of-band values
+        maxLongToWithdraw = min(maxLongToWithdraw, longBalance);
+
+        maxExpectedShortToRepay =
+            (expectedShortToRepay * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
     }
 
     /**
      * @notice Validates proportional close for profit path and returns amount to repay
-     * @dev Validates totalLongAmountToRedeem (repay + profit) within 1% of BPS expected. Reverts if out of band.
+     * @dev Validates totalLongAmountToRedeem (repay + profit) within 2% of BPS expected. Reverts if out of band.
      * @param totalLongAmountToRedeem Sum of long to redeem for repay and for profit swap (collateralAmountToRedeem + amountToRedeemForProfitSwap)
-     * @param minAmountOutRepay User's minimum expected short from repay swap; validated against exact expected short (not bumped)
+     * @param minAmountOutRepay User's minimum expected short from repay swap; must be >= expected short for this BPS (slightly above current debt is enough)
      * @return amountToRepay Short amount to use for repay call (includes 100% tolerance bump when applicable)
      */
     function _validateProfitClose(
@@ -1116,37 +1121,36 @@ contract RelativePositionManager is
             uint256 expectedLongToWithdraw,
             uint256 expectedShortToRepay,
             uint256 minLongToWithdraw,
-            uint256 maxLongToWithdraw
+            uint256 maxLongToWithdraw,
+            uint256 maxExpectedShortToRepay
         ) = _getProportionalCloseAmounts(position, closeFractionBps);
 
+        // Revert when user tries to withdraw more than available long (BPS implies zero long to redeem).
         if (expectedLongToWithdraw == 0 && totalLongAmountToRedeem != 0) revert InvalidLongAmountToRedeem();
 
+        // Revert if total long to redeem is outside the proportional close tolerance band.
         if (totalLongAmountToRedeem < minLongToWithdraw || totalLongAmountToRedeem > maxLongToWithdraw)
             revert ProportionalCloseAmountOutOfTolerance();
 
         // Validate minAmountOut against exact expected short (not bumped) to give user certainty on the repay amount
         if (expectedShortToRepay > 0 && minAmountOutRepay < expectedShortToRepay) revert MinAmountOutRepayBelowDebt();
-        amountToRepay = expectedShortToRepay;
-
-        // For 100% close, add tolerance so we send slightly more to cover interest during flash loan; LM caps actual repay to current debt
-        if (closeFractionBps == PROPORTIONAL_CLOSE_MAX && expectedShortToRepay > 0) {
-            amountToRepay =
-                (expectedShortToRepay * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) /
-                PROPORTIONAL_CLOSE_MAX;
-        }
+        amountToRepay = (closeFractionBps == PROPORTIONAL_CLOSE_MAX && expectedShortToRepay > 0)
+            ? maxExpectedShortToRepay // For 100% close, add tolerance so we send slightly more to cover interest during flash loan
+            : expectedShortToRepay;
     }
 
     /**
      * @notice Validates loss close first exit and returns calculated second repay amount
      * @dev Ensures the provided first-leg long/short amounts are within the proportional-close tolerance band
      *      and derives the second-leg short repay amount (with tolerance bump for 100% closes).
+     *      If first-leg short > expected, full close in first leg is allowed provided it is <= maxExpectedShortToRepay (second leg = 0).
      * @param position snapshot of the position (used to derive expected long/short amounts)
      * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
-     * @param shortAmountToRepayForFirstSwap Short amount to repay in the first exit (must be within tolerance of expected short)
+     * @param shortAmountToRepayForFirstSwap Short amount to repay in the first exit, for 100% close with one leg, should cover the extra bumped amount.
      * @param longAmountToRedeemForFirstSwap Long amount to redeem for the first swap (must be within PROPORTIONAL_CLOSE_TOLERANCE of expected long)
-     * @param minAmountOutFirst Minimum short out from the first swap (must be >= shortAmountToRepayForFirstSwap)
-     * @param minAmountOutSecond Minimum short out from the second swap (must be >= internally calculated second repay)
-     * @return amountToRepaySecond The second-leg short repay amount (expectedShortToRepay - shortAmountToRepayForFirstSwap)
+     * @param minAmountOutFirst Minimum short out from the first swap (must be >= shortAmountToRepayForFirstSwap
+     * @param minAmountOutSecond Minimum short out from the second swap (must be >= internally calculated second repay; for 100% close should cover the bumped amount)
+     * @return amountToRepaySecond The second-leg short repay amount (expectedShortToRepay - first leg, or 0 when first leg covers full). Caller uses shortAmountToRepayForFirstSwap for the first leg.
      */
     function _validateLossClose(
         Position memory position,
@@ -1156,30 +1160,43 @@ contract RelativePositionManager is
         uint256 minAmountOutFirst,
         uint256 minAmountOutSecond
     ) internal returns (uint256 amountToRepaySecond) {
-        if (shortAmountToRepayForFirstSwap > 0 && minAmountOutFirst < shortAmountToRepayForFirstSwap)
-            revert MinAmountOutRepayBelowDebt();
+        // MinimumOut should never be smaller than expected to repay; for 100% close with one asset, user should account for the extra bumped amount (similar to profit case).
+        if (minAmountOutFirst < shortAmountToRepayForFirstSwap) revert MinAmountOutRepayBelowDebt();
 
         (
-            ,
+            uint256 expectedLongToWithdraw,
             uint256 expectedShortToRepay,
             uint256 minLongToWithdraw,
-            uint256 maxLongToWithdraw
+            uint256 maxLongToWithdraw,
+            uint256 maxExpectedShortToRepay
         ) = _getProportionalCloseAmounts(position, closeFractionBps);
 
+        // Revert when user tries to withdraw more than available long (BPS implies zero long to redeem).
+        if (expectedLongToWithdraw == 0 && longAmountToRedeemForFirstSwap != 0) revert InvalidLongAmountToRedeem();
+
+        // Revert if first-leg long to redeem is outside the proportional close tolerance band.
         if (longAmountToRedeemForFirstSwap < minLongToWithdraw || longAmountToRedeemForFirstSwap > maxLongToWithdraw)
             revert ProportionalCloseAmountOutOfTolerance();
 
-        // (2) First-exit short repay within BPS tolerance of expected short
-        if (shortAmountToRepayForFirstSwap > expectedShortToRepay) revert ProportionalCloseAmountOutOfTolerance();
-
-        // (3) Second repay = expectedShort - first repay; validate minAmountOutSecond against exact amount, then add tolerance for 100% close
-        amountToRepaySecond = expectedShortToRepay - shortAmountToRepayForFirstSwap;
-        if (amountToRepaySecond > 0 && minAmountOutSecond < amountToRepaySecond) revert MinAmountOutSecondBelowDebt();
-        if (closeFractionBps == PROPORTIONAL_CLOSE_MAX && amountToRepaySecond > 0) {
-            amountToRepaySecond =
-                (amountToRepaySecond * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) /
-                PROPORTIONAL_CLOSE_MAX;
+        // First leg exceeds expected: cap at maxExpectedShortToRepay and set second leg to zero.
+        if (shortAmountToRepayForFirstSwap > expectedShortToRepay) {
+            if (shortAmountToRepayForFirstSwap > maxExpectedShortToRepay)
+                revert ProportionalCloseAmountOutOfTolerance();
+            amountToRepaySecond = 0;
+        } else {
+            amountToRepaySecond = expectedShortToRepay - shortAmountToRepayForFirstSwap;
         }
+
+        // Validate and optionally bump second leg.
+        if (amountToRepaySecond > 0) {
+            if (minAmountOutSecond < amountToRepaySecond) revert MinAmountOutSecondBelowDebt();
+            if (closeFractionBps == PROPORTIONAL_CLOSE_MAX) {
+                amountToRepaySecond =
+                    (amountToRepaySecond * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) /
+                    PROPORTIONAL_CLOSE_MAX;
+            }
+        }
+        return amountToRepaySecond;
     }
 
     /**

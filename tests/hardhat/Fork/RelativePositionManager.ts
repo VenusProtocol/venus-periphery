@@ -374,7 +374,7 @@ async function setupRpmForkFixture(): Promise<RpmForkFixture> {
 }
 
 // --- Tests ---
-forking(80929690, () => {
+forking(81501196, () => {
   let rpm: RelativePositionManager;
   let comptroller: ComptrollerMock;
   let dsa: IERC20;
