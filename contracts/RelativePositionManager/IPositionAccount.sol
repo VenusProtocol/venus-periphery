@@ -59,6 +59,14 @@ interface IPositionAccount {
     ) external;
 
     /**
+     * @notice Forwards exitSingleAssetLeverage to the LeverageStrategiesManager (collateral and debt are same asset)
+     * @dev Only callable by the RelativePositionManager. Use when DSA == short: repay short debt by redeeming DSA vTokens, no swap.
+     * @param collateralMarket vToken market for both collateral and debt (e.g. DSA when DSA == short)
+     * @param collateralAmountToFlashLoan Amount to borrow via flash loan for debt repayment
+     */
+    function exitSingleAssetLeverage(IVToken collateralMarket, uint256 collateralAmountToFlashLoan) external;
+
+    /**
      * @notice Transfers full balance of an ERC20 token from this position account to its owner (dust recovery)
      * @dev Only callable by the RelativePositionManager. Used to sweep dust to the position owner.
      * @param token Address of the ERC20 token to transfer

@@ -241,10 +241,9 @@ contract RelativePositionManager is
         IVToken dsaVToken = _getValidatedDSAVToken(dsaIndex);
         _checkSameMarket(longVToken, shortVToken, address(dsaVToken));
 
-        // Validate requested leverage against [MIN_LEVERAGE, maxLeverageForDSA], where
-        // maxLeverageForDSA is derived from the DSA collateral factor as 1 / (1 - CF),
-        uint256 maxLeverageForDsa = _getMaxLeverageForDSA(dsaVToken);
-        if (effectiveLeverage < MIN_LEVERAGE || effectiveLeverage > maxLeverageForDsa) {
+        // Validate requested leverage against [MIN_LEVERAGE, maxLeverage]; λ_max = CF_c / (1 - CF_l * (1 - f))
+        uint256 maxLeverage = _getMaxLeverage(dsaVToken, longVToken);
+        if (effectiveLeverage < MIN_LEVERAGE || effectiveLeverage > maxLeverage) {
             revert InvalidLeverage();
         }
 
@@ -543,17 +542,21 @@ contract RelativePositionManager is
             );
         }
 
-        // 2. Second exitLeverage (DSA → short): amountToRepaySecond = shortDebt - first leg
+        // 2. Second leg: repay remaining short debt with DSA. When DSA == short use exitSingleAssetLeverage (no swap); else exitLeverage.
         if (amountToRepaySecond > 0) {
             uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
-            IPositionAccount(positionAccount).exitLeverage(
-                dsaVToken,
-                dsaAmountToRedeemForSecondSwap,
-                shortVToken,
-                amountToRepaySecond,
-                minAmountOutSecond,
-                swapDataSecond
-            );
+            if (address(dsaVToken) == address(shortVToken)) {
+                IPositionAccount(positionAccount).exitSingleAssetLeverage(dsaVToken, amountToRepaySecond);
+            } else {
+                IPositionAccount(positionAccount).exitLeverage(
+                    dsaVToken,
+                    dsaAmountToRedeemForSecondSwap,
+                    shortVToken,
+                    amountToRepaySecond,
+                    minAmountOutSecond,
+                    swapDataSecond
+                );
+            }
             uint256 vTokensAfter = dsaVToken.balanceOf(positionAccount);
             // Reduce suppliedPrincipalVTokens by the vTokens actually burned from DSA for this repay leg
             position.suppliedPrincipalVTokens -= (vTokensBefore - vTokensAfter);
@@ -963,7 +966,7 @@ contract RelativePositionManager is
     function _supplyPrincipalToPositionAccount(Position storage position, IVToken dsaVToken, uint256 amount) internal {
         if (position.longVToken == address(dsaVToken)) _syncSuppliedPrincipal(position);
         address positionAccount = position.positionAccount;
-        
+
         uint256 balanceBefore = dsaVToken.balanceOf(positionAccount);
         address underlying = dsaVToken.underlying();
         IERC20Upgradeable(underlying).safeTransferFrom(msg.sender, address(this), amount);
@@ -1334,20 +1337,26 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Computes the maximum allowed leverage for a given DSA market
-     * @param dsaVToken The DSA vToken market
-     * @return maxLeverage The maximum leverage ratio allowed for positions using this DSA
+     * @notice Computes the maximum allowed leverage: λ_max = CF_c / (1 - CF_l * (1 - f))
+     * @dev c = Collateral (DSA), L = Long asset, S = Short asset. CF_c = collateral CF, CF_l = Long asset CF, f = friction (PROPORTIONAL_CLOSE_TOLERANCE).
+     * @param dsaVToken Collateral (DSA) vToken market
+     * @param longVToken Long asset vToken market (CF_l)
+     * @return maxLeverage The maximum leverage ratio allowed (1e18 mantissa)
      */
-    function _getMaxLeverageForDSA(IVToken dsaVToken) internal view returns (uint256 maxLeverage) {
-        (, uint256 CF, ) = COMPTROLLER.markets(address(dsaVToken));
-        if (CF >= MANTISSA_ONE) revert InvalidCollateralFactor();
+    function _getMaxLeverage(IVToken dsaVToken, address longVToken) internal view returns (uint256 maxLeverage) {
+        (, uint256 cfC, ) = COMPTROLLER.markets(address(dsaVToken));
+        if (cfC >= MANTISSA_ONE) revert InvalidCollateralFactor();
 
-        // Theoretical leverage L = 1 / (1 - CF), with all values in 1e18 mantissa form:
-        // L = (1e18 * 1e18) / (1e18 - CF)
-        uint256 denom = MANTISSA_ONE - CF;
-        uint256 theoretical = (MANTISSA_ONE * MANTISSA_ONE) / denom;
+        (, uint256 cfL, ) = COMPTROLLER.markets(longVToken);
+        if (cfL >= MANTISSA_ONE) revert InvalidCollateralFactor();
 
-        maxLeverage = theoretical < MIN_LEVERAGE ? MIN_LEVERAGE : theoretical;
+        // (1 - f) in mantissa: f = tolerance (slippage)
+        uint256 friction = (PROPORTIONAL_CLOSE_TOLERANCE * MANTISSA_ONE) / PROPORTIONAL_CLOSE_MAX;
+        uint256 oneMinusF = MANTISSA_ONE - friction;
+        uint256 denom = MANTISSA_ONE - (cfL * oneMinusF) / MANTISSA_ONE; // 1 - CF_l * (1 - f)
+        if (denom == 0) revert InvalidCollateralFactor();
+        maxLeverage = (cfC * MANTISSA_ONE) / denom;
+        if (maxLeverage < MIN_LEVERAGE) maxLeverage = MIN_LEVERAGE;
     }
 
     /**
@@ -1358,7 +1367,6 @@ contract RelativePositionManager is
      */
     function _checkSameMarket(address longVToken, address shortVToken, address dsaVToken) internal pure {
         if (longVToken == shortVToken) revert SameMarketNotAllowed();
-        if (dsaVToken == shortVToken) revert SameMarketNotAllowed();
     }
 
     /**

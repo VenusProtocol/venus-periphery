@@ -1959,7 +1959,7 @@ forking(81501196, () => {
           initialPrincipal: parseEther("2000"),
           shortAmount: parseEther("2"),
           longAmount: parseEther("40"),
-          leverage: parseEther("4"),
+          leverage: parseEther("3"),
           tokenOutWhaleOverride: vLONG_ADDRESS,
         });
 
@@ -2033,7 +2033,7 @@ forking(81501196, () => {
           initialPrincipal: parseEther("8000"),
           shortAmount: parseEther("1"),
           longAmount: parseEther("3000"),
-          leverage: parseEther("5"),
+          leverage: parseEther("2"),
           useLongVToken: dsaVToken,
           longAddress: DSA_ADDRESS,
           tokenOutWhaleOverride: vDSA_ADDRESS,

@@ -76,6 +76,13 @@ contract PositionAccount is Initializable, IPositionAccount {
     );
 
     /**
+     * @notice Emitted when exitSingleAssetLeverage is forwarded to the LeverageManager
+     * @param market vToken market (collateral and debt are the same)
+     * @param amount Flash loan amount for debt repayment
+     */
+    event ExitSingleAssetLeverageForwarded(address indexed market, uint256 amount);
+
+    /**
      * @notice Emitted when dust (remaining token balance) is transferred to the position owner
      * @param token Address of the ERC20 token transferred
      * @param owner Address of the position account owner receiving the dust
@@ -218,6 +225,24 @@ contract PositionAccount is Initializable, IPositionAccount {
             borrowedAmountToFlashLoan,
             minAmountOutAfterSwap,
             swapData
+        );
+    }
+
+    /**
+     * @notice Forwards exitSingleAssetLeverage to the LeverageStrategiesManager on behalf of this position account
+     * @dev Only callable by the RelativePositionManager. Use when collateral and debt are the same asset (e.g. DSA == short).
+     * @param collateralMarket vToken market for both collateral and debt
+     * @param collateralAmountToFlashLoan Amount to borrow via flash loan for debt repayment
+     * @custom:error UnauthorizedCaller if caller is not the RelativePositionManager.
+     */
+    function exitSingleAssetLeverage(
+        IVToken collateralMarket,
+        uint256 collateralAmountToFlashLoan
+    ) external onlyRelativePositionManager {
+        emit ExitSingleAssetLeverageForwarded(address(collateralMarket), collateralAmountToFlashLoan);
+        ILeverageStrategiesManager(LEVERAGE_MANAGER).exitSingleAssetLeverage(
+            collateralMarket,
+            collateralAmountToFlashLoan
         );
     }
 
