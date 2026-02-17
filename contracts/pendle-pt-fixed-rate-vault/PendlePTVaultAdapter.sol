@@ -98,10 +98,8 @@ contract PendlePTVaultAdapter is
     //                          RECEIVE FUNCTION
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Accept native BNB only from WBNB contract (during unwrap).
-    receive() external payable {
-        if (msg.sender != WBNB) revert UnauthorizedSender();
-    }
+    /// @notice Accept native BNB
+    receive() external payable {}
 
     // ═══════════════════════════════════════════════════════════════════════
     //                       EXTERNAL FUNCTIONS
@@ -144,7 +142,7 @@ contract PendlePTVaultAdapter is
         IERC20(input.tokenIn).safeTransferFrom(msg.sender, address(this), amount);
 
         // 2. Swap tokenIn → PT via Pendle Router (Pendle handles aggregator routing if needed)
-        uint256 netPtOut = _swapToPt(input.tokenIn, pendleMarket, minPtOut, guessPtOut, input, limit);
+        uint256 netPtOut = _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
 
         // 3. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config, netPtOut);
@@ -236,23 +234,26 @@ contract PendlePTVaultAdapter is
 
         MarketConfig storage config = markets[pendleMarket];
 
-        // Validate that tokenIn is WBNB for native deposits
-        if (input.tokenIn != WBNB) revert TokenMustBeWBNB();
+        // Validate calldata consistency
         if (input.netTokenIn != msg.value) revert InputAmountMismatch(msg.value, input.netTokenIn);
 
-        // 1. Wrap BNB → WBNB
-        IWBNB(WBNB).deposit{ value: msg.value }();
+        // 1. Swap native BNB → PT via Pendle Router
+        (uint256 netPtOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt{ value: msg.value }(
+            address(this),
+            pendleMarket,
+            minPtOut,
+            guessPtOut,
+            input,
+            limit
+        );
 
-        // 2. Swap WBNB → PT via Pendle Router
-        uint256 netPtOut = _swapToPt(WBNB, pendleMarket, minPtOut, guessPtOut, input, limit);
-
-        // 3. Deposit PT into Venus — vTokens go to user
+        // 2. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config, netPtOut);
 
-        // 4. Refund any excess WBNB as native BNB
+        // 3. Refund any excess native BNB or WBNB
         _refundNativeDust();
 
-        emit Deposited(pendleMarket, msg.sender, WBNB, msg.value, netPtOut, netVTokensMinted);
+        emit Deposited(pendleMarket, msg.sender, input.tokenIn, msg.value, netPtOut, netVTokensMinted);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
@@ -444,26 +445,24 @@ contract PendlePTVaultAdapter is
     }
 
     /**
-     * @notice Swaps underlying tokens to PT via Pendle Router.
-     * @param underlying The underlying token address to swap from.
+     * @notice Swaps tokenIn to PT via Pendle Router.
      * @param pendleMarket The Pendle market address for the swap.
      * @param minPtOut Minimum PT to receive (slippage protection).
      * @param guessPtOut Off-chain binary search approximation parameters.
-     * @param input Token input configuration from Pendle API.
+     * @param input Token input configuration from Pendle API (contains tokenIn address).
      * @param limit Limit order fill data.
      * @return netPtOut Amount of PT tokens received from the swap.
      * @dev Approves router, performs swap, then resets approval to zero.
      */
     function _swapToPt(
-        address underlying,
         address pendleMarket,
         uint256 minPtOut,
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
     ) private returns (uint256 netPtOut) {
-        uint256 amount = IERC20(underlying).balanceOf(address(this));
-        IERC20(underlying).forceApprove(PENDLE_ROUTER, amount);
+        uint256 amount = IERC20(input.tokenIn).balanceOf(address(this));
+        IERC20(input.tokenIn).forceApprove(PENDLE_ROUTER, amount);
 
         (netPtOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt(
             address(this), // PT receiver = adapter (so we can deposit into Venus)
@@ -474,7 +473,7 @@ contract PendlePTVaultAdapter is
             limit
         );
 
-        IERC20(underlying).forceApprove(PENDLE_ROUTER, 0);
+        IERC20(input.tokenIn).forceApprove(PENDLE_ROUTER, 0);
     }
 
     /**
@@ -510,13 +509,13 @@ contract PendlePTVaultAdapter is
     }
 
     /**
-     * @notice Redeems PT 1:1 to underlying via Pendle Router for ERC-20 markets.
+     * @notice Redeems PT 1:1 to tokenOut via Pendle Router for ERC-20 markets.
      * @param pt The Principal Token address to redeem.
      * @param yt The Yield Token address (required for redemption).
      * @param ptBalance Amount of PT tokens to redeem.
      * @param output Token output configuration from Pendle API.
-     * @return netTokenOut Amount of underlying tokens received.
-     * @dev Underlying tokens are sent directly to msg.sender.
+     * @return netTokenOut Amount of output tokens received.
+     * @dev Output tokens are sent directly to msg.sender.
      *      Approves router, performs redemption, then resets approval to zero.
      */
     function _redeemPtToToken(
@@ -528,7 +527,7 @@ contract PendlePTVaultAdapter is
         IERC20(pt).forceApprove(PENDLE_ROUTER, ptBalance);
 
         (netTokenOut, ) = IPAllActionV3(PENDLE_ROUTER).redeemPyToToken(
-            msg.sender, // underlying sent directly to user
+            msg.sender, // tokenOut sent directly to user
             yt,
             ptBalance,
             output
@@ -579,14 +578,12 @@ contract PendlePTVaultAdapter is
     }
 
     /**
-     * @notice Refunds any remaining WBNB balance as native BNB to the caller.
-     * @dev Unwraps WBNB to BNB and sends to msg.sender. Only processes if balance > 0.
+     * @notice Refunds any remaining native BNB to the caller.
      */
     function _refundNativeDust() private {
-        uint256 wbnbDust = IERC20(WBNB).balanceOf(address(this));
-        if (wbnbDust > 0) {
-            IWBNB(WBNB).withdraw(wbnbDust);
-            Address.sendValue(payable(msg.sender), wbnbDust);
+        uint256 bnbDust = address(this).balance;
+        if (bnbDust > 0) {
+            Address.sendValue(payable(msg.sender), bnbDust);
         }
     }
 }

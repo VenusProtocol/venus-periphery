@@ -8,7 +8,7 @@ import { TokenInput, TokenOutput, ApproxParams, LimitOrderData } from "@pendle/c
  * @author Venus Protocol
  * @notice Interface for the PendlePTVaultAdapter contract.
  * @dev Universal adapter that wraps Pendle PT swap and Venus Core deposit/redeem into single
- *      transactions. Users deposit underlying tokens (e.g. USDC, BNB) and receive Venus vTokens.
+ *      transactions. Users deposit tokens (e.g. USDC, BNB) and receive Venus vTokens.
  *      A single adapter handles all PT markets via an internal market registry.
  *      The adapter does NOT hold user funds or track user positions — all user accounting is
  *      managed by Venus vTokens. The contract should hold zero token balances between transactions.
@@ -27,7 +27,7 @@ interface IPendlePTVaultAdapter {
      * @param comptroller Venus Comptroller address for the isolated pool
      * @param isActive Whether this market is currently accepting deposits/withdrawals
      * @param maturity PT expiry timestamp (Unix timestamp)
-     * @dev No longer enforces a single underlying token - accepts any token from Pendle's tokensIn/tokensOut
+     * @dev Accepts any token from Pendle's tokensIn/tokensOut arrays
      */
     struct MarketConfig {
         address pt;
@@ -135,9 +135,6 @@ interface IPendlePTVaultAdapter {
     /// @notice Error thrown when a zero address is provided where a valid address is required.
     error ZeroAddress();
 
-    /// @notice Error thrown when an unauthorized sender attempts a restricted operation.
-    error UnauthorizedSender();
-
     /**
      * @notice Error thrown when the transaction deadline has been exceeded.
      * @param deadline The deadline timestamp that was set
@@ -169,13 +166,6 @@ interface IPendlePTVaultAdapter {
      * @param currentTime The current block timestamp
      */
     error MarketNotMatured(uint256 maturity, uint256 currentTime);
-
-    /**
-     * @notice Error thrown when attempting to deposit into a market that has already matured.
-     * @param maturity The maturity timestamp of the PT
-     * @param currentTime The current block timestamp
-     */
-    error MarketAlreadyMatured(uint256 maturity, uint256 currentTime);
 
     /// @notice Error thrown when the TokenInput tokenIn is the zero address.
     error InvalidTokenInput();
@@ -210,12 +200,11 @@ interface IPendlePTVaultAdapter {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Deposit underlying tokens → swap to PT via Pendle → deposit PT into Venus → user receives vTokens.
-     * @dev User must approve this adapter for `amount` of the underlying token beforehand.
+     * @notice Deposit tokenIn → swap to PT via Pendle → deposit PT into Venus → user receives vTokens.
+     * @dev User must approve this adapter for `amount` of tokenIn beforehand.
      *      The contract will be paused during emergency situations.
-     *      Only active markets (before maturity) can accept deposits.
      * @param pendleMarket Pendle market address identifying the PT market
-     * @param amount Amount of underlying tokens to deposit
+     * @param amount Amount of tokenIn to deposit
      * @param minPtOut Minimum PT to receive from Pendle swap (slippage protection)
      * @param guessPtOut Off-chain binary search hint from the Pendle API (saves ~180k gas)
      * @param input Token routing configuration from the Pendle API
@@ -232,14 +221,14 @@ interface IPendlePTVaultAdapter {
     ) external returns (uint256 netVTokensMinted);
 
     /**
-     * @notice Withdraw before maturity: redeem vTokens → sell PT on Pendle AMM → user receives underlying.
+     * @notice Withdraw before maturity: redeem vTokens → sell PT on Pendle AMM → user receives tokenOut.
      * @dev User must have delegated to this adapter in the Comptroller beforehand.
      *      PT is sold on the Pendle AMM at current market price (subject to slippage).
      * @param pendleMarket Pendle market address
      * @param vTokenAmount Amount of vTokens to redeem
      * @param output Token routing configuration from the Pendle API
      * @param limit Limit order fill data (can be empty struct)
-     * @return netTokenOut Amount of underlying tokens received by the user
+     * @return netTokenOut Amount of output tokens received by the user
      */
     function withdraw(
         address pendleMarket,
@@ -249,14 +238,14 @@ interface IPendlePTVaultAdapter {
     ) external returns (uint256 netTokenOut);
 
     /**
-     * @notice Redeem at or after maturity: redeem vTokens → redeem PT 1:1 via SY → user receives underlying.
+     * @notice Redeem at or after maturity: redeem vTokens → redeem PT 1:1 via SY → user receives tokenOut.
      * @dev No AMM swap — PT is redeemed directly through SY at 1:1 ratio (no price impact).
      *      User must have delegated to this adapter in the Comptroller beforehand.
      * @param pendleMarket Pendle market address
      * @param vTokenAmount Amount of vTokens to redeem
      * @param deadline Transaction deadline timestamp (reverts if exceeded)
      * @param output Token routing configuration from the Pendle API
-     * @return netTokenOut Amount of underlying tokens received by the user
+     * @return netTokenOut Amount of output tokens received by the user
      */
     function redeemAtMaturity(
         address pendleMarket,
@@ -270,14 +259,13 @@ interface IPendlePTVaultAdapter {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Deposit native BNB → wrap to WBNB → swap to PT → deposit into Venus → user receives vTokens.
-     * @dev Wraps native BNB to WBNB and proceeds with standard deposit flow.
-     *      Any excess WBNB is unwrapped and refunded as BNB to the user.
-     *      The input.tokenIn must be WBNB for this function.
+     * @notice Deposit native BNB → swap to PT via Pendle Router → deposit PT into Venus → user receives vTokens.
+     * @dev Passes native BNB directly to Pendle Router (payable) without wrapping to WBNB.
+     *      Any excess native BNB or WBNB is refunded to the user.
      * @param pendleMarket Pendle market address identifying the PT market
      * @param minPtOut Minimum PT to receive from Pendle swap (slippage protection)
      * @param guessPtOut Off-chain binary search hint from the Pendle API
-     * @param input Token routing configuration from the Pendle API (tokenIn must be WBNB)
+     * @param input Token routing configuration from the Pendle API
      * @param limit Limit order fill data (can be empty struct)
      * @return netVTokensMinted Amount of vTokens credited to the user
      */
