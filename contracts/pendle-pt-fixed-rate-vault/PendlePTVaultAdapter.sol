@@ -187,18 +187,7 @@ contract PendlePTVaultAdapter is
         uint256 ptBalance = IERC20(config.pt).balanceOf(address(this));
 
         // 2. Swap PT → tokenOut via Pendle (sent directly to user, Pendle handles routing)
-        IERC20(config.pt).forceApprove(PENDLE_ROUTER, ptBalance);
-
-        (netTokenOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactPtForToken(
-            msg.sender, // tokens sent directly to user (supports both ERC-20 and native)
-            pendleMarket,
-            ptBalance,
-            output,
-            limit
-        );
-
-        // 3. Reset approvals
-        IERC20(config.pt).forceApprove(PENDLE_ROUTER, 0);
+        netTokenOut = _swapPtToToken(config.pt, pendleMarket, ptBalance, output, limit);
 
         emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptBalance, output.tokenOut, netTokenOut);
     }
@@ -396,7 +385,7 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    ) private returns (uint256 netPtOut) {
+    ) internal returns (uint256 netPtOut) {
         uint256 amount = IERC20(input.tokenIn).balanceOf(address(this));
         IERC20(input.tokenIn).forceApprove(PENDLE_ROUTER, amount);
 
@@ -420,7 +409,7 @@ contract PendlePTVaultAdapter is
      * @dev Approves vToken, calls mintBehalf, then resets approval to zero.
      *      Reverts with VTokenMintFailed if the mint operation returns non-zero error.
      */
-    function _mintVTokens(MarketConfig storage config, uint256 ptAmount) private returns (uint256 netVTokensMinted) {
+    function _mintVTokens(MarketConfig storage config, uint256 ptAmount) internal returns (uint256 netVTokensMinted) {
         uint256 vTokenBalanceBefore = IVenusVToken(config.vToken).balanceOf(msg.sender);
 
         IERC20(config.pt).forceApprove(config.vToken, ptAmount);
@@ -439,9 +428,40 @@ contract PendlePTVaultAdapter is
      * @dev Underlying PT tokens are sent to this adapter contract.
      *      Reverts with VTokenRedeemFailed if the redeem operation returns non-zero error.
      */
-    function _redeemVTokens(address vToken, uint256 vTokenAmount) private {
+    function _redeemVTokens(address vToken, uint256 vTokenAmount) internal {
         uint256 redeemErr = IVenusVToken(vToken).redeemBehalf(msg.sender, vTokenAmount);
         if (redeemErr != 0) revert VTokenRedeemFailed(redeemErr);
+    }
+
+    /**
+     * @notice Swaps PT to tokenOut via Pendle Router (before maturity).
+     * @param pt The Principal Token address.
+     * @param pendleMarket The Pendle market address for the swap.
+     * @param ptBalance Amount of PT tokens to swap.
+     * @param output Token output configuration from Pendle API.
+     * @param limit Limit order fill data.
+     * @return netTokenOut Amount of output tokens received.
+     * @dev Output tokens are sent directly to msg.sender.
+     *      Approves router, performs swap, then resets approval to zero.
+     */
+    function _swapPtToToken(
+        address pt,
+        address pendleMarket,
+        uint256 ptBalance,
+        TokenOutput calldata output,
+        LimitOrderData calldata limit
+    ) internal returns (uint256 netTokenOut) {
+        IERC20(pt).forceApprove(PENDLE_ROUTER, ptBalance);
+
+        (netTokenOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactPtForToken(
+            msg.sender, // tokens sent directly to user
+            pendleMarket,
+            ptBalance,
+            output,
+            limit
+        );
+
+        IERC20(pt).forceApprove(PENDLE_ROUTER, 0);
     }
 
     /**
@@ -459,7 +479,7 @@ contract PendlePTVaultAdapter is
         address yt,
         uint256 ptBalance,
         TokenOutput calldata output
-    ) private returns (uint256 netTokenOut) {
+    ) internal returns (uint256 netTokenOut) {
         IERC20(pt).forceApprove(PENDLE_ROUTER, ptBalance);
 
         (netTokenOut, ) = IPAllActionV3(PENDLE_ROUTER).redeemPyToToken(
@@ -478,7 +498,7 @@ contract PendlePTVaultAdapter is
      * @param to The recipient address.
      * @dev Used to return dust/leftover tokens after swaps. Only transfers if balance > 0.
      */
-    function _sweepDust(address token, address to) private {
+    function _sweepDust(address token, address to) internal {
         uint256 dust = IERC20(token).balanceOf(address(this));
         if (dust > 0) {
             IERC20(token).safeTransfer(to, dust);
@@ -488,7 +508,7 @@ contract PendlePTVaultAdapter is
     /**
      * @notice Refunds any remaining native BNB to the caller.
      */
-    function _refundNativeDust() private {
+    function _refundNativeDust() internal {
         uint256 bnbDust = address(this).balance;
         if (bnbDust > 0) {
             Address.sendValue(payable(msg.sender), bnbDust);
