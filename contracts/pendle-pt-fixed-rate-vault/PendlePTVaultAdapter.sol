@@ -10,11 +10,20 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 
 import { IPAllActionV3 } from "@pendle/core-v2/contracts/interfaces/IPAllActionV3.sol";
-import { TokenInput, TokenOutput, ApproxParams, LimitOrderData } from "@pendle/core-v2/contracts/interfaces/IPAllActionTypeV3.sol";
-import { IPMarket, IStandardizedYield, IPPrincipalToken, IPYieldToken } from "@pendle/core-v2/contracts/interfaces/IPMarket.sol";
+import {
+    TokenInput,
+    TokenOutput,
+    ApproxParams,
+    LimitOrderData
+} from "@pendle/core-v2/contracts/interfaces/IPAllActionTypeV3.sol";
+import {
+    IPMarket,
+    IStandardizedYield,
+    IPPrincipalToken,
+    IPYieldToken
+} from "@pendle/core-v2/contracts/interfaces/IPMarket.sol";
 import { IVenusVToken } from "./interfaces/IVenusVToken.sol";
 import { IVenusComptroller } from "./interfaces/IVenusComptroller.sol";
-import { IWBNB } from "./interfaces/IWBNB.sol";
 import { IPendlePTVaultAdapter } from "./interfaces/IPendlePTVaultAdapter.sol";
 
 /**
@@ -71,9 +80,10 @@ contract PendlePTVaultAdapter is
         _;
     }
 
-    /// @dev Reverts if the current block timestamp exceeds the deadline.
-    modifier checkDeadline(uint256 deadline) {
-        if (block.timestamp > deadline) revert DeadlineExceeded(deadline, block.timestamp);
+    /// @dev Reverts if the market has already matured (block.timestamp >= maturity).
+    modifier beforeMaturity(address pendleMarket) {
+        uint256 maturity = markets[pendleMarket].maturity;
+        if (!(block.timestamp < maturity)) revert MarketAlreadyMatured(maturity, block.timestamp);
         _;
     }
 
@@ -131,7 +141,7 @@ contract PendlePTVaultAdapter is
         LimitOrderData calldata limit
     ) external whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netVTokensMinted) {
         if (amount == 0) revert ZeroAmount();
-            if (input.tokenIn == address(0)) revert InvalidTokenInput();
+        if (input.tokenIn == address(0)) revert InvalidTokenInput();
 
         MarketConfig storage config = markets[pendleMarket];
 
@@ -159,9 +169,15 @@ contract PendlePTVaultAdapter is
         uint256 vTokenAmount,
         TokenOutput calldata output,
         LimitOrderData calldata limit
-    ) external whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netTokenOut) {
+    )
+        external
+        whenNotPaused
+        nonReentrant
+        onlyActiveMarket(pendleMarket)
+        beforeMaturity(pendleMarket)
+        returns (uint256 netTokenOut)
+    {
         if (vTokenAmount == 0) revert ZeroAmount();
-        if (output.tokenOut == address(0)) revert InvalidTokenOutput();
 
         MarketConfig storage config = markets[pendleMarket];
 
@@ -174,7 +190,7 @@ contract PendlePTVaultAdapter is
         IERC20(config.pt).forceApprove(PENDLE_ROUTER, ptBalance);
 
         (netTokenOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactPtForToken(
-            msg.sender, // tokens sent directly to user
+            msg.sender, // tokens sent directly to user (supports both ERC-20 and native)
             pendleMarket,
             ptBalance,
             output,
@@ -191,7 +207,6 @@ contract PendlePTVaultAdapter is
     function redeemAtMaturity(
         address pendleMarket,
         uint256 vTokenAmount,
-        uint256 deadline,
         TokenOutput calldata output
     )
         external
@@ -199,11 +214,9 @@ contract PendlePTVaultAdapter is
         nonReentrant
         onlyActiveMarket(pendleMarket)
         atOrAfterMaturity(pendleMarket)
-        checkDeadline(deadline)
         returns (uint256 netTokenOut)
     {
         if (vTokenAmount == 0) revert ZeroAmount();
-        if (output.tokenOut == address(0)) revert InvalidTokenOutput();
 
         MarketConfig storage config = markets[pendleMarket];
 
@@ -254,83 +267,6 @@ contract PendlePTVaultAdapter is
         _refundNativeDust();
 
         emit Deposited(pendleMarket, msg.sender, input.tokenIn, msg.value, netPtOut, netVTokensMinted);
-    }
-
-    /// @inheritdoc IPendlePTVaultAdapter
-    function withdrawNative(
-        address pendleMarket,
-        uint256 vTokenAmount,
-        TokenOutput calldata output,
-        LimitOrderData calldata limit
-    ) external whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netTokenOut) {
-        if (vTokenAmount == 0) revert ZeroAmount();
-
-        MarketConfig storage config = markets[pendleMarket];
-
-        // Validate that tokenOut is WBNB for native withdrawals
-        if (output.tokenOut != WBNB) revert TokenMustBeWBNB();
-
-        // 1. Redeem vTokens → adapter receives PT
-        _redeemVTokens(config.vToken, vTokenAmount);
-
-        uint256 ptBalance = IERC20(config.pt).balanceOf(address(this));
-
-        // 2. Swap PT → WBNB via Pendle (sent to adapter so we can unwrap)
-        IERC20(config.pt).forceApprove(PENDLE_ROUTER, ptBalance);
-
-        (netTokenOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactPtForToken(
-            address(this), // receiver = adapter (not user — we unwrap first)
-            pendleMarket,
-            ptBalance,
-            output,
-            limit
-        );
-
-        // 3. Reset approvals
-        IERC20(config.pt).forceApprove(PENDLE_ROUTER, 0);
-
-        // 4. Unwrap WBNB → BNB and send to user
-        IWBNB(WBNB).withdraw(netTokenOut);
-        Address.sendValue(payable(msg.sender), netTokenOut);
-
-        emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptBalance, WBNB, netTokenOut);
-    }
-
-    /// @inheritdoc IPendlePTVaultAdapter
-    function redeemAtMaturityNative(
-        address pendleMarket,
-        uint256 vTokenAmount,
-        uint256 deadline,
-        TokenOutput calldata output
-    )
-        external
-        whenNotPaused
-        nonReentrant
-        onlyActiveMarket(pendleMarket)
-        atOrAfterMaturity(pendleMarket)
-        checkDeadline(deadline)
-        returns (uint256 netTokenOut)
-    {
-        if (vTokenAmount == 0) revert ZeroAmount();
-
-        MarketConfig storage config = markets[pendleMarket];
-
-        // Validate that tokenOut is WBNB for native redemptions
-        if (output.tokenOut != WBNB) revert TokenMustBeWBNB();
-
-        // 1. Redeem vTokens → adapter receives PT
-        _redeemVTokens(config.vToken, vTokenAmount);
-
-        uint256 ptBalance = IERC20(config.pt).balanceOf(address(this));
-
-        // 2. Redeem PT 1:1 → WBNB via Pendle (sent to adapter so we can unwrap)
-        netTokenOut = _redeemPtToTokenNative(config.pt, config.yt, ptBalance, output);
-
-        // 3. Unwrap WBNB → BNB and send to user
-        IWBNB(WBNB).withdraw(netTokenOut);
-        Address.sendValue(payable(msg.sender), netTokenOut);
-
-        emit RedeemedAtMaturity(pendleMarket, msg.sender, vTokenAmount, ptBalance, WBNB, netTokenOut);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -528,34 +464,6 @@ contract PendlePTVaultAdapter is
 
         (netTokenOut, ) = IPAllActionV3(PENDLE_ROUTER).redeemPyToToken(
             msg.sender, // tokenOut sent directly to user
-            yt,
-            ptBalance,
-            output
-        );
-
-        IERC20(pt).forceApprove(PENDLE_ROUTER, 0);
-    }
-
-    /**
-     * @notice Redeems PT 1:1 to WBNB via Pendle Router for native token markets.
-     * @param pt The Principal Token address to redeem.
-     * @param yt The Yield Token address (required for redemption).
-     * @param ptBalance Amount of PT tokens to redeem.
-     * @param output Token output configuration from Pendle API.
-     * @return netTokenOut Amount of WBNB tokens received.
-     * @dev WBNB is sent to this adapter (not msg.sender) so it can be unwrapped to native BNB.
-     *      Approves router, performs redemption, then resets approval to zero.
-     */
-    function _redeemPtToTokenNative(
-        address pt,
-        address yt,
-        uint256 ptBalance,
-        TokenOutput calldata output
-    ) private returns (uint256 netTokenOut) {
-        IERC20(pt).forceApprove(PENDLE_ROUTER, ptBalance);
-
-        (netTokenOut, ) = IPAllActionV3(PENDLE_ROUTER).redeemPyToToken(
-            address(this), // receive WBNB here so we can unwrap
             yt,
             ptBalance,
             output

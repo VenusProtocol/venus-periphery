@@ -136,13 +136,6 @@ interface IPendlePTVaultAdapter {
     error ZeroAddress();
 
     /**
-     * @notice Error thrown when the transaction deadline has been exceeded.
-     * @param deadline The deadline timestamp that was set
-     * @param currentTime The current block timestamp
-     */
-    error DeadlineExceeded(uint256 deadline, uint256 currentTime);
-
-    /**
      * @notice Error thrown when attempting to interact with a market that has not been registered.
      * @param pendleMarket The Pendle market address that is not registered
      */
@@ -167,14 +160,15 @@ interface IPendlePTVaultAdapter {
      */
     error MarketNotMatured(uint256 maturity, uint256 currentTime);
 
+    /**
+     * @notice Error thrown when attempting a pre-maturity operation on a market that has already matured.
+     * @param maturity The maturity timestamp of the PT
+     * @param currentTime The current block timestamp
+     */
+    error MarketAlreadyMatured(uint256 maturity, uint256 currentTime);
+
     /// @notice Error thrown when the TokenInput tokenIn is the zero address.
     error InvalidTokenInput();
-
-    /// @notice Error thrown when the TokenOutput tokenOut is the zero address.
-    error InvalidTokenOutput();
-
-    /// @notice Error thrown when native deposit/withdraw calldata has tokenIn/tokenOut != WBNB.
-    error TokenMustBeWBNB();
 
     /**
      * @notice Error thrown when the input amount in the calldata does not match the amount parameter.
@@ -222,7 +216,9 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Withdraw before maturity: redeem vTokens → sell PT on Pendle AMM → user receives tokenOut.
-     * @dev User must have delegated to this adapter in the Comptroller beforehand.
+     * @dev Reverts after maturity — use redeemAtMaturity instead for post-maturity withdrawals.
+     *      Supports both ERC-20 and native token (address(0)) output via Pendle Router.
+     *      User must have delegated to this adapter in the Comptroller beforehand.
      *      PT is sold on the Pendle AMM at current market price (subject to slippage).
      * @param pendleMarket Pendle market address
      * @param vTokenAmount Amount of vTokens to redeem
@@ -240,28 +236,27 @@ interface IPendlePTVaultAdapter {
     /**
      * @notice Redeem at or after maturity: redeem vTokens → redeem PT 1:1 via SY → user receives tokenOut.
      * @dev No AMM swap — PT is redeemed directly through SY at 1:1 ratio (no price impact).
+     *      Supports both ERC-20 and native token (address(0)) output via Pendle Router.
      *      User must have delegated to this adapter in the Comptroller beforehand.
      * @param pendleMarket Pendle market address
      * @param vTokenAmount Amount of vTokens to redeem
-     * @param deadline Transaction deadline timestamp (reverts if exceeded)
      * @param output Token routing configuration from the Pendle API
      * @return netTokenOut Amount of output tokens received by the user
      */
     function redeemAtMaturity(
         address pendleMarket,
         uint256 vTokenAmount,
-        uint256 deadline,
         TokenOutput calldata output
     ) external returns (uint256 netTokenOut);
 
     // ═══════════════════════════════════════════════════════════════════════
-    //                    CORE FUNCTIONS — NATIVE TOKEN
+    //                    CORE FUNCTIONS — NATIVE DEPOSIT
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
      * @notice Deposit native BNB → swap to PT via Pendle Router → deposit PT into Venus → user receives vTokens.
      * @dev Passes native BNB directly to Pendle Router (payable) without wrapping to WBNB.
-     *      Any excess native BNB or WBNB is refunded to the user.
+     *      Any excess native BNB is refunded to the user.
      * @param pendleMarket Pendle market address identifying the PT market
      * @param minPtOut Minimum PT to receive from Pendle swap (slippage protection)
      * @param guessPtOut Off-chain binary search hint from the Pendle API
@@ -276,43 +271,6 @@ interface IPendlePTVaultAdapter {
         TokenInput calldata input,
         LimitOrderData calldata limit
     ) external payable returns (uint256 netVTokensMinted);
-
-    /**
-     * @notice Withdraw before maturity with native BNB: redeem vTokens → sell PT → unwrap WBNB → user receives BNB.
-     * @dev Unwraps WBNB to native BNB after withdrawal from Pendle.
-     *      The output.tokenOut must be WBNB for this function.
-     *      User must have delegated to this adapter in the Comptroller beforehand.
-     * @param pendleMarket Pendle market address
-     * @param vTokenAmount Amount of vTokens to redeem
-     * @param output Token routing configuration from the Pendle API (tokenOut must be WBNB)
-     * @param limit Limit order fill data (can be empty struct)
-     * @return netTokenOut Amount of native BNB received by the user
-     */
-    function withdrawNative(
-        address pendleMarket,
-        uint256 vTokenAmount,
-        TokenOutput calldata output,
-        LimitOrderData calldata limit
-    ) external returns (uint256 netTokenOut);
-
-    /**
-     * @notice Redeem at maturity with native BNB: redeem vTokens → redeem PT 1:1 → unwrap WBNB → user receives BNB.
-     * @dev Unwraps WBNB to native BNB after redemption from Pendle.
-     *      The output.tokenOut must be WBNB for this function.
-     *      No AMM swap — PT is redeemed directly through SY at 1:1 ratio.
-     *      User must have delegated to this adapter in the Comptroller beforehand.
-     * @param pendleMarket Pendle market address
-     * @param vTokenAmount Amount of vTokens to redeem
-     * @param deadline Transaction deadline timestamp
-     * @param output Token routing configuration from the Pendle API (tokenOut must be WBNB)
-     * @return netTokenOut Amount of native BNB received by the user
-     */
-    function redeemAtMaturityNative(
-        address pendleMarket,
-        uint256 vTokenAmount,
-        uint256 deadline,
-        TokenOutput calldata output
-    ) external returns (uint256 netTokenOut);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                          ADMIN FUNCTIONS
