@@ -48,6 +48,9 @@ export interface PendleSwapParams {
  * @param amount Amount of tokenIn to swap (in wei)
  * @param receiver Receiver address for the transaction
  * @param slippage Slippage tolerance (e.g., 0.03 for 3%)
+ * @param enableAggregator Whether to enable Pendle's aggregator routing (required for tokens
+ *        not in tokensMintSy, e.g. WBNB). When true, Pendle uses external DEX aggregators
+ *        (kyberswap, odos, etc.) to swap tokenIn → tokenMintSy before minting SY.
  * @returns Complete swap parameters from Pendle API
  */
 export async function getPendleSwapParams(
@@ -57,12 +60,13 @@ export async function getPendleSwapParams(
   amount: BigNumber,
   receiver: string,
   slippage: number = 0.03,
+  enableAggregator: boolean = false,
 ): Promise<PendleSwapParams> {
   try {
     const response = await axios.post(`${PENDLE_API_BASE_URL}/v3/sdk/${chainId}/convert`, {
       receiver,
       slippage,
-      enableAggregator: false,
+      enableAggregator,
       inputs: [
         {
           token: tokenIn,

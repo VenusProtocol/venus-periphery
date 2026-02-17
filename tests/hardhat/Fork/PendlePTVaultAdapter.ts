@@ -145,11 +145,6 @@ if (FORK_MAINNET) {
       //   - tokenInput.tokenMintSy == tokenInput.tokenIn (same token, no intermediate swap)
       //   - tokenInput.pendleSwap == address(0) (no aggregator needed)
       //   - tokenInput.swapData is empty (swapType=0, no external router call)
-      //
-      // In the next test we will use WBNB as tokenIn, which is in `tokensIn` but NOT in
-      // `tokensMintSy`. For such tokens, Pendle's aggregator routing kicks in — the SDK
-      // returns a non-zero pendleSwap address, swapData with external router calldata,
-      // and tokenMintSy will differ from tokenIn (e.g. tokenIn=WBNB, tokenMintSy=slisBNB).
       // ═══════════════════════════════════════════════════════════════════════
 
       describe("Deposit via adapter", () => {
@@ -246,6 +241,124 @@ if (FORK_MAINNET) {
           console.log("vTokens received:", ethers.utils.formatEther(vTokensMinted));
 
           // Revoke delegation after test so next test can set it fresh
+          await comptroller.connect(user).updateDelegate(adapter.address, false);
+        });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Test 2: WBNB — tokenIn is in tokensIn but NOT in tokensMintSy
+        //         (aggregator-routed path)
+        // ─────────────────────────────────────────────────────────────────────
+        //
+        // WBNB (0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c) is listed in the market's
+        // `tokensIn` array but is NOT in `tokensMintSy`. This means the SY contract cannot
+        // directly wrap WBNB — Pendle must first swap WBNB to a tokensMintSy token (slisBNB
+        // or native BNB) via an external DEX aggregator before minting SY.
+        //
+        // Flow: WBNB → [Aggregator: kyberswap/odos/etc.] → slisBNB → SY.deposit() → SY
+        //       → PT (via Pendle AMM) → Venus vToken
+        //
+        // Because WBNB requires aggregator routing:
+        //   - tokenInput.tokenIn == WBNB (what the user sends)
+        //   - tokenInput.tokenMintSy != tokenIn (e.g. slisBNB or native BNB)
+        //   - tokenInput.pendleSwap != address(0) (Pendle's swap helper contract)
+        //   - tokenInput.swapData contains external router calldata (swapType > 0)
+        //
+        // The adapter itself is agnostic to this — it just pulls WBNB from the user,
+        // approves Pendle Router, and passes the tokenInput struct. Pendle Router
+        // internally executes the aggregator swap before minting SY and swapping to PT.
+        // ─────────────────────────────────────────────────────────────────────
+        it("should deposit WBNB (aggregator-routed token) → PT → Venus", async () => {
+          const depositAmount = parseUnits("1", 18); // 1 WBNB
+
+          // Step 1: Verify user has enough WBNB (whale already holds WBNB)
+          const userWbnbBalance = await wbnb.balanceOf(user.address);
+          expect(userWbnbBalance).to.be.gte(depositAmount);
+
+          // Step 2: Fetch swap parameters from Pendle API (enableAggregator=true)
+          // WBNB is NOT in tokensMintSy — Pendle needs an aggregator (kyberswap, odos, okx,
+          // or paraswap) to swap WBNB → slisBNB before minting SY.
+          const marketConfig = await adapter.getMarketConfig(marketAddress);
+          const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
+            56, // BSC chainId
+            WBNB,
+            marketConfig.pt,
+            depositAmount,
+            user.address,
+            0.03, // 3% slippage
+            true, // enableAggregator — required for tokens not in tokensMintSy
+          );
+
+          // Verify API returned aggregator-routed path:
+          //   - tokenIn is WBNB (what the user deposits)
+          //   - tokenMintSy differs from tokenIn (the aggregator output, e.g. slisBNB)
+          //   - pendleSwap is non-zero (Pendle's swap helper that executes the aggregator call)
+          //   - swapData.swapType = 1 (indicates external router call is needed)
+          expect(tokenInput.tokenIn.toLowerCase()).to.equal(WBNB.toLowerCase());
+          expect(tokenInput.netTokenIn).to.equal(depositAmount);
+          expect(tokenInput.tokenMintSy.toLowerCase()).to.not.equal(clisbnb);
+          expect(tokenInput.pendleSwap).to.not.equal(ethers.constants.AddressZero);
+          expect(tokenInput.swapData.swapType).to.equal(1);
+
+          // Step 3: Record balances before deposit
+          const userWbnbBefore = await wbnb.balanceOf(user.address);
+          const userVTokenBefore = await vToken.balanceOf(user.address);
+          const userPtBefore = await ptToken.balanceOf(user.address);
+
+          // Step 4: Approve adapter for WBNB transfer and Venus delegation
+          await wbnb.connect(user).approve(adapter.address, depositAmount);
+          const comptroller = await ethers.getContractAt("IMarketFacet", COMPTROLLER);
+          await comptroller.connect(user).updateDelegate(adapter.address, true);
+
+          // Step 5: Execute deposit — adapter pulls WBNB, Pendle Router handles
+          // the aggregator swap (WBNB → slisBNB) internally before minting SY → PT
+          const tx = await adapter.connect(user).deposit(
+            marketAddress,
+            depositAmount,
+            minPtOut,
+            approxParams,
+            tokenInput,
+            limitOrderData,
+          );
+          const receipt = await tx.wait();
+
+          // Step 6: Record balances after deposit
+          const userWbnbAfter = await wbnb.balanceOf(user.address);
+          const userVTokenAfter = await vToken.balanceOf(user.address);
+          const userPtAfter = await ptToken.balanceOf(user.address);
+
+          const wbnbSpent = userWbnbBefore.sub(userWbnbAfter);
+          const vTokensMinted = userVTokenAfter.sub(userVTokenBefore);
+
+          // Step 7: Assert user balance changes
+          expect(wbnbSpent).to.equal(depositAmount); // Exact WBNB amount taken from user
+          expect(vTokensMinted).to.be.gt(0); // User received vTokens
+          expect(userPtAfter).to.equal(userPtBefore); // No PT leaked to user (all deposited into Venus)
+
+          // Step 8: Assert adapter holds zero balances (stateless between txs)
+          expect(await wbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await clisbnb.balanceOf(adapter.address)).to.equal(0); // No intermediate slisBNB left
+          expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
+          expect(await vToken.balanceOf(adapter.address)).to.equal(0);
+
+          // Step 9: Verify Deposited event
+          const depositedEvent = receipt.events?.find((e: any) => e.event === "Deposited");
+          expect(depositedEvent).to.not.be.undefined;
+
+          const args = depositedEvent!.args!;
+          expect(args.pendleMarket).to.equal(marketAddress);
+          expect(args.user).to.equal(user.address);
+          expect(args.tokenIn).to.equal(WBNB);
+          expect(args.amountIn).to.equal(depositAmount);
+          expect(args.ptAmount).to.be.gte(minPtOut);
+          expect(args.vTokenAmount).to.equal(vTokensMinted);
+          expect(args.vTokenAmount).to.be.gt(0);
+
+          console.log("\n=== WBNB Deposit Results ===");
+          console.log("WBNB spent:", ethers.utils.formatEther(wbnbSpent));
+          console.log("PT minted:", ethers.utils.formatEther(args.ptAmount));
+          console.log("vTokens received:", ethers.utils.formatEther(vTokensMinted));
+
+          // Revoke delegation after test
           await comptroller.connect(user).updateDelegate(adapter.address, false);
         });
       });
