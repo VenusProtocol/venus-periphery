@@ -21,6 +21,9 @@ interface IVenusVToken {
     /// @notice Returns the underlying asset address of this vToken market.
     function underlying() external view returns (address);
 
+    /// @notice Returns the Comptroller address associated with this vToken market.
+    function comptroller() external view returns (address);
+
     /// @notice Returns the vToken balance of `account`.
     function balanceOf(address account) external view returns (uint256);
 }

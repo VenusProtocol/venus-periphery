@@ -27,7 +27,6 @@ interface IPendlePTVaultAdapter {
      * @param comptroller Venus Comptroller address for the isolated pool
      * @param isActive Whether this market is currently accepting deposits/withdrawals
      * @param maturity PT expiry timestamp (Unix timestamp)
-     * @dev Accepts any token from Pendle's tokensIn/tokensOut arrays
      */
     struct MarketConfig {
         address pt;
@@ -48,14 +47,12 @@ interface IPendlePTVaultAdapter {
      * @param pendleMarket Pendle market address that was registered
      * @param pt Principal Token address
      * @param vToken Venus VToken market address
-     * @param comptroller Venus Comptroller address
      * @param maturity PT maturity timestamp
      */
     event MarketAdded(
         address indexed pendleMarket,
         address indexed pt,
-        address vToken,
-        address comptroller,
+        address indexed vToken,
         uint256 maturity
     );
 
@@ -148,6 +145,12 @@ interface IPendlePTVaultAdapter {
     error MarketNotActive(address pendleMarket);
 
     /**
+     * @notice Error thrown when attempting to activate a market that is already active.
+     * @param pendleMarket The Pendle market address that is already active
+     */
+    error MarketAlreadyActive(address pendleMarket);
+
+    /**
      * @notice Error thrown when attempting to register a market that is already registered.
      * @param pendleMarket The Pendle market address that is already registered
      */
@@ -189,14 +192,23 @@ interface IPendlePTVaultAdapter {
      */
     error VTokenRedeemFailed(uint256 errorCode);
 
+    /**
+     * @notice Error thrown when the vToken's underlying asset does not match the derived PT address.
+     * @param vToken The vToken address whose underlying was checked
+     * @param expectedUnderlying The expected underlying (PT) address
+     */
+    error UnderlyingMismatch(address vToken, address expectedUnderlying);
+
     // ═══════════════════════════════════════════════════════════════════════
-    //                        CORE FUNCTIONS — ERC-20
+    //                          CORE — DEPOSIT
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
      * @notice Deposit tokenIn → swap to PT via Pendle → deposit PT into Venus → user receives vTokens.
      * @dev User must approve this adapter for `amount` of tokenIn beforehand.
      *      The contract will be paused during emergency situations.
+     *      Accepts any token from Pendle's tokensIn array for the given market.
+     *      No beforeMaturity check — Pendle Router naturally reverts post-maturity swaps.
      * @param pendleMarket Pendle market address identifying the PT market
      * @param amount Amount of tokenIn to deposit
      * @param minPtOut Minimum PT to receive from Pendle swap (slippage protection)
@@ -213,6 +225,30 @@ interface IPendlePTVaultAdapter {
         TokenInput calldata input,
         LimitOrderData calldata limit
     ) external returns (uint256 netVTokensMinted);
+
+    /**
+     * @notice Deposit native BNB → swap to PT via Pendle Router → deposit PT into Venus → user receives vTokens.
+     * @dev Passes native BNB directly to Pendle Router (payable) without wrapping to WBNB.
+     *      Any excess native BNB is refunded to the user.
+     *      No beforeMaturity check — Pendle Router naturally reverts post-maturity swaps.
+     * @param pendleMarket Pendle market address identifying the PT market
+     * @param minPtOut Minimum PT to receive from Pendle swap (slippage protection)
+     * @param guessPtOut Off-chain binary search hint from the Pendle API
+     * @param input Token routing configuration from the Pendle API
+     * @param limit Limit order fill data (can be empty struct)
+     * @return netVTokensMinted Amount of vTokens credited to the user
+     */
+    function depositNative(
+        address pendleMarket,
+        uint256 minPtOut,
+        ApproxParams calldata guessPtOut,
+        TokenInput calldata input,
+        LimitOrderData calldata limit
+    ) external payable returns (uint256 netVTokensMinted);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                      CORE — WITHDRAW & REDEEM
+    // ═══════════════════════════════════════════════════════════════════════
 
     /**
      * @notice Withdraw before maturity: redeem vTokens → sell PT on Pendle AMM → user receives tokenOut.
@@ -250,47 +286,25 @@ interface IPendlePTVaultAdapter {
     ) external returns (uint256 netTokenOut);
 
     // ═══════════════════════════════════════════════════════════════════════
-    //                    CORE FUNCTIONS — NATIVE DEPOSIT
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice Deposit native BNB → swap to PT via Pendle Router → deposit PT into Venus → user receives vTokens.
-     * @dev Passes native BNB directly to Pendle Router (payable) without wrapping to WBNB.
-     *      Any excess native BNB is refunded to the user.
-     * @param pendleMarket Pendle market address identifying the PT market
-     * @param minPtOut Minimum PT to receive from Pendle swap (slippage protection)
-     * @param guessPtOut Off-chain binary search hint from the Pendle API
-     * @param input Token routing configuration from the Pendle API
-     * @param limit Limit order fill data (can be empty struct)
-     * @return netVTokensMinted Amount of vTokens credited to the user
-     */
-    function depositNative(
-        address pendleMarket,
-        uint256 minPtOut,
-        ApproxParams calldata guessPtOut,
-        TokenInput calldata input,
-        LimitOrderData calldata limit
-    ) external payable returns (uint256 netVTokensMinted);
-
-    // ═══════════════════════════════════════════════════════════════════════
     //                          ADMIN FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Register a new PT market. Derives PT, SY, YT, and maturity from the Pendle market on-chain.
+     * @notice Register a new PT market. Derives PT, SY, YT, maturity, and comptroller from on-chain data.
      * @dev Only callable by the contract owner.
-     *      Reads token addresses and maturity directly from the Pendle market contract.
-     *      Accepts any token from Pendle's tokensIn array for deposits.
+     *      Reads token addresses and maturity from the Pendle market contract.
+     *      Validates that the vToken's underlying matches the derived PT address.
+     *      Derives the comptroller from the vToken (eliminates misconfiguration risk).
      * @param pendleMarket Pendle AMM market address to register
      * @param vToken Venus VToken market address for this PT
-     * @param comptroller Venus Comptroller address for the isolated pool
      */
-    function addMarket(address pendleMarket, address vToken, address comptroller) external;
+    function addMarket(address pendleMarket, address vToken) external;
 
     /**
      * @notice Deactivate a market (blocks new deposits and withdrawals).
      * @dev Only callable by the contract owner.
      *      Deactivation prevents new operations but does not affect existing user positions.
+     *      Reverts if the market is already deactivated.
      * @param pendleMarket Pendle market address to deactivate
      */
     function deactivateMarket(address pendleMarket) external;
@@ -298,6 +312,7 @@ interface IPendlePTVaultAdapter {
     /**
      * @notice Re-activate a previously deactivated market.
      * @dev Only callable by the contract owner.
+     *      Reverts if the market is already active.
      * @param pendleMarket Pendle market address to activate
      */
     function activateMarket(address pendleMarket) external;
@@ -316,7 +331,7 @@ interface IPendlePTVaultAdapter {
     function unpause() external;
 
     /**
-     * @notice Recover tokens accidentally sent to the contract.
+     * @notice Recover ERC-20 tokens accidentally sent to the contract.
      * @dev Only callable by the contract owner.
      *      Should only be used for recovering mistakenly sent tokens.
      *      The contract should hold zero balances during normal operations.
@@ -325,6 +340,16 @@ interface IPendlePTVaultAdapter {
      * @param amount Amount to transfer
      */
     function sweepTokens(address token, address to, uint256 amount) external;
+
+    /**
+     * @notice Recover native BNB accidentally sent to the contract.
+     * @dev Only callable by the contract owner.
+     *      The receive() function is open for Pendle Router refunds, so native BNB
+     *      can accumulate from accidental transfers or selfdestruct.
+     * @param to Recipient address
+     * @param amount Amount of native BNB to transfer
+     */
+    function sweepNative(address payable to, uint256 amount) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                          VIEW FUNCTIONS
@@ -345,6 +370,8 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Get all registered market addresses.
+     * @dev The list grows unboundedly — markets can be deactivated but not removed.
+     *      Expected to remain small in practice.
      * @return Array of all registered Pendle market addresses
      */
     function getAllMarkets() external view returns (address[] memory);
@@ -358,8 +385,8 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Check if a user has delegated to this adapter for a specific market's Comptroller.
-     * @dev Delegation is required for both deposit (enterMarketBehalf) and withdraw (redeemBehalf).
-     *      Users must call Comptroller.updateDelegate(adapter, true) before using the adapter.
+     * @dev Delegation is required for withdraw/redeemAtMaturity (redeemBehalf).
+     *      Users must call Comptroller.updateDelegate(adapter, true) before withdrawing.
      * @param pendleMarket Pendle market address
      * @param user User address to check
      * @return True if the user has approved this adapter as a delegate
@@ -368,12 +395,13 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Get the immutable Pendle Router address.
-     * @return Pendle RouterV4 address used for all PT swaps and redemptions
+     * @return Pendle Router address used for all PT swaps and redemptions
      */
     function PENDLE_ROUTER() external view returns (address);
 
     /**
      * @notice Get the immutable WBNB address.
+     * @dev Reserved for future withdrawNative support.
      * @return Wrapped native token (WBNB) address
      */
     function WBNB() external view returns (address);
