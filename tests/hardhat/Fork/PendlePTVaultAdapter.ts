@@ -5,7 +5,7 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import { FORK_MAINNET, forking } from "./utils";
-import { getPendleSwapParams } from "./utils/pendleApi";
+import { getPendleSwapParams, getPendlePtToTokenParams } from "./utils/pendleApi";
 
 const { expect } = chai;
 
@@ -99,6 +99,21 @@ function getDummyLimitOrderData() {
     normalFills: [],
     flashFills: [],
     optData: "0x",
+  };
+}
+
+function getDummyTokenOutput(tokenOut: string) {
+  return {
+    tokenOut,
+    minTokenOut: 0,
+    tokenRedeemSy: tokenOut,
+    pendleSwap: ethers.constants.AddressZero,
+    swapData: {
+      swapType: 0,
+      extRouter: ethers.constants.AddressZero,
+      extCalldata: "0x",
+      needScale: false,
+    },
   };
 }
 
@@ -510,7 +525,7 @@ if (FORK_MAINNET) {
         // Pendle Router rejects the deposit attempt.
         // ═══════════════════════════════════════════════════════════════════════
 
-        it("should revert when Pendle market has expired (Pendle Router rejects)", async () => {
+        it("should revert with MarketExpired when Pendle market has expired", async () => {
           const depositAmount = parseUnits("1", 18);
 
           // Acquire slisBNB if needed
@@ -542,12 +557,16 @@ if (FORK_MAINNET) {
           await clisbnb.connect(user).approve(adapter.address, depositAmount);
           await comptroller.connect(user).updateDelegate(adapter.address, true);
 
-          // Attempt deposit after maturity — Pendle Router should reject
+          // Attempt deposit after maturity — all adapter checks pass (amount, tokenIn, market active),
+          // token transfer succeeds, but Pendle Market rejects the swap with MarketExpired
+          const pendleMarketContract = await ethers.getContractAt(["error MarketExpired()"], PENDLE_MARKET);
+
           await expect(
             adapter
               .connect(user)
               .deposit(marketAddress, depositAmount, minPtOut, approxParams, tokenInput, limitOrderData),
-          ).to.be.reverted;
+          ).to.be.revertedWithCustomError(pendleMarketContract, "MarketExpired");
+
           // Restore to pre-maturity state
           await snapshot.restore();
         });
@@ -667,6 +686,925 @@ if (FORK_MAINNET) {
           )
             .to.be.revertedWithCustomError(adapter, "InputAmountMismatch")
             .withArgs(nativeDepositAmount, mismatchedNetTokenIn);
+        });
+      });
+
+      // ═══════════════════════════════════════════════════════════════════════
+      //                        WITHDRAW VIA ADAPTER
+      // ═══════════════════════════════════════════════════════════════════════
+      //
+      // Withdraw flow: vTokens → redeem from Venus → PT → swap via Pendle AMM → tokenOut to user
+      //
+      // KEY CONCEPT: tokensRedeemSy vs tokensOut
+      //
+      //   tokensRedeemSy — Tokens that the SY (Standardized Yield) contract can
+      //     DIRECTLY unwrap to without any external DEX swap.
+      //     For this market (PT-clisBNBx-25JUN2026): tokensRedeemSy = [clisBNB]
+      //
+      //   tokensOut — ALL tokens supported for withdrawal output. This is a
+      //     SUPERSET of tokensRedeemSy that includes aggregator-routed tokens.
+      //     For this market: tokensOut = [native BNB, clisBNB, WBNB, USDC, ...]
+      //
+      // Routing paths:
+      //   tokenOut ∈ tokensRedeemSy (e.g. clisBNB):
+      //     PT → AMM sell → SY → SY.redeem() → tokenOut directly
+      //     (enableAggregator = false, output.pendleSwap = address(0))
+      //
+      //   tokenOut ∈ tokensOut but ∉ tokensRedeemSy (e.g. WBNB, native BNB):
+      //     PT → AMM sell → SY → SY.redeem() → clisBNB → [Aggregator] → tokenOut
+      //     (enableAggregator = true, output.pendleSwap != address(0))
+      //
+      // ═══════════════════════════════════════════════════════════════════════
+
+      describe("Withdraw via adapter", () => {
+        let depositPtAmount: any;
+        let depositVTokenAmount: any;
+
+        before(async () => {
+          console.log("\n=== Setting up withdraw tests: depositing slisBNB to get vTokens ===");
+          const depositAmount = parseUnits("5", 18);
+
+          // Ensure user has enough slisBNB
+          const currentBalance = await clisbnb.balanceOf(user.address);
+          if (currentBalance.lt(depositAmount)) {
+            await getSlisbnbViaListaDeposit(user, clisbnb, parseUnits("10", 18));
+          }
+
+          // Fetch deposit params from Pendle API
+          const marketConfig = await adapter.getMarketConfig(marketAddress);
+          const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
+            56,
+            CLISBNB,
+            marketConfig.pt,
+            depositAmount,
+            user.address,
+            0.03,
+            false,
+          );
+
+          // Approve adapter and enable delegation
+          await clisbnb.connect(user).approve(adapter.address, depositAmount);
+          await comptroller.connect(user).updateDelegate(adapter.address, true);
+
+          // Deposit to get vTokens
+          const tx = await adapter
+            .connect(user)
+            .deposit(marketAddress, depositAmount, minPtOut, approxParams, tokenInput, limitOrderData);
+          const receipt = await tx.wait();
+
+          // Extract amounts from Deposited event for PT↔vToken ratio calculation
+          const depositedEvent = receipt.events?.find((e: any) => e.event === "Deposited");
+          depositPtAmount = depositedEvent!.args!.ptAmount;
+          depositVTokenAmount = depositedEvent!.args!.vTokenAmount;
+
+          const userVTokenBalance = await vToken.balanceOf(user.address);
+          console.log("User vToken balance for withdraw tests:", ethers.utils.formatEther(userVTokenBalance));
+          console.log("PT deposited:", ethers.utils.formatEther(depositPtAmount));
+          console.log("vTokens minted:", ethers.utils.formatEther(depositVTokenAmount));
+
+          // Delegation stays active for withdraw tests (redeemBehalf requires it)
+        });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Test 1: clisBNB — tokenOut is in tokensRedeemSy (direct SY redeem path)
+        // ─────────────────────────────────────────────────────────────────────
+        //
+        // clisBNB is the ONLY token in this market's `tokensRedeemSy` array.
+        // The SY contract can directly redeem to clisBNB without any aggregator.
+        //
+        // Flow: vTokens → redeem → PT → AMM sell → SY → SY.redeem() → clisBNB to user
+        //
+        // Because clisBNB is a direct redeemSy token:
+        //   - output.tokenRedeemSy == output.tokenOut (direct redemption)
+        //   - output.pendleSwap == address(0) (no aggregator needed)
+        //   - output.swapData.swapType == 0 (no external router call)
+        // ─────────────────────────────────────────────────────────────────────
+        it("should withdraw to clisBNB (direct redeemSy token) — no aggregator", async () => {
+          // Use 1/3 of vTokens for this test
+          const withdrawVTokenAmount = depositVTokenAmount.div(3);
+
+          // Estimate PT that will be redeemed from Venus
+          // Since we just deposited and no interest has accrued, the ratio is preserved
+          const estimatedPt = withdrawVTokenAmount.mul(depositPtAmount).div(depositVTokenAmount);
+
+          // Fetch withdraw params from Pendle API
+          const { tokenOutput, limitOrderData } = await getPendlePtToTokenParams(
+            56,
+            PT_CLISBNBX_25JUN2026,
+            CLISBNB,
+            estimatedPt,
+            user.address,
+            0.03,
+            false, // enableAggregator — not needed, clisBNB is in tokensRedeemSy
+          );
+
+          // Verify API returned direct redeem path (no aggregator routing)
+          expect(tokenOutput.tokenOut.toLowerCase()).to.equal(CLISBNB.toLowerCase());
+          expect(tokenOutput.tokenRedeemSy.toLowerCase()).to.equal(CLISBNB.toLowerCase());
+          expect(tokenOutput.pendleSwap).to.equal(ethers.constants.AddressZero);
+          expect(tokenOutput.swapData.swapType).to.equal(0);
+
+          // Record balances before withdraw
+          const userClisbnbBefore = await clisbnb.balanceOf(user.address);
+          const userVTokenBefore = await vToken.balanceOf(user.address);
+          const userPtBefore = await ptToken.balanceOf(user.address);
+
+          // Execute withdraw
+          const tx = await adapter
+            .connect(user)
+            .withdraw(marketAddress, withdrawVTokenAmount, tokenOutput, limitOrderData);
+          const receipt = await tx.wait();
+
+          // Record balances after withdraw
+          const userClisbnbAfter = await clisbnb.balanceOf(user.address);
+          const userVTokenAfter = await vToken.balanceOf(user.address);
+          const userPtAfter = await ptToken.balanceOf(user.address);
+
+          const clisbnbReceived = userClisbnbAfter.sub(userClisbnbBefore);
+          const vTokensRedeemed = userVTokenBefore.sub(userVTokenAfter);
+
+          // Assert user balance changes
+          expect(vTokensRedeemed).to.equal(withdrawVTokenAmount);
+          expect(clisbnbReceived).to.be.gt(0);
+          expect(clisbnbReceived).to.be.gte(tokenOutput.minTokenOut);
+          expect(userPtAfter).to.equal(userPtBefore); // No PT leaked to user
+
+          // Assert adapter holds zero balances (stateless between txs)
+          expect(await clisbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
+          expect(await vToken.balanceOf(adapter.address)).to.equal(0);
+
+          // Verify Withdrawn event
+          const withdrawnEvent = receipt.events?.find((e: any) => e.event === "Withdrawn");
+          expect(withdrawnEvent).to.not.be.undefined;
+
+          const args = withdrawnEvent!.args!;
+          expect(args.pendleMarket).to.equal(marketAddress);
+          expect(args.user).to.equal(user.address);
+          expect(args.vTokenAmount).to.equal(withdrawVTokenAmount);
+          expect(args.ptAmount).to.be.gt(0);
+          expect(args.tokenOut).to.equal(CLISBNB);
+          expect(args.amountOut).to.equal(clisbnbReceived);
+
+          console.log("\n=== clisBNB Withdraw Results ===");
+          console.log("vTokens redeemed:", ethers.utils.formatEther(vTokensRedeemed));
+          console.log("PT sold:", ethers.utils.formatEther(args.ptAmount));
+          console.log("clisBNB received:", ethers.utils.formatEther(clisbnbReceived));
+        });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Test 2: WBNB — tokenOut is in tokensOut but NOT in tokensRedeemSy
+        //         (aggregator-routed path)
+        // ─────────────────────────────────────────────────────────────────────
+        //
+        // WBNB is in the market's `tokensOut` array but NOT in `tokensRedeemSy`.
+        // Pendle must redeem SY to clisBNB first, then swap clisBNB → WBNB via
+        // an external DEX aggregator.
+        //
+        // Flow: vTokens → redeem → PT → AMM sell → SY → SY.redeem() → clisBNB
+        //       → [Aggregator] → WBNB to user
+        //
+        // Because WBNB requires aggregator routing:
+        //   - output.tokenRedeemSy != output.tokenOut (intermediate SY redemption to clisBNB)
+        //   - output.pendleSwap != address(0) (Pendle's swap helper for aggregator)
+        //   - output.swapData.swapType > 0 (external router call)
+        // ─────────────────────────────────────────────────────────────────────
+        it("should withdraw to WBNB (aggregator-routed) — not in tokensRedeemSy", async () => {
+          // Use another 1/3 of the original vTokens
+          const withdrawVTokenAmount = depositVTokenAmount.div(3);
+
+          // Estimate PT from vToken redemption
+          const estimatedPt = withdrawVTokenAmount.mul(depositPtAmount).div(depositVTokenAmount);
+
+          // Fetch withdraw params from Pendle API
+          const { tokenOutput, limitOrderData } = await getPendlePtToTokenParams(
+            56,
+            PT_CLISBNBX_25JUN2026,
+            WBNB,
+            estimatedPt,
+            user.address,
+            0.03,
+            true, // enableAggregator — required, WBNB is NOT in tokensRedeemSy
+          );
+
+          // Verify API returned aggregator-routed path
+          expect(tokenOutput.tokenOut.toLowerCase()).to.equal(WBNB.toLowerCase());
+          expect(tokenOutput.pendleSwap).to.not.equal(ethers.constants.AddressZero);
+          expect(tokenOutput.swapData.swapType).to.equal(1);
+
+          // Record balances before withdraw
+          const userWbnbBefore = await wbnb.balanceOf(user.address);
+          const userVTokenBefore = await vToken.balanceOf(user.address);
+          const userPtBefore = await ptToken.balanceOf(user.address);
+
+          // Execute withdraw
+          const tx = await adapter
+            .connect(user)
+            .withdraw(marketAddress, withdrawVTokenAmount, tokenOutput, limitOrderData);
+          const receipt = await tx.wait();
+
+          // Record balances after withdraw
+          const userWbnbAfter = await wbnb.balanceOf(user.address);
+          const userVTokenAfter = await vToken.balanceOf(user.address);
+          const userPtAfter = await ptToken.balanceOf(user.address);
+
+          const wbnbReceived = userWbnbAfter.sub(userWbnbBefore);
+          const vTokensRedeemed = userVTokenBefore.sub(userVTokenAfter);
+
+          // Assert user balance changes
+          expect(vTokensRedeemed).to.equal(withdrawVTokenAmount);
+          expect(wbnbReceived).to.be.gt(0);
+          expect(wbnbReceived).to.be.gte(tokenOutput.minTokenOut);
+          expect(userPtAfter).to.equal(userPtBefore); // No PT leaked to user
+
+          // Assert adapter holds zero balances (stateless between txs)
+          expect(await wbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await clisbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
+          expect(await vToken.balanceOf(adapter.address)).to.equal(0);
+
+          // Verify Withdrawn event
+          const withdrawnEvent = receipt.events?.find((e: any) => e.event === "Withdrawn");
+          expect(withdrawnEvent).to.not.be.undefined;
+
+          const args = withdrawnEvent!.args!;
+          expect(args.pendleMarket).to.equal(marketAddress);
+          expect(args.user).to.equal(user.address);
+          expect(args.vTokenAmount).to.equal(withdrawVTokenAmount);
+          expect(args.ptAmount).to.be.gt(0);
+          expect(args.tokenOut).to.equal(WBNB);
+          expect(args.amountOut).to.equal(wbnbReceived);
+
+          console.log("\n=== WBNB Withdraw Results ===");
+          console.log("vTokens redeemed:", ethers.utils.formatEther(vTokensRedeemed));
+          console.log("PT sold:", ethers.utils.formatEther(args.ptAmount));
+          console.log("WBNB received:", ethers.utils.formatEther(wbnbReceived));
+        });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Test 3: Native BNB — withdraw to native BNB (address(0))
+        // ─────────────────────────────────────────────────────────────────────
+        //
+        // Native BNB (address(0)) is in `tokensOut` but NOT in `tokensRedeemSy`.
+        // Pendle Router handles the full unwrap chain and sends native BNB to
+        // the receiver (user).
+        //
+        // Flow: vTokens → redeem → PT → AMM sell → SY → SY.redeem() → clisBNB
+        //       → [Aggregator] → native BNB to user
+        //
+        // For native BNB output:
+        //   - output.tokenOut == address(0) (native token in Pendle)
+        //   - Pendle Router unwraps and sends native BNB to the receiver
+        //   - enableAggregator = true (native BNB not in tokensRedeemSy)
+        // ─────────────────────────────────────────────────────────────────────
+        it("should withdraw to native BNB — Pendle Router handles unwrapping", async () => {
+          // Use half of remaining vTokens (leaves some for error case tests)
+          const userVTokenBalance = await vToken.balanceOf(user.address);
+          const withdrawVTokenAmount = userVTokenBalance.div(2);
+
+          // Estimate PT from vToken redemption
+          const estimatedPt = withdrawVTokenAmount.mul(depositPtAmount).div(depositVTokenAmount);
+
+          // Fetch withdraw params for native BNB output
+          const NATIVE = ethers.constants.AddressZero;
+          const { tokenOutput, limitOrderData } = await getPendlePtToTokenParams(
+            56,
+            PT_CLISBNBX_25JUN2026,
+            NATIVE,
+            estimatedPt,
+            user.address,
+            0.03,
+            true, // enableAggregator — required, native BNB not in tokensRedeemSy
+          );
+
+          // Record balances before withdraw
+          const userBnbBefore = await ethers.provider.getBalance(user.address);
+          const userVTokenBefore = await vToken.balanceOf(user.address);
+          const userPtBefore = await ptToken.balanceOf(user.address);
+
+          // Execute withdraw
+          const tx = await adapter
+            .connect(user)
+            .withdraw(marketAddress, withdrawVTokenAmount, tokenOutput, limitOrderData);
+          const receipt = await tx.wait();
+          const gasUsed = receipt.gasUsed.mul(receipt.effectiveGasPrice);
+
+          // Record balances after withdraw
+          const userBnbAfter = await ethers.provider.getBalance(user.address);
+          const userVTokenAfter = await vToken.balanceOf(user.address);
+          const userPtAfter = await ptToken.balanceOf(user.address);
+
+          const bnbReceived = userBnbAfter.sub(userBnbBefore).add(gasUsed); // Add back gas to get actual amount received
+          const vTokensRedeemed = userVTokenBefore.sub(userVTokenAfter);
+
+          // Assert user balance changes
+          expect(vTokensRedeemed).to.equal(withdrawVTokenAmount);
+          expect(bnbReceived).to.be.gt(0);
+          expect(userPtAfter).to.equal(userPtBefore); // No PT leaked to user
+
+          // Assert adapter holds zero balances
+          expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
+          expect(await vToken.balanceOf(adapter.address)).to.equal(0);
+          expect(await ethers.provider.getBalance(adapter.address)).to.equal(0); // No BNB dust
+
+          // Verify Withdrawn event
+          const withdrawnEvent = receipt.events?.find((e: any) => e.event === "Withdrawn");
+          expect(withdrawnEvent).to.not.be.undefined;
+
+          const args = withdrawnEvent!.args!;
+          expect(args.pendleMarket).to.equal(marketAddress);
+          expect(args.user).to.equal(user.address);
+          expect(args.vTokenAmount).to.equal(withdrawVTokenAmount);
+          expect(args.ptAmount).to.be.gt(0);
+          expect(args.tokenOut).to.equal(NATIVE);
+          expect(args.amountOut).to.be.gt(0);
+
+          console.log("\n=== Native BNB Withdraw Results ===");
+          console.log("vTokens redeemed:", ethers.utils.formatEther(vTokensRedeemed));
+          console.log("PT sold:", ethers.utils.formatEther(args.ptAmount));
+          console.log("BNB received:", ethers.utils.formatEther(bnbReceived));
+        });
+      });
+
+      // ═══════════════════════════════════════════════════════════════════════
+      //                        WITHDRAW ERROR CASES
+      // ═══════════════════════════════════════════════════════════════════════
+      //
+      // Tests that verify the withdraw function reverts correctly for invalid
+      // inputs. These use dummy structs since the contract reverts before
+      // reaching the Pendle Router or vToken interaction for most cases.
+      // ═══════════════════════════════════════════════════════════════════════
+
+      describe("Withdraw error cases", () => {
+        const dummyLimit = getDummyLimitOrderData();
+        const withdrawAmount = parseUnits("1", 18);
+
+        it("should revert with ZeroAmount when vTokenAmount is 0", async () => {
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(
+            adapter.connect(user).withdraw(marketAddress, 0, output, dummyLimit),
+          ).to.be.revertedWithCustomError(adapter, "ZeroAmount");
+        });
+
+        it("should revert with MarketNotRegistered for unregistered market", async () => {
+          const fakeMarket = "0x0000000000000000000000000000000000001234";
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(adapter.connect(user).withdraw(fakeMarket, withdrawAmount, output, dummyLimit))
+            .to.be.revertedWithCustomError(adapter, "MarketNotRegistered")
+            .withArgs(fakeMarket);
+        });
+
+        it("should revert with MarketNotActive when market is deactivated", async () => {
+          const snapshot = await takeSnapshot();
+
+          await adapter.connect(owner).deactivateMarket(marketAddress);
+
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(adapter.connect(user).withdraw(marketAddress, withdrawAmount, output, dummyLimit))
+            .to.be.revertedWithCustomError(adapter, "MarketNotActive")
+            .withArgs(marketAddress);
+
+          await snapshot.restore();
+        });
+
+        it("should revert when contract is paused", async () => {
+          const snapshot = await takeSnapshot();
+
+          await adapter.connect(owner).pause();
+
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(
+            adapter.connect(user).withdraw(marketAddress, withdrawAmount, output, dummyLimit),
+          ).to.be.revertedWith("Pausable: paused");
+
+          await snapshot.restore();
+        });
+
+        it("should revert with MarketAlreadyMatured when called after maturity", async () => {
+          const snapshot = await takeSnapshot();
+
+          // Time travel past maturity
+          const marketConfig = await adapter.getMarketConfig(marketAddress);
+          const maturity = marketConfig.maturity.toNumber();
+          await time.increaseTo(maturity + 1);
+
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(
+            adapter.connect(user).withdraw(marketAddress, withdrawAmount, output, dummyLimit),
+          ).to.be.revertedWithCustomError(adapter, "MarketAlreadyMatured");
+
+          await snapshot.restore();
+        });
+
+        it("should revert when user has not delegated to adapter (redeemBehalf fails)", async () => {
+          const snapshot = await takeSnapshot();
+
+          // Revoke delegation
+          await comptroller.connect(user).updateDelegate(adapter.address, false);
+
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(
+            adapter.connect(user).withdraw(marketAddress, withdrawAmount, output, dummyLimit),
+          ).to.be.reverted;
+
+          await snapshot.restore();
+        });
+      });
+
+      // ═══════════════════════════════════════════════════════════════════════
+      //                    REDEEM AT MATURITY VIA ADAPTER
+      // ═══════════════════════════════════════════════════════════════════════
+      //
+      // RedeemAtMaturity flow:
+      //   vTokens → redeem from Venus → PT → redeem 1:1 via SY → tokenOut to user
+      //
+      // Unlike withdraw (which sells PT on Pendle AMM at market price with slippage),
+      // redeemAtMaturity redeems PT 1:1 through the SY contract:
+      //   - No AMM swap, no price impact, no slippage from AMM
+      //   - Uses redeemPyToToken() instead of swapExactPtForToken()
+      //   - No LimitOrderData parameter needed
+      //   - Only callable at or after maturity (atOrAfterMaturity modifier)
+      //
+      // tokensRedeemSy vs tokensOut routing still applies for the SY → tokenOut step:
+      //   clisBNB (in tokensRedeemSy): PT → SY → SY.redeem() → clisBNB directly
+      //   WBNB, native BNB (not in tokensRedeemSy): PT → SY → SY.redeem() → clisBNB → [Aggregator] → tokenOut
+      //
+      // NOTE: Tests time-travel ~1.5 years past maturity. Aggregator routing
+      // calldata from the Pendle API may contain DEX swap deadlines that expire
+      // after such a large time jump. Only clisBNB (direct redeemSy, no aggregator)
+      // is guaranteed to work. WBNB and native BNB tests are attempted but may
+      // require fallback to manually constructed TokenOutput if aggregator
+      // deadlines expire. Aggregator routing is already fully tested in the
+      // withdraw section above (pre-maturity, no time travel).
+      //
+      // ═══════════════════════════════════════════════════════════════════════
+
+      describe("RedeemAtMaturity via adapter", () => {
+        let depositPtAmount: any;
+        let depositVTokenAmount: any;
+        let preMaturitySnapshot: any;
+
+        before(async () => {
+          console.log("\n=== Setting up redeemAtMaturity tests ===");
+          const depositAmount = parseUnits("3", 18);
+
+          // Ensure user has enough slisBNB
+          const currentBalance = await clisbnb.balanceOf(user.address);
+          if (currentBalance.lt(depositAmount)) {
+            await getSlisbnbViaListaDeposit(user, clisbnb, parseUnits("10", 18));
+          }
+
+          // Fetch deposit params from Pendle API (pre-maturity — API queries real chain)
+          const marketConfig = await adapter.getMarketConfig(marketAddress);
+          const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
+            56,
+            CLISBNB,
+            marketConfig.pt,
+            depositAmount,
+            user.address,
+            0.03,
+            false,
+          );
+
+          // Approve adapter and ensure delegation is active
+          await clisbnb.connect(user).approve(adapter.address, depositAmount);
+          const isDelegated = await adapter.isDelegated(marketAddress, user.address);
+          if (!isDelegated) {
+            await comptroller.connect(user).updateDelegate(adapter.address, true);
+          }
+
+          // Deposit to get vTokens (pre-maturity)
+          const tx = await adapter
+            .connect(user)
+            .deposit(marketAddress, depositAmount, minPtOut, approxParams, tokenInput, limitOrderData);
+          const receipt = await tx.wait();
+
+          // Extract amounts from Deposited event for PT↔vToken ratio
+          const depositedEvent = receipt.events?.find((e: any) => e.event === "Deposited");
+          depositPtAmount = depositedEvent!.args!.ptAmount;
+          depositVTokenAmount = depositedEvent!.args!.vTokenAmount;
+
+          const userVTokenBalance = await vToken.balanceOf(user.address);
+          console.log(
+            "User vToken balance for redeemAtMaturity tests:",
+            ethers.utils.formatEther(userVTokenBalance),
+          );
+          console.log("PT deposited:", ethers.utils.formatEther(depositPtAmount));
+
+          // ── Fix oracle staleness after time travel ──────────────────────
+          // redeemBehalf triggers Comptroller → Resilient Oracle → Chainlink.
+          // After ~1.5yr time travel, Chainlink feeds are stale.
+          // Fix: capture valid price, then replace the comptroller's oracle
+          // with a SimplePriceOracle that returns the stored price.
+          const comptrollerForOracle = await ethers.getContractAt(
+            [
+              "function oracle() view returns (address)",
+              "function admin() view returns (address)",
+              "function _setPriceOracle(address newOracle) external returns (uint256)",
+            ],
+            COMPTROLLER,
+          );
+          const oracleAddr = await comptrollerForOracle.oracle();
+          const currentOracle = await ethers.getContractAt(
+            ["function getUnderlyingPrice(address vToken) view returns (uint256)"],
+            oracleAddr,
+          );
+          const ptVTokenPrice = await currentOracle.getUnderlyingPrice(VTOKEN_PT_CLISBNBX_25JUN2026);
+          console.log("Oracle price for PT vToken (pre-travel):", ptVTokenPrice.toString());
+
+          // Take snapshot BEFORE time travel (restored in after() for subsequent tests)
+          preMaturitySnapshot = await takeSnapshot();
+
+          // Time travel past maturity
+          const maturity = marketConfig.maturity.toNumber();
+          await time.increaseTo(maturity + 1);
+          console.log("Time traveled past maturity:", new Date((maturity + 1) * 1000).toISOString());
+
+          // Deploy SimplePriceOracle and set the captured price
+          const SimplePriceOracle = await ethers.getContractFactory("SimplePriceOracle");
+          const simpleOracle = await SimplePriceOracle.deploy();
+          await simpleOracle.deployed();
+          await simpleOracle.setUnderlyingPrice(VTOKEN_PT_CLISBNBX_25JUN2026, ptVTokenPrice);
+
+          // Impersonate comptroller admin and replace oracle
+          const comptrollerAdmin = await comptrollerForOracle.admin();
+          await impersonateAccount(comptrollerAdmin);
+          await setBalance(comptrollerAdmin, parseUnits("10", 18));
+          const adminSigner = await ethers.getSigner(comptrollerAdmin);
+          const result = await comptrollerForOracle.connect(adminSigner)._setPriceOracle(simpleOracle.address);
+          await result.wait();
+
+          // Verify the oracle was actually changed
+          const newOracleAddr = await comptrollerForOracle.oracle();
+          console.log("Oracle before:", oracleAddr);
+          console.log("Oracle after: ", newOracleAddr);
+          console.log("SimplePriceOracle:", simpleOracle.address);
+          expect(newOracleAddr).to.equal(simpleOracle.address);
+        });
+
+        after(async () => {
+          // Restore pre-maturity state for subsequent test sections
+          await preMaturitySnapshot.restore();
+        });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Test 1: clisBNB — direct 1:1 redemption via SY (no aggregator)
+        // ─────────────────────────────────────────────────────────────────────
+        //
+        // After maturity, PT redeems 1:1 through SY. Since clisBNB is in
+        // tokensRedeemSy, SY directly unwraps to clisBNB — no aggregator needed.
+        //
+        // Flow: vTokens → redeem → PT → redeemPyToToken() → SY → clisBNB to user
+        //
+        // Unlike pre-maturity withdraw (AMM sell with price impact),
+        // this is a pure 1:1 redemption — no slippage from AMM.
+        // ─────────────────────────────────────────────────────────────────────
+        it("should redeem to clisBNB (direct redeemSy) — 1:1 redemption, no AMM", async () => {
+          const withdrawVTokenAmount = depositVTokenAmount.div(2);
+
+          // Estimate PT from vToken redemption (ratio preserved, no interest accrued)
+          const estimatedPt = withdrawVTokenAmount.mul(depositPtAmount).div(depositVTokenAmount);
+
+          // Fetch TokenOutput from Pendle API
+          // Note: API queries the real (pre-maturity) chain, but the TokenOutput routing
+          // data (tokenRedeemSy, pendleSwap, swapData) is the same regardless of maturity —
+          // it describes how SY unwraps to the final tokenOut.
+          const { tokenOutput } = await getPendlePtToTokenParams(
+            56,
+            PT_CLISBNBX_25JUN2026,
+            CLISBNB,
+            estimatedPt,
+            user.address,
+            0.03,
+            false, // enableAggregator — not needed, clisBNB is in tokensRedeemSy
+          );
+
+          // Verify API returned direct redeem path (no aggregator routing)
+          expect(tokenOutput.tokenOut.toLowerCase()).to.equal(CLISBNB.toLowerCase());
+          expect(tokenOutput.tokenRedeemSy.toLowerCase()).to.equal(CLISBNB.toLowerCase());
+          expect(tokenOutput.pendleSwap).to.equal(ethers.constants.AddressZero);
+          expect(tokenOutput.swapData.swapType).to.equal(0);
+
+          // Record balances before redemption
+          const userClisbnbBefore = await clisbnb.balanceOf(user.address);
+          const userVTokenBefore = await vToken.balanceOf(user.address);
+          const userPtBefore = await ptToken.balanceOf(user.address);
+
+          // Execute redeemAtMaturity (no LimitOrderData — pure 1:1 redemption)
+          const tx = await adapter
+            .connect(user)
+            .redeemAtMaturity(marketAddress, withdrawVTokenAmount, tokenOutput);
+          const receipt = await tx.wait();
+
+          // Record balances after redemption
+          const userClisbnbAfter = await clisbnb.balanceOf(user.address);
+          const userVTokenAfter = await vToken.balanceOf(user.address);
+          const userPtAfter = await ptToken.balanceOf(user.address);
+
+          const clisbnbReceived = userClisbnbAfter.sub(userClisbnbBefore);
+          const vTokensRedeemed = userVTokenBefore.sub(userVTokenAfter);
+
+          // Assert user balance changes
+          expect(vTokensRedeemed).to.equal(withdrawVTokenAmount);
+          expect(clisbnbReceived).to.be.gt(0);
+          expect(clisbnbReceived).to.be.gte(tokenOutput.minTokenOut);
+          expect(userPtAfter).to.equal(userPtBefore); // No PT leaked to user
+
+          // Assert adapter holds zero balances (stateless between txs)
+          expect(await clisbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
+          expect(await vToken.balanceOf(adapter.address)).to.equal(0);
+
+          // Verify RedeemedAtMaturity event (NOT Withdrawn — different event for post-maturity)
+          const redeemEvent = receipt.events?.find((e: any) => e.event === "RedeemedAtMaturity");
+          expect(redeemEvent).to.not.be.undefined;
+
+          const args = redeemEvent!.args!;
+          expect(args.pendleMarket).to.equal(marketAddress);
+          expect(args.user).to.equal(user.address);
+          expect(args.vTokenAmount).to.equal(withdrawVTokenAmount);
+          expect(args.ptAmount).to.be.gt(0);
+          expect(args.tokenOut).to.equal(CLISBNB);
+          expect(args.amountOut).to.equal(clisbnbReceived);
+
+          console.log("\n=== clisBNB RedeemAtMaturity Results ===");
+          console.log("vTokens redeemed:", ethers.utils.formatEther(vTokensRedeemed));
+          console.log("PT redeemed (1:1):", ethers.utils.formatEther(args.ptAmount));
+          console.log("clisBNB received:", ethers.utils.formatEther(clisbnbReceived));
+        });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Test 2: WBNB — 1:1 redemption via SY + aggregator routing
+        // ─────────────────────────────────────────────────────────────────────
+        //
+        // WBNB is NOT in tokensRedeemSy. After 1:1 PT redemption through SY,
+        // the Router redeems SY to clisBNB, then routes through an aggregator
+        // to swap clisBNB → WBNB.
+        //
+        // Flow: vTokens → redeem → PT → redeemPyToToken() → SY → clisBNB
+        //       → [Aggregator] → WBNB to user
+        //
+        // NOTE: Aggregator calldata is fetched pre-maturity from the Pendle API.
+        // After time-traveling ~1.5 years to maturity, DEX swap deadlines
+        // embedded in the calldata may have expired, causing this test to fail.
+        // ─────────────────────────────────────────────────────────────────────
+        it("should redeem to WBNB (aggregator-routed) — 1:1 redemption + DEX swap", async () => {
+          // Use half of remaining vTokens
+          const userVTokenBalance = await vToken.balanceOf(user.address);
+          const withdrawVTokenAmount = userVTokenBalance.div(2);
+
+          // Estimate PT from vToken redemption
+          const estimatedPt = withdrawVTokenAmount.mul(depositPtAmount).div(depositVTokenAmount);
+
+          // Fetch TokenOutput from Pendle API (enableAggregator=true for WBNB)
+          const { tokenOutput } = await getPendlePtToTokenParams(
+            56,
+            PT_CLISBNBX_25JUN2026,
+            WBNB,
+            estimatedPt,
+            user.address,
+            0.03,
+            true, // enableAggregator — required, WBNB is NOT in tokensRedeemSy
+          );
+
+          // Verify API returned aggregator-routed path
+          expect(tokenOutput.tokenOut.toLowerCase()).to.equal(WBNB.toLowerCase());
+          expect(tokenOutput.pendleSwap).to.not.equal(ethers.constants.AddressZero);
+          expect(tokenOutput.swapData.swapType).to.equal(1);
+
+          // Record balances before redemption
+          const userWbnbBefore = await wbnb.balanceOf(user.address);
+          const userVTokenBefore = await vToken.balanceOf(user.address);
+          const userPtBefore = await ptToken.balanceOf(user.address);
+
+          // Execute redeemAtMaturity
+          const tx = await adapter
+            .connect(user)
+            .redeemAtMaturity(marketAddress, withdrawVTokenAmount, tokenOutput);
+          const receipt = await tx.wait();
+
+          // Record balances after redemption
+          const userWbnbAfter = await wbnb.balanceOf(user.address);
+          const userVTokenAfter = await vToken.balanceOf(user.address);
+          const userPtAfter = await ptToken.balanceOf(user.address);
+
+          const wbnbReceived = userWbnbAfter.sub(userWbnbBefore);
+          const vTokensRedeemed = userVTokenBefore.sub(userVTokenAfter);
+
+          // Assert user balance changes
+          expect(vTokensRedeemed).to.equal(withdrawVTokenAmount);
+          expect(wbnbReceived).to.be.gt(0);
+          expect(wbnbReceived).to.be.gte(tokenOutput.minTokenOut);
+          expect(userPtAfter).to.equal(userPtBefore); // No PT leaked to user
+
+          // Assert adapter holds zero balances
+          expect(await wbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await clisbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
+          expect(await vToken.balanceOf(adapter.address)).to.equal(0);
+
+          // Verify RedeemedAtMaturity event
+          const redeemEvent = receipt.events?.find((e: any) => e.event === "RedeemedAtMaturity");
+          expect(redeemEvent).to.not.be.undefined;
+
+          const args = redeemEvent!.args!;
+          expect(args.pendleMarket).to.equal(marketAddress);
+          expect(args.user).to.equal(user.address);
+          expect(args.vTokenAmount).to.equal(withdrawVTokenAmount);
+          expect(args.ptAmount).to.be.gt(0);
+          expect(args.tokenOut).to.equal(WBNB);
+          expect(args.amountOut).to.equal(wbnbReceived);
+
+          console.log("\n=== WBNB RedeemAtMaturity Results ===");
+          console.log("vTokens redeemed:", ethers.utils.formatEther(vTokensRedeemed));
+          console.log("PT redeemed (1:1):", ethers.utils.formatEther(args.ptAmount));
+          console.log("WBNB received:", ethers.utils.formatEther(wbnbReceived));
+        });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Test 3: Native BNB — 1:1 redemption via SY + aggregator unwrap
+        // ─────────────────────────────────────────────────────────────────────
+        //
+        // Native BNB (address(0)) is NOT in tokensRedeemSy.
+        // After 1:1 PT redemption through SY, the Router redeems SY to clisBNB,
+        // then routes through an aggregator to unwrap to native BNB.
+        //
+        // Flow: vTokens → redeem → PT → redeemPyToToken() → SY → clisBNB
+        //       → [Aggregator] → native BNB to user
+        // ─────────────────────────────────────────────────────────────────────
+        it("should redeem to native BNB — 1:1 redemption + aggregator unwrap", async () => {
+          // Use half of remaining vTokens
+          const userVTokenBalance = await vToken.balanceOf(user.address);
+          const withdrawVTokenAmount = userVTokenBalance.div(2);
+
+          // Estimate PT from vToken redemption
+          const estimatedPt = withdrawVTokenAmount.mul(depositPtAmount).div(depositVTokenAmount);
+
+          // Fetch TokenOutput for native BNB output
+          const NATIVE = ethers.constants.AddressZero;
+          const { tokenOutput } = await getPendlePtToTokenParams(
+            56,
+            PT_CLISBNBX_25JUN2026,
+            NATIVE,
+            estimatedPt,
+            user.address,
+            0.03,
+            true, // enableAggregator — required, native BNB not in tokensRedeemSy
+          );
+
+          // Record balances before redemption
+          const userBnbBefore = await ethers.provider.getBalance(user.address);
+          const userVTokenBefore = await vToken.balanceOf(user.address);
+          const userPtBefore = await ptToken.balanceOf(user.address);
+
+          // Execute redeemAtMaturity
+          const tx = await adapter
+            .connect(user)
+            .redeemAtMaturity(marketAddress, withdrawVTokenAmount, tokenOutput);
+          const receipt = await tx.wait();
+          const gasUsed = receipt.gasUsed.mul(receipt.effectiveGasPrice);
+
+          // Record balances after redemption
+          const userBnbAfter = await ethers.provider.getBalance(user.address);
+          const userVTokenAfter = await vToken.balanceOf(user.address);
+          const userPtAfter = await ptToken.balanceOf(user.address);
+
+          const bnbReceived = userBnbAfter.sub(userBnbBefore).add(gasUsed); // Add back gas
+          const vTokensRedeemed = userVTokenBefore.sub(userVTokenAfter);
+
+          // Assert user balance changes
+          expect(vTokensRedeemed).to.equal(withdrawVTokenAmount);
+          expect(bnbReceived).to.be.gt(0);
+          expect(userPtAfter).to.equal(userPtBefore); // No PT leaked to user
+
+          // Assert adapter holds zero balances
+          expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
+          expect(await vToken.balanceOf(adapter.address)).to.equal(0);
+          expect(await ethers.provider.getBalance(adapter.address)).to.equal(0);
+
+          // Verify RedeemedAtMaturity event
+          const redeemEvent = receipt.events?.find((e: any) => e.event === "RedeemedAtMaturity");
+          expect(redeemEvent).to.not.be.undefined;
+
+          const args = redeemEvent!.args!;
+          expect(args.pendleMarket).to.equal(marketAddress);
+          expect(args.user).to.equal(user.address);
+          expect(args.vTokenAmount).to.equal(withdrawVTokenAmount);
+          expect(args.ptAmount).to.be.gt(0);
+          expect(args.tokenOut).to.equal(NATIVE);
+          expect(args.amountOut).to.be.gt(0);
+
+          console.log("\n=== Native BNB RedeemAtMaturity Results ===");
+          console.log("vTokens redeemed:", ethers.utils.formatEther(vTokensRedeemed));
+          console.log("PT redeemed (1:1):", ethers.utils.formatEther(args.ptAmount));
+          console.log("BNB received:", ethers.utils.formatEther(bnbReceived));
+        });
+      });
+
+      // ═══════════════════════════════════════════════════════════════════════
+      //                    REDEEM AT MATURITY ERROR CASES
+      // ═══════════════════════════════════════════════════════════════════════
+      //
+      // After the above describe's after() hook, the snapshot is restored to
+      // pre-maturity state. Error cases that need post-maturity use per-test
+      // snapshots with time travel.
+      //
+      // Modifier execution order for redeemAtMaturity:
+      //   whenNotPaused → nonReentrant → onlyActiveMarket → atOrAfterMaturity → body
+      // This means Paused/MarketNotRegistered/MarketNotActive revert before the
+      // maturity check, so they can be tested in pre-maturity state.
+      // ═══════════════════════════════════════════════════════════════════════
+
+      describe("RedeemAtMaturity error cases", () => {
+        const redeemAmount = parseUnits("1", 18);
+
+        it("should revert with MarketNotMatured when called before maturity", async () => {
+          // We are in pre-maturity state (snapshot restored by the after() hook above)
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(
+            adapter.connect(user).redeemAtMaturity(marketAddress, redeemAmount, output),
+          ).to.be.revertedWithCustomError(adapter, "MarketNotMatured");
+        });
+
+        it("should revert with ZeroAmount when vTokenAmount is 0", async () => {
+          // ZeroAmount check is in the function body, AFTER atOrAfterMaturity modifier
+          // → must time-travel past maturity for this check to be reached
+          const snapshot = await takeSnapshot();
+
+          const marketConfig = await adapter.getMarketConfig(marketAddress);
+          await time.increaseTo(marketConfig.maturity.toNumber() + 1);
+
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(
+            adapter.connect(user).redeemAtMaturity(marketAddress, 0, output),
+          ).to.be.revertedWithCustomError(adapter, "ZeroAmount");
+
+          await snapshot.restore();
+        });
+
+        it("should revert with MarketNotRegistered for unregistered market", async () => {
+          const fakeMarket = "0x0000000000000000000000000000000000001234";
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(adapter.connect(user).redeemAtMaturity(fakeMarket, redeemAmount, output))
+            .to.be.revertedWithCustomError(adapter, "MarketNotRegistered")
+            .withArgs(fakeMarket);
+        });
+
+        it("should revert with MarketNotActive when market is deactivated", async () => {
+          const snapshot = await takeSnapshot();
+
+          await adapter.connect(owner).deactivateMarket(marketAddress);
+
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(adapter.connect(user).redeemAtMaturity(marketAddress, redeemAmount, output))
+            .to.be.revertedWithCustomError(adapter, "MarketNotActive")
+            .withArgs(marketAddress);
+
+          await snapshot.restore();
+        });
+
+        it("should revert when contract is paused", async () => {
+          const snapshot = await takeSnapshot();
+
+          await adapter.connect(owner).pause();
+
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(
+            adapter.connect(user).redeemAtMaturity(marketAddress, redeemAmount, output),
+          ).to.be.revertedWith("Pausable: paused");
+
+          await snapshot.restore();
+        });
+
+        it("should revert when user has not delegated to adapter (redeemBehalf fails)", async () => {
+          // Delegation check happens inside _redeemVTokens, AFTER all modifiers pass
+          // → must time-travel past maturity
+          const snapshot = await takeSnapshot();
+
+          const marketConfig = await adapter.getMarketConfig(marketAddress);
+          await time.increaseTo(marketConfig.maturity.toNumber() + 1);
+
+          // Revoke delegation
+          await comptroller.connect(user).updateDelegate(adapter.address, false);
+
+          const output = getDummyTokenOutput(CLISBNB);
+
+          await expect(
+            adapter.connect(user).redeemAtMaturity(marketAddress, redeemAmount, output),
+          ).to.be.reverted;
+
+          await snapshot.restore();
         });
       });
     });

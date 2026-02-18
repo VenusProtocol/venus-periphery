@@ -33,10 +33,28 @@ export interface LimitOrderDataStruct {
   optData: string;
 }
 
+export interface TokenOutputStruct {
+  tokenOut: string;
+  minTokenOut: BigNumber;
+  tokenRedeemSy: string;
+  pendleSwap: string;
+  swapData: {
+    swapType: number;
+    extRouter: string;
+    extCalldata: string;
+    needScale: boolean;
+  };
+}
+
 export interface PendleSwapParams {
   minPtOut: BigNumber;
   approxParams: ApproxParamsStruct;
   tokenInput: TokenInputStruct;
+  limitOrderData: LimitOrderDataStruct;
+}
+
+export interface PendlePtToTokenParams {
+  tokenOutput: TokenOutputStruct;
   limitOrderData: LimitOrderDataStruct;
 }
 
@@ -149,6 +167,114 @@ export async function getPendleSwapParams(
         tokenIn,
         netTokenIn: amount,
         tokenMintSy: tokenIn,
+        pendleSwap: "0x0000000000000000000000000000000000000000",
+        swapData: {
+          swapType: 0,
+          extRouter: "0x0000000000000000000000000000000000000000",
+          extCalldata: "0x",
+          needScale: false,
+        },
+      },
+      limitOrderData: {
+        limitRouter: "0x0000000000000000000000000000000000000000",
+        epsSkipMarket: 0,
+        normalFills: [],
+        flashFills: [],
+        optData: "0x",
+      },
+    };
+  }
+}
+
+/**
+ * Fetches swap parameters from Pendle v3 convert API for PT → token direction.
+ * Uses the same bidirectional convert endpoint — Pendle auto-detects the swap direction
+ * from the token types (PT as input triggers swapExactPtForToken).
+ *
+ * @param chainId Chain ID (56 for BSC)
+ * @param ptToken PT token address (input — being sold)
+ * @param tokenOut Desired output token address (e.g., clisBNB, WBNB, address(0) for native)
+ * @param amount Amount of PT tokens to sell (in wei)
+ * @param receiver Receiver address for the output tokens
+ * @param slippage Slippage tolerance (e.g., 0.03 for 3%)
+ * @param enableAggregator Whether to enable Pendle's aggregator routing.
+ *        Required when tokenOut is NOT in tokensRedeemSy (e.g., WBNB, native BNB).
+ *        Not needed when tokenOut IS in tokensRedeemSy (e.g., clisBNB).
+ * @returns TokenOutput and LimitOrderData structs for swapExactPtForToken
+ */
+export async function getPendlePtToTokenParams(
+  chainId: number,
+  ptToken: string,
+  tokenOut: string,
+  amount: BigNumber,
+  receiver: string,
+  slippage: number = 0.03,
+  enableAggregator: boolean = false,
+): Promise<PendlePtToTokenParams> {
+  try {
+    const response = await axios.post(`${PENDLE_API_BASE_URL}/v3/sdk/${chainId}/convert`, {
+      receiver,
+      slippage,
+      enableAggregator,
+      inputs: [
+        {
+          token: ptToken,
+          amount: amount.toString(),
+        },
+      ],
+      outputs: [tokenOut],
+    });
+
+    const data = response.data;
+
+    // Extract contract call parameters from the first route
+    const route = data.routes[0];
+    const paramValues = route.contractParamInfo.contractCallParams;
+
+    // For swapExactPtForToken(receiver, market, exactPtIn, output, limit):
+    // [0] = receiver, [1] = market, [2] = exactPtIn, [3] = TokenOutput, [4] = LimitOrderData
+
+    // Parse TokenOutput from index 3
+    const tokenOutputRaw = paramValues[3];
+    const tokenOutput: TokenOutputStruct = {
+      tokenOut: tokenOutputRaw.tokenOut,
+      minTokenOut: BigNumber.from(tokenOutputRaw.minTokenOut),
+      tokenRedeemSy: tokenOutputRaw.tokenRedeemSy,
+      pendleSwap: tokenOutputRaw.pendleSwap,
+      swapData: {
+        swapType: Number(tokenOutputRaw.swapData.swapType),
+        extRouter: tokenOutputRaw.swapData.extRouter,
+        extCalldata: tokenOutputRaw.swapData.extCalldata || "0x",
+        needScale: tokenOutputRaw.swapData.needScale,
+      },
+    };
+
+    // Parse LimitOrderData from index 4
+    const limitOrderDataRaw = paramValues[4];
+    const limitOrderData: LimitOrderDataStruct = {
+      limitRouter: limitOrderDataRaw.limitRouter,
+      epsSkipMarket: Number(limitOrderDataRaw.epsSkipMarket),
+      normalFills: limitOrderDataRaw.normalFills || [],
+      flashFills: limitOrderDataRaw.flashFills || [],
+      optData: limitOrderDataRaw.optData || "0x",
+    };
+
+    console.log("✓ Successfully fetched PT→token parameters from Pendle API");
+
+    return {
+      tokenOutput,
+      limitOrderData,
+    };
+  } catch (error: any) {
+    console.warn("⚠ Failed to fetch PT→token params from Pendle API, falling back to estimated params");
+    console.warn("  Error:", error.response?.data?.message || error.message);
+
+    // Fallback to conservative estimates if API fails
+    return {
+      tokenOutput: {
+        tokenOut,
+        minTokenOut: amount.mul(95).div(100), // 95% of PT amount as conservative estimate
+        tokenRedeemSy: tokenOut,
         pendleSwap: "0x0000000000000000000000000000000000000000",
         swapData: {
           swapType: 0,
