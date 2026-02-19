@@ -1,5 +1,6 @@
 // BSC Mainnet addresses and configuration for PendlePTVaultAdapter fork tests.
 
+export const BSC_CHAIN_ID = 56;
 export const BLOCK_NUMBER = 81554169;
 
 // Pendle ecosystem

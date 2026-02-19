@@ -60,12 +60,12 @@ contracts/pendle-pt-fixed-rate-vault/
 
 ## Core Functions
 
-| Function | When | Mechanism |
-| --- | --- | --- |
-| `deposit(pendleMarket, amount, minPtOut, guessPtOut, input, limit)` | Before maturity | tokenIn → PT (AMM) → mintBehalf → vTokens to user |
-| `depositNative(pendleMarket, minPtOut, guessPtOut, input, limit)` | Before maturity | native BNB → PT (AMM) → mintBehalf → vTokens to user |
-| `withdraw(pendleMarket, vTokenAmount, output, limit)` | Before maturity | redeemBehalf → PT → tokenOut (AMM) to user |
-| `redeemAtMaturity(pendleMarket, vTokenAmount, output)` | At/after maturity | redeemBehalf → PT → tokenOut (1:1 via SY) to user |
+| Function                                                            | When              | Mechanism                                            |
+| ------------------------------------------------------------------- | ----------------- | ---------------------------------------------------- |
+| `deposit(pendleMarket, amount, minPtOut, guessPtOut, input, limit)` | Before maturity   | tokenIn → PT (AMM) → mintBehalf → vTokens to user    |
+| `depositNative(pendleMarket, minPtOut, guessPtOut, input, limit)`   | Before maturity   | native BNB → PT (AMM) → mintBehalf → vTokens to user |
+| `withdraw(pendleMarket, vTokenAmount, output, limit)`               | Before maturity   | redeemBehalf → PT → tokenOut (AMM) to user           |
+| `redeemAtMaturity(pendleMarket, vTokenAmount, output)`              | At/after maturity | redeemBehalf → PT → tokenOut (1:1 via SY) to user    |
 
 ## Prerequisites for Users
 
@@ -74,22 +74,22 @@ contracts/pendle-pt-fixed-rate-vault/
 
 ## Admin Functions
 
-| Function | Purpose |
-| --- | --- |
-| `addMarket(pendleMarket, vToken)` | Register a new PT market |
-| `deactivateMarket(pendleMarket)` | Block new operations on a market |
-| `activateMarket(pendleMarket)` | Re-enable a deactivated market |
-| `pause()` / `unpause()` | Emergency pause all operations |
-| `sweepTokens(token, to, amount)` | Recover stuck ERC-20 tokens |
-| `sweepNative(to, amount)` | Recover stuck native BNB |
+| Function                          | Purpose                          |
+| --------------------------------- | -------------------------------- |
+| `addMarket(pendleMarket, vToken)` | Register a new PT market         |
+| `deactivateMarket(pendleMarket)`  | Block new operations on a market |
+| `activateMarket(pendleMarket)`    | Re-enable a deactivated market   |
+| `pause()` / `unpause()`           | Emergency pause all operations   |
+| `sweepTokens(token, to, amount)`  | Recover stuck ERC-20 tokens      |
+| `sweepNative(to, amount)`         | Recover stuck native BNB         |
 
 ## External Dependencies
 
-| Protocol | Contract | Address (BSC) |
-| --- | --- | --- |
-| Pendle | RouterV4 | `0x888888888889758F76e7103c6CbF23ABbF58F946` |
-| Pendle | Market / YT | Per-market |
-| Venus | VToken / Comptroller | Per-market |
+| Protocol | Contract             | Address (BSC)                                |
+| -------- | -------------------- | -------------------------------------------- |
+| Pendle   | RouterV4             | `0x888888888889758F76e7103c6CbF23ABbF58F946` |
+| Pendle   | Market / YT          | Per-market                                   |
+| Venus    | VToken / Comptroller | Per-market                                   |
 
 ## Deployment
 

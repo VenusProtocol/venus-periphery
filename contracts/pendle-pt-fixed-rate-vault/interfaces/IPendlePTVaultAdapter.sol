@@ -5,7 +5,7 @@ import { TokenInput, TokenOutput, ApproxParams, LimitOrderData } from "@pendle/c
 
 /**
  * @title IPendlePTVaultAdapter
- * @author Venus Protocol
+ * @author Venus
  * @notice Interface for the PendlePTVaultAdapter contract.
  * @dev Universal adapter that wraps Pendle PT swap and Venus Core deposit/redeem into single
  *      transactions. Users deposit tokens (e.g. USDC, BNB) and receive Venus vTokens.
@@ -49,12 +49,7 @@ interface IPendlePTVaultAdapter {
      * @param vToken Venus VToken market address
      * @param maturity PT maturity timestamp
      */
-    event MarketAdded(
-        address indexed pendleMarket,
-        address indexed pt,
-        address indexed vToken,
-        uint256 maturity
-    );
+    event MarketAdded(address indexed pendleMarket, address indexed pt, address indexed vToken, uint256 maturity);
 
     /**
      * @notice Emitted when a market is deactivated by admin.

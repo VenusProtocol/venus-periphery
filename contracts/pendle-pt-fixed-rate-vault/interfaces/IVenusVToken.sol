@@ -2,6 +2,7 @@
 pragma solidity 0.8.25;
 
 /// @title Venus VToken Interface for PendlePTVaultAdapter
+/// @author Venus Protocol
 /// @notice Minimal VToken interface covering mintBehalf/redeemBehalf operations.
 /// @dev Both functions return 0 on success and a non-zero error code on failure (Compound pattern).
 interface IVenusVToken {
@@ -19,11 +20,15 @@ interface IVenusVToken {
     function redeemBehalf(address owner, uint256 redeemTokens) external returns (uint256);
 
     /// @notice Returns the underlying asset address of this vToken market.
+    /// @return Address of the underlying token
     function underlying() external view returns (address);
 
     /// @notice Returns the Comptroller address associated with this vToken market.
+    /// @return Address of the Comptroller contract for delegation checks.
     function comptroller() external view returns (address);
 
     /// @notice Returns the vToken balance of `account`.
+    /// @param account The address to query the balance of.
+    /// @return The amount of vTokens held by `account`.
     function balanceOf(address account) external view returns (uint256);
 }

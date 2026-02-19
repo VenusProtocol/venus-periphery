@@ -10,25 +10,15 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 
 import { IPAllActionV3 } from "@pendle/core-v2/contracts/interfaces/IPAllActionV3.sol";
-import {
-    TokenInput,
-    TokenOutput,
-    ApproxParams,
-    LimitOrderData
-} from "@pendle/core-v2/contracts/interfaces/IPAllActionTypeV3.sol";
-import {
-    IPMarket,
-    IStandardizedYield,
-    IPPrincipalToken,
-    IPYieldToken
-} from "@pendle/core-v2/contracts/interfaces/IPMarket.sol";
+import { TokenInput, TokenOutput, ApproxParams, LimitOrderData } from "@pendle/core-v2/contracts/interfaces/IPAllActionTypeV3.sol";
+import { IPMarket, IStandardizedYield, IPPrincipalToken, IPYieldToken } from "@pendle/core-v2/contracts/interfaces/IPMarket.sol";
 import { IVenusVToken } from "./interfaces/IVenusVToken.sol";
 import { IVenusComptroller } from "./interfaces/IVenusComptroller.sol";
 import { IPendlePTVaultAdapter } from "./interfaces/IPendlePTVaultAdapter.sol";
 
 /**
  * @title PendlePTVaultAdapter
- * @author Venus Protocol
+ * @author Venus
  * @notice Universal adapter that wraps Pendle PT swap and Venus Core deposit/redeem into single transactions.
  */
 contract PendlePTVaultAdapter is
@@ -268,10 +258,7 @@ contract PendlePTVaultAdapter is
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IPendlePTVaultAdapter
-    function addMarket(
-        address pendleMarket,
-        address vToken
-    ) external onlyOwner {
+    function addMarket(address pendleMarket, address vToken) external onlyOwner {
         if (pendleMarket == address(0)) revert ZeroAddress();
         if (vToken == address(0)) revert ZeroAddress();
         if (markets[pendleMarket].pt != address(0)) revert MarketAlreadyRegistered(pendleMarket);
@@ -365,7 +352,7 @@ contract PendlePTVaultAdapter is
 
     /// @inheritdoc IPendlePTVaultAdapter
     function isMatured(address pendleMarket) external view returns (bool) {
-        return block.timestamp >= markets[pendleMarket].maturity;
+        return !(block.timestamp < markets[pendleMarket].maturity);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
@@ -376,18 +363,6 @@ contract PendlePTVaultAdapter is
     // ═══════════════════════════════════════════════════════════════════════
     //                        INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice Validates that the market is registered and active.
-     * @param pendleMarket The Pendle market address to validate.
-     * @dev Reverts with MarketNotRegistered if PT address is zero.
-     *      Reverts with MarketNotActive if market has been deactivated.
-     */
-    function _requireActiveMarket(address pendleMarket) internal view {
-        MarketConfig storage config = markets[pendleMarket];
-        if (config.pt == address(0)) revert MarketNotRegistered(pendleMarket);
-        if (!config.isActive) revert MarketNotActive(pendleMarket);
-    }
 
     /**
      * @notice Swaps tokenIn to PT via Pendle Router.
@@ -534,5 +509,17 @@ contract PendlePTVaultAdapter is
         if (bnbDust > 0) {
             Address.sendValue(payable(msg.sender), bnbDust);
         }
+    }
+
+    /**
+     * @notice Validates that the market is registered and active.
+     * @param pendleMarket The Pendle market address to validate.
+     * @dev Reverts with MarketNotRegistered if PT address is zero.
+     *      Reverts with MarketNotActive if market has been deactivated.
+     */
+    function _requireActiveMarket(address pendleMarket) internal view {
+        MarketConfig storage config = markets[pendleMarket];
+        if (config.pt == address(0)) revert MarketNotRegistered(pendleMarket);
+        if (!config.isActive) revert MarketNotActive(pendleMarket);
     }
 }

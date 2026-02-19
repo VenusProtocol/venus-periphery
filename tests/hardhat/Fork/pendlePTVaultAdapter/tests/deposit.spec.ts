@@ -1,11 +1,11 @@
 import "@nomicfoundation/hardhat-chai-matchers";
-import { loadFixture, takeSnapshot, time } from "@nomicfoundation/hardhat-network-helpers";
+import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 import chai from "chai";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import { FORK_MAINNET, forking } from "../../utils";
-import { BLOCK_NUMBER, SLISBNB, FAKE_MARKET, PENDLE_MARKET, WBNB } from "../utils/constants";
+import { BLOCK_NUMBER, BSC_CHAIN_ID, FAKE_MARKET, PENDLE_MARKET, SLISBNB, WBNB } from "../utils/constants";
 import { baseFixture } from "../utils/fixtures";
 import {
   getDummyApproxParams,
@@ -32,7 +32,7 @@ function describeTests() {
         // Fetch swap params from Pendle API (enableAggregator=false)
         const marketConfig = await adapter.getMarketConfig(marketAddress);
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
-          56,
+          BSC_CHAIN_ID,
           SLISBNB,
           marketConfig.pt,
           depositAmount,
@@ -95,7 +95,7 @@ function describeTests() {
         expect(args.vTokenAmount).to.be.gt(0);
       });
 
-      // WBNB is in tokensIn but NOT in tokensMintSy -- aggregator-routed path.
+      // WBNB is NOT in tokensMintSy -- requires aggregator routing.
       // Flow: WBNB -> [Aggregator] -> slisBNB -> SY.deposit() -> SY -> PT -> Venus vToken
       it("should deposit WBNB (aggregator-routed token) -> PT -> Venus", async () => {
         const { adapter, user, wbnb, slisbnb, vToken, ptToken, comptroller, marketAddress } =
@@ -110,7 +110,7 @@ function describeTests() {
         // Fetch swap params from Pendle API (enableAggregator=true)
         const marketConfig = await adapter.getMarketConfig(marketAddress);
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
-          56,
+          BSC_CHAIN_ID,
           WBNB,
           marketConfig.pt,
           depositAmount,
@@ -188,7 +188,7 @@ function describeTests() {
         // Fetch swap params for native BNB
         const marketConfig = await adapter.getMarketConfig(marketAddress);
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
-          56,
+          BSC_CHAIN_ID,
           NATIVE,
           marketConfig.pt,
           depositAmount,
@@ -260,7 +260,7 @@ function describeTests() {
         const marketConfig = await adapter.getMarketConfig(marketAddress);
         const maturity = marketConfig.maturity.toNumber();
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
-          56,
+          BSC_CHAIN_ID,
           SLISBNB,
           marketConfig.pt,
           depositAmount,

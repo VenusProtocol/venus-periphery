@@ -5,10 +5,11 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import {
-  SLISBNB,
+  BSC_CHAIN_ID,
   COMPTROLLER,
   PENDLE_MARKET,
   PENDLE_ROUTER_V3,
+  SLISBNB,
   VTOKEN_PT_CLISBNBX_25JUN2026,
   WBNB,
   WBNB_WHALE,
@@ -111,7 +112,7 @@ export async function depositedFixture(): Promise<DepositedFixture> {
   // Fetch swap params from Pendle API
   const marketConfig = await base.adapter.getMarketConfig(base.marketAddress);
   const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
-    56,
+    BSC_CHAIN_ID,
     SLISBNB,
     marketConfig.pt,
     depositAmount,

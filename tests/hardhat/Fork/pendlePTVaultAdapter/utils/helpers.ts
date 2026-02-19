@@ -5,12 +5,13 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import {
-  SLISBNB,
+  BNB_NATIVE,
   COMPTROLLER,
   LISTA_LISUSD,
   LISTA_RESILIENT_ORACLE,
-  PANCAKE_ROUTER,
   LISTA_STAKE_MANAGER,
+  PANCAKE_ROUTER,
+  SLISBNB,
   WBNB,
 } from "./constants";
 
@@ -53,6 +54,32 @@ export async function getSlisbnbViaListaDeposit(
 
   const balanceAfter = await slisbnbToken.balanceOf(signer.address);
   return balanceAfter.sub(balanceBefore);
+}
+
+/**
+/**
+ * KyberSwap's executor verifies a cryptographic signature over its swap
+ * data (targetData). After time travel to PT maturity (~1.5yr), embedded
+ * deadlines expire and any calldata patching invalidates the signature
+ * (→ InvalidSignature() revert).
+ *
+ * Solution: replace the KyberSwap router at its on-chain address with
+ * AggregatorMock (compiled Solidity contract) that performs a direct
+ * PancakeSwap V2 swap, bypassing the executor entirely.
+ *
+ * Replace the aggregator router (e.g. KyberSwap) with AggregatorMock via
+ * hardhat_setCode. The mock performs a direct PancakeSwap V2 swap instead
+ * of calling the original executor. Storage at the address is preserved.
+ *
+ * @param routerAddress The aggregator router address to replace.
+ * @param routerAddress  The aggregator router address to replace
+ */
+export async function replaceAggregatorWithMock(routerAddress: string): Promise<void> {
+  const factory = await ethers.getContractFactory("AggregatorMock");
+  const temp = await factory.deploy();
+  await temp.deployed();
+  const runtimeBytecode = await ethers.provider.getCode(temp.address);
+  await ethers.provider.send("hardhat_setCode", [routerAddress, runtimeBytecode]);
 }
 
 // ── Dummy Struct Factories ──────────────────────────────────────────────
@@ -160,10 +187,7 @@ export async function increaseListaOracleTimeDeltaTolerance(): Promise<void> {
  * for BNB and slisBNB so stale feeds are accepted after time travel.
  */
 export async function increaseVenusOracleMaxStalePeriod(): Promise<void> {
-  const comptrollerContract = await ethers.getContractAt(
-    ["function oracle() view returns (address)"],
-    COMPTROLLER,
-  );
+  const comptrollerContract = await ethers.getContractAt(["function oracle() view returns (address)"], COMPTROLLER);
   const venusOracleAddr = await comptrollerContract.oracle();
   const venusOracle = await ethers.getContractAt(
     [
@@ -172,11 +196,10 @@ export async function increaseVenusOracleMaxStalePeriod(): Promise<void> {
     venusOracleAddr,
   );
 
-  const BNB_NATIVE_ADDR = "0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB";
   const TWO_YEARS = 2 * 365 * 24 * 3600;
 
   const tokensToFix = [
-    { address: BNB_NATIVE_ADDR, symbol: "BNB" },
+    { address: BNB_NATIVE, symbol: "BNB" },
     { address: SLISBNB, symbol: "slisBNB" },
   ];
 
@@ -217,9 +240,7 @@ export async function increaseVenusOracleMaxStalePeriod(): Promise<void> {
             );
             const tokenConfig = await chainlink.tokenConfigs(token.address);
             if (tokenConfig.asset !== ethers.constants.AddressZero) {
-              await acm
-                .connect(acmOwnerSigner)
-                .giveCallPermission(oracleAddr, "setTokenConfig(TokenConfig)", acmOwner);
+              await acm.connect(acmOwnerSigner).giveCallPermission(oracleAddr, "setTokenConfig(TokenConfig)", acmOwner);
               await chainlink.connect(acmOwnerSigner).setTokenConfig({
                 asset: token.address,
                 feed: tokenConfig.feed,
