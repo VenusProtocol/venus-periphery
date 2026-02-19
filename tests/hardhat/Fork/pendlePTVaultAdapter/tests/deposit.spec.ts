@@ -5,7 +5,7 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import { FORK_MAINNET, forking } from "../../utils";
-import { BLOCK_NUMBER, CLISBNB, FAKE_MARKET, PENDLE_MARKET, WBNB } from "../utils/constants";
+import { BLOCK_NUMBER, SLISBNB, FAKE_MARKET, PENDLE_MARKET, WBNB } from "../utils/constants";
 import { baseFixture } from "../utils/fixtures";
 import {
   getDummyApproxParams,
@@ -25,7 +25,7 @@ function describeTests() {
       // slisBNB is in tokensMintSy -- direct SY mint path, no aggregator.
       // Flow: slisBNB -> SY.deposit() -> SY -> PT (via Pendle AMM) -> Venus vToken
       it("should deposit slisBNB (direct mintSy token) -> PT -> Venus", async () => {
-        const { adapter, user, clisbnb, vToken, ptToken, comptroller, marketAddress } = await loadFixture(baseFixture);
+        const { adapter, user, slisbnb, vToken, ptToken, comptroller, marketAddress } = await loadFixture(baseFixture);
 
         const depositAmount = parseUnits("1", 18);
 
@@ -33,7 +33,7 @@ function describeTests() {
         const marketConfig = await adapter.getMarketConfig(marketAddress);
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
           56,
-          CLISBNB,
+          SLISBNB,
           marketConfig.pt,
           depositAmount,
           user.address,
@@ -42,19 +42,19 @@ function describeTests() {
         );
 
         // Verify API returned direct mint path (no aggregator routing)
-        expect(tokenInput.tokenIn.toLowerCase()).to.equal(CLISBNB.toLowerCase());
+        expect(tokenInput.tokenIn.toLowerCase()).to.equal(SLISBNB.toLowerCase());
         expect(tokenInput.netTokenIn).to.equal(depositAmount);
         expect(tokenInput.tokenMintSy.toLowerCase()).to.equal(tokenInput.tokenIn.toLowerCase());
         expect(tokenInput.pendleSwap).to.equal(ethers.constants.AddressZero);
         expect(tokenInput.swapData.swapType).to.equal(0);
 
         // Record balances before deposit
-        const userSlisbnbBefore = await clisbnb.balanceOf(user.address);
+        const userSlisbnbBefore = await slisbnb.balanceOf(user.address);
         const userVTokenBefore = await vToken.balanceOf(user.address);
         const userPtBefore = await ptToken.balanceOf(user.address);
 
         // Approve and delegate
-        await clisbnb.connect(user).approve(adapter.address, depositAmount);
+        await slisbnb.connect(user).approve(adapter.address, depositAmount);
         await comptroller.connect(user).updateDelegate(adapter.address, true);
 
         // Execute deposit
@@ -64,7 +64,7 @@ function describeTests() {
         const receipt = await tx.wait();
 
         // Record balances after deposit
-        const userSlisbnbAfter = await clisbnb.balanceOf(user.address);
+        const userSlisbnbAfter = await slisbnb.balanceOf(user.address);
         const userVTokenAfter = await vToken.balanceOf(user.address);
         const userPtAfter = await ptToken.balanceOf(user.address);
 
@@ -77,7 +77,7 @@ function describeTests() {
         expect(userPtAfter).to.equal(userPtBefore); // No PT leaked to user
 
         // Assert adapter holds zero balances (stateless)
-        expect(await clisbnb.balanceOf(adapter.address)).to.equal(0);
+        expect(await slisbnb.balanceOf(adapter.address)).to.equal(0);
         expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
         expect(await vToken.balanceOf(adapter.address)).to.equal(0);
 
@@ -88,7 +88,7 @@ function describeTests() {
         const args = depositedEvent!.args!;
         expect(args.pendleMarket).to.equal(marketAddress);
         expect(args.user).to.equal(user.address);
-        expect(args.tokenIn).to.equal(CLISBNB);
+        expect(args.tokenIn).to.equal(SLISBNB);
         expect(args.amountIn).to.equal(depositAmount);
         expect(args.ptAmount).to.be.gte(minPtOut);
         expect(args.vTokenAmount).to.equal(vTokensMinted);
@@ -98,7 +98,7 @@ function describeTests() {
       // WBNB is in tokensIn but NOT in tokensMintSy -- aggregator-routed path.
       // Flow: WBNB -> [Aggregator] -> slisBNB -> SY.deposit() -> SY -> PT -> Venus vToken
       it("should deposit WBNB (aggregator-routed token) -> PT -> Venus", async () => {
-        const { adapter, user, wbnb, clisbnb, vToken, ptToken, comptroller, marketAddress } =
+        const { adapter, user, wbnb, slisbnb, vToken, ptToken, comptroller, marketAddress } =
           await loadFixture(baseFixture);
 
         const depositAmount = parseUnits("1", 18);
@@ -155,7 +155,7 @@ function describeTests() {
 
         // Assert adapter holds zero balances (stateless)
         expect(await wbnb.balanceOf(adapter.address)).to.equal(0);
-        expect(await clisbnb.balanceOf(adapter.address)).to.equal(0);
+        expect(await slisbnb.balanceOf(adapter.address)).to.equal(0);
         expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
         expect(await vToken.balanceOf(adapter.address)).to.equal(0);
 
@@ -252,7 +252,7 @@ function describeTests() {
 
     describe("deposit after maturity", () => {
       it("should revert with MarketExpired when Pendle market has expired", async () => {
-        const { adapter, user, clisbnb, comptroller, marketAddress } = await loadFixture(baseFixture);
+        const { adapter, user, slisbnb, comptroller, marketAddress } = await loadFixture(baseFixture);
 
         const depositAmount = parseUnits("1", 18);
 
@@ -261,7 +261,7 @@ function describeTests() {
         const maturity = marketConfig.maturity.toNumber();
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
           56,
-          CLISBNB,
+          SLISBNB,
           marketConfig.pt,
           depositAmount,
           user.address,
@@ -276,7 +276,7 @@ function describeTests() {
         await time.increaseTo(maturity + 1);
 
         // Approve adapter
-        await clisbnb.connect(user).approve(adapter.address, depositAmount);
+        await slisbnb.connect(user).approve(adapter.address, depositAmount);
         await comptroller.connect(user).updateDelegate(adapter.address, true);
 
         // Attempt deposit after maturity -- Pendle Market rejects with MarketExpired
@@ -299,7 +299,7 @@ function describeTests() {
 
       it("should revert with ZeroAmount when amount is 0", async () => {
         const { adapter, user, marketAddress } = await loadFixture(baseFixture);
-        const input = getDummyTokenInput(CLISBNB, 0);
+        const input = getDummyTokenInput(SLISBNB, 0);
 
         await expect(
           adapter.connect(user).deposit(marketAddress, 0, 0, dummyApprox, input, dummyLimit),
@@ -318,7 +318,7 @@ function describeTests() {
       it("should revert with InputAmountMismatch when netTokenIn != amount", async () => {
         const { adapter, user, marketAddress } = await loadFixture(baseFixture);
         const mismatchedNetTokenIn = parseUnits("2", 18);
-        const input = getDummyTokenInput(CLISBNB, mismatchedNetTokenIn);
+        const input = getDummyTokenInput(SLISBNB, mismatchedNetTokenIn);
 
         await expect(adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit))
           .to.be.revertedWithCustomError(adapter, "InputAmountMismatch")
@@ -327,7 +327,7 @@ function describeTests() {
 
       it("should revert with MarketNotRegistered for unregistered market", async () => {
         const { adapter, user } = await loadFixture(baseFixture);
-        const input = getDummyTokenInput(CLISBNB, depositAmount);
+        const input = getDummyTokenInput(SLISBNB, depositAmount);
 
         await expect(adapter.connect(user).deposit(FAKE_MARKET, depositAmount, 0, dummyApprox, input, dummyLimit))
           .to.be.revertedWithCustomError(adapter, "MarketNotRegistered")
@@ -339,7 +339,7 @@ function describeTests() {
 
         await adapter.connect(owner).deactivateMarket(marketAddress);
 
-        const input = getDummyTokenInput(CLISBNB, depositAmount);
+        const input = getDummyTokenInput(SLISBNB, depositAmount);
 
         await expect(adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit))
           .to.be.revertedWithCustomError(adapter, "MarketNotActive")
@@ -351,7 +351,7 @@ function describeTests() {
 
         await adapter.connect(owner).pause();
 
-        const input = getDummyTokenInput(CLISBNB, depositAmount);
+        const input = getDummyTokenInput(SLISBNB, depositAmount);
 
         await expect(
           adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit),
@@ -359,11 +359,11 @@ function describeTests() {
       });
 
       it("should revert when user has not approved adapter for tokenIn", async () => {
-        const { adapter, user, clisbnb, marketAddress } = await loadFixture(baseFixture);
-        const input = getDummyTokenInput(CLISBNB, depositAmount);
+        const { adapter, user, slisbnb, marketAddress } = await loadFixture(baseFixture);
+        const input = getDummyTokenInput(SLISBNB, depositAmount);
 
         // Ensure zero allowance
-        await clisbnb.connect(user).approve(adapter.address, 0);
+        await slisbnb.connect(user).approve(adapter.address, 0);
 
         await expect(adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit)).to
           .be.reverted;

@@ -9,7 +9,7 @@ export const PT_CLISBNBX_25JUN2026 = "0xe052823b4aefc6e230FAf46231A57d0905E30AE0
 
 // Tokens
 export const WBNB = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
-export const CLISBNB = "0xB0b84D294e0C75A6abe60171b70edEb2EFd14A1B"; // Lista collateral BNB (slisBNB)
+export const SLISBNB = "0xB0b84D294e0C75A6abe60171b70edEb2EFd14A1B"; // slisBNB (Lista Staked BNB)
 
 // Venus protocol
 export const VTOKEN_PT_CLISBNBX_25JUN2026 = "0x6d3BD68E90B42615cb5abF4B8DE92b154ADc435e";

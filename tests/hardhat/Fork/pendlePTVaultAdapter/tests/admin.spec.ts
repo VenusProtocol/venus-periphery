@@ -7,7 +7,7 @@ import { ethers } from "hardhat";
 import { FORK_MAINNET, forking } from "../../utils";
 import {
   BLOCK_NUMBER,
-  CLISBNB,
+  SLISBNB,
   COMPTROLLER,
   FAKE_MARKET,
   PENDLE_MARKET,
@@ -223,21 +223,21 @@ function describeTests() {
 
       describe("sweepTokens", () => {
         it("should sweep ERC-20 tokens from adapter to specified address", async () => {
-          const { adapter, owner, user, clisbnb } = await loadFixture(baseFixture);
+          const { adapter, owner, user, slisbnb } = await loadFixture(baseFixture);
 
           const sweepAmount = parseUnits("1", 18);
 
           // Send tokens to the adapter directly (simulates accidental transfer)
-          await clisbnb.connect(user).transfer(adapter.address, sweepAmount);
-          expect(await clisbnb.balanceOf(adapter.address)).to.equal(sweepAmount);
+          await slisbnb.connect(user).transfer(adapter.address, sweepAmount);
+          expect(await slisbnb.balanceOf(adapter.address)).to.equal(sweepAmount);
 
           // Sweep tokens to owner
-          const ownerBalBefore = await clisbnb.balanceOf(owner.address);
-          await adapter.connect(owner).sweepTokens(CLISBNB, owner.address, sweepAmount);
-          const ownerBalAfter = await clisbnb.balanceOf(owner.address);
+          const ownerBalBefore = await slisbnb.balanceOf(owner.address);
+          await adapter.connect(owner).sweepTokens(SLISBNB, owner.address, sweepAmount);
+          const ownerBalAfter = await slisbnb.balanceOf(owner.address);
 
           expect(ownerBalAfter.sub(ownerBalBefore)).to.equal(sweepAmount);
-          expect(await clisbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await slisbnb.balanceOf(adapter.address)).to.equal(0);
         });
 
         it("should revert with ZeroAddress when token is zero", async () => {
@@ -252,7 +252,7 @@ function describeTests() {
           const { adapter, owner } = await loadFixture(baseFixture);
 
           await expect(
-            adapter.connect(owner).sweepTokens(CLISBNB, ethers.constants.AddressZero, parseUnits("1", 18)),
+            adapter.connect(owner).sweepTokens(SLISBNB, ethers.constants.AddressZero, parseUnits("1", 18)),
           ).to.be.revertedWithCustomError(adapter, "ZeroAddress");
         });
 
@@ -260,7 +260,7 @@ function describeTests() {
           const { adapter, user } = await loadFixture(baseFixture);
 
           await expect(
-            adapter.connect(user).sweepTokens(CLISBNB, user.address, parseUnits("1", 18)),
+            adapter.connect(user).sweepTokens(SLISBNB, user.address, parseUnits("1", 18)),
           ).to.be.revertedWith("Ownable: caller is not the owner");
         });
       });

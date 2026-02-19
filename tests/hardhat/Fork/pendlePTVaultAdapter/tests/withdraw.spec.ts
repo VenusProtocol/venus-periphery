@@ -5,7 +5,7 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import { FORK_MAINNET, forking } from "../../utils";
-import { BLOCK_NUMBER, CLISBNB, FAKE_MARKET, PT_CLISBNBX_25JUN2026, WBNB } from "../utils/constants";
+import { BLOCK_NUMBER, SLISBNB, FAKE_MARKET, PT_CLISBNBX_25JUN2026, WBNB } from "../utils/constants";
 import { depositedFixture } from "../utils/fixtures";
 import { getDummyLimitOrderData, getDummyTokenOutput } from "../utils/helpers";
 import { getPendlePtToTokenParams } from "../utils/pendleApi";
@@ -19,17 +19,17 @@ function describeTests() {
       // Withdraw flow: vTokens -> redeem from Venus -> PT -> swap via Pendle AMM -> tokenOut
       //
       // Routing:
-      //   tokenOut in tokensRedeemSy (clisBNB): PT -> AMM sell -> SY -> SY.redeem() -> tokenOut
-      //   tokenOut NOT in tokensRedeemSy (WBNB, BNB): PT -> AMM sell -> SY -> clisBNB -> [Aggregator] -> tokenOut
+      //   tokenOut in tokensRedeemSy (slisBNB): PT -> AMM sell -> SY -> SY.redeem() -> tokenOut
+      //   tokenOut NOT in tokensRedeemSy (WBNB, BNB): PT -> AMM sell -> SY -> slisBNB -> [Aggregator] -> tokenOut
 
       describe("withdraw happy path", () => {
-        // clisBNB is the ONLY token in this market's tokensRedeemSy.
-        // SY can directly redeem to clisBNB without any aggregator.
-        it("should withdraw to clisBNB (direct redeemSy token) -- no aggregator", async () => {
+        // slisBNB is the ONLY token in this market's tokensRedeemSy.
+        // SY can directly redeem to slisBNB without any aggregator.
+        it("should withdraw to slisBNB (direct redeemSy token) -- no aggregator", async () => {
           const {
             adapter,
             user,
-            clisbnb,
+            slisbnb,
             vToken,
             ptToken,
             marketAddress,
@@ -47,21 +47,21 @@ function describeTests() {
           const { tokenOutput, limitOrderData } = await getPendlePtToTokenParams(
             56,
             PT_CLISBNBX_25JUN2026,
-            CLISBNB,
+            SLISBNB,
             estimatedPt,
             user.address,
             0.03,
-            false, // no aggregator needed -- clisBNB is in tokensRedeemSy
+            false, // no aggregator needed -- slisBNB is in tokensRedeemSy
           );
 
           // Verify API returned direct redeem path
-          expect(tokenOutput.tokenOut.toLowerCase()).to.equal(CLISBNB.toLowerCase());
-          expect(tokenOutput.tokenRedeemSy.toLowerCase()).to.equal(CLISBNB.toLowerCase());
+          expect(tokenOutput.tokenOut.toLowerCase()).to.equal(SLISBNB.toLowerCase());
+          expect(tokenOutput.tokenRedeemSy.toLowerCase()).to.equal(SLISBNB.toLowerCase());
           expect(tokenOutput.pendleSwap).to.equal(ethers.constants.AddressZero);
           expect(tokenOutput.swapData.swapType).to.equal(0);
 
           // Record balances before withdraw
-          const userClisbnbBefore = await clisbnb.balanceOf(user.address);
+          const userClisbnbBefore = await slisbnb.balanceOf(user.address);
           const userVTokenBefore = await vToken.balanceOf(user.address);
           const userPtBefore = await ptToken.balanceOf(user.address);
 
@@ -70,21 +70,21 @@ function describeTests() {
           const receipt = await tx.wait();
 
           // Record balances after withdraw
-          const userClisbnbAfter = await clisbnb.balanceOf(user.address);
+          const userClisbnbAfter = await slisbnb.balanceOf(user.address);
           const userVTokenAfter = await vToken.balanceOf(user.address);
           const userPtAfter = await ptToken.balanceOf(user.address);
 
-          const clisbnbReceived = userClisbnbAfter.sub(userClisbnbBefore);
+          const slisbnbReceived = userClisbnbAfter.sub(userClisbnbBefore);
           const vTokensRedeemed = userVTokenBefore.sub(userVTokenAfter);
 
           // Assert user balance changes
           expect(vTokensRedeemed).to.equal(withdrawVTokenAmount);
-          expect(clisbnbReceived).to.be.gt(0);
-          expect(clisbnbReceived).to.be.gte(tokenOutput.minTokenOut);
+          expect(slisbnbReceived).to.be.gt(0);
+          expect(slisbnbReceived).to.be.gte(tokenOutput.minTokenOut);
           expect(userPtAfter).to.equal(userPtBefore); // No PT leaked
 
           // Assert adapter holds zero balances (stateless)
-          expect(await clisbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await slisbnb.balanceOf(adapter.address)).to.equal(0);
           expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
           expect(await vToken.balanceOf(adapter.address)).to.equal(0);
 
@@ -97,18 +97,18 @@ function describeTests() {
           expect(args.user).to.equal(user.address);
           expect(args.vTokenAmount).to.equal(withdrawVTokenAmount);
           expect(args.ptAmount).to.be.gt(0);
-          expect(args.tokenOut).to.equal(CLISBNB);
-          expect(args.amountOut).to.equal(clisbnbReceived);
+          expect(args.tokenOut).to.equal(SLISBNB);
+          expect(args.amountOut).to.equal(slisbnbReceived);
         });
 
         // WBNB is in tokensOut but NOT in tokensRedeemSy -- aggregator-routed path.
-        // Flow: vTokens -> redeem -> PT -> AMM sell -> SY -> clisBNB -> [Aggregator] -> WBNB
+        // Flow: vTokens -> redeem -> PT -> AMM sell -> SY -> slisBNB -> [Aggregator] -> WBNB
         it("should withdraw to WBNB (aggregator-routed) -- not in tokensRedeemSy", async () => {
           const {
             adapter,
             user,
             wbnb,
-            clisbnb,
+            slisbnb,
             vToken,
             ptToken,
             marketAddress,
@@ -160,7 +160,7 @@ function describeTests() {
 
           // Assert adapter holds zero balances (stateless)
           expect(await wbnb.balanceOf(adapter.address)).to.equal(0);
-          expect(await clisbnb.balanceOf(adapter.address)).to.equal(0);
+          expect(await slisbnb.balanceOf(adapter.address)).to.equal(0);
           expect(await ptToken.balanceOf(adapter.address)).to.equal(0);
           expect(await vToken.balanceOf(adapter.address)).to.equal(0);
 
@@ -257,7 +257,7 @@ function describeTests() {
 
         it("should revert with ZeroAmount when vTokenAmount is 0", async () => {
           const { adapter, user, marketAddress } = await loadFixture(depositedFixture);
-          const output = getDummyTokenOutput(CLISBNB);
+          const output = getDummyTokenOutput(SLISBNB);
 
           await expect(
             adapter.connect(user).withdraw(marketAddress, 0, output, dummyLimit),
@@ -266,7 +266,7 @@ function describeTests() {
 
         it("should revert with MarketNotRegistered for unregistered market", async () => {
           const { adapter, user } = await loadFixture(depositedFixture);
-          const output = getDummyTokenOutput(CLISBNB);
+          const output = getDummyTokenOutput(SLISBNB);
 
           await expect(adapter.connect(user).withdraw(FAKE_MARKET, withdrawAmount, output, dummyLimit))
             .to.be.revertedWithCustomError(adapter, "MarketNotRegistered")
@@ -277,7 +277,7 @@ function describeTests() {
           const { adapter, owner, user, marketAddress } = await loadFixture(depositedFixture);
 
           await adapter.connect(owner).deactivateMarket(marketAddress);
-          const output = getDummyTokenOutput(CLISBNB);
+          const output = getDummyTokenOutput(SLISBNB);
 
           await expect(adapter.connect(user).withdraw(marketAddress, withdrawAmount, output, dummyLimit))
             .to.be.revertedWithCustomError(adapter, "MarketNotActive")
@@ -288,7 +288,7 @@ function describeTests() {
           const { adapter, owner, user, marketAddress } = await loadFixture(depositedFixture);
 
           await adapter.connect(owner).pause();
-          const output = getDummyTokenOutput(CLISBNB);
+          const output = getDummyTokenOutput(SLISBNB);
 
           await expect(
             adapter.connect(user).withdraw(marketAddress, withdrawAmount, output, dummyLimit),
@@ -303,7 +303,7 @@ function describeTests() {
           const maturity = marketConfig.maturity.toNumber();
           await time.increaseTo(maturity + 1);
 
-          const output = getDummyTokenOutput(CLISBNB);
+          const output = getDummyTokenOutput(SLISBNB);
 
           await expect(
             adapter.connect(user).withdraw(marketAddress, withdrawAmount, output, dummyLimit),
@@ -315,7 +315,7 @@ function describeTests() {
 
           // Revoke delegation
           await comptroller.connect(user).updateDelegate(adapter.address, false);
-          const output = getDummyTokenOutput(CLISBNB);
+          const output = getDummyTokenOutput(SLISBNB);
 
           await expect(
             adapter.connect(user).withdraw(marketAddress, withdrawAmount, output, dummyLimit),

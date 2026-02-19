@@ -5,7 +5,7 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import {
-  CLISBNB,
+  SLISBNB,
   COMPTROLLER,
   PENDLE_MARKET,
   PENDLE_ROUTER_V3,
@@ -27,7 +27,7 @@ export interface BaseFixture {
   owner: SignerWithAddress;
   user: SignerWithAddress;
   wbnb: Contract;
-  clisbnb: Contract;
+  slisbnb: Contract;
   vToken: Contract;
   ptToken: Contract;
   comptroller: Contract;
@@ -56,7 +56,7 @@ export async function baseFixture(): Promise<BaseFixture> {
 
   // Contract instances
   const wbnb = await ethers.getContractAt("IERC20", WBNB);
-  const clisbnb = await ethers.getContractAt("IERC20", CLISBNB);
+  const slisbnb = await ethers.getContractAt("IERC20", SLISBNB);
   const vToken = await ethers.getContractAt("IVenusVToken", VTOKEN_PT_CLISBNBX_25JUN2026);
   const comptroller = await ethers.getContractAt("IMarketFacet", COMPTROLLER);
 
@@ -84,14 +84,14 @@ export async function baseFixture(): Promise<BaseFixture> {
   const ptToken = await ethers.getContractAt("IERC20", marketConfig.pt);
 
   // Acquire slisBNB for user (15 BNB worth -- enough for all deposit tests)
-  await getSlisbnbViaListaDeposit(user, clisbnb, parseUnits("15", 18));
+  await getSlisbnbViaListaDeposit(user, slisbnb, parseUnits("15", 18));
 
   return {
     adapter,
     owner,
     user,
     wbnb,
-    clisbnb,
+    slisbnb,
     vToken,
     ptToken,
     comptroller,
@@ -112,7 +112,7 @@ export async function depositedFixture(): Promise<DepositedFixture> {
   const marketConfig = await base.adapter.getMarketConfig(base.marketAddress);
   const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
     56,
-    CLISBNB,
+    SLISBNB,
     marketConfig.pt,
     depositAmount,
     base.user.address,
@@ -121,7 +121,7 @@ export async function depositedFixture(): Promise<DepositedFixture> {
   );
 
   // Approve adapter and enable delegation
-  await base.clisbnb.connect(base.user).approve(base.adapter.address, depositAmount);
+  await base.slisbnb.connect(base.user).approve(base.adapter.address, depositAmount);
   await base.comptroller.connect(base.user).updateDelegate(base.adapter.address, true);
 
   // Deposit to get vTokens

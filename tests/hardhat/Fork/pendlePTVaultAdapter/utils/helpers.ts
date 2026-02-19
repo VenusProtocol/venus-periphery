@@ -5,7 +5,7 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import {
-  CLISBNB,
+  SLISBNB,
   COMPTROLLER,
   LISTA_LISUSD,
   LISTA_RESILIENT_ORACLE,
@@ -34,7 +34,7 @@ export async function getSlisbnbViaSwap(
 
   await wbnbToken.connect(signer).approve(PANCAKE_ROUTER, amount);
   const deadline = Math.floor(Date.now() / 1000) + 3600;
-  await pancakeRouter.connect(signer).swapExactTokensForTokens(amount, 0, [WBNB, CLISBNB], signer.address, deadline);
+  await pancakeRouter.connect(signer).swapExactTokensForTokens(amount, 0, [WBNB, SLISBNB], signer.address, deadline);
 
   const balanceAfter = await slisbnbToken.balanceOf(signer.address);
   return balanceAfter.sub(balanceBefore);
@@ -136,9 +136,9 @@ export async function increaseListaOracleTimeDeltaTolerance(): Promise<void> {
   const TWO_YEARS = 2 * 365 * 24 * 3600;
 
   // lisUSD: queried by DynamicDutyCalculator.calculateDuty() via drip()
-  // slisBNB (CLISBNB): queried during collateral price checks on withdraw
+  // slisBNB (SLISBNB): queried during collateral price checks on withdraw
   // WBNB: queried by SlisBnbOracle to compute slisBNB/USD
-  const tokensToFix = [LISTA_LISUSD, CLISBNB, WBNB];
+  const tokensToFix = [LISTA_LISUSD, SLISBNB, WBNB];
 
   for (const token of tokensToFix) {
     try {
@@ -177,7 +177,7 @@ export async function increaseVenusOracleMaxStalePeriod(): Promise<void> {
 
   const tokensToFix = [
     { address: BNB_NATIVE_ADDR, symbol: "BNB" },
-    { address: CLISBNB, symbol: "slisBNB" },
+    { address: SLISBNB, symbol: "slisBNB" },
   ];
 
   for (const token of tokensToFix) {
