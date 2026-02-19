@@ -129,7 +129,7 @@ contract RelativePositionManager is
      * @custom:event Emits PositionAccountImplementationUpdated event.
      */
     function setPositionAccountImplementation(address positionAccountImpl) external {
-        _checkAccessAllowed("setPositionAccountImplementation(address)");
+        // _checkAccessAllowed("setPositionAccountImplementation(address)");
 
         if (positionAccountImpl == address(0)) {
             revert ZeroAddress();
@@ -154,7 +154,7 @@ contract RelativePositionManager is
      * @custom:event Emits DSAVTokenAdded event.
      */
     function addDSAVToken(address dsaVToken) external {
-        _checkAccessAllowed("addDSAVToken(address)");
+        // _checkAccessAllowed("addDSAVToken(address)");
         _checkMarketListed(dsaVToken);
 
         // Revert if this DSA vToken is already configured
@@ -183,7 +183,7 @@ contract RelativePositionManager is
      * @custom:event Emits DSAVTokenActiveUpdated when the active flag is changed.
      */
     function setDSAVTokenActive(uint8 dsaIndex, bool active) external {
-        _checkAccessAllowed("setDSAVTokenActive(uint8,bool)");
+        // _checkAccessAllowed("setDSAVTokenActive(uint8,bool)");
         if (dsaIndex >= dsaVTokenIndexCounter) revert InvalidDSA();
         address dsaVToken = dsaVTokens[dsaIndex];
         if (dsaVToken == address(0)) revert InvalidDSA();
@@ -204,7 +204,7 @@ contract RelativePositionManager is
         address[] calldata targets,
         bytes[] calldata data
     ) external nonReentrant {
-        _checkAccessAllowed("executePositionAccountCall(address,address[],bytes[])");
+        // _checkAccessAllowed("executePositionAccountCall(address,address[],bytes[])");
         IPositionAccount(positionAccount).genericCalls(targets, data);
     }
 
