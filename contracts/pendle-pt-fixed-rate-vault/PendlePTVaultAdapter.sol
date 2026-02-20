@@ -47,6 +47,7 @@ contract PendlePTVaultAdapter is
 
     /// @notice Ordered list of all registered market addresses (for enumeration).
     /// @dev Grows unboundedly — expected to remain small.
+    ///      Matured markets remain in the list to allow late redemptions.
     address[] public marketList;
 
     /// @dev Reserved storage gap for future upgrades.
