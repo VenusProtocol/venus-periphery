@@ -132,11 +132,13 @@ contract PendlePTVaultAdapter is
 
         MarketConfig storage config = markets[pendleMarket];
 
-        // Validate calldata consistency
-        if (input.netTokenIn != amount) revert InputAmountMismatch(amount, input.netTokenIn);
-
         // 1. Pull tokens from user → adapter (accepts any token from Pendle's tokensIn)
+        uint256 balanceBefore = IERC20(input.tokenIn).balanceOf(address(this));
         IERC20(input.tokenIn).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = IERC20(input.tokenIn).balanceOf(address(this)) - balanceBefore;
+
+        // Validate actual received amount matches Pendle's expected input
+        if (input.netTokenIn != received) revert InputAmountMismatch(received, input.netTokenIn);
 
         // 2. Swap tokenIn → PT via Pendle Router (Pendle handles aggregator routing if needed)
         uint256 netPtOut = _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
@@ -144,7 +146,8 @@ contract PendlePTVaultAdapter is
         // 3. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config, netPtOut);
 
-        // 4. Sweep any dust tokenIn back to user
+        // 4. Sweep any dust back to user (PT rounding + leftover tokenIn)
+        _sweepDust(config.pt, msg.sender);
         _sweepDust(input.tokenIn, msg.sender);
 
         emit Deposited(pendleMarket, msg.sender, input.tokenIn, amount, netPtOut, netVTokensMinted);
@@ -179,7 +182,10 @@ contract PendlePTVaultAdapter is
         // 2. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config, netPtOut);
 
-        // 3. Refund any excess native BNB to the caller
+        // 3. Sweep any PT dust from rounding back to user
+        _sweepDust(config.pt, msg.sender);
+
+        // 4. Refund any excess native BNB to the caller
         _refundNativeDust();
 
         emit Deposited(pendleMarket, msg.sender, input.tokenIn, msg.value, netPtOut, netVTokensMinted);
@@ -208,14 +214,14 @@ contract PendlePTVaultAdapter is
         MarketConfig storage config = markets[pendleMarket];
 
         // 1. Redeem vTokens → adapter receives PT
+        uint256 ptBefore = IERC20(config.pt).balanceOf(address(this));
         _redeemVTokens(config.vToken, vTokenAmount);
-
-        uint256 ptBalance = IERC20(config.pt).balanceOf(address(this));
+        uint256 ptReceived = IERC20(config.pt).balanceOf(address(this)) - ptBefore;
 
         // 2. Swap PT → tokenOut via Pendle (sent directly to user, Pendle handles routing)
-        netTokenOut = _swapPtToToken(config.pt, pendleMarket, ptBalance, output, limit);
+        netTokenOut = _swapPtToToken(config.pt, pendleMarket, ptReceived, output, limit);
 
-        emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptBalance, output.tokenOut, netTokenOut);
+        emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptReceived, output.tokenOut, netTokenOut);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
@@ -236,14 +242,14 @@ contract PendlePTVaultAdapter is
         MarketConfig storage config = markets[pendleMarket];
 
         // 1. Redeem vTokens → adapter receives PT
+        uint256 ptBefore = IERC20(config.pt).balanceOf(address(this));
         _redeemVTokens(config.vToken, vTokenAmount);
-
-        uint256 ptBalance = IERC20(config.pt).balanceOf(address(this));
+        uint256 ptReceived = IERC20(config.pt).balanceOf(address(this)) - ptBefore;
 
         // 2. Redeem PT 1:1 → tokenOut via Pendle (sent directly to user, Pendle handles routing)
-        netTokenOut = _redeemPtToToken(config.pt, config.yt, ptBalance, output);
+        netTokenOut = _redeemPtToToken(config.pt, config.yt, ptReceived, output);
 
-        emit RedeemedAtMaturity(pendleMarket, msg.sender, vTokenAmount, ptBalance, output.tokenOut, netTokenOut);
+        emit RedeemedAtMaturity(pendleMarket, msg.sender, vTokenAmount, ptReceived, output.tokenOut, netTokenOut);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -355,9 +361,7 @@ contract PendlePTVaultAdapter is
         TokenInput calldata input,
         LimitOrderData calldata limit
     ) internal returns (uint256 netPtOut) {
-        // Use actual balance to handle fee-on-transfer tokens correctly
-        uint256 amount = IERC20(input.tokenIn).balanceOf(address(this));
-        IERC20(input.tokenIn).forceApprove(PENDLE_ROUTER, amount);
+        IERC20(input.tokenIn).forceApprove(PENDLE_ROUTER, input.netTokenIn);
 
         (netPtOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt(
             address(this), // PT receiver = adapter (so we can deposit into Venus)
