@@ -28,7 +28,6 @@ function describeTests() {
         const config = await adapter.getMarketConfig(marketAddress);
         expect(config.pt).to.equal(PT_CLISBNBX_25JUN2026);
         expect(config.vToken).to.equal(VTOKEN_PT_CLISBNBX_25JUN2026);
-        expect(config.comptroller).to.equal(COMPTROLLER);
         expect(config.isActive).to.be.true;
         expect(config.maturity).to.be.gt(0);
         expect(config.sy).to.not.equal(ethers.constants.AddressZero);
@@ -43,7 +42,6 @@ function describeTests() {
         expect(config.sy).to.equal(ethers.constants.AddressZero);
         expect(config.yt).to.equal(ethers.constants.AddressZero);
         expect(config.vToken).to.equal(ethers.constants.AddressZero);
-        expect(config.comptroller).to.equal(ethers.constants.AddressZero);
         expect(config.isActive).to.be.false;
         expect(config.maturity).to.equal(0);
       });
@@ -91,16 +89,16 @@ function describeTests() {
 
     describe("isDelegated", () => {
       it("should return false when user has not delegated", async () => {
-        const { adapter, user, marketAddress } = await loadFixture(baseFixture);
+        const { adapter, user } = await loadFixture(baseFixture);
 
-        expect(await adapter.isDelegated(marketAddress, user.address)).to.be.false;
+        expect(await adapter.isDelegated(user.address)).to.be.false;
       });
 
       it("should return true when user has delegated", async () => {
-        const { adapter, user, comptroller, marketAddress } = await loadFixture(baseFixture);
+        const { adapter, user, comptroller } = await loadFixture(baseFixture);
 
         await comptroller.connect(user).updateDelegate(adapter.address, true);
-        expect(await adapter.isDelegated(marketAddress, user.address)).to.be.true;
+        expect(await adapter.isDelegated(user.address)).to.be.true;
       });
     });
 
@@ -117,6 +115,12 @@ function describeTests() {
         const { adapter } = await loadFixture(baseFixture);
 
         expect(await adapter.WBNB()).to.equal(WBNB);
+      });
+
+      it("should return the correct COMPTROLLER address", async () => {
+        const { adapter } = await loadFixture(baseFixture);
+
+        expect(await adapter.COMPTROLLER()).to.equal(COMPTROLLER);
       });
     });
   });

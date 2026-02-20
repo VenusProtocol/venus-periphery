@@ -32,11 +32,14 @@ contract PendlePTVaultAdapter is
     //                            IMMUTABLES
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Pendle Router address (IPAllActionV3) — same for all markets on BSC.
+    /// @notice Pendle Router address (IPAllActionV3).
     address public immutable PENDLE_ROUTER;
 
-    /// @notice Wrapped native token address (WBNB on BSC). Reserved for future withdrawNative support.
+    /// @notice Wrapped native token address (WBNB on BSC).
     address public immutable WBNB;
+
+    /// @notice Venus core pool Comptroller address.
+    address public immutable COMPTROLLER;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                          STATE VARIABLES
@@ -80,15 +83,17 @@ contract PendlePTVaultAdapter is
     //                            CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Sets immutable router and WBNB addresses. Implementation contract only.
     /// @param pendleRouter_ Pendle Router (IPAllActionV3) address.
     /// @param wbnb_ Wrapped native token (WBNB) address.
-    constructor(address pendleRouter_, address wbnb_) {
+    /// @param comptroller_ Venus core pool Comptroller address.
+    constructor(address pendleRouter_, address wbnb_, address comptroller_) {
         if (pendleRouter_ == address(0)) revert ZeroAddress();
         if (wbnb_ == address(0)) revert ZeroAddress();
+        if (comptroller_ == address(0)) revert ZeroAddress();
 
         PENDLE_ROUTER = pendleRouter_;
         WBNB = wbnb_;
+        COMPTROLLER = comptroller_;
 
         _disableInitializers();
     }
@@ -267,17 +272,11 @@ contract PendlePTVaultAdapter is
 
         uint256 maturity = IPMarket(pendleMarket).expiry();
 
-        // Derive comptroller from vToken (eliminates misconfiguration risk)
-        // Note: If only one comptroller (i.e. core pool comptroller) is used across all markets,
-        // consider making it an immutable for gas efficiency
-        address comptroller = IVenusVToken(vToken).comptroller();
-
         markets[pendleMarket] = MarketConfig({
             pt: address(_PT),
             sy: address(_SY),
             yt: address(_YT),
             vToken: vToken,
-            comptroller: comptroller,
             isActive: true,
             maturity: maturity
         });
@@ -355,8 +354,8 @@ contract PendlePTVaultAdapter is
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
-    function isDelegated(address pendleMarket, address user) external view returns (bool) {
-        return IVenusComptroller(markets[pendleMarket].comptroller).approvedDelegates(user, address(this));
+    function isDelegated(address user) external view returns (bool) {
+        return IVenusComptroller(COMPTROLLER).approvedDelegates(user, address(this));
     }
 
     // ═══════════════════════════════════════════════════════════════════════

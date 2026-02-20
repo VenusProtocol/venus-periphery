@@ -34,7 +34,6 @@ function describeTests() {
         const config = await adapter.getMarketConfig(marketAddress);
         expect(config.pt).to.equal(PT_CLISBNBX_25JUN2026);
         expect(config.vToken).to.equal(VTOKEN_PT_CLISBNBX_25JUN2026);
-        expect(config.comptroller).to.equal(COMPTROLLER);
         expect(config.isActive).to.be.true;
         expect(config.maturity).to.be.gt(0);
         expect(config.sy).to.not.equal(ethers.constants.AddressZero);
@@ -70,7 +69,7 @@ function describeTests() {
         const [owner] = await ethers.getSigners();
 
         const PendlePTVaultAdapter = await ethers.getContractFactory("PendlePTVaultAdapter");
-        const implementation = await PendlePTVaultAdapter.deploy(PENDLE_ROUTER_V3, WBNB);
+        const implementation = await PendlePTVaultAdapter.deploy(PENDLE_ROUTER_V3, WBNB, COMPTROLLER);
         await implementation.deployed();
 
         const proxyAdminAddress = "0x0000000000000000000000000000000000000001";

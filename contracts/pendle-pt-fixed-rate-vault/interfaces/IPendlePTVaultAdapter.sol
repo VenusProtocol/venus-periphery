@@ -24,7 +24,6 @@ interface IPendlePTVaultAdapter {
      * @param sy Standardized Yield token address
      * @param yt Yield Token address (needed for maturity redemption)
      * @param vToken Venus VToken market address for this PT
-     * @param comptroller Venus Comptroller address for the isolated pool
      * @param isActive Whether this market is currently accepting deposits/withdrawals
      * @param maturity PT expiry timestamp (Unix timestamp)
      */
@@ -33,7 +32,6 @@ interface IPendlePTVaultAdapter {
         address sy;
         address yt;
         address vToken;
-        address comptroller;
         bool isActive;
         uint256 maturity;
     }
@@ -285,11 +283,10 @@ interface IPendlePTVaultAdapter {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Register a new PT market. Derives PT, SY, YT, maturity, and comptroller from on-chain data.
+     * @notice Register a new PT market. Derives PT, SY, YT, and maturity from on-chain data.
      * @dev Access controlled via AccessControlManager.
      *      Reads token addresses and maturity from the Pendle market contract.
      *      Validates that the vToken's underlying matches the derived PT address.
-     *      Derives the comptroller from the vToken (eliminates misconfiguration risk).
      * @param pendleMarket Pendle AMM market address to register
      * @param vToken Venus VToken market address for this PT
      */
@@ -379,14 +376,13 @@ interface IPendlePTVaultAdapter {
     function isMatured(address pendleMarket) external view returns (bool);
 
     /**
-     * @notice Check if a user has delegated to this adapter for a specific market's Comptroller.
+     * @notice Check if a user has delegated to this adapter in the Comptroller.
      * @dev Delegation is required for withdraw/redeemAtMaturity (redeemBehalf).
      *      Users must call Comptroller.updateDelegate(adapter, true) before withdrawing.
-     * @param pendleMarket Pendle market address
      * @param user User address to check
      * @return True if the user has approved this adapter as a delegate
      */
-    function isDelegated(address pendleMarket, address user) external view returns (bool);
+    function isDelegated(address user) external view returns (bool);
 
     /**
      * @notice Get the immutable Pendle Router address.
@@ -400,4 +396,10 @@ interface IPendlePTVaultAdapter {
      * @return Wrapped native token (WBNB) address
      */
     function WBNB() external view returns (address);
+
+    /**
+     * @notice Get the immutable Venus Comptroller address.
+     * @return Venus core pool Comptroller address
+     */
+    function COMPTROLLER() external view returns (address);
 }

@@ -74,7 +74,7 @@ export async function baseFixture(): Promise<BaseFixture> {
 
   // Deploy implementation
   const PendlePTVaultAdapter = await ethers.getContractFactory("PendlePTVaultAdapter");
-  const implementation = await PendlePTVaultAdapter.deploy(PENDLE_ROUTER_V3, WBNB);
+  const implementation = await PendlePTVaultAdapter.deploy(PENDLE_ROUTER_V3, WBNB, COMPTROLLER);
   await implementation.deployed();
 
   // Deploy proxy
