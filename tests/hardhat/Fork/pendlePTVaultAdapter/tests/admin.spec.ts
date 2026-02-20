@@ -16,7 +16,6 @@ import {
   PT_CLISBNBX_25JUN2026,
   SLISBNB,
   VTOKEN_PT_CLISBNBX_25JUN2026,
-  WBNB,
 } from "../utils/constants";
 import { baseFixture } from "../utils/fixtures";
 
@@ -69,7 +68,7 @@ function describeTests() {
         const [owner] = await ethers.getSigners();
 
         const PendlePTVaultAdapter = await ethers.getContractFactory("PendlePTVaultAdapter");
-        const implementation = await PendlePTVaultAdapter.deploy(PENDLE_ROUTER_V3, WBNB, COMPTROLLER);
+        const implementation = await PendlePTVaultAdapter.deploy(PENDLE_ROUTER_V3, COMPTROLLER);
         await implementation.deployed();
 
         const proxyAdminAddress = "0x0000000000000000000000000000000000000001";

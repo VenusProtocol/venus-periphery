@@ -35,9 +35,6 @@ contract PendlePTVaultAdapter is
     /// @notice Pendle Router address (IPAllActionV3).
     address public immutable PENDLE_ROUTER;
 
-    /// @notice Wrapped native token address (WBNB on BSC).
-    address public immutable WBNB;
-
     /// @notice Venus core pool Comptroller address.
     address public immutable COMPTROLLER;
 
@@ -84,15 +81,11 @@ contract PendlePTVaultAdapter is
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @param pendleRouter_ Pendle Router (IPAllActionV3) address.
-    /// @param wbnb_ Wrapped native token (WBNB) address.
     /// @param comptroller_ Venus core pool Comptroller address.
-    constructor(address pendleRouter_, address wbnb_, address comptroller_) {
+    constructor(address pendleRouter_, address comptroller_) {
         if (pendleRouter_ == address(0)) revert ZeroAddress();
-        if (wbnb_ == address(0)) revert ZeroAddress();
         if (comptroller_ == address(0)) revert ZeroAddress();
-
         PENDLE_ROUTER = pendleRouter_;
-        WBNB = wbnb_;
         COMPTROLLER = comptroller_;
 
         _disableInitializers();

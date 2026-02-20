@@ -391,13 +391,6 @@ interface IPendlePTVaultAdapter {
     function PENDLE_ROUTER() external view returns (address);
 
     /**
-     * @notice Get the immutable WBNB address.
-     * @dev Reserved for future withdrawNative support.
-     * @return Wrapped native token (WBNB) address
-     */
-    function WBNB() external view returns (address);
-
-    /**
      * @notice Get the immutable Venus Comptroller address.
      * @return Venus core pool Comptroller address
      */

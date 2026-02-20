@@ -11,7 +11,6 @@ import {
   PENDLE_ROUTER_V3,
   PT_CLISBNBX_25JUN2026,
   VTOKEN_PT_CLISBNBX_25JUN2026,
-  WBNB,
 } from "../utils/constants";
 import { baseFixture, maturedWithDepositsFixture } from "../utils/fixtures";
 
@@ -109,12 +108,6 @@ function describeTests() {
         const { adapter } = await loadFixture(baseFixture);
 
         expect(await adapter.PENDLE_ROUTER()).to.equal(PENDLE_ROUTER_V3);
-      });
-
-      it("should return the correct WBNB address", async () => {
-        const { adapter } = await loadFixture(baseFixture);
-
-        expect(await adapter.WBNB()).to.equal(WBNB);
       });
 
       it("should return the correct COMPTROLLER address", async () => {
