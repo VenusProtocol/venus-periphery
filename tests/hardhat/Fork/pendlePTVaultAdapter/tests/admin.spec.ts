@@ -1,14 +1,16 @@
 import "@nomicfoundation/hardhat-chai-matchers";
-import { loadFixture, setBalance } from "@nomicfoundation/hardhat-network-helpers";
+import { impersonateAccount, loadFixture, setBalance } from "@nomicfoundation/hardhat-network-helpers";
 import chai from "chai";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import { FORK_MAINNET, forking } from "../../utils";
 import {
+  ACCESS_CONTROL_MANAGER,
   BLOCK_NUMBER,
   COMPTROLLER,
   FAKE_MARKET,
+  NORMAL_TIMELOCK,
   PENDLE_MARKET,
   PENDLE_ROUTER_V3,
   PT_CLISBNBX_25JUN2026,
@@ -72,7 +74,7 @@ function describeTests() {
         await implementation.deployed();
 
         const proxyAdminAddress = "0x0000000000000000000000000000000000000001";
-        const data = implementation.interface.encodeFunctionData("initialize", [owner.address]);
+        const data = implementation.interface.encodeFunctionData("initialize", [ACCESS_CONTROL_MANAGER]);
         const TransparentUpgradeableProxy = await ethers.getContractFactory(
           "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy",
         );
@@ -80,6 +82,18 @@ function describeTests() {
         await proxy.deployed();
 
         const freshAdapter = await ethers.getContractAt("PendlePTVaultAdapter", proxy.address);
+
+        // Grant addMarket permission to owner on the fresh adapter via NORMAL_TIMELOCK (holds DEFAULT_ADMIN_ROLE)
+        const acm = await ethers.getContractAt(
+          ["function giveCallPermission(address, string, address) external"],
+          ACCESS_CONTROL_MANAGER,
+        );
+        await impersonateAccount(NORMAL_TIMELOCK);
+        await setBalance(NORMAL_TIMELOCK, parseUnits("1", 18));
+        const timelockSigner = await ethers.getSigner(NORMAL_TIMELOCK);
+        await acm
+          .connect(timelockSigner)
+          .giveCallPermission(freshAdapter.address, "addMarket(address,address)", owner.address);
 
         // vUSDT from Venus core pool — its underlying() returns USDT, not PT
         const WRONG_VTOKEN = "0xfD5840Cd36d94D7229439859C0112a4185BC0255";
@@ -89,12 +103,12 @@ function describeTests() {
           .withArgs(WRONG_VTOKEN, PT_CLISBNBX_25JUN2026);
       });
 
-      it("should revert when called by non-owner", async () => {
+      it("should revert when called by unauthorized account", async () => {
         const { adapter, user } = await loadFixture(baseFixture);
 
-        await expect(adapter.connect(user).addMarket(FAKE_MARKET, VTOKEN_PT_CLISBNBX_25JUN2026)).to.be.revertedWith(
-          "Ownable: caller is not the owner",
-        );
+        await expect(
+          adapter.connect(user).addMarket(FAKE_MARKET, VTOKEN_PT_CLISBNBX_25JUN2026),
+        ).to.be.revertedWithCustomError(adapter, "Unauthorized");
       });
     });
 
@@ -130,11 +144,12 @@ function describeTests() {
           .withArgs(FAKE_MARKET);
       });
 
-      it("should revert when called by non-owner", async () => {
+      it("should revert when called by unauthorized account", async () => {
         const { adapter, user, marketAddress } = await loadFixture(baseFixture);
 
-        await expect(adapter.connect(user).deactivateMarket(marketAddress)).to.be.revertedWith(
-          "Ownable: caller is not the owner",
+        await expect(adapter.connect(user).deactivateMarket(marketAddress)).to.be.revertedWithCustomError(
+          adapter,
+          "Unauthorized",
         );
       });
     });
@@ -174,11 +189,12 @@ function describeTests() {
           .withArgs(FAKE_MARKET);
       });
 
-      it("should revert when called by non-owner", async () => {
+      it("should revert when called by unauthorized account", async () => {
         const { adapter, user, marketAddress } = await loadFixture(baseFixture);
 
-        await expect(adapter.connect(user).activateMarket(marketAddress)).to.be.revertedWith(
-          "Ownable: caller is not the owner",
+        await expect(adapter.connect(user).activateMarket(marketAddress)).to.be.revertedWithCustomError(
+          adapter,
+          "Unauthorized",
         );
       });
     });
@@ -201,17 +217,17 @@ function describeTests() {
         expect(await adapter.paused()).to.be.false;
       });
 
-      it("should revert pause when called by non-owner", async () => {
+      it("should revert pause when called by unauthorized account", async () => {
         const { adapter, user } = await loadFixture(baseFixture);
 
-        await expect(adapter.connect(user).pause()).to.be.revertedWith("Ownable: caller is not the owner");
+        await expect(adapter.connect(user).pause()).to.be.revertedWithCustomError(adapter, "Unauthorized");
       });
 
-      it("should revert unpause when called by non-owner", async () => {
+      it("should revert unpause when called by unauthorized account", async () => {
         const { adapter, owner, user } = await loadFixture(baseFixture);
 
         await adapter.connect(owner).pause();
-        await expect(adapter.connect(user).unpause()).to.be.revertedWith("Ownable: caller is not the owner");
+        await expect(adapter.connect(user).unpause()).to.be.revertedWithCustomError(adapter, "Unauthorized");
       });
     });
 

@@ -286,7 +286,7 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Register a new PT market. Derives PT, SY, YT, maturity, and comptroller from on-chain data.
-     * @dev Only callable by the contract owner.
+     * @dev Access controlled via AccessControlManager.
      *      Reads token addresses and maturity from the Pendle market contract.
      *      Validates that the vToken's underlying matches the derived PT address.
      *      Derives the comptroller from the vToken (eliminates misconfiguration risk).
@@ -297,7 +297,7 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Deactivate a market (blocks new deposits and withdrawals).
-     * @dev Only callable by the contract owner.
+     * @dev Access controlled via AccessControlManager.
      *      Deactivation prevents new operations but does not affect existing user positions.
      *      Reverts if the market is already deactivated.
      * @param pendleMarket Pendle market address to deactivate
@@ -306,7 +306,7 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Re-activate a previously deactivated market.
-     * @dev Only callable by the contract owner.
+     * @dev Access controlled via AccessControlManager.
      *      Reverts if the market is already active.
      * @param pendleMarket Pendle market address to activate
      */
@@ -314,14 +314,14 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Pause all deposit/withdraw operations (emergency).
-     * @dev Only callable by the contract owner.
+     * @dev Access controlled via AccessControlManager.
      *      When paused, all user-facing functions revert.
      */
     function pause() external;
 
     /**
      * @notice Unpause operations.
-     * @dev Only callable by the contract owner.
+     * @dev Access controlled via AccessControlManager.
      */
     function unpause() external;
 

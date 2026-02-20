@@ -10,6 +10,7 @@ import {
   LISTA_LISUSD,
   LISTA_RESILIENT_ORACLE,
   LISTA_STAKE_MANAGER,
+  NORMAL_TIMELOCK,
   PANCAKE_ROUTER,
   SLISBNB,
   WBNB,
@@ -218,16 +219,12 @@ export async function increaseVenusOracleMaxStalePeriod(): Promise<void> {
           );
           const acmAddr = await oracle.accessControlManager();
           const acm = await ethers.getContractAt(
-            [
-              "function owner() view returns (address)",
-              "function giveCallPermission(address, string, address) external",
-            ],
+            ["function giveCallPermission(address, string, address) external"],
             acmAddr,
           );
-          const acmOwner = await acm.owner();
-          await impersonateAccount(acmOwner);
-          await setBalance(acmOwner, parseUnits("1", 18));
-          const acmOwnerSigner = await ethers.getSigner(acmOwner);
+          await impersonateAccount(NORMAL_TIMELOCK);
+          await setBalance(NORMAL_TIMELOCK, parseUnits("1", 18));
+          const NORMAL_TIMELOCKSigner = await ethers.getSigner(NORMAL_TIMELOCK);
 
           // Try ChainlinkOracle interface: setTokenConfig({asset, feed, maxStalePeriod})
           try {
@@ -240,8 +237,8 @@ export async function increaseVenusOracleMaxStalePeriod(): Promise<void> {
             );
             const tokenConfig = await chainlink.tokenConfigs(token.address);
             if (tokenConfig.asset !== ethers.constants.AddressZero) {
-              await acm.connect(acmOwnerSigner).giveCallPermission(oracleAddr, "setTokenConfig(TokenConfig)", acmOwner);
-              await chainlink.connect(acmOwnerSigner).setTokenConfig({
+              await acm.connect(NORMAL_TIMELOCKSigner).giveCallPermission(oracleAddr, "setTokenConfig(TokenConfig)", NORMAL_TIMELOCK);
+              await chainlink.connect(NORMAL_TIMELOCKSigner).setTokenConfig({
                 asset: token.address,
                 feed: tokenConfig.feed,
                 maxStalePeriod: TWO_YEARS,
@@ -255,13 +252,13 @@ export async function increaseVenusOracleMaxStalePeriod(): Promise<void> {
           // Try BinanceOracle interface: setMaxStalePeriod(symbol, stalePeriod)
           try {
             await acm
-              .connect(acmOwnerSigner)
-              .giveCallPermission(oracleAddr, "setMaxStalePeriod(string,uint256)", acmOwner);
+              .connect(NORMAL_TIMELOCKSigner)
+              .giveCallPermission(oracleAddr, "setMaxStalePeriod(string,uint256)", NORMAL_TIMELOCK);
             const binance = await ethers.getContractAt(
               ["function setMaxStalePeriod(string, uint256) external"],
               oracleAddr,
             );
-            await binance.connect(acmOwnerSigner).setMaxStalePeriod(token.symbol, TWO_YEARS);
+            await binance.connect(NORMAL_TIMELOCKSigner).setMaxStalePeriod(token.symbol, TWO_YEARS);
           } catch {
             // Neither ChainlinkOracle nor BinanceOracle -- skip
           }

@@ -5,8 +5,10 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import {
+  ACCESS_CONTROL_MANAGER,
   BSC_CHAIN_ID,
   COMPTROLLER,
+  NORMAL_TIMELOCK,
   PENDLE_MARKET,
   PENDLE_ROUTER_V3,
   SLISBNB,
@@ -61,6 +63,15 @@ export async function baseFixture(): Promise<BaseFixture> {
   const vToken = await ethers.getContractAt("IVenusVToken", VTOKEN_PT_CLISBNBX_25JUN2026);
   const comptroller = await ethers.getContractAt("IMarketFacet", COMPTROLLER);
 
+  // Use the mainnet ACM — NORMAL_TIMELOCK holds DEFAULT_ADMIN_ROLE
+  const acm = await ethers.getContractAt(
+    ["function giveCallPermission(address, string, address) external"],
+    ACCESS_CONTROL_MANAGER,
+  );
+  await impersonateAccount(NORMAL_TIMELOCK);
+  await setBalance(NORMAL_TIMELOCK, parseUnits("1", 18));
+  const timelockSigner = await ethers.getSigner(NORMAL_TIMELOCK);
+
   // Deploy implementation
   const PendlePTVaultAdapter = await ethers.getContractFactory("PendlePTVaultAdapter");
   const implementation = await PendlePTVaultAdapter.deploy(PENDLE_ROUTER_V3, WBNB);
@@ -68,7 +79,7 @@ export async function baseFixture(): Promise<BaseFixture> {
 
   // Deploy proxy
   const proxyAdminAddress = "0x0000000000000000000000000000000000000001";
-  const data = implementation.interface.encodeFunctionData("initialize", [owner.address]);
+  const data = implementation.interface.encodeFunctionData("initialize", [ACCESS_CONTROL_MANAGER]);
   const TransparentUpgradeableProxy = await ethers.getContractFactory(
     "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy",
   );
@@ -76,6 +87,18 @@ export async function baseFixture(): Promise<BaseFixture> {
   await proxy.deployed();
 
   const adapter = await ethers.getContractAt("PendlePTVaultAdapter", proxy.address);
+
+  // Grant ACM permissions to the owner via impersonated NORMAL_TIMELOCK (holds DEFAULT_ADMIN_ROLE)
+  const acmGuardedFunctions = [
+    "addMarket(address,address)",
+    "deactivateMarket(address)",
+    "activateMarket(address)",
+    "pause()",
+    "unpause()",
+  ];
+  for (const funcSig of acmGuardedFunctions) {
+    await acm.connect(timelockSigner).giveCallPermission(adapter.address, funcSig, owner.address);
+  }
 
   // Register market
   await adapter.connect(owner).addMarket(PENDLE_MARKET, VTOKEN_PT_CLISBNBX_25JUN2026);

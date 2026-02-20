@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.25;
 
-import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
+import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
 import { IPAllActionV3 } from "@pendle/core-v2/contracts/interfaces/IPAllActionV3.sol";
 import { TokenInput, TokenOutput, ApproxParams, LimitOrderData } from "@pendle/core-v2/contracts/interfaces/IPAllActionTypeV3.sol";
@@ -23,8 +22,7 @@ import { IPendlePTVaultAdapter } from "./interfaces/IPendlePTVaultAdapter.sol";
  */
 contract PendlePTVaultAdapter is
     IPendlePTVaultAdapter,
-    Initializable,
-    Ownable2StepUpgradeable,
+    AccessControlledV8,
     PausableUpgradeable,
     ReentrancyGuardUpgradeable
 {
@@ -107,15 +105,11 @@ contract PendlePTVaultAdapter is
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice Initializes the proxy state. Called once after proxy deployment.
-    /// @param owner_ Address that will own the contract (multisig / timelock).
-    function initialize(address owner_) external initializer {
-        if (owner_ == address(0)) revert ZeroAddress();
-
-        __Ownable2Step_init();
+    /// @param accessControlManager_ Address of the Venus AccessControlManager contract.
+    function initialize(address accessControlManager_) external reinitializer(1) {
+        __AccessControlled_init(accessControlManager_);
         __Pausable_init();
         __ReentrancyGuard_init();
-
-        _transferOwnership(owner_);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -258,7 +252,8 @@ contract PendlePTVaultAdapter is
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IPendlePTVaultAdapter
-    function addMarket(address pendleMarket, address vToken) external onlyOwner {
+    function addMarket(address pendleMarket, address vToken) external {
+        _checkAccessAllowed("addMarket(address,address)");
         if (pendleMarket == address(0)) revert ZeroAddress();
         if (vToken == address(0)) revert ZeroAddress();
         if (markets[pendleMarket].pt != address(0)) revert MarketAlreadyRegistered(pendleMarket);
@@ -293,7 +288,8 @@ contract PendlePTVaultAdapter is
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
-    function deactivateMarket(address pendleMarket) external onlyOwner {
+    function deactivateMarket(address pendleMarket) external {
+        _checkAccessAllowed("deactivateMarket(address)");
         if (markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
         if (!markets[pendleMarket].isActive) revert MarketNotActive(pendleMarket);
         markets[pendleMarket].isActive = false;
@@ -301,7 +297,8 @@ contract PendlePTVaultAdapter is
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
-    function activateMarket(address pendleMarket) external onlyOwner {
+    function activateMarket(address pendleMarket) external {
+        _checkAccessAllowed("activateMarket(address)");
         if (markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
         if (markets[pendleMarket].isActive) revert MarketAlreadyActive(pendleMarket);
         markets[pendleMarket].isActive = true;
@@ -309,12 +306,14 @@ contract PendlePTVaultAdapter is
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
-    function pause() external onlyOwner {
+    function pause() external {
+        _checkAccessAllowed("pause()");
         _pause();
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
-    function unpause() external onlyOwner {
+    function unpause() external {
+        _checkAccessAllowed("unpause()");
         _unpause();
     }
 
