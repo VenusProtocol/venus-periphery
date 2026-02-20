@@ -46,7 +46,7 @@ contract PendlePTVaultAdapter is
     mapping(address => MarketConfig) public markets;
 
     /// @notice Ordered list of all registered market addresses (for enumeration).
-    /// @dev Grows unboundedly — markets can be deactivated but not removed. Expected to remain small.
+    /// @dev Grows unboundedly — expected to remain small.
     address[] public marketList;
 
     /// @dev Reserved storage gap for future upgrades.
@@ -56,9 +56,9 @@ contract PendlePTVaultAdapter is
     //                             MODIFIERS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @dev Reverts if the market is not registered or not active.
-    modifier onlyActiveMarket(address pendleMarket) {
-        _requireActiveMarket(pendleMarket);
+    /// @dev Reverts if the market is not registered.
+    modifier onlyRegisteredMarket(address pendleMarket) {
+        _requireRegisteredMarket(pendleMarket);
         _;
     }
 
@@ -125,7 +125,7 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    ) external whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netVTokensMinted) {
+    ) external whenNotPaused nonReentrant onlyRegisteredMarket(pendleMarket) returns (uint256 netVTokensMinted) {
         if (amount == 0) revert ZeroAmount();
         if (input.tokenIn == address(0)) revert InvalidTokenInput();
 
@@ -156,7 +156,7 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    ) external payable whenNotPaused nonReentrant onlyActiveMarket(pendleMarket) returns (uint256 netVTokensMinted) {
+    ) external payable whenNotPaused nonReentrant onlyRegisteredMarket(pendleMarket) returns (uint256 netVTokensMinted) {
         if (msg.value == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
@@ -198,7 +198,7 @@ contract PendlePTVaultAdapter is
         external
         whenNotPaused
         nonReentrant
-        onlyActiveMarket(pendleMarket)
+        onlyRegisteredMarket(pendleMarket)
         beforeMaturity(pendleMarket)
         returns (uint256 netTokenOut)
     {
@@ -226,7 +226,7 @@ contract PendlePTVaultAdapter is
         external
         whenNotPaused
         nonReentrant
-        onlyActiveMarket(pendleMarket)
+        onlyRegisteredMarket(pendleMarket)
         atOrAfterMaturity(pendleMarket)
         returns (uint256 netTokenOut)
     {
@@ -270,31 +270,12 @@ contract PendlePTVaultAdapter is
             sy: address(_SY),
             yt: address(_YT),
             vToken: vToken,
-            isActive: true,
             maturity: maturity
         });
 
         marketList.push(pendleMarket);
 
         emit MarketAdded(pendleMarket, address(_PT), vToken, maturity);
-    }
-
-    /// @inheritdoc IPendlePTVaultAdapter
-    function deactivateMarket(address pendleMarket) external {
-        _checkAccessAllowed("deactivateMarket(address)");
-        if (markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
-        if (!markets[pendleMarket].isActive) revert MarketNotActive(pendleMarket);
-        markets[pendleMarket].isActive = false;
-        emit MarketDeactivated(pendleMarket);
-    }
-
-    /// @inheritdoc IPendlePTVaultAdapter
-    function activateMarket(address pendleMarket) external {
-        _checkAccessAllowed("activateMarket(address)");
-        if (markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
-        if (markets[pendleMarket].isActive) revert MarketAlreadyActive(pendleMarket);
-        markets[pendleMarket].isActive = true;
-        emit MarketActivated(pendleMarket);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
@@ -503,14 +484,11 @@ contract PendlePTVaultAdapter is
     }
 
     /**
-     * @notice Validates that the market is registered and active.
+     * @notice Validates that the market is registered.
      * @param pendleMarket The Pendle market address to validate.
      * @dev Reverts with MarketNotRegistered if PT address is zero.
-     *      Reverts with MarketNotActive if market has been deactivated.
      */
-    function _requireActiveMarket(address pendleMarket) internal view {
-        MarketConfig storage config = markets[pendleMarket];
-        if (config.pt == address(0)) revert MarketNotRegistered(pendleMarket);
-        if (!config.isActive) revert MarketNotActive(pendleMarket);
+    function _requireRegisteredMarket(address pendleMarket) internal view {
+        if (markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
     }
 }

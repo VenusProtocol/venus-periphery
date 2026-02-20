@@ -33,7 +33,6 @@ function describeTests() {
         const config = await adapter.getMarketConfig(marketAddress);
         expect(config.pt).to.equal(PT_CLISBNBX_25JUN2026);
         expect(config.vToken).to.equal(VTOKEN_PT_CLISBNBX_25JUN2026);
-        expect(config.isActive).to.be.true;
         expect(config.maturity).to.be.gt(0);
         expect(config.sy).to.not.equal(ethers.constants.AddressZero);
         expect(config.yt).to.not.equal(ethers.constants.AddressZero);
@@ -107,93 +106,6 @@ function describeTests() {
         await expect(
           adapter.connect(user).addMarket(FAKE_MARKET, VTOKEN_PT_CLISBNBX_25JUN2026),
         ).to.be.revertedWithCustomError(adapter, "Unauthorized");
-      });
-    });
-
-    // ── deactivateMarket ──────────────────────────────────────────────
-
-    describe("deactivateMarket", () => {
-      it("should deactivate a market and emit MarketDeactivated", async () => {
-        const { adapter, owner, marketAddress } = await loadFixture(baseFixture);
-
-        await expect(adapter.connect(owner).deactivateMarket(marketAddress))
-          .to.emit(adapter, "MarketDeactivated")
-          .withArgs(marketAddress);
-
-        const config = await adapter.getMarketConfig(marketAddress);
-        expect(config.isActive).to.be.false;
-      });
-
-      it("should revert with MarketNotActive when market is already deactivated", async () => {
-        const { adapter, owner, marketAddress } = await loadFixture(baseFixture);
-
-        await adapter.connect(owner).deactivateMarket(marketAddress);
-
-        await expect(adapter.connect(owner).deactivateMarket(marketAddress))
-          .to.be.revertedWithCustomError(adapter, "MarketNotActive")
-          .withArgs(marketAddress);
-      });
-
-      it("should revert with MarketNotRegistered for unregistered market", async () => {
-        const { adapter, owner } = await loadFixture(baseFixture);
-
-        await expect(adapter.connect(owner).deactivateMarket(FAKE_MARKET))
-          .to.be.revertedWithCustomError(adapter, "MarketNotRegistered")
-          .withArgs(FAKE_MARKET);
-      });
-
-      it("should revert when called by unauthorized account", async () => {
-        const { adapter, user, marketAddress } = await loadFixture(baseFixture);
-
-        await expect(adapter.connect(user).deactivateMarket(marketAddress)).to.be.revertedWithCustomError(
-          adapter,
-          "Unauthorized",
-        );
-      });
-    });
-
-    // ── activateMarket ────────────────────────────────────────────────
-
-    describe("activateMarket", () => {
-      it("should re-activate a deactivated market and emit MarketActivated", async () => {
-        const { adapter, owner, marketAddress } = await loadFixture(baseFixture);
-
-        // Deactivate first
-        await adapter.connect(owner).deactivateMarket(marketAddress);
-        expect((await adapter.getMarketConfig(marketAddress)).isActive).to.be.false;
-
-        // Re-activate
-        await expect(adapter.connect(owner).activateMarket(marketAddress))
-          .to.emit(adapter, "MarketActivated")
-          .withArgs(marketAddress);
-
-        expect((await adapter.getMarketConfig(marketAddress)).isActive).to.be.true;
-      });
-
-      it("should revert with MarketAlreadyActive when market is already active", async () => {
-        const { adapter, owner, marketAddress } = await loadFixture(baseFixture);
-
-        // Market is active by default after addMarket
-        await expect(adapter.connect(owner).activateMarket(marketAddress))
-          .to.be.revertedWithCustomError(adapter, "MarketAlreadyActive")
-          .withArgs(marketAddress);
-      });
-
-      it("should revert with MarketNotRegistered for unregistered market", async () => {
-        const { adapter, owner } = await loadFixture(baseFixture);
-
-        await expect(adapter.connect(owner).activateMarket(FAKE_MARKET))
-          .to.be.revertedWithCustomError(adapter, "MarketNotRegistered")
-          .withArgs(FAKE_MARKET);
-      });
-
-      it("should revert when called by unauthorized account", async () => {
-        const { adapter, user, marketAddress } = await loadFixture(baseFixture);
-
-        await expect(adapter.connect(user).activateMarket(marketAddress)).to.be.revertedWithCustomError(
-          adapter,
-          "Unauthorized",
-        );
       });
     });
 

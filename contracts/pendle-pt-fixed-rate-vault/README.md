@@ -77,8 +77,6 @@ contracts/pendle-pt-fixed-rate-vault/
 | Function                          | Purpose                          |
 | --------------------------------- | -------------------------------- |
 | `addMarket(pendleMarket, vToken)` | Register a new PT market         |
-| `deactivateMarket(pendleMarket)`  | Block new operations on a market |
-| `activateMarket(pendleMarket)`    | Re-enable a deactivated market   |
 | `pause()` / `unpause()`           | Emergency pause all operations   |
 | `sweepTokens(token, to, amount)`  | Recover stuck ERC-20 tokens      |
 | `sweepNative(to, amount)`         | Recover stuck native BNB         |

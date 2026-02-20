@@ -27,7 +27,6 @@ function describeTests() {
         const config = await adapter.getMarketConfig(marketAddress);
         expect(config.pt).to.equal(PT_CLISBNBX_25JUN2026);
         expect(config.vToken).to.equal(VTOKEN_PT_CLISBNBX_25JUN2026);
-        expect(config.isActive).to.be.true;
         expect(config.maturity).to.be.gt(0);
         expect(config.sy).to.not.equal(ethers.constants.AddressZero);
         expect(config.yt).to.not.equal(ethers.constants.AddressZero);
@@ -41,7 +40,6 @@ function describeTests() {
         expect(config.sy).to.equal(ethers.constants.AddressZero);
         expect(config.yt).to.equal(ethers.constants.AddressZero);
         expect(config.vToken).to.equal(ethers.constants.AddressZero);
-        expect(config.isActive).to.be.false;
         expect(config.maturity).to.equal(0);
       });
     });

@@ -91,8 +91,6 @@ export async function baseFixture(): Promise<BaseFixture> {
   // Grant ACM permissions to the owner via impersonated NORMAL_TIMELOCK (holds DEFAULT_ADMIN_ROLE)
   const acmGuardedFunctions = [
     "addMarket(address,address)",
-    "deactivateMarket(address)",
-    "activateMarket(address)",
     "pause()",
     "unpause()",
   ];

@@ -334,18 +334,6 @@ function describeTests() {
           .withArgs(FAKE_MARKET);
       });
 
-      it("should revert with MarketNotActive when market is deactivated", async () => {
-        const { adapter, owner, user, marketAddress } = await loadFixture(baseFixture);
-
-        await adapter.connect(owner).deactivateMarket(marketAddress);
-
-        const input = getDummyTokenInput(SLISBNB, depositAmount);
-
-        await expect(adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit))
-          .to.be.revertedWithCustomError(adapter, "MarketNotActive")
-          .withArgs(marketAddress);
-      });
-
       it("should revert when contract is paused", async () => {
         const { adapter, owner, user, marketAddress } = await loadFixture(baseFixture);
 

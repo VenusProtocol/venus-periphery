@@ -271,10 +271,10 @@ function describeTests() {
     // ── RedeemAtMaturity Error Cases ──────────────────────────────────
     //
     // Modifier execution order:
-    //   whenNotPaused -> nonReentrant -> onlyActiveMarket -> atOrAfterMaturity -> body
+    //   whenNotPaused -> nonReentrant -> onlyRegisteredMarket -> atOrAfterMaturity -> body
     //
-    // Paused/MarketNotRegistered/MarketNotActive revert before the maturity
-    // check, so they can use baseFixture (pre-maturity state).
+    // Paused/MarketNotRegistered revert before the maturity check,
+    // so they can use baseFixture (pre-maturity state).
     // ZeroAmount and delegation failure are in the function body, so they
     // need maturedWithDepositsFixture (post-maturity).
 
@@ -308,17 +308,6 @@ function describeTests() {
         await expect(adapter.connect(user).redeemAtMaturity(FAKE_MARKET, redeemAmount, output))
           .to.be.revertedWithCustomError(adapter, "MarketNotRegistered")
           .withArgs(FAKE_MARKET);
-      });
-
-      it("should revert with MarketNotActive when market is deactivated", async () => {
-        const { adapter, owner, user, marketAddress } = await loadFixture(baseFixture);
-
-        await adapter.connect(owner).deactivateMarket(marketAddress);
-        const output = getDummyTokenOutput(SLISBNB);
-
-        await expect(adapter.connect(user).redeemAtMaturity(marketAddress, redeemAmount, output))
-          .to.be.revertedWithCustomError(adapter, "MarketNotActive")
-          .withArgs(marketAddress);
       });
 
       it("should revert when contract is paused", async () => {

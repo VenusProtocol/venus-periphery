@@ -24,7 +24,6 @@ interface IPendlePTVaultAdapter {
      * @param sy Standardized Yield token address
      * @param yt Yield Token address (needed for maturity redemption)
      * @param vToken Venus VToken market address for this PT
-     * @param isActive Whether this market is currently accepting deposits/withdrawals
      * @param maturity PT expiry timestamp (Unix timestamp)
      */
     struct MarketConfig {
@@ -32,7 +31,6 @@ interface IPendlePTVaultAdapter {
         address sy;
         address yt;
         address vToken;
-        bool isActive;
         uint256 maturity;
     }
 
@@ -48,18 +46,6 @@ interface IPendlePTVaultAdapter {
      * @param maturity PT maturity timestamp
      */
     event MarketAdded(address indexed pendleMarket, address indexed pt, address indexed vToken, uint256 maturity);
-
-    /**
-     * @notice Emitted when a market is deactivated by admin.
-     * @param pendleMarket Pendle market address that was deactivated
-     */
-    event MarketDeactivated(address indexed pendleMarket);
-
-    /**
-     * @notice Emitted when a previously deactivated market is re-activated.
-     * @param pendleMarket Pendle market address that was activated
-     */
-    event MarketActivated(address indexed pendleMarket);
 
     /**
      * @notice Emitted when a user deposits tokens and receives vTokens.
@@ -130,18 +116,6 @@ interface IPendlePTVaultAdapter {
      * @param pendleMarket The Pendle market address that is not registered
      */
     error MarketNotRegistered(address pendleMarket);
-
-    /**
-     * @notice Error thrown when attempting to interact with a market that has been deactivated.
-     * @param pendleMarket The Pendle market address that is not active
-     */
-    error MarketNotActive(address pendleMarket);
-
-    /**
-     * @notice Error thrown when attempting to activate a market that is already active.
-     * @param pendleMarket The Pendle market address that is already active
-     */
-    error MarketAlreadyActive(address pendleMarket);
 
     /**
      * @notice Error thrown when attempting to register a market that is already registered.
@@ -293,23 +267,6 @@ interface IPendlePTVaultAdapter {
     function addMarket(address pendleMarket, address vToken) external;
 
     /**
-     * @notice Deactivate a market (blocks new deposits and withdrawals).
-     * @dev Access controlled via AccessControlManager.
-     *      Deactivation prevents new operations but does not affect existing user positions.
-     *      Reverts if the market is already deactivated.
-     * @param pendleMarket Pendle market address to deactivate
-     */
-    function deactivateMarket(address pendleMarket) external;
-
-    /**
-     * @notice Re-activate a previously deactivated market.
-     * @dev Access controlled via AccessControlManager.
-     *      Reverts if the market is already active.
-     * @param pendleMarket Pendle market address to activate
-     */
-    function activateMarket(address pendleMarket) external;
-
-    /**
      * @notice Pause all deposit/withdraw operations (emergency).
      * @dev Access controlled via AccessControlManager.
      *      When paused, all user-facing functions revert.
@@ -362,8 +319,7 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Get all registered market addresses.
-     * @dev The list grows unboundedly — markets can be deactivated but not removed.
-     *      Expected to remain small in practice.
+     * @dev The list grows unboundedly — expected to remain small in practice.
      * @return Array of all registered Pendle market addresses
      */
     function getAllMarkets() external view returns (address[] memory);
