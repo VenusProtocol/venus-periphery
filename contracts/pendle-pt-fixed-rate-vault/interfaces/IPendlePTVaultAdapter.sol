@@ -325,7 +325,7 @@ interface IPendlePTVaultAdapter {
     function getAllMarkets() external view returns (address[] memory);
 
     /**
-     * @notice Check if a specific PT market has matured.
+     * @notice Check if a specific registered PT market has matured.
      * @param pendleMarket Pendle market address
      * @return True if the current timestamp is at or past the market's maturity
      */

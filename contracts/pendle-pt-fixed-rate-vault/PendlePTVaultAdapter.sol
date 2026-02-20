@@ -324,6 +324,7 @@ contract PendlePTVaultAdapter is
 
     /// @inheritdoc IPendlePTVaultAdapter
     function isMatured(address pendleMarket) external view returns (bool) {
+        if(markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
         return !(block.timestamp < markets[pendleMarket].maturity);
     }
 
