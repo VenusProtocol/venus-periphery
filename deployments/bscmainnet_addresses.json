@@ -15,6 +15,9 @@
     "SentinelOracle_Implementation": "0x26F9aCA545Cb0d91738e5AAD1b8E6568728f7BC0",
     "SentinelOracle_Proxy": "0x58eae0Cf4215590E19860b66b146C5d539cb6f14",
     "SwapHelper": "0xD79be25aEe798Aa34A9Ba1230003d7499be29A24",
+    "SwapRouter": "0xde7E4f67Af577F29e5F3B995f9e67FD425F73621",
+    "SwapRouter_Implementation": "0xf0B661b6694940Ad4cE583449b71733D4D44C2F1",
+    "SwapRouter_Proxy": "0xde7E4f67Af577F29e5F3B995f9e67FD425F73621",
     "UniswapOracle": "0x8FD05458faf220B2324c4BFbb29DBC4B3CF6f23f",
     "UniswapOracle_Implementation": "0x3156529859cf18708404544324098330EAb31827",
     "UniswapOracle_Proxy": "0x8FD05458faf220B2324c4BFbb29DBC4B3CF6f23f"

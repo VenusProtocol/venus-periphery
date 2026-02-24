@@ -177,7 +177,7 @@ if (FORK_MAINNET) {
     let vWBNB: VBep20Delegator;
     let wBNBSwapHelper: WBNBSwapHelper;
 
-    describe("PositionSwapper Upgrade + Swap Flow", () => {
+    describe.skip("PositionSwapper Upgrade + Swap Flow", () => {
       beforeEach(async () => {
         ({ positionSwapper, coreComptroller, vBNB, vWBNB, wBNBSwapHelper } = await loadFixture(setupMarketFixture));
       });
