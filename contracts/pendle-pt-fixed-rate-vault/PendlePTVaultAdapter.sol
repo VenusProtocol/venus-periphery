@@ -130,25 +130,29 @@ contract PendlePTVaultAdapter is
         if (amount == 0) revert ZeroAmount();
         if (input.tokenIn == address(0)) revert InvalidTokenInput();
 
-        MarketConfig storage config = markets[pendleMarket];
+        uint256 netPtOut;
+        {
+            MarketConfig storage config = markets[pendleMarket];
+            uint256 ptBalanceBefore = IERC20(config.pt).balanceOf(address(this));
 
-        // 1. Pull tokens from user → adapter (accepts any token from Pendle's tokensIn)
-        uint256 balanceBefore = IERC20(input.tokenIn).balanceOf(address(this));
-        IERC20(input.tokenIn).safeTransferFrom(msg.sender, address(this), amount);
-        uint256 received = IERC20(input.tokenIn).balanceOf(address(this)) - balanceBefore;
+            // 1. Pull tokens from user → adapter (accepts any token from Pendle's tokensIn)
+            uint256 balanceBefore = IERC20(input.tokenIn).balanceOf(address(this));
+            IERC20(input.tokenIn).safeTransferFrom(msg.sender, address(this), amount);
+            uint256 received = IERC20(input.tokenIn).balanceOf(address(this)) - balanceBefore;
 
-        // Validate actual received amount matches Pendle's expected input
-        if (input.netTokenIn != received) revert InputAmountMismatch(received, input.netTokenIn);
+            // Validate actual received amount matches Pendle's expected input
+            if (input.netTokenIn != received) revert InputAmountMismatch(received, input.netTokenIn);
 
-        // 2. Swap tokenIn → PT via Pendle Router (Pendle handles aggregator routing if needed)
-        uint256 netPtOut = _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
+            // 2. Swap tokenIn → PT via Pendle Router (Pendle handles aggregator routing if needed)
+            netPtOut = _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
 
-        // 3. Deposit PT into Venus — vTokens go to user
-        netVTokensMinted = _mintVTokens(config, netPtOut);
+            // 3. Deposit PT into Venus — vTokens go to user
+            netVTokensMinted = _mintVTokens(config, netPtOut);
 
-        // 4. Sweep any dust back to user (PT rounding + leftover tokenIn)
-        _sweepDust(config.pt, msg.sender);
-        _sweepDust(input.tokenIn, msg.sender);
+            // 4. Sweep only dust from this transaction back to user (PT rounding + leftover tokenIn)
+            _sweepDust(config.pt, msg.sender, ptBalanceBefore);
+            _sweepDust(input.tokenIn, msg.sender, balanceBefore);
+        }
 
         emit Deposited(pendleMarket, msg.sender, input.tokenIn, amount, netPtOut, netVTokensMinted);
     }
@@ -164,6 +168,8 @@ contract PendlePTVaultAdapter is
         if (msg.value == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
+        uint256 ptBalanceBefore = IERC20(config.pt).balanceOf(address(this));
+        uint256 nativeBalanceBefore = address(this).balance - msg.value;
 
         // Validate calldata consistency
         if (input.netTokenIn != msg.value) revert InputAmountMismatch(msg.value, input.netTokenIn);
@@ -182,11 +188,11 @@ contract PendlePTVaultAdapter is
         // 2. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config, netPtOut);
 
-        // 3. Sweep any PT dust from rounding back to user
-        _sweepDust(config.pt, msg.sender);
+        // 3. Sweep only PT dust from this transaction back to user
+        _sweepDust(config.pt, msg.sender, ptBalanceBefore);
 
-        // 4. Refund any excess native BNB to the caller
-        _refundNativeDust();
+        // 4. Refund only excess native BNB from this transaction to the caller
+        _refundNativeDust(nativeBalanceBefore);
 
         emit Deposited(pendleMarket, msg.sender, input.tokenIn, msg.value, netPtOut, netVTokensMinted);
     }
@@ -221,7 +227,10 @@ contract PendlePTVaultAdapter is
         // 2. Swap PT → tokenOut via Pendle (sent directly to user, Pendle handles routing)
         netTokenOut = _swapPtToToken(config.pt, pendleMarket, ptReceived, output, limit);
 
-        emit Withdrawn(pendleMarket, msg.sender, vTokenAmount, ptReceived, output.tokenOut, netTokenOut);
+        // 3. Sweep only PT dust from this transaction back to user
+        _sweepDust(config.pt, msg.sender, ptBefore);
+
+        emit Withdrawn(pendleMarket, msg.sender, output.tokenOut, vTokenAmount, ptReceived, netTokenOut);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
@@ -249,7 +258,10 @@ contract PendlePTVaultAdapter is
         // 2. Redeem PT 1:1 → tokenOut via Pendle (sent directly to user, Pendle handles routing)
         netTokenOut = _redeemPtToToken(config.pt, config.yt, ptReceived, output);
 
-        emit RedeemedAtMaturity(pendleMarket, msg.sender, vTokenAmount, ptReceived, output.tokenOut, netTokenOut);
+        // 3. Sweep only PT dust from this transaction back to user
+        _sweepDust(config.pt, msg.sender, ptBefore);
+
+        emit RedeemedAtMaturity(pendleMarket, msg.sender, output.tokenOut, vTokenAmount, ptReceived, netTokenOut);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -467,25 +479,28 @@ contract PendlePTVaultAdapter is
     }
 
     /**
-     * @notice Transfers any remaining token balance back to the recipient.
+     * @notice Transfers only the dust accrued during the current transaction back to the recipient.
      * @param token The ERC-20 token address to sweep.
      * @param to The recipient address.
-     * @dev Used to return dust/leftover tokens after swaps. Only transfers if balance > 0.
+     * @param balanceBefore The adapter's token balance snapshot taken before operations began.
+     * @dev Compares current balance against the pre-operation snapshot to sweep only the delta,
+     *      preventing pre-existing balances from leaking to the caller.
      */
-    function _sweepDust(address token, address to) internal {
-        uint256 dust = IERC20(token).balanceOf(address(this));
-        if (dust > 0) {
-            IERC20(token).safeTransfer(to, dust);
+    function _sweepDust(address token, address to, uint256 balanceBefore) internal {
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        if (balance > balanceBefore) {
+            IERC20(token).safeTransfer(to, balance - balanceBefore);
         }
     }
 
     /**
-     * @notice Refunds any remaining native BNB to the caller.
+     * @notice Refunds only the native BNB dust accrued during the current transaction to the caller.
+     * @param balanceBefore The adapter's native balance snapshot taken before operations began.
      */
-    function _refundNativeDust() internal {
-        uint256 bnbDust = address(this).balance;
-        if (bnbDust > 0) {
-            Address.sendValue(payable(msg.sender), bnbDust);
+    function _refundNativeDust(uint256 balanceBefore) internal {
+        uint256 balance = address(this).balance;
+        if (balance > balanceBefore) {
+            Address.sendValue(payable(msg.sender), balance - balanceBefore);
         }
     }
 

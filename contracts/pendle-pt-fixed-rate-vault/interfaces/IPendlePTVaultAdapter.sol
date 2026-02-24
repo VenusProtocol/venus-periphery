@@ -51,17 +51,17 @@ interface IPendlePTVaultAdapter {
      * @notice Emitted when a user deposits tokens and receives vTokens.
      * @param pendleMarket Pendle market address used for the deposit
      * @param user Address of the user who deposited
-     * @param tokenIn The actual token address that was deposited
-     * @param amountIn Amount of input tokens deposited by user
+     * @param tokenIn The input token address deposited by the user
+     * @param amountIn Amount of input tokens deposited
      * @param ptAmount Amount of PT tokens received from Pendle swap
      * @param vTokenAmount Amount of vTokens minted to the user
      */
     event Deposited(
         address indexed pendleMarket,
         address indexed user,
-        address tokenIn,
+        address indexed tokenIn,
         uint256 amountIn,
-        uint256 indexed ptAmount,
+        uint256 ptAmount,
         uint256 vTokenAmount
     );
 
@@ -69,17 +69,17 @@ interface IPendlePTVaultAdapter {
      * @notice Emitted when a user withdraws (before maturity) by selling PT on Pendle AMM.
      * @param pendleMarket Pendle market address used for the withdrawal
      * @param user Address of the user who withdrew
+     * @param tokenOut The output token address received by the user
      * @param vTokenAmount Amount of vTokens redeemed
      * @param ptAmount Amount of PT tokens sold on Pendle
-     * @param tokenOut The actual token address that was received
      * @param amountOut Amount of output tokens received by user
      */
     event Withdrawn(
         address indexed pendleMarket,
         address indexed user,
+        address indexed tokenOut,
         uint256 vTokenAmount,
-        uint256 indexed ptAmount,
-        address tokenOut,
+        uint256 ptAmount,
         uint256 amountOut
     );
 
@@ -87,17 +87,17 @@ interface IPendlePTVaultAdapter {
      * @notice Emitted when a user redeems at or after maturity (1:1 redemption via SY).
      * @param pendleMarket Pendle market address used for the redemption
      * @param user Address of the user who redeemed
+     * @param tokenOut The output token address received by the user
      * @param vTokenAmount Amount of vTokens redeemed
      * @param ptAmount Amount of PT tokens redeemed
-     * @param tokenOut The actual token address that was received
      * @param amountOut Amount of output tokens received by user
      */
     event RedeemedAtMaturity(
         address indexed pendleMarket,
         address indexed user,
+        address indexed tokenOut,
         uint256 vTokenAmount,
-        uint256 indexed ptAmount,
-        address tokenOut,
+        uint256 ptAmount,
         uint256 amountOut
     );
 

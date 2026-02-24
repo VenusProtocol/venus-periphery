@@ -316,9 +316,12 @@ function describeTests() {
       });
 
       it("should revert with InputAmountMismatch when netTokenIn != amount", async () => {
-        const { adapter, user, marketAddress } = await loadFixture(baseFixture);
+        const { adapter, user, slisbnb, marketAddress } = await loadFixture(baseFixture);
         const mismatchedNetTokenIn = parseUnits("2", 18);
         const input = getDummyTokenInput(SLISBNB, mismatchedNetTokenIn);
+
+        // Approve adapter so safeTransferFrom succeeds; the mismatch check triggers after
+        await slisbnb.connect(user).approve(adapter.address, depositAmount);
 
         await expect(adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit))
           .to.be.revertedWithCustomError(adapter, "InputAmountMismatch")

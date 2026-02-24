@@ -263,9 +263,12 @@ export async function getPendlePtToTokenParams(
       swapData: parseSwapData(outputRaw.swapData),
     };
 
-    const limitOrderData = parseLimitOrderData(params[4]);
+    // Use empty limit order data — the API may return signed fills from live
+    // market makers whose nonces/signatures are invalid on a forked chain
+    // (causes "LOP: bad signature"). Pure AMM routing works on forks.
+    const limitOrderData = fallbackLimitOrderData();
 
-    console.log("  Pendle API: fetched PT->token swap params");
+    console.log("  Pendle API: fetched PT->token swap params (limit orders stripped for fork safety)");
     return { tokenOutput, limitOrderData };
   } catch (err: unknown) {
     const axiosErr = err as AxiosError<{ message?: string }>;
