@@ -230,12 +230,14 @@ interface IRelativePositionManager {
     /// @notice Emitted when principal is withdrawn
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
+    /// @param cycleId The cycle ID of the position
     /// @param dsaAsset Address of the DSA asset
     /// @param amount Amount withdrawn
     /// @param remainingPrincipal Remaining principal after withdrawal
     event PrincipalWithdrawn(
         address indexed user,
         address indexed positionAccount,
+        uint256 cycleId,
         address dsaAsset,
         uint256 amount,
         uint256 remainingPrincipal
@@ -382,7 +384,8 @@ interface IRelativePositionManager {
 
     /**
      * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
-     * @dev Repay amount is derived from BPS. Total long validated against BPS (within PROPORTIONAL_CLOSE_TOLERANCE). minAmountOutRepay must be >= calculated repay.
+     * @dev Repay amount is derived from BPS. Total long validated against BPS (within PROPORTIONAL_CLOSE_TOLERANCE).
+     * minAmountOutRepay must be >= calculated repay.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
