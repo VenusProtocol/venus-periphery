@@ -891,25 +891,25 @@ contract RelativePositionManager is
             vTokensMinted = (amountToRedeem * MANTISSA_ONE) / exchangeRate;
         } else {
             // Redeem long underlying from the position account to this contract
+            uint256 balanceBefore = longUnderlying.balanceOf(address(this));
             uint256 err = longVToken.redeemUnderlyingBehalf(positionAccount, amountToRedeem);
             if (err != SUCCESS) revert RedeemBehalfFailed(err);
+            uint256 amountReceived = longUnderlying.balanceOf(address(this)) - balanceBefore;
 
             uint256 amountOut = _performSwap(
                 longUnderlying,
-                amountToRedeem,
+                amountReceived,
                 dsaUnderlying,
                 minAmountOutProfit,
                 swapDataProfit
             );
 
             // Supply the received DSA underlying as additional principal to the same position account.
-            uint256 balanceBefore = dsaVToken.balanceOf(positionAccount);
+            balanceBefore = dsaVToken.balanceOf(positionAccount);
             dsaUnderlying.forceApprove(address(dsaVToken), amountOut);
             uint256 mintError = dsaVToken.mintBehalf(positionAccount, amountOut);
             if (mintError != SUCCESS) revert MintBehalfFailed(mintError);
-            uint256 balanceAfter = dsaVToken.balanceOf(positionAccount) - balanceBefore;
-
-            vTokensMinted = balanceAfter;
+            vTokensMinted = dsaVToken.balanceOf(positionAccount) - balanceBefore;
         }
 
         // Update principal state
