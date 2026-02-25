@@ -580,33 +580,17 @@ contract RelativePositionManager is
             );
         }
 
-        uint256 dsaAmountRedeemed;
         // 2. Second leg: repay remaining short debt with DSA.
-        // When DSA == short use exitSingleAssetLeverage (no swap); else exitLeverage.
-        if (amountToRepaySecond > 0) {
-            dsaAmountRedeemed = dsaAmountToRedeemForSecondSwap;
-            uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
-            if (address(dsaVToken) == address(shortVToken)) {
-                IPositionAccount(positionAccount).exitSingleAssetLeverage(dsaVToken, amountToRepaySecond);
-            } else {
-                IPositionAccount(positionAccount).exitLeverage(
-                    dsaVToken,
-                    dsaAmountToRedeemForSecondSwap,
-                    shortVToken,
-                    amountToRepaySecond,
-                    minAmountOutSecond,
-                    swapDataSecond
-                );
-            }
-            // Reduce suppliedPrincipalVTokens by DSA vTokens burned for this leg, clamped to tracked principal.
-            uint256 burned = vTokensBefore - dsaVToken.balanceOf(positionAccount);
-            if (burned > position.suppliedPrincipalVTokens) {
-                position.suppliedPrincipalVTokens = 0;
-            } else {
-                position.suppliedPrincipalVTokens -= burned;
-            }
-            _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
-        }
+        uint256 dsaAmountRedeemed = _closePositionWithDSA(
+            position,
+            positionAccount,
+            dsaVToken,
+            shortVToken,
+            dsaAmountToRedeemForSecondSwap,
+            amountToRepaySecond,
+            minAmountOutSecond,
+            swapDataSecond
+        );
 
         // Transfer any dust from LM (sent to position account) to user
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
@@ -921,6 +905,66 @@ contract RelativePositionManager is
         // Update principal state
         position.suppliedPrincipalVTokens += vTokensMinted;
         emit ProfitConverted(position.user, positionAccount, amountToRedeem, position.suppliedPrincipalVTokens);
+    }
+
+    /**
+     * @notice Closes a position leg by repaying debt with DSA
+     * @dev Handles both single-asset (DSA == short) and different-asset (DSA != short) cases
+     *      Executes exit, updates principal, and transfers dust
+     * @param position The position storage reference
+     * @param positionAccount The position account address
+     * @param dsaVToken The DSA vToken market
+     * @param shortVToken The short vToken market
+     * @param dsaAmountToRedeem User-supplied DSA amount to redeem (for two-asset case)
+     * @param amountToRepaySecond Amount of short debt to repay
+     * @param minAmountOutSecond Minimum output for swap (two-asset case)
+     * @param swapDataSecond Swap calldata (two-asset case)
+     * @return dsaAmountRedeemed Actual DSA amount redeemed
+     */
+    function _closePositionWithDSA(
+        Position storage position,
+        address positionAccount,
+        IVToken dsaVToken,
+        IVToken shortVToken,
+        uint256 dsaAmountToRedeem,
+        uint256 amountToRepaySecond,
+        uint256 minAmountOutSecond,
+        bytes calldata swapDataSecond
+    ) internal returns (uint256 dsaAmountRedeemed) {
+        if (amountToRepaySecond == 0) return 0;
+
+        // Check if DSA and short assets are the same (same-asset case vs different-asset case)
+        bool isSameAsset = address(dsaVToken) == address(shortVToken);
+        uint256 vTokensBefore = dsaVToken.balanceOf(positionAccount);
+
+        // Execute exit operation based on whether DSA == short (same-asset case)
+        if (isSameAsset) {
+            IPositionAccount(positionAccount).exitSingleAssetLeverage(dsaVToken, amountToRepaySecond);
+        } else {
+            IPositionAccount(positionAccount).exitLeverage(
+                dsaVToken,
+                dsaAmountToRedeem,
+                shortVToken,
+                amountToRepaySecond,
+                minAmountOutSecond,
+                swapDataSecond
+            );
+        }
+
+        // Calculate amount redeemed and update principal
+        uint256 vTokensBurned = vTokensBefore - dsaVToken.balanceOf(positionAccount);
+        dsaAmountRedeemed = isSameAsset
+            ? (vTokensBurned * dsaVToken.exchangeRateCurrent()) / MANTISSA_ONE
+            : dsaAmountToRedeem;
+
+        // Reduce suppliedPrincipalVTokens by DSA vTokens burned, clamped to tracked principal
+        if (vTokensBurned > position.suppliedPrincipalVTokens) {
+            position.suppliedPrincipalVTokens = 0;
+        } else {
+            position.suppliedPrincipalVTokens -= vTokensBurned;
+        }
+
+        _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
     }
 
     /**
