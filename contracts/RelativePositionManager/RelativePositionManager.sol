@@ -1284,8 +1284,9 @@ contract RelativePositionManager is
             uint256 maxExpectedShortToRepay
         ) = _getProportionalCloseAmounts(position, closeFractionBps);
 
-        // Revert when expected long for this close fraction is zero but user passed non-zero long to redeem.
-        if (expectedLongToWithdraw == 0 && longAmountToRedeemForFirstSwap != 0) revert InvalidLongAmountToRedeem();
+        // Revert when expected long for this close fraction is zero but user passed non-zero long to redeem or repay.
+        if (expectedLongToWithdraw == 0 && (longAmountToRedeemForFirstSwap != 0 || shortAmountToRepayForFirstSwap != 0))
+            revert InvalidLongAmountToRedeem();
 
         // Revert if first-leg long to redeem is outside the proportional close tolerance band.
         if (longAmountToRedeemForFirstSwap < minLongToWithdraw || longAmountToRedeemForFirstSwap > maxLongToWithdraw)
@@ -1298,10 +1299,8 @@ contract RelativePositionManager is
             amountToRepaySecond = 0;
         } else {
             amountToRepaySecond = expectedShortToRepay - shortAmountToRepayForFirstSwap;
-        }
 
-        // Validate and optionally bump second leg.
-        if (amountToRepaySecond > 0) {
+            // Validate and optionally bump second leg.
             if (minAmountOutSecond < amountToRepaySecond) revert MinAmountOutSecondBelowDebt();
             // For 100% close, add tolerance so we send slightly more to cover interest during flash loan
             if (closeFractionBps == PROPORTIONAL_CLOSE_MAX) {
