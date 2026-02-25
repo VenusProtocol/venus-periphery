@@ -1097,13 +1097,15 @@ contract RelativePositionManager is
         (, uint256 dsaCF, ) = COMPTROLLER.markets(address(dsaVToken));
         (, uint256 longCF, ) = COMPTROLLER.markets(address(longVToken));
 
-        // Calculate nominalCapitalUtilized borrowValueUSD/effectiveLeverage
-        utilization.nominalCapitalUtilized = (values.borrowValueUSD * MANTISSA_ONE) / position.effectiveLeverage;
+        // Calculate nominalCapitalUtilized borrowValueUSD/effectiveLeverage (rounded up for conservative estimate)
+        utilization.nominalCapitalUtilized = ceilDiv(values.borrowValueUSD * MANTISSA_ONE, position.effectiveLeverage);
 
-        // Calculate actualCapitalUtilized (borrowValueUSD - (longValueUSD * longCF)) / dsaCF
-        utilization.actualCapitalUtilized = values.borrowValueUSD > (values.longValueUSD * longCF) / MANTISSA_ONE
-            ? ((values.borrowValueUSD - (values.longValueUSD * longCF) / MANTISSA_ONE) * MANTISSA_ONE) / dsaCF
+        // Calculate actualCapitalUtilized: (borrowValueUSD - longValueUSD * longCF) / dsaCF (rounded up for conservative estimate)
+        uint256 longCollateralValueUSD = (values.longValueUSD * longCF) / MANTISSA_ONE;
+        uint256 excessBorrowUSD = values.borrowValueUSD > longCollateralValueUSD
+            ? values.borrowValueUSD - longCollateralValueUSD
             : 0;
+        utilization.actualCapitalUtilized = excessBorrowUSD > 0 ? ceilDiv(excessBorrowUSD * MANTISSA_ONE, dsaCF) : 0;
 
         utilization.finalCapitalUtilized = max(utilization.actualCapitalUtilized, utilization.nominalCapitalUtilized);
         utilization.finalCapitalUtilized = min(values.suppliedPrincipalUSD, utilization.finalCapitalUtilized);
@@ -1111,7 +1113,7 @@ contract RelativePositionManager is
         // Calculate available capital in USD (finalCapitalUtilized is already capped by suppliedPrincipalVTokens)
         utilization.availableCapitalUSD = values.suppliedPrincipalUSD - utilization.finalCapitalUtilized;
 
-        // Calculate withdrawable amount in DSA token terms
+        // Calculate withdrawable amount in DSA token terms (rounded down for conservative estimate)
         utilization.withdrawableAmount = (utilization.availableCapitalUSD * MANTISSA_ONE) / values.dsaPrice;
     }
 
@@ -1466,5 +1468,15 @@ contract RelativePositionManager is
      */
     function min(uint256 a, uint256 b) internal pure returns (uint256) {
         return a <= b ? a : b;
+    }
+
+    /**
+     * @notice Performs ceiling division (rounding up) for two unsigned integers
+     * @param a Numerator
+     * @param b Denominator
+     * @return result Ceiling of a / b
+     */
+    function ceilDiv(uint256 a, uint256 b) internal pure returns (uint256) {
+        return (a + b - 1) / b;
     }
 }
