@@ -99,6 +99,9 @@ contract PositionAccount is Initializable, IPositionAccount {
     /// @notice Thrown when genericCalls is invoked with invalid calls length (empty or lengths mismatch)
     error InvalidCallsLength();
 
+    /// @notice Thrown when exitMarket fails with a non-zero error code
+    error ExitMarketFailed(uint256 err);
+
     /**
      * @notice Modifier to restrict access to only the RelativePositionManager
      */
@@ -244,6 +247,18 @@ contract PositionAccount is Initializable, IPositionAccount {
             collateralMarket,
             collateralAmountToFlashLoan
         );
+    }
+
+    /**
+     * @notice Exits a market by calling comptroller.exitMarket with this position account as the sender
+     * @dev Only callable by the RelativePositionManager. The position account directly calls the Comptroller.
+     * @param vTokenToExit Address of the vToken market to exit
+     * @custom:error UnauthorizedCaller if caller is not the RelativePositionManager.
+     * @custom:error ExitMarketFailed if the exit market operation fails.
+     */
+    function exitMarket(address vTokenToExit) external onlyRelativePositionManager {
+        uint256 err = COMPTROLLER.exitMarket(vTokenToExit);
+        if (err != 0) revert ExitMarketFailed(err);
     }
 
     /**

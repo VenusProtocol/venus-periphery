@@ -703,6 +703,12 @@ contract RelativePositionManager is
         position.isActive = false;
         position.suppliedPrincipalVTokens = 0;
 
+        // Exit the DSA market from position account (unless DSA is the long asset)
+        // DSA market is guaranteed to be entered during activatePosition, so no membership check needed
+        if (address(dsaVToken) != address(longVToken)) {
+            IPositionAccount(positionAccount).exitMarket(address(dsaVToken));
+        }
+
         // Withdraw any remaining DSA principal to user (for complete withdraw use redeemBehalf instead of redeemUnderlyingToUser)
         uint256 underlyingRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
         emit PositionDeactivated(msg.sender, positionAccount, position.cycleId, address(dsaVToken), underlyingRedeemed);

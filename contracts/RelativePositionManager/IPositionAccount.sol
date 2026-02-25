@@ -74,6 +74,13 @@ interface IPositionAccount {
     function transferDustToOwner(address token) external;
 
     /**
+     * @notice Exits a market by calling comptroller.exitMarket with this position account as the sender
+     * @dev Only callable by the RelativePositionManager. The position account directly calls the Comptroller.
+     * @param vTokenToExit Address of the vToken market to exit
+     */
+    function exitMarket(address vTokenToExit) external;
+
+    /**
      * @notice Executes multiple generic calls to external contracts on behalf of the position account
      * @dev Only callable by the authorized RelativePositionManager contract.
      * @param targets Array of target contract addresses

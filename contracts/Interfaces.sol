@@ -63,6 +63,8 @@ interface IComptroller {
 
     function enterMarket(address user, address vToken) external returns (uint256);
 
+    function exitMarket(address vToken) external returns (uint256);
+
     function liquidationIncentiveMantissa() external view returns (uint256);
 
     function vaiController() external view returns (address);
