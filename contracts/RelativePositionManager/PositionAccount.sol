@@ -17,6 +17,12 @@ import { IPositionAccount } from "./IPositionAccount.sol";
  *      It allows the RelativePositionManager to execute calls on behalf of the user.
  *      The constructor sets immutable values shared across all clones.
  *      The initialize function sets clone-specific data.
+ *
+ *      DESIGN INVARIANT - External Token Transfers & Accounting Drift:
+ *      Do not call mintBehalf or perform direct transfers to this contract. Use only the RelativePositionManager.
+ *      External transfers to this account are not accurately tracked by the manager, causing accounting drift.
+ *      No funds are lost, only accounting can drift. All operations must be routed through the RelativePositionManager
+ *      to maintain accurate accounting.
  */
 contract PositionAccount is Initializable, IPositionAccount {
     using AddressUpgradeable for address;

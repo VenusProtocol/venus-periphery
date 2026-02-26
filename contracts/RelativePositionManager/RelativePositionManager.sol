@@ -237,6 +237,8 @@ contract RelativePositionManager is
     /**
      * @notice Supplies additional principal to an active position
      * @dev Can be called multiple times to increase collateral. DSA is taken from the position (set on activation).
+     *      External transfers to PositionAccount are not included in the design.
+     *      All transfers to PositionAccount must be routed through this RPM contract only.
      * @param longVToken The vToken market address for the long asset
      * @param shortVToken The vToken market address for the short asset
      * @param amount Amount of DSA underlying to supply
@@ -1337,6 +1339,10 @@ contract RelativePositionManager is
      * @dev When DSA != long asset, all DSA underlying on the position account is considered principal,
      *      so we can read it directly. When DSA == long asset, we must use the stored principal vTokens
      *      to avoid counting long collateral as principal.
+     *
+     *      DESIGN INVARIANT: External transfers to PositionAccount are not included in the design.
+     *      All transfers to PositionAccount must be routed through this contract only.
+     *
      * @param position The position data (holds suppliedPrincipalVTokens and positionAccount)
      * @return balance of principal in underlying units
      */
