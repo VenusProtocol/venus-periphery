@@ -92,6 +92,10 @@ interface IRelativePositionManager {
     /// @param errorCode Error code returned by the vToken mintBehalf call
     error MintBehalfFailed(uint256 errorCode);
 
+    /// @custom:error ZeroVTokensMinted when supplied amount rounds down to 0 vTokens due to exchange rate
+    /// (e.g., supplying 1 wei when vToken exchange rate > 1e18). Ensure amount is large enough to mint at least 1 vToken.
+    error ZeroVTokensMinted();
+
     /// @custom:error EnterMarketFailed when entering market on behalf fails
     error EnterMarketFailed(uint256 errorCode);
 

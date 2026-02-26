@@ -262,10 +262,11 @@ contract RelativePositionManager is
      *      All transfers to PositionAccount must be routed through this RPM contract only.
      * @param longVToken The vToken market address for the long asset
      * @param shortVToken The vToken market address for the short asset
-     * @param amount Amount of DSA underlying to supply
+     * @param amount Amount of DSA underlying to supply (must be large enough to mint at least 1 vToken)
      * @custom:error Throw ZeroAmount if amount is zero.
      * @custom:error Throw PositionNotActive if the position is not active.
      * @custom:error Throw MintBehalfFailed if minting supplied principal on behalf fails.
+     * @custom:error Throw ZeroVTokensMinted if supplied amount rounds down to 0 vTokens Minted.
      * @custom:event Emits PrincipalSupplied event.
      */
     function supplyPrincipal(
@@ -297,6 +298,7 @@ contract RelativePositionManager is
      * @custom:error Throw PositionAlreadyExists if the position is already active.
      * @custom:error Throw EnterMarketFailed if entering the DSA market on behalf fails.
      * @custom:error Throw MintBehalfFailed if minting initial principal fails.
+     * @custom:error Throw ZeroVTokensMinted if initialPrincipal rounds down to 0 vTokens if Minted.
      * @custom:event Emits PositionActivated or PositionAccountDeployed (if new account) and possibly PrincipalSupplied.
      */
     function activatePosition(
@@ -369,6 +371,7 @@ contract RelativePositionManager is
      * @custom:error Throw PositionNotActive if the position is not active.
      * @custom:error Throw InsufficientPrincipal if no principal exists and additionalPrincipal is zero.
      * @custom:error Throw MintBehalfFailed if additionalPrincipal minting on behalf fails.
+     * @custom:error Throw ZeroVTokensMinted if additionalPrincipal rounds down to 0 vTokens if Minted.
      * @custom:error Throw InvalidOraclePrice if pricing data is unavailable while computing borrow limits.
      * @custom:error Throw BorrowAmountExceedsMaximum if shortAmount exceeds max allowed borrow.
      * @custom:event Emits PositionOpened event (and PrincipalSupplied if additionalPrincipal > 0).
@@ -450,6 +453,7 @@ contract RelativePositionManager is
      * @custom:error Throw TokenSwapCallFailed if the profit swap helper call fails.
      * @custom:error Throw SlippageExceeded if profit swap output is below minAmountOutProfit.
      * @custom:error Throw MintBehalfFailed if minting converted profit as principal fails.
+     * @custom:error Throw ZeroVTokensMinted if profit swap output rounds down to 0 vTokens if Minted.
      * @custom:error Throw PositionNotFullyClosed if 100% close is used but short debt remains (e.g. exitLeverage did not repay fully).
      * @custom:event Emits ProfitConverted and PositionClosed events.
      */
@@ -923,6 +927,8 @@ contract RelativePositionManager is
             uint256 mintError = dsaVToken.mintBehalf(positionAccount, amountOut);
             if (mintError != SUCCESS) revert MintBehalfFailed(mintError);
             vTokensMinted = dsaVToken.balanceOf(positionAccount) - balanceBefore;
+            // Ensure mint actually produced vTokens
+            if (vTokensMinted == 0) revert ZeroVTokensMinted();
         }
 
         // Update principal state
@@ -1093,6 +1099,8 @@ contract RelativePositionManager is
         uint256 mintError = dsaVToken.mintBehalf(positionAccount, amount);
         if (mintError != SUCCESS) revert MintBehalfFailed(mintError);
         uint256 vTokensMinted = dsaVToken.balanceOf(positionAccount) - balanceBefore;
+        // Ensure mint actually produced vTokens
+        if (vTokensMinted == 0) revert ZeroVTokensMinted();
         position.suppliedPrincipalVTokens += vTokensMinted;
 
         emit PrincipalSupplied(
