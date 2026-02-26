@@ -126,11 +126,14 @@ interface IRelativePositionManager {
     /// @custom:error PositionAccountImplementationNotSet when trying to deploy or compute position accounts before implementation is configured
     error PositionAccountImplementationNotSet();
 
-    /// @custom:error SamePositionAccountImplementation when setter is called with the current implementation address
-    error SamePositionAccountImplementation();
-
     /// @custom:error PositionAccountImplementationLocked when PositionAccountImplementation is already locked and cannot be changed
     error PositionAccountImplementationLocked();
+
+    /// @custom:error SameProportionalCloseTolerance when setter is called with the current tolerance value
+    error SameProportionalCloseTolerance();
+
+    /// @custom:error InvalidProportionalCloseTolerance when tolerance value is invalid (zero)
+    error InvalidProportionalCloseTolerance();
 
     /// @custom:error ProportionalCloseAmountOutOfTolerance when user-provided close amounts are not within 1% of BPS-derived expected amounts
     error ProportionalCloseAmountOutOfTolerance();
@@ -293,6 +296,11 @@ interface IRelativePositionManager {
     /// @notice Emitted when the PositionAccount implementation address is set (can only be set once)
     /// @param implementation PositionAccount implementation address
     event PositionAccountImplementationSet(address indexed implementation);
+
+    /// @notice Emitted when the proportional close tolerance is updated
+    /// @param oldTolerance Previous tolerance value (in basis points)
+    /// @param newTolerance New tolerance value (in basis points)
+    event ProportionalCloseToleranceUpdated(uint256 indexed oldTolerance, uint256 indexed newTolerance);
 
     /// @notice Emitted when a new PositionAccount clone is deployed for a user and asset pair
     /// @param user Owner of the position account

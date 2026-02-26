@@ -40,18 +40,18 @@ contract RelativePositionManager is
     /// @dev Minimum leverage ratio (1x)
     uint256 private constant MIN_LEVERAGE = MANTISSA_ONE;
 
-    /// @dev Proportional close in percentage: 100 = 100%, 1 = 1% minimum
-    uint256 private constant PROPORTIONAL_CLOSE_MIN = 1;
-    uint256 private constant PROPORTIONAL_CLOSE_MAX = 100;
-
-    /// @dev Tolerance for proportional close: 1 = 1% margin of error
-    uint256 private constant PROPORTIONAL_CLOSE_TOLERANCE = 2;
+    /// @dev Proportional close in basis points: 10000 = 100%, 1 = 0.01% minimum
+    uint256 private constant PROPORTIONAL_CLOSE_MIN = 1; // 0.01%
+    uint256 private constant PROPORTIONAL_CLOSE_MAX = 10000; // 100%
 
     /// @notice The Venus comptroller contract
     IComptroller public immutable COMPTROLLER;
 
     /// @notice The leverage strategies manager contract
     LeverageStrategiesManager public immutable LEVERAGE_MANAGER;
+
+    /// @notice Tolerance for proportional close (in basis points): 100 = 1% margin of error (governance-controlled)
+    uint256 public proportionalCloseTolerance;
 
     /// @notice Implementation contract for PositionAccount clones (settable via governance, can only be set once)
     address public POSITION_ACCOUNT_IMPLEMENTATION;
@@ -76,7 +76,7 @@ contract RelativePositionManager is
      * variables without shifting down storage in the inheritance chain.
      * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps
      */
-    uint256[45] private __gap;
+    uint256[44] private __gap;
 
     /**
      * @notice Contract constructor
@@ -103,6 +103,7 @@ contract RelativePositionManager is
         __AccessControlled_init(accessControlManager_);
         __ReentrancyGuard_init();
         __Pausable_init();
+        proportionalCloseTolerance = 100; // 1% default tolerance
     }
 
     /**
@@ -137,12 +138,31 @@ contract RelativePositionManager is
         _checkAccessAllowed("setPositionAccountImplementation(address)");
 
         if (isPositionAccountImplementationLocked) revert PositionAccountImplementationLocked();
-
         if (positionAccountImpl == address(0)) revert ZeroAddress();
 
         isPositionAccountImplementationLocked = true;
         POSITION_ACCOUNT_IMPLEMENTATION = positionAccountImpl;
         emit PositionAccountImplementationSet(positionAccountImpl);
+    }
+
+    /**
+     * @notice Sets the proportional close tolerance (in basis points)
+     * @dev Callable only by governance via AccessControlManager. 100 bps = 1%.
+     * @param newTolerance New tolerance value in basis points
+     * @custom:error Throw InvalidProportionalCloseTolerance if tolerance is zero.
+     * @custom:error Throw SameProportionalCloseTolerance if tolerance is unchanged.
+     * @custom:event Emits ProportionalCloseToleranceUpdated event.
+     */
+    function setProportionalCloseTolerance(uint256 newTolerance) external {
+        _checkAccessAllowed("setProportionalCloseTolerance(uint256)");
+        if (newTolerance < PROPORTIONAL_CLOSE_MIN || newTolerance > PROPORTIONAL_CLOSE_MAX)
+            revert InvalidProportionalCloseTolerance();
+
+        uint256 oldTolerance = proportionalCloseTolerance;
+        if (oldTolerance == newTolerance) revert SameProportionalCloseTolerance();
+
+        proportionalCloseTolerance = newTolerance;
+        emit ProportionalCloseToleranceUpdated(oldTolerance, newTolerance);
     }
 
     /**
@@ -1204,15 +1224,15 @@ contract RelativePositionManager is
         expectedShortToRepay = (shortDebt * closeFractionBps) / PROPORTIONAL_CLOSE_MAX;
 
         minLongToWithdraw =
-            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX - PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX - proportionalCloseTolerance)) / PROPORTIONAL_CLOSE_MAX;
         maxLongToWithdraw =
-            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+            (expectedLongToWithdraw * (PROPORTIONAL_CLOSE_MAX + proportionalCloseTolerance)) / PROPORTIONAL_CLOSE_MAX;
 
         // Cap at actual long collateral balance to prevent out-of-band values
         maxLongToWithdraw = min(maxLongToWithdraw, longBalance);
 
         maxExpectedShortToRepay =
-            (expectedShortToRepay * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) / PROPORTIONAL_CLOSE_MAX;
+            (expectedShortToRepay * (PROPORTIONAL_CLOSE_MAX + proportionalCloseTolerance)) / PROPORTIONAL_CLOSE_MAX;
     }
 
     /**
@@ -1308,7 +1328,7 @@ contract RelativePositionManager is
             // For 100% close, add tolerance so we send slightly more to cover interest during flash loan
             if (closeFractionBps == PROPORTIONAL_CLOSE_MAX) {
                 amountToRepaySecond =
-                    (amountToRepaySecond * (PROPORTIONAL_CLOSE_MAX + PROPORTIONAL_CLOSE_TOLERANCE)) /
+                    (amountToRepaySecond * (PROPORTIONAL_CLOSE_MAX + proportionalCloseTolerance)) /
                     PROPORTIONAL_CLOSE_MAX;
             }
         }
@@ -1460,7 +1480,7 @@ contract RelativePositionManager is
         if (cfL >= MANTISSA_ONE) revert InvalidCollateralFactor();
 
         // (1 - f) in mantissa: f = tolerance (slippage)
-        uint256 friction = (PROPORTIONAL_CLOSE_TOLERANCE * MANTISSA_ONE) / PROPORTIONAL_CLOSE_MAX;
+        uint256 friction = (proportionalCloseTolerance * MANTISSA_ONE) / PROPORTIONAL_CLOSE_MAX;
         uint256 oneMinusF = MANTISSA_ONE - friction;
         uint256 denom = MANTISSA_ONE - (cfL * oneMinusF) / MANTISSA_ONE; // 1 - CF_l * (1 - f)
         if (denom == 0) revert InvalidCollateralFactor();
