@@ -53,8 +53,11 @@ contract RelativePositionManager is
     /// @notice The leverage strategies manager contract
     LeverageStrategiesManager public immutable LEVERAGE_MANAGER;
 
-    /// @notice Implementation contract for PositionAccount clones (settable via governance)
+    /// @notice Implementation contract for PositionAccount clones (settable via governance, can only be set once)
     address public POSITION_ACCOUNT_IMPLEMENTATION;
+
+    /// @notice Lock flag to prevent changing POSITION_ACCOUNT_IMPLEMENTATION after it's set
+    bool public isPositionAccountImplementationLocked;
 
     /// @notice Counter / next index for newly added DSA vTokens (also equals current count)
     uint8 public dsaVTokenIndexCounter;
@@ -121,27 +124,25 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Updates the implementation contract used for PositionAccount clones
+     * @notice Sets the implementation contract used for PositionAccount clones (can be set only once)
      * @dev Callable only by governance via AccessControlManager. Must be set before any positions are activated.
+     *      Due to circular RPM-PA dependency, cannot make POSITION_ACCOUNT_IMPLEMENTATION immutable.
+     *      Instead, a lock flag prevents changes after initial setup, achieving the same effect.
      * @param positionAccountImpl Implementation contract for PositionAccount EIP-1167 clones
      * @custom:error Throw ZeroAddress if positionAccountImpl is zero.
-     * @custom:error Throw SamePositionAccountImplementation if the implementation is unchanged.
-     * @custom:event Emits PositionAccountImplementationUpdated event.
+     * @custom:error Throw PositionAccountImplementationLocked if already set.
+     * @custom:event Emits PositionAccountImplementationSet event.
      */
     function setPositionAccountImplementation(address positionAccountImpl) external {
         _checkAccessAllowed("setPositionAccountImplementation(address)");
 
-        if (positionAccountImpl == address(0)) {
-            revert ZeroAddress();
-        }
+        if (isPositionAccountImplementationLocked) revert PositionAccountImplementationLocked();
 
-        address oldImpl = POSITION_ACCOUNT_IMPLEMENTATION;
-        if (oldImpl == positionAccountImpl) {
-            revert SamePositionAccountImplementation();
-        }
+        if (positionAccountImpl == address(0)) revert ZeroAddress();
 
+        isPositionAccountImplementationLocked = true;
         POSITION_ACCOUNT_IMPLEMENTATION = positionAccountImpl;
-        emit PositionAccountImplementationUpdated(oldImpl, positionAccountImpl);
+        emit PositionAccountImplementationSet(positionAccountImpl);
     }
 
     /**

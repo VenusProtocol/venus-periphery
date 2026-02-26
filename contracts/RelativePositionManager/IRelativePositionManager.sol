@@ -129,6 +129,9 @@ interface IRelativePositionManager {
     /// @custom:error SamePositionAccountImplementation when setter is called with the current implementation address
     error SamePositionAccountImplementation();
 
+    /// @custom:error PositionAccountImplementationLocked when PositionAccountImplementation is already locked and cannot be changed
+    error PositionAccountImplementationLocked();
+
     /// @custom:error ProportionalCloseAmountOutOfTolerance when user-provided close amounts are not within 1% of BPS-derived expected amounts
     error ProportionalCloseAmountOutOfTolerance();
 
@@ -287,10 +290,9 @@ interface IRelativePositionManager {
     /// @param active New active flag (true to allow new activations, false to block them)
     event DSAVTokenActiveUpdated(address indexed dsaVToken, uint8 index, bool active);
 
-    /// @notice Emitted when the PositionAccount implementation address is updated
-    /// @param oldImplementation Previous implementation address (zero if first set)
-    /// @param newImplementation New implementation address
-    event PositionAccountImplementationUpdated(address indexed oldImplementation, address indexed newImplementation);
+    /// @notice Emitted when the PositionAccount implementation address is set (can only be set once)
+    /// @param implementation PositionAccount implementation address
+    event PositionAccountImplementationSet(address indexed implementation);
 
     /// @notice Emitted when a new PositionAccount clone is deployed for a user and asset pair
     /// @param user Owner of the position account
