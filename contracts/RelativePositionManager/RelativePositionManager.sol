@@ -149,7 +149,7 @@ contract RelativePositionManager is
      * @notice Sets the proportional close tolerance (in basis points)
      * @dev Callable only by governance via AccessControlManager. 100 bps = 1%.
      * @param newTolerance New tolerance value in basis points
-     * @custom:error Throw InvalidProportionalCloseTolerance if tolerance is zero.
+     * @custom:error Throw InvalidProportionalCloseTolerance if tolerance is outside [1, 10000].
      * @custom:error Throw SameProportionalCloseTolerance if tolerance is unchanged.
      * @custom:event Emits ProportionalCloseToleranceUpdated event.
      */
@@ -230,16 +230,32 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Activates and opens a position in a single transaction
-     * @dev Runs activatePosition flow first, then openPosition flow.
+     * @notice Opens a leveraged position for the first time (combines activation + opening in one call)
+     * @dev Runs _activatePosition flow first, then _openPosition flow. Deploys a new PositionAccount contract
+     *      if one doesn't exist for this user/asset combination. Supplies required initial principal during activation,
+     *      then immediately opens/borrows with shortAmount. Emits both PositionActivated and PositionOpened events.
      * @param longVToken The vToken market address for the asset to long
      * @param shortVToken The vToken market address for the asset to short
      * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
-     * @param initialPrincipal initial principal amount to supply during activation
-     * @param effectiveLeverage The target leverage ratio for this position
+     * @param initialPrincipal Required initial principal amount to supply during activation (must be > 0)
+     * @param effectiveLeverage The target leverage ratio for this position (in mantissa, e.g., 2e18 = 2x leverage)
      * @param shortAmount Amount to borrow in shortAsset terms
      * @param minLongAmount Minimum amount of long asset expected from swap
      * @param swapData Swap instructions for converting shortAsset to longAsset
+     * @custom:error Throw InsufficientPrincipal if initialPrincipal is zero.
+     * @custom:error Throw ZeroAddress if longVToken or shortVToken is zero.
+     * @custom:error Throw SameMarketNotAllowed if long and short vTokens are identical.
+     * @custom:error Throw AssetNotListed if a market is not listed.
+     * @custom:error Throw InvalidDSA if dsaIndex is not Valid, or DSAInactive if the DSA is inactive.
+     * @custom:error Throw InvalidLeverage if effectiveLeverage is out of range.
+     * @custom:error Throw PositionAlreadyExists if the position is already active.
+     * @custom:error Throw EnterMarketFailed if entering the DSA market on behalf fails.
+     * @custom:error Throw MintBehalfFailed if minting initialPrincipal fails.
+     * @custom:error Throw ZeroVTokensMinted if initialPrincipal rounds down to 0 vTokens due to exchange rate.
+     * @custom:error Throw ZeroShortAmount if shortAmount is zero.
+     * @custom:error Throw InvalidOraclePrice if pricing data is unavailable while computing borrow limits.
+     * @custom:error Throw BorrowAmountExceedsMaximum if shortAmount exceeds max allowed borrow.
+     * @custom:event Emits PositionAccountDeployed (if new account), PositionActivated, PrincipalSupplied, and PositionOpened.
      */
     function activateAndOpenPosition(
         address longVToken,
@@ -250,9 +266,63 @@ contract RelativePositionManager is
         uint256 shortAmount,
         uint256 minLongAmount,
         bytes calldata swapData
-    ) external whenNotPaused {
-        activatePosition(longVToken, shortVToken, dsaIndex, initialPrincipal, effectiveLeverage);
-        openPosition(IVToken(longVToken), IVToken(shortVToken), 0, shortAmount, minLongAmount, swapData);
+    ) external nonReentrant whenNotPaused {
+        _activatePosition(longVToken, shortVToken, dsaIndex, initialPrincipal, effectiveLeverage);
+        _openPosition(IVToken(longVToken), IVToken(shortVToken), 0, shortAmount, minLongAmount, swapData);
+
+        Position storage position = positions[msg.sender][longVToken][shortVToken];
+        emit PositionOpened(
+            msg.sender,
+            position.positionAccount,
+            position.cycleId,
+            longVToken,
+            shortVToken,
+            position.dsaVToken,
+            shortAmount,
+            initialPrincipal
+        );
+    }
+
+    /**
+     * @notice Scales an existing position by adding additional leverage (borrow + swap to long)
+     * @dev Can only be called on an already-active position. Optionally supply additional principal
+     *      via additionalPrincipal; otherwise uses existing principal. Validates that shortAmount doesn't
+     *      exceed the maximum allowed based on capital utilization.
+     * @param longVToken The vToken market for the asset to long
+     * @param shortVToken The vToken market for the asset to short
+     * @param additionalPrincipal Additional principal to supply this call (0 if none)
+     * @param shortAmount Amount to borrow in shortAsset terms (must not exceed max calculated borrow)
+     * @param minLongAmount Minimum amount of long asset expected from swap (protects against slippage)
+     * @param swapData Swap instructions for converting shortAsset to longAsset
+     * @custom:error Throw ZeroShortAmount if shortAmount is zero.
+     * @custom:error Throw PositionNotActive if the position is not active.
+     * @custom:error Throw MintBehalfFailed if additionalPrincipal minting on behalf fails.
+     * @custom:error Throw ZeroVTokensMinted if additionalPrincipal rounds down to 0 vTokens if Minted.
+     * @custom:error Throw InvalidOraclePrice if pricing data is unavailable while computing borrow limits.
+     * @custom:error Throw BorrowAmountExceedsMaximum if shortAmount exceeds max allowed borrow.
+     * @custom:event Emits PositionScaled event (and PrincipalSupplied if additionalPrincipal > 0).
+     */
+    function scalePosition(
+        IVToken longVToken,
+        IVToken shortVToken,
+        uint256 additionalPrincipal,
+        uint256 shortAmount,
+        uint256 minLongAmount,
+        bytes calldata swapData
+    ) external nonReentrant whenNotPaused {
+        _openPosition(longVToken, shortVToken, additionalPrincipal, shortAmount, minLongAmount, swapData);
+
+        Position storage position = positions[msg.sender][address(longVToken)][address(shortVToken)];
+        emit PositionScaled(
+            msg.sender,
+            position.positionAccount,
+            position.cycleId,
+            address(longVToken),
+            address(shortVToken),
+            position.dsaVToken,
+            shortAmount,
+            additionalPrincipal
+        );
     }
 
     /**
@@ -277,151 +347,6 @@ contract RelativePositionManager is
         if (amount == 0) revert ZeroAmount();
         Position storage position = _getActivePosition(msg.sender, longVToken, shortVToken);
         _supplyPrincipalToPositionAccount(position, IVToken(position.dsaVToken), amount);
-    }
-
-    /**
-     * @notice Activates a position account for the user with specified asset pair and DSA
-     * @dev Deploys a new PositionAccount contract if one doesn't exist for this user/asset combination.
-     *      The effective leverage must be set during activation and will be used to validate borrow amounts
-     *      It can only be changed when the position is inactive, by starting a new activation cycle.
-     * @param longVToken The vToken market address for the asset to long
-     * @param shortVToken The vToken market address for the asset to short
-     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
-     * @param initialPrincipal Optional initial principal amount to supply
-     * @param effectiveLeverage The target leverage ratio for this position (in mantissa, e.g., 2e18 = 2x leverage)
-     * @custom:error Throw ZeroAddress if longVToken or shortVToken is zero.
-     * @custom:error Throw SameMarketNotAllowed if long and short vTokens are identical.
-     * @custom:error Throw AssetNotListed if a market is not listed.
-     * @custom:error Throw InvalidDSA if dsaIndex is invalid or market not listed.
-     * @custom:error Throw DSAInactive if the chosen DSA vToken is configured but not active for new activations.
-     * @custom:error Throw InvalidLeverage if effectiveLeverage is out of range.
-     * @custom:error Throw PositionAlreadyExists if the position is already active.
-     * @custom:error Throw EnterMarketFailed if entering the DSA market on behalf fails.
-     * @custom:error Throw MintBehalfFailed if minting initial principal fails.
-     * @custom:error Throw ZeroVTokensMinted if initialPrincipal rounds down to 0 vTokens if Minted.
-     * @custom:event Emits PositionActivated or PositionAccountDeployed (if new account) and possibly PrincipalSupplied.
-     */
-    function activatePosition(
-        address longVToken,
-        address shortVToken,
-        uint8 dsaIndex,
-        uint256 initialPrincipal,
-        uint256 effectiveLeverage
-    ) public nonReentrant whenNotPaused {
-        _checkMarketListed(longVToken);
-        _checkMarketListed(shortVToken);
-        IVToken dsaVToken = _getValidatedDSAVToken(dsaIndex);
-        _checkSameMarket(longVToken, shortVToken);
-
-        // Validate requested leverage against [MIN_LEVERAGE, maxLeverage]; λ_max = CF_c / (1 - CF_l * (1 - f))
-        uint256 maxLeverage = _getMaxLeverage(dsaVToken, longVToken);
-        if (effectiveLeverage < MIN_LEVERAGE || effectiveLeverage > maxLeverage) {
-            revert InvalidLeverage();
-        }
-
-        Position storage position = positions[msg.sender][longVToken][shortVToken];
-        if (position.isActive) {
-            revert PositionAlreadyExists();
-        }
-
-        // Deploy position account if it doesn't exist (sets immutable fields in _deployPositionAccount)
-        if (position.positionAccount == address(0)) {
-            _deployPositionAccount(msg.sender, longVToken, shortVToken);
-        }
-
-        // Increment cycle ID on each activation and set mutable fields
-        position.cycleId++;
-        position.isActive = true;
-        position.dsaIndex = dsaIndex;
-        position.dsaVToken = address(dsaVToken);
-        position.effectiveLeverage = effectiveLeverage;
-
-        // Enter DSA market on behalf of position account (to use as collateral)
-        _validateAndEnterMarket(position.positionAccount, dsaVToken);
-
-        if (initialPrincipal > 0) {
-            _supplyPrincipalToPositionAccount(position, dsaVToken, initialPrincipal);
-        }
-
-        emit PositionActivated(
-            msg.sender,
-            longVToken,
-            shortVToken,
-            address(dsaVToken),
-            position.positionAccount,
-            position.cycleId,
-            initialPrincipal,
-            effectiveLeverage
-        );
-    }
-
-    /**
-     * @notice Opens a leveraged position or scales an existing one (borrow short, swap to long)
-     * @dev Can be used to open or scale an active position. Requires principal from prior supply/activation or
-     *      additionalPrincipal in this call, then forwards execution to the position account via
-     *      enterLeverage. Long and short cannot be the same market (same-market pairs are blocked
-     *      at activation), while other combinations are supported, including DSA == short.
-     * @param longVToken The vToken market for the asset to long
-     * @param shortVToken The vToken market for the asset to short
-     * @param additionalPrincipal Additional principal to supply this call (0 if none)
-     * @param shortAmount Amount to borrow in shortAsset terms (must not exceed max calculated borrow)
-     * @param minLongAmount Minimum amount of long asset expected from swap (protects against slippage)
-     * @param swapData Swap instructions for converting shortAsset to longAsset
-     * @custom:error Throw ZeroShortAmount if shortAmount is zero.
-     * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:error Throw InsufficientPrincipal if no principal exists and additionalPrincipal is zero.
-     * @custom:error Throw MintBehalfFailed if additionalPrincipal minting on behalf fails.
-     * @custom:error Throw ZeroVTokensMinted if additionalPrincipal rounds down to 0 vTokens if Minted.
-     * @custom:error Throw InvalidOraclePrice if pricing data is unavailable while computing borrow limits.
-     * @custom:error Throw BorrowAmountExceedsMaximum if shortAmount exceeds max allowed borrow.
-     * @custom:event Emits PositionOpened event (and PrincipalSupplied if additionalPrincipal > 0).
-     */
-    function openPosition(
-        IVToken longVToken,
-        IVToken shortVToken,
-        uint256 additionalPrincipal,
-        uint256 shortAmount,
-        uint256 minLongAmount,
-        bytes calldata swapData
-    ) public nonReentrant whenNotPaused {
-        if (shortAmount == 0) revert ZeroShortAmount();
-        Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
-
-        // Must have principal (existing or supplied this call) to collateralize the borrow
-        if (position.suppliedPrincipalVTokens == 0 && additionalPrincipal == 0) revert InsufficientPrincipal();
-        IVToken dsaVToken = IVToken(position.dsaVToken);
-
-        if (additionalPrincipal > 0) {
-            _supplyPrincipalToPositionAccount(position, dsaVToken, additionalPrincipal);
-        }
-
-        uint256 maxBorrowAmount = _calculateMaxBorrowAllowed(position);
-        if (shortAmount > maxBorrowAmount) revert BorrowAmountExceedsMaximum();
-
-        address positionAccount = position.positionAccount;
-        IPositionAccount(positionAccount).enterLeverage(
-            longVToken,
-            0, // DSA is used as Seed
-            shortVToken,
-            shortAmount,
-            minLongAmount,
-            swapData
-        );
-
-        // Transfer any dust from LM (sent to position account) to user
-        _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
-        _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
-
-        emit PositionOpened(
-            msg.sender,
-            positionAccount,
-            position.cycleId,
-            address(longVToken),
-            address(shortVToken),
-            address(dsaVToken),
-            shortAmount,
-            additionalPrincipal
-        );
     }
 
     /**
@@ -550,7 +475,6 @@ contract RelativePositionManager is
      *        Should Include flash-loan fees and (for 100% close) internal tolerance buffer.
      * @param swapDataSecond Swap #2 calldata: DSA → short for the second repay leg
      * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:error Throw SameMarketNotAllowed if long and short vTokens are identical.
      * @custom:error Throw ZeroDebt if there is no short debt to close.
      * @custom:error Throw InvalidCloseFractionBps if closeFractionBps is not between 1 and 10000.
      * @custom:error Throw MinAmountOutRepayBelowDebt if minAmountOutFirst is below shortAmountToRepayForFirstSwap.
@@ -715,7 +639,7 @@ contract RelativePositionManager is
         position.suppliedPrincipalVTokens = 0;
 
         // Exit the DSA market from position account (unless DSA is the long asset)
-        // DSA market is guaranteed to be entered during activatePosition, so no membership check needed
+        // DSA market is guaranteed to be entered during _activatePosition, so no membership check needed
         if (address(dsaVToken) != address(longVToken)) {
             IPositionAccount(positionAccount).exitMarket(address(dsaVToken));
         }
@@ -732,7 +656,7 @@ contract RelativePositionManager is
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @return predicted The predicted PositionAccount address (same as after activatePosition for that user/long/short)
+     * @return predicted The predicted PositionAccount address (same as deployed by activateAndOpenPosition for that user/long/short)
      * @custom:error Throw PositionAccountImplementationNotSet if implementation is not configured.
      */
     function getPositionAccountAddress(
@@ -847,6 +771,118 @@ contract RelativePositionManager is
     }
 
     /**
+     * @notice Activates a position account and supplies required principal
+     * @dev Deploys a new PositionAccount contract if one doesn't exist. Sets up position structure,
+     *      enters DSA market, and supplies initialPrincipal. Called by activateAndOpenPosition().
+     * @param longVToken The vToken market address for the asset to long
+     * @param shortVToken The vToken market address for the asset to short
+     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
+     * @param initialPrincipal Required initial principal amount (must be > 0)
+     * @param effectiveLeverage The target leverage ratio for this position
+     */
+    function _activatePosition(
+        address longVToken,
+        address shortVToken,
+        uint8 dsaIndex,
+        uint256 initialPrincipal,
+        uint256 effectiveLeverage
+    ) internal {
+        _checkMarketListed(longVToken);
+        _checkMarketListed(shortVToken);
+        IVToken dsaVToken = _getValidatedDSAVToken(dsaIndex);
+        _checkSameMarket(longVToken, shortVToken);
+
+        if (initialPrincipal == 0) revert InsufficientPrincipal();
+
+        // Validate requested leverage against [MIN_LEVERAGE, maxLeverage]; λ_max = CF_c / (1 - CF_l * (1 - f))
+        uint256 maxLeverage = _getMaxLeverage(dsaVToken, longVToken);
+        if (effectiveLeverage < MIN_LEVERAGE || effectiveLeverage > maxLeverage) {
+            revert InvalidLeverage();
+        }
+
+        Position storage position = positions[msg.sender][longVToken][shortVToken];
+        if (position.isActive) {
+            revert PositionAlreadyExists();
+        }
+
+        // Deploy position account if it doesn't exist (sets immutable fields in _deployPositionAccount)
+        if (position.positionAccount == address(0)) {
+            _deployPositionAccount(msg.sender, longVToken, shortVToken);
+        }
+
+        // Increment cycle ID on each activation and set mutable fields
+        position.cycleId++;
+        position.isActive = true;
+        position.dsaIndex = dsaIndex;
+        position.dsaVToken = address(dsaVToken);
+        position.effectiveLeverage = effectiveLeverage;
+
+        // Enter DSA market on behalf of position account (to use as collateral)
+        _validateAndEnterMarket(position.positionAccount, dsaVToken);
+
+        // Supply required principal
+        _supplyPrincipalToPositionAccount(position, dsaVToken, initialPrincipal);
+
+        emit PositionActivated(
+            msg.sender,
+            longVToken,
+            shortVToken,
+            address(dsaVToken),
+            position.positionAccount,
+            position.cycleId,
+            initialPrincipal,
+            effectiveLeverage
+        );
+    }
+
+    /**
+     * @notice Opens or scales a leveraged position (borrow short, swap to long)
+     * @dev Supplies optional additionalPrincipal, calculates max borrow, and executes leverage via
+     *      the position account. Event emission (PositionOpened or PositionScaled) is the
+     *      responsibility of the caller.
+     * @param longVToken The vToken market for the asset to long
+     * @param shortVToken The vToken market for the asset to short
+     * @param additionalPrincipal Additional principal to supply (0 if none)
+     * @param shortAmount Amount to borrow in shortAsset terms
+     * @param minLongAmount Minimum amount of long asset expected from swap
+     * @param swapData Swap instructions for converting shortAsset to longAsset
+     */
+    function _openPosition(
+        IVToken longVToken,
+        IVToken shortVToken,
+        uint256 additionalPrincipal,
+        uint256 shortAmount,
+        uint256 minLongAmount,
+        bytes calldata swapData
+    ) internal {
+        if (shortAmount == 0) revert ZeroShortAmount();
+        Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
+        IVToken dsaVToken = IVToken(position.dsaVToken);
+
+        // Supply additional principal if provided
+        if (additionalPrincipal > 0) {
+            _supplyPrincipalToPositionAccount(position, dsaVToken, additionalPrincipal);
+        }
+
+        uint256 maxBorrowAmount = _calculateMaxBorrowAllowed(position);
+        if (shortAmount > maxBorrowAmount) revert BorrowAmountExceedsMaximum();
+
+        address positionAccount = position.positionAccount;
+        IPositionAccount(positionAccount).enterLeverage(
+            longVToken,
+            0, // DSA is used as Seed
+            shortVToken,
+            shortAmount,
+            minLongAmount,
+            swapData
+        );
+
+        // Transfer any dust from LM (sent to position account) to user
+        _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
+    }
+
+    /**
      * @notice Deploys a new PositionAccount contract for the user
      * @dev Uses deterministic deployment via clones and initializes the clone with user-specific data.
      *      Sets position account address and immutable position fields (user, longAsset, shortAsset) in storage.
@@ -876,11 +912,10 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Redeems a given amount of long from the position account and swaps it to DSA,
-     *         then supplies the resulting DSA as additional principal on the same position.
-     * @dev Used for proportional close with profit: partial or full close can have a "profit" slice converted
-     *      into DSA principal. When DSA and long share the same vToken market, no redeem/mint cycle is required;
-     *      the function  simply reclassifies part of the long collateral as principal in storage.
+     * @notice Converts long collateral into DSA principal on the same position.
+     * @dev When long and DSA share the same underlying, no on-chain redeem/swap/mint occurs — the function
+     *      reclassifies existing vTokens in storage using the current exchange rate. When assets differ,
+     *      redeems long underlying, swaps to DSA via the swap helper, and mints the result as principal.
      * @param position The Position storage reference whose principal should be increased
      * @param positionAccount The position account from which long is conceptually redeemed
      * @param longVToken Long market vToken
@@ -1475,7 +1510,7 @@ contract RelativePositionManager is
 
     /**
      * @notice Computes the maximum allowed leverage: λ_max = CF_c / (1 - CF_l * (1 - f))
-     * @dev c = Collateral (DSA), L = Long asset, S = Short asset. CF_c = collateral CF, CF_l = Long asset CF, f = friction (PROPORTIONAL_CLOSE_TOLERANCE).
+     * @dev c = Collateral (DSA), L = Long asset. CF_c = collateral CF, CF_l = Long asset CF, f = friction (PROPORTIONAL_CLOSE_TOLERANCE).
      * @param dsaVToken Collateral (DSA) vToken market
      * @param longVToken Long asset vToken market (CF_l)
      * @return maxLeverage The maximum leverage ratio allowed (1e18 mantissa)

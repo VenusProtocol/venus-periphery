@@ -136,7 +136,7 @@ interface IRelativePositionManager {
     /// @custom:error SameProportionalCloseTolerance when setter is called with the current tolerance value
     error SameProportionalCloseTolerance();
 
-    /// @custom:error InvalidProportionalCloseTolerance when tolerance value is invalid (zero)
+    /// @custom:error InvalidProportionalCloseTolerance when tolerance is outside [1, 10000]
     error InvalidProportionalCloseTolerance();
 
     /// @custom:error ProportionalCloseAmountOutOfTolerance when user-provided close amounts are not within 1% of BPS-derived expected amounts
@@ -157,7 +157,8 @@ interface IRelativePositionManager {
     /// @param shortAsset Address of the short asset
     /// @param dsaAsset Address of the DSA asset
     /// @param positionAccount Address of the deployed PositionAccount
-    /// @param initialPrincipal Initial principal supplied (optional)
+    /// @param cycleId Current cycle ID of the position (increments on each activation)
+    /// @param initialPrincipal Initial principal supplied during activation (required, > 0)
     /// @param effectiveLeverage Target leverage ratio for the position
     event PositionActivated(
         address indexed user,
@@ -186,15 +187,36 @@ interface IRelativePositionManager {
         uint256 newTotalPrincipal
     );
 
-    /// @notice Emitted when a position is opened or scaled (borrow + swap to long)
+    /// @notice Emitted when a position is opened (during activateAndOpenPosition flow)
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
+    /// @param cycleId The cycle ID of the position
+    /// @param longAsset Address of the long asset
+    /// @param shortAsset Address of the short asset
+    /// @param dsaAsset Address of the DSA asset
+    /// @param shortAmount Amount borrowed in short asset
+    /// @param initialPrincipal Initial principal supplied during activation (required, > 0)
+    event PositionOpened(
+        address indexed user,
+        address indexed positionAccount,
+        uint256 cycleId,
+        address longAsset,
+        address shortAsset,
+        address dsaAsset,
+        uint256 shortAmount,
+        uint256 initialPrincipal
+    );
+
+    /// @notice Emitted when an existing position is scaled (additional borrow-long added to existing position)
+    /// @param user Address of the user
+    /// @param positionAccount Address of the position account
+    /// @param cycleId The cycle ID of the position
     /// @param longAsset Address of the long asset
     /// @param shortAsset Address of the short asset
     /// @param dsaAsset Address of the DSA asset
     /// @param shortAmount Amount borrowed in short asset
     /// @param additionalPrincipal Additional principal supplied this call (0 if none)
-    event PositionOpened(
+    event PositionScaled(
         address indexed user,
         address indexed positionAccount,
         uint256 cycleId,
@@ -325,32 +347,15 @@ interface IRelativePositionManager {
     function dsaVTokenIndexCounter() external view returns (uint8 count);
 
     /**
-     * @notice Activates a position account for the user with specified asset pair and DSA
+     * @notice Activates a position and opens it with initial leverage (combined in one transaction)
      * @dev Deploys a new PositionAccount contract if one doesn't exist for this user/asset combination.
-     *      The effective leverage must be set during activation and will be used to validate borrow amounts
-     *      in openPosition operations.
+     *      Sets up the position with initial principal, then immediately opens/borrows with shortAmount.
+     *      Emits both PositionActivated and PositionOpened events.
      * @param longVToken The vToken market address for the asset to long
      * @param shortVToken The vToken market address for the asset to short
      * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
-     * @param initialPrincipal Optional initial principal amount to supply
+     * @param initialPrincipal Required initial principal amount to supply during activation (must be > 0)
      * @param effectiveLeverage The target leverage ratio for this position (in mantissa, e.g., 2e18 = 2x leverage)
-     */
-    function activatePosition(
-        address longVToken,
-        address shortVToken,
-        uint8 dsaIndex,
-        uint256 initialPrincipal,
-        uint256 effectiveLeverage
-    ) external;
-
-    /**
-     * @notice Activates and opens a position in a single transaction
-     * @dev Runs activatePosition flow first, then openPosition flow.
-     * @param longVToken The vToken market address for the asset to long
-     * @param shortVToken The vToken market address for the asset to short
-     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
-     * @param initialPrincipal Optional initial principal amount to supply during activation
-     * @param effectiveLeverage The target leverage ratio for this position
      * @param shortAmount Amount to borrow in shortAsset terms
      * @param minLongAmount Minimum amount of long asset expected from swap
      * @param swapData Swap instructions for converting shortAsset to longAsset
@@ -376,10 +381,11 @@ interface IRelativePositionManager {
     function supplyPrincipal(address longVToken, address shortVToken, uint256 amount) external;
 
     /**
-     * @notice Opens a leveraged position or scales an existing one (borrow short, swap to long)
-     * @dev Can be called multiple times to scale the position. Optionally supply additional principal
+     * @notice Scales an existing position by adding additional leverage (borrow + swap to long)
+     * @dev Can only be called on an already-active position. Optionally supply additional principal
      *      via additionalPrincipal; otherwise uses existing principal. Validates that shortAmount doesn't
      *      exceed the maximum allowed based on capital utilization. DSA is taken from the position (set during activation).
+     *      Emits PositionScaled event to distinguish from initial opening.
      * @param longVToken The vToken market for the asset to long
      * @param shortVToken The vToken market for the asset to short
      * @param additionalPrincipal Additional principal to supply this call (0 if none)
@@ -387,7 +393,7 @@ interface IRelativePositionManager {
      * @param minLongAmount Minimum amount of long asset expected from swap (protects against slippage)
      * @param swapData Swap instructions for converting shortAsset to longAsset
      */
-    function openPosition(
+    function scalePosition(
         IVToken longVToken,
         IVToken shortVToken,
         uint256 additionalPrincipal,
@@ -494,7 +500,8 @@ interface IRelativePositionManager {
 
     /**
      * @notice Returns the address at which the PositionAccount would be deployed for the given user and markets
-     * @dev Same salt as used when deploying via activatePosition. Returns the address that would be used if the position account were deployed.
+     * @dev Same salt as used when deploying via activateAndOpenPosition (keccak256(user, longVToken, shortVToken)).
+     *      Returns the address that cloneDeterministic would deploy to if called by this contract.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
