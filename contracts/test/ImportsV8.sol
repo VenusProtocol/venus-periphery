@@ -11,3 +11,4 @@ import { ComptrollerLens } from "@venusprotocol/venus-protocol/contracts/Lens/Co
 import { ChainlinkOracle } from "@venusprotocol/oracle/contracts/oracles/ChainlinkOracle.sol";
 import { BinanceOracle } from "@venusprotocol/oracle/contracts/oracles/BinanceOracle.sol";
 import { ResilientOracle } from "@venusprotocol/oracle/contracts/ResilientOracle.sol";
+import { MockToken } from "@venusprotocol/venus-protocol/contracts/test/MockToken.sol";
