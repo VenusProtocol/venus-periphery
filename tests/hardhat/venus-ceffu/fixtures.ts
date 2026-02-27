@@ -29,8 +29,8 @@ export type VaultInitParams = {
   gracePeriod: number;
 };
 
-const THIRTY_DAYS = 30 * 24 * 60 * 60;
-const SEVEN_DAYS = 7 * 24 * 60 * 60;
+export const THIRTY_DAYS = 30 * 24 * 60 * 60;
+export const SEVEN_DAYS = 7 * 24 * 60 * 60;
 
 export async function defaultVaultParams(
   tokenAddress: string,
@@ -62,6 +62,7 @@ export interface FullSystemFixture {
   alice: SignerWithAddress;
   bob: SignerWithAddress;
   treasury: SignerWithAddress;
+  ceffuWallet: SignerWithAddress;
   acm: FakeContract<IAccessControlManagerV8>;
   usdcToken: MockToken;
   vaultImpl: FixedRateVault;
@@ -73,7 +74,7 @@ export interface FullSystemFixture {
 }
 
 export async function deployFullSystemFixture(): Promise<FullSystemFixture> {
-  const [owner, alice, bob, treasury] = await ethers.getSigners();
+  const [owner, alice, bob, treasury, ceffuWallet] = await ethers.getSigners();
 
   // Mock ACM — allow all calls by default
   const acm = await smock.fake<IAccessControlManagerV8>("IAccessControlManagerV8");
@@ -130,6 +131,7 @@ export async function deployFullSystemFixture(): Promise<FullSystemFixture> {
     alice,
     bob,
     treasury,
+    ceffuWallet,
     acm,
     usdcToken,
     vaultImpl,
