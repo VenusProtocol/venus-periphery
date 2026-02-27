@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-pragma solidity 0.8.28;
+pragma solidity 0.8.25;
 
 import { Clones } from "@openzeppelin/contracts/proxy/Clones.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
