@@ -436,7 +436,7 @@ contract RelativePositionManager is
      *         the position account and can be withdrawn later or swept on deactivation.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @param longAmountToRedeemForRepay Amount of long to redeem for the repay leg (validated against BPS)
      * @param minAmountOutRepay Minimum short Amount expected from repay swap; must be >= required repay amount for the given BPS.
      *        Should Include flash-loan fees and (for 100% close) include internal tolerance buffer.
@@ -445,7 +445,7 @@ contract RelativePositionManager is
      * @param minAmountOutProfit Minimum DSA out from the profit swap used for slippage protection
      * @param swapDataProfit Swap #2: long → DSA for profit realization
      * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:error Throw InvalidCloseFractionBps if closeFractionBps is not between 1 and 100.
+     * @custom:error Throw InvalidCloseFractionBps if closeFractionBps is not between 1 and 10000.
      * @custom:error Throw InvalidLongAmountToRedeem if total long to redeem is invalid for the chosen BPS.
      * @custom:error Throw MinAmountOutRepayBelowDebt if minAmountOutRepay is below the calculated short debt for this close.
      * @custom:error Throw ProportionalCloseAmountOutOfTolerance if total long amounts are not within the tolerated BPS band.
@@ -539,7 +539,7 @@ contract RelativePositionManager is
      *        the withdrawable amount; deactivatePosition redeems all remaining DSA and sends it to the user.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @param longAmountToRedeemForFirstSwap Long amount to redeem for the first swap (validated against BPS within 1% tolerance)
      * @param shortAmountToRepayForFirstSwap Short amount to repay in the first exit (validated: 0 <= value <= BPS-derived expected short)
      * @param minAmountOutFirst Min short Amount expected from first swap; must be >= shortAmountToRepayForFirstSwap.
@@ -552,7 +552,7 @@ contract RelativePositionManager is
      * @custom:error Throw PositionNotActive if the position is not active.
      * @custom:error Throw SameMarketNotAllowed if long and short vTokens are identical.
      * @custom:error Throw ZeroDebt if there is no short debt to close.
-     * @custom:error Throw InvalidCloseFractionBps if closeFractionBps is not between 1 and 100.
+     * @custom:error Throw InvalidCloseFractionBps if closeFractionBps is not between 1 and 10000.
      * @custom:error Throw MinAmountOutRepayBelowDebt if minAmountOutFirst is below shortAmountToRepayForFirstSwap.
      * @custom:error Throw ProportionalCloseAmountOutOfTolerance if first-exit amounts are not within the tolerated BPS band.
      * @custom:error Throw MinAmountOutSecondBelowDebt if minAmountOutSecond is below the internally calculated second repay.
@@ -1200,9 +1200,9 @@ contract RelativePositionManager is
 
     /**
      * @notice Returns expected proportional amounts and tolerance band for a close (BPS of current balance/debt)
-     * @dev Reverts with InvalidCloseFractionBps if closeFractionBps is not in [1, 100].
+     * @dev Reverts with InvalidCloseFractionBps if closeFractionBps is not in [1, 10000].
      * @param position The position (long balance and positionAccount from position; short debt from position.shortVToken)
-     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @return expectedLongToWithdraw Amount of long to redeem (BPS of current long balance)
      * @return expectedShortToRepay Amount of short to repay (BPS of current short debt)
      * @return minLongToWithdraw Minimum long amount within PROPORTIONAL_CLOSE_TOLERANCE
@@ -1247,7 +1247,7 @@ contract RelativePositionManager is
      * @notice Validates proportional close for profit path and returns amount to repay
      * @dev Validates totalLongAmountToRedeem (repay + profit) within PROPORTIONAL_CLOSE_TOLERANCE of BPS expected. Reverts if out of band.
      * @param position Position storage (used to derive expected long/short amounts)
-     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @param totalLongAmountToRedeem Sum of long to redeem for repay and for profit swap
      * @param minAmountOutRepay User's minimum expected short from repay swap; must be >= expected short for this BPS
      * @return amountToRepay Short amount to use for repay call (includes PROPORTIONAL_CLOSE_MIN bump when 100% close)
@@ -1289,7 +1289,7 @@ contract RelativePositionManager is
      *      If first-leg short > expected, full close in first leg is allowed provided it is <= maxExpectedShortToRepay;
      *      then the second leg becomes 0 (second repay amount is 0).
      * @param position Snapshot of the position (used to derive expected long/short amounts)
-     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @param longAmountToRedeemForFirstSwap Long amount to redeem for the first swap (must be within PROPORTIONAL_CLOSE_TOLERANCE of expected long)
      * @param shortAmountToRepayForFirstSwap Short amount to repay in the first exit; for 100% close with one leg, should cover the extra bumped amount
      * @param minAmountOutFirst Minimum short out from the first swap (must be >= shortAmountToRepayForFirstSwap)

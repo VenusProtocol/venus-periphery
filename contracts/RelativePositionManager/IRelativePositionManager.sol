@@ -148,7 +148,7 @@ interface IRelativePositionManager {
     /// @custom:error InvalidLongAmountToRedeem when proportional close expects zero long (no long to close) but user passed non-zero total long amount
     error InvalidLongAmountToRedeem();
 
-    /// @custom:error InvalidCloseFractionBps when closeFractionBps is not between 1 and 100 (percentage)
+    /// @custom:error InvalidCloseFractionBps when closeFractionBps is not between 1 and 10000 (basis points)
     error InvalidCloseFractionBps();
 
     /// @notice Emitted when a user activates a position account
@@ -209,7 +209,7 @@ interface IRelativePositionManager {
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
     /// @param cycleId The cycle ID of the position
-    /// @param closeFractionBps Proportion closed in percentage (100 = 100%)
+    /// @param closeFractionBps Proportion closed in basis points (10000 = 100%, 1 = 0.01% minimum)
     /// @param amountRepaid Short debt repaid in this close
     /// @param amountRedeemed Long collateral redeemed in this close
     /// @param amountRedeemedDsa DSA amount redeemed in this close (loss close second leg; 0 for profit close)
@@ -402,7 +402,7 @@ interface IRelativePositionManager {
      * minAmountOutRepay must be >= calculated repay.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @param longAmountToRedeemForRepay Amount of long to redeem for the repay leg (validated against BPS)
      * @param minAmountOutRepay Minimum short out from the repay swap (must be >= calculated repay amount for this BPS)
      * @param swapDataRepay Swap #1: long → short for debt repayment
@@ -424,11 +424,11 @@ interface IRelativePositionManager {
 
     /**
      * @notice Closes a position with loss proportionally
-     * @dev closeFractionBps: 100 = 100%, 1 = 1% min. First-exit long is proportion-derived; short repay in [0, expectedShort].
+     * @dev closeFractionBps: 10000 = 100%, 1 = 0.01% min. First-exit long is proportion-derived; short repay in [0, expectedShort].
      *      First exit long→short, second exit DSA→short for remainder. Position fully closed.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param closeFractionBps Proportion to close in percentage (100 = 100%)
+     * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within PROPORTIONAL_CLOSE_TOLERANCE)
      * @param shortAmountToRepayForFirstSwap Short to repay in first exit (0 <= value <= BPS-derived expected short)
      * @param minAmountOutFirst Minimum amount out from first swap (must be >= borrowedAmountToRepayFirst when first repay > 0)
