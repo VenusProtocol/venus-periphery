@@ -80,7 +80,11 @@ interface IFixedRateVault {
     /// @param totalRepayment Total repayment amount (principal + interest, asset decimals)
     /// @param protocolReserve Venus protocol's share of interest (asset decimals)
     /// @param userNetReturn Net amount available for user withdrawals (asset decimals)
-    event RepaymentReceived(uint256 indexed totalRepayment, uint256 indexed protocolReserve, uint256 indexed userNetReturn);
+    event RepaymentReceived(
+        uint256 indexed totalRepayment,
+        uint256 indexed protocolReserve,
+        uint256 indexed userNetReturn
+    );
 
     /// @notice Emitted when protocol reserves are withdrawn to treasury
     /// @param recipient Address that received the reserves
@@ -142,11 +146,7 @@ interface IFixedRateVault {
      * @param fundRouter_ FundRouter singleton address
      * @param params Vault configuration parameters
      */
-    function initialize(
-        address accessControlManager_,
-        address fundRouter_,
-        VaultInitParams calldata params
-    ) external;
+    function initialize(address accessControlManager_, address fundRouter_, VaultInitParams calldata params) external;
 
     // ──────────────────────────────────────────────
     //  Lifecycle functions

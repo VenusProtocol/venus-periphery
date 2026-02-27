@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-pragma solidity 0.8.25;
+pragma solidity 0.8.28;
 
 import { IFixedRateVault } from "./IFixedRateVault.sol";
 
@@ -65,11 +65,7 @@ interface IVaultFactory {
      * @param vaultImplementation_ Address of the FixedRateVault logic contract for cloning
      * @param fundRouter_ Address of the FundRouter singleton
      */
-    function initialize(
-        address accessControlManager_,
-        address vaultImplementation_,
-        address fundRouter_
-    ) external;
+    function initialize(address accessControlManager_, address vaultImplementation_, address fundRouter_) external;
 
     // ──────────────────────────────────────────────
     //  Core: Vault deployment
@@ -80,9 +76,7 @@ interface IVaultFactory {
      * @param params Vault initialization parameters (see VaultInitParams struct)
      * @return vault Address of the newly deployed vault
      */
-    function deployVault(
-        IFixedRateVault.VaultInitParams calldata params
-    ) external returns (address vault);
+    function deployVault(IFixedRateVault.VaultInitParams calldata params) external returns (address vault);
 
     // ──────────────────────────────────────────────
     //  Admin: Configuration

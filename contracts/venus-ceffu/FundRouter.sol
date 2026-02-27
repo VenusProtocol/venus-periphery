@@ -3,7 +3,10 @@ pragma solidity 0.8.28;
 
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
-import { SafeERC20Upgradeable, IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import {
+    SafeERC20Upgradeable,
+    IERC20Upgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import { IERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/interfaces/IERC4626Upgradeable.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 import { ensureNonzeroAddress } from "@venusprotocol/solidity-utilities/contracts/validators.sol";
@@ -30,7 +33,13 @@ import { IFixedRateVault } from "./interfaces/IFixedRateVault.sol";
  *
  * @custom:security-contact security@venus.io
  */
-contract FundRouter is ReentrancyGuardUpgradeable, PausableUpgradeable, AccessControlledV8, FundRouterStorageV1, IFundRouter {
+contract FundRouter is
+    ReentrancyGuardUpgradeable,
+    PausableUpgradeable,
+    AccessControlledV8,
+    FundRouterStorageV1,
+    IFundRouter
+{
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     // ──────────────────────────────────────────────
@@ -43,10 +52,7 @@ contract FundRouter is ReentrancyGuardUpgradeable, PausableUpgradeable, AccessCo
     }
 
     /// @inheritdoc IFundRouter
-    function initialize(
-        address accessControlManager_,
-        address vaultFactory_
-    ) external initializer {
+    function initialize(address accessControlManager_, address vaultFactory_) external initializer {
         ensureNonzeroAddress(vaultFactory_);
 
         __ReentrancyGuard_init();

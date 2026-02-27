@@ -9,7 +9,6 @@ import { IFundRouter } from "./interfaces/IFundRouter.sol";
  * @notice Storage layout for the FundRouter contract.
  */
 abstract contract FundRouterStorageV1 {
-
     /// @notice Address of the VaultFactory contract. Used to verify that a caller is a
     ///         factory-deployed vault via IVaultFactory(vaultFactory).isVault().
     address public vaultFactory;

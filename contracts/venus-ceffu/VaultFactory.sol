@@ -48,9 +48,7 @@ contract VaultFactory is AccessControlledV8, VaultFactoryStorageV1, IVaultFactor
     // ──────────────────────────────────────────────
 
     /// @inheritdoc IVaultFactory
-    function deployVault(
-        IFixedRateVault.VaultInitParams calldata params
-    ) external returns (address vault) {
+    function deployVault(IFixedRateVault.VaultInitParams calldata params) external returns (address vault) {
         _checkAccessAllowed("deployVault(VaultInitParams)");
 
         // Validate ceffuRequestId is non-empty and unique
@@ -68,11 +66,7 @@ contract VaultFactory is AccessControlledV8, VaultFactoryStorageV1, IVaultFactor
         vault = Clones.cloneDeterministic(vaultImplementation, salt);
 
         // Initialize the clone with factory-provided addresses + caller-provided params
-        IFixedRateVault(vault).initialize(
-            address(_accessControlManager),
-            fundRouter,
-            params
-        );
+        IFixedRateVault(vault).initialize(address(_accessControlManager), fundRouter, params);
 
         // Register vault in all lookup structures
         uint256 newVaultId = ++vaultCount;

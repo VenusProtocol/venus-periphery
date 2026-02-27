@@ -7,7 +7,6 @@ pragma solidity 0.8.28;
  * @notice Storage layout for the VaultFactory contract.
  */
 abstract contract VaultFactoryStorageV1 {
-
     /// @notice Address of the FixedRateVault logic contract used as the  implementation
     address public vaultImplementation;
 

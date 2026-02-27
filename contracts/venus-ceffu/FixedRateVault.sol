@@ -265,41 +265,27 @@ contract FixedRateVault is
 
     /// @inheritdoc ERC4626Upgradeable
     /// @dev Adds nonReentrant and whenNotPaused guards. Only during active fundraising.
-    function deposit(
-        uint256 assets,
-        address receiver
-    ) public override nonReentrant whenNotPaused returns (uint256) {
+    function deposit(uint256 assets, address receiver) public override nonReentrant whenNotPaused returns (uint256) {
         return super.deposit(assets, receiver);
     }
 
     /// @inheritdoc ERC4626Upgradeable
     /// @dev Adds nonReentrant and whenNotPaused guards. Only during active fundraising.
-    function mint(
-        uint256 shares,
-        address receiver
-    ) public override nonReentrant whenNotPaused returns (uint256) {
+    function mint(uint256 shares, address receiver) public override nonReentrant whenNotPaused returns (uint256) {
         return super.mint(shares, receiver);
     }
 
     /// @inheritdoc ERC4626Upgradeable
     /// @dev Adds nonReentrant guard. Deliberately omits whenNotPaused so withdrawals
     ///      remain accessible even when paused (user safety valve in terminal states).
-    function withdraw(
-        uint256 assets,
-        address receiver,
-        address owner
-    ) public override nonReentrant returns (uint256) {
+    function withdraw(uint256 assets, address receiver, address owner) public override nonReentrant returns (uint256) {
         return super.withdraw(assets, receiver, owner);
     }
 
     /// @inheritdoc ERC4626Upgradeable
     /// @dev Adds nonReentrant guard. Deliberately omits whenNotPaused so redemptions
     ///      remain accessible even when paused (user safety valve in terminal states).
-    function redeem(
-        uint256 shares,
-        address receiver,
-        address owner
-    ) public override nonReentrant returns (uint256) {
+    function redeem(uint256 shares, address receiver, address owner) public override nonReentrant returns (uint256) {
         return super.redeem(shares, receiver, owner);
     }
 
@@ -384,12 +370,7 @@ contract FixedRateVault is
      * @param assets Amount of underlying assets being deposited (asset decimals)
      * @param shares Amount of vault shares to mint
      */
-    function _deposit(
-        address caller,
-        address receiver,
-        uint256 assets,
-        uint256 shares
-    ) internal override {
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
         // State and time window checks
         if (state != VaultState.Fundraising) {
             revert InvalidState(state, VaultState.Fundraising);
