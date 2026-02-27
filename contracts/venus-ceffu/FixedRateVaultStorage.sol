@@ -44,9 +44,13 @@ abstract contract FixedRateVaultStorageV1 {
     /// @notice Duration of the lock period in seconds (e.g., 30 days = 2_592_000)
     uint256 public lockPeriodDuration;
 
-    /// @notice Timestamp when the lock period ends. Set when fundraising closes successfully.
-    ///         Calculated as: block.timestamp + lockPeriodDuration at close time.
+    /// @notice Timestamp when the lock period ends. Set when order fill is confirmed.
+    ///         Calculated as: lockStartAt + lockPeriodDuration.
     uint256 public lockPeriodEndTime;
+
+    /// @notice Timestamp when interest accrual starts. Set when Ceffu confirms the order fill
+    ///         via confirmOrderFill(). Used to compute lockPeriodEndTime = lockStartAt + lockPeriodDuration.
+    uint256 public lockStartAt;
 
     /// @notice Protocol reserve factor in basis points (e.g., 1000 = 10%)
     uint256 public reserveFactorBps;
@@ -89,7 +93,7 @@ abstract contract FixedRateVaultStorageV1 {
     string public ceffuRequestId;
 
     /// @dev Reserved storage gap for future upgrades.
-    ///      Slots used: 17 (1 packed + 14 uint256 + 1 mapping + 1 string). Gap: 33.
+    ///      Slots used: 18 (1 packed + 15 uint256 + 1 mapping + 1 string). Gap: 32.
     ///      Note: VaultInitParams is a calldata-only struct; it occupies no storage slots.
-    uint256[33] private __gap;
+    uint256[32] private __gap;
 }

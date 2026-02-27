@@ -19,7 +19,7 @@ import { IFixedRateVault } from "./interfaces/IFixedRateVault.sol";
  * @notice Singleton "Main Contract" that routes funds between FixedRateVaults and Ceffu.
  *
  * Fund flow:
- *   Outbound: Vault → receiveFundsFromVault() → transferToCeffu() → Ceffu sub-wallet
+ *   Outbound: Vault → receiveFundsFromVault() → transferToCeffu() → confirmOrderFillForVault() → Ceffu
  *   Inbound:  Ceffu sends on-chain → recordRepayment() → distributeRepaymentToVault() → Vault
  *
  * Each vault gets an isolated VaultAllocation with boolean idempotency guards
@@ -144,6 +144,30 @@ contract FundRouter is ReentrancyGuardUpgradeable, PausableUpgradeable, AccessCo
     }
 
     // ──────────────────────────────────────────────
+    //  Step 3.5: Confirm order fill for vault
+    // ──────────────────────────────────────────────
+
+    /// @inheritdoc IFundRouter
+    function confirmOrderFillForVault(address vault) external {
+        _checkAccessAllowed("confirmOrderFillForVault(address)");
+
+        VaultAllocation storage allocation = vaultAllocations[vault];
+
+        if (!allocation.fundsSentToCeffu) {
+            revert PrerequisiteNotMet();
+        }
+        if (allocation.orderFillConfirmed) {
+            revert OperationAlreadyCompleted();
+        }
+
+        allocation.orderFillConfirmed = true;
+
+        IFixedRateVault(vault).confirmOrderFill();
+
+        emit OrderFillConfirmedForVault(vault);
+    }
+
+    // ──────────────────────────────────────────────
     //  Step 4: Record Ceffu repayment arrival
     // ──────────────────────────────────────────────
 
@@ -157,7 +181,7 @@ contract FundRouter is ReentrancyGuardUpgradeable, PausableUpgradeable, AccessCo
 
         VaultAllocation storage allocation = vaultAllocations[vault];
 
-        if (!allocation.fundsSentToCeffu) {
+        if (!allocation.orderFillConfirmed) {
             revert PrerequisiteNotMet();
         }
         if (allocation.repaymentReceived) {

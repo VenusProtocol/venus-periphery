@@ -20,19 +20,25 @@ import { FixedRateVaultStorageV1 } from "./FixedRateVaultStorage.sol";
  * @notice ERC-4626 tokenized vault for fixed-rate lending to Ceffu institutional clients.
  *
  * Lifecycle state machine:
+ *   Fundraising -> PendingFill -> Locked -> Matured
+ *        |
+ *    Cancelled
  *
  * - Fundraising: users deposit stablecoins, shares minted 1:1
- * - Locked: funds transferred to Ceffu via FundRouter, awaiting repayment
+ * - PendingFill: funds sent to Ceffu via FundRouter, awaiting order fill confirmation
+ * - Locked: order filled, interest accruing from lockStartAt, awaiting repayment
  * - Matured: repayment received, shares redeemable for principal + net interest
  * - Cancelled: fundraising failed (below minCap) or admin-cancelled, 1:1 refund
  *
  * The critical `totalAssets()` override drives all ERC-4626 share math:
- *   Fundraising/Locked -> totalPrincipal (1:1 ratio)
+ *   Fundraising/PendingFill/Locked -> totalPrincipal (1:1 ratio)
  *   Cancelled -> actual vault balance (tracks withdrawals for 1:1 refunds)
  *   Matured -> actual vault balance minus pending protocolReserve (shares worth more)
  *
  * Deployed as EIP-1167 deterministic clones via VaultFactory. Each vault is single-use
  * with fixed parameters — no per-vault upgrade needed.
+ *
+ * @custom:security-contact security@venus.io
  */
 contract FixedRateVault is
     ERC4626Upgradeable,
@@ -83,7 +89,29 @@ contract FixedRateVault is
         __Pausable_init();
         __AccessControlled_init(accessControlManager_);
 
-        _validateAndSetConfig(fundRouter_, params);
+        // Validate parameters
+        if (params.fixedAPY == 0) revert InvalidInitParam("fixedAPY");
+        if (params.minCap == 0) revert InvalidInitParam("minCap");
+        if (params.maxCap < params.minCap) revert InvalidInitParam("maxCap < minCap");
+        if (params.fundraisingEndTime <= params.fundraisingStartTime) revert InvalidInitParam("fundraisingWindow");
+        if (params.lockPeriodDuration == 0) revert InvalidInitParam("lockPeriodDuration");
+        if (params.reserveFactorBps > MAX_BPS) revert InvalidInitParam("reserveFactorBps > 100%");
+
+        // Set vault config (immutable after initialization)
+        fundRouter = fundRouter_;
+        fixedAPY = params.fixedAPY;
+        minCap = params.minCap;
+        maxCap = params.maxCap;
+        fundraisingStartTime = params.fundraisingStartTime;
+        fundraisingEndTime = params.fundraisingEndTime;
+        lockPeriodDuration = params.lockPeriodDuration;
+        reserveFactorBps = params.reserveFactorBps;
+        minUserDeposit = params.minUserDeposit;
+        maxUserDeposit = params.maxUserDeposit;
+        gracePeriod = params.gracePeriod;
+        ceffuRequestId = params.ceffuRequestId;
+
+        // state defaults to VaultState.Fundraising (enum value 0)
     }
 
     /// @inheritdoc IFixedRateVault
@@ -106,12 +134,26 @@ contract FixedRateVault is
     function cancelVault() external {
         _checkAccessAllowed("cancelVault()");
 
-        if (state != VaultState.Fundraising) {
+        if (state != VaultState.Fundraising && state != VaultState.PendingFill) {
             revert InvalidState(state, VaultState.Fundraising);
         }
 
         state = VaultState.Cancelled;
         emit VaultCancelled();
+    }
+
+    /// @inheritdoc IFixedRateVault
+    function confirmOrderFill() external {
+        if (msg.sender != fundRouter) revert OnlyFundRouter();
+        if (state != VaultState.PendingFill) {
+            revert InvalidState(state, VaultState.PendingFill);
+        }
+
+        state = VaultState.Locked;
+        lockStartAt = block.timestamp;
+        lockPeriodEndTime = block.timestamp + lockPeriodDuration;
+
+        emit OrderFillConfirmed(lockStartAt, lockPeriodEndTime);
     }
 
     /// @inheritdoc IFixedRateVault
@@ -336,7 +378,7 @@ contract FixedRateVault is
      *      - Fundraising state and time window checks
      *      - Per-user minimum deposit validation (cumulative across multiple deposits)
      *      - Deposit tracking via userDeposits and totalPrincipal
-     *      - Auto-close on maxCap hit (Scenario A: immediate lock)
+     *      - Auto-close on maxCap hit (Scenario A: transitions to PendingFill)
      * @param caller Address initiating the deposit (msg.sender)
      * @param receiver Address that will receive the minted shares
      * @param assets Amount of underlying assets being deposited (asset decimals)
@@ -399,46 +441,17 @@ contract FixedRateVault is
     }
 
     /**
-     * @notice Validates initialization parameters and sets vault configuration.
-     * @param fundRouter_ Address of the FundRouter contract
-     * @param params Vault initialization parameters
-     */
-    function _validateAndSetConfig(address fundRouter_, VaultInitParams calldata params) internal {
-        // Validate parameters
-        if (params.fixedAPY == 0) revert InvalidInitParam("fixedAPY");
-        if (params.minCap == 0) revert InvalidInitParam("minCap");
-        if (params.maxCap < params.minCap) revert InvalidInitParam("maxCap < minCap");
-        if (params.fundraisingEndTime <= params.fundraisingStartTime) revert InvalidInitParam("fundraisingWindow");
-        if (params.lockPeriodDuration == 0) revert InvalidInitParam("lockPeriodDuration");
-        if (params.reserveFactorBps > MAX_BPS) revert InvalidInitParam("reserveFactorBps > 100%");
-
-        // Set vault config (immutable after initialization)
-        fundRouter = fundRouter_;
-        fixedAPY = params.fixedAPY;
-        minCap = params.minCap;
-        maxCap = params.maxCap;
-        fundraisingStartTime = params.fundraisingStartTime;
-        fundraisingEndTime = params.fundraisingEndTime;
-        lockPeriodDuration = params.lockPeriodDuration;
-        reserveFactorBps = params.reserveFactorBps;
-        minUserDeposit = params.minUserDeposit;
-        maxUserDeposit = params.maxUserDeposit;
-        gracePeriod = params.gracePeriod;
-        ceffuRequestId = params.ceffuRequestId;
-    }
-
-    /**
      * @notice Handles successful fundraising closure (Scenario A or B).
      * @dev Closes fundraising for both scenarios:
      *      - Scenario A: maxCap reached via deposit (auto-close)
      *      - Scenario B: admin calls closeFundraising() with totalPrincipal >= minCap
      *
-     *      Transitions state to Locked, calculates lockPeriodEndTime, approves the
-     *      FundRouter to pull all raised funds, and triggers the transfer.
+     *      Transitions state to PendingFill, approves the FundRouter to pull all raised
+     *      funds, and triggers the transfer. lockPeriodEndTime is NOT set here — it will
+     *      be set when Ceffu confirms the order fill via confirmOrderFill().
      */
     function _closeFundraisingSuccessful() internal {
-        state = VaultState.Locked;
-        lockPeriodEndTime = block.timestamp + lockPeriodDuration;
+        state = VaultState.PendingFill;
 
         // Approve FundRouter to pull all fundraised tokens, then trigger transfer
         IERC20Upgradeable asset_ = IERC20Upgradeable(asset());

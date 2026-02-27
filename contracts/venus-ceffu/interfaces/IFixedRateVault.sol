@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-pragma solidity 0.8.25;
+pragma solidity 0.8.28;
 
 /**
  * @title IFixedRateVault
@@ -8,7 +8,7 @@ pragma solidity 0.8.25;
  *         for fixed-rate lending to Ceffu institutional clients.
  *
  * Lifecycle state machine:
- *   Fundraising -> Locked -> Matured
+ *   Fundraising -> PendingFill -> Locked -> Matured
  *        |
  *    Cancelled
  */
@@ -20,9 +20,10 @@ interface IFixedRateVault {
     /// @notice Lifecycle states of a fixed-rate vault
     enum VaultState {
         Fundraising, // 0 - accepting user deposits
-        Locked, //      1 - funds transferred to Ceffu, awaiting repayment
-        Matured, //     2 - repayment received, users can withdraw
-        Cancelled //    3 - fundraising failed or admin-cancelled, users can refund
+        PendingFill, // 1 - funds sent to Ceffu, awaiting order fill confirmation
+        Locked, //      2 - order filled, interest accruing, awaiting repayment
+        Matured, //     3 - repayment received, users can withdraw
+        Cancelled //    4 - fundraising failed or admin-cancelled, users can refund
     }
 
     // ──────────────────────────────────────────────
@@ -89,6 +90,12 @@ interface IFixedRateVault {
     /// @notice Emitted when governance triggers emergency unlock after grace period
     /// @param availableBalance Actual vault token balance at time of emergency unlock
     event EmergencyUnlocked(uint256 indexed availableBalance);
+
+    /// @notice Emitted when Ceffu confirms the order fill, transitioning PendingFill -> Locked
+    /// @param lockStartAt Timestamp when interest accrual begins (set at fill confirmation)
+    /// @param lockPeriodEndTime Timestamp when the lock period ends
+    event OrderFillConfirmed(uint256 lockStartAt, uint256 lockPeriodEndTime);
+
     // ──────────────────────────────────────────────
     //  Custom errors
     // ──────────────────────────────────────────────
@@ -147,15 +154,23 @@ interface IFixedRateVault {
 
     /**
      * @notice Closes the fundraising period.
-     *         If totalPrincipal >= minCap, transitions to Locked and sends funds to FundRouter.
+     *         If totalPrincipal >= minCap, transitions to PendingFill and sends funds to FundRouter.
      *         If totalPrincipal < minCap, transitions to Cancelled for user refunds.
      */
     function closeFundraising() external;
 
     /**
-     * @notice Admin force-cancel during Fundraising. Users can withdraw full refunds.
+     * @notice Admin force-cancel during Fundraising or PendingFill.
+     *         Users can withdraw full refunds once funds are returned to the vault.
      */
     function cancelVault() external;
+
+    /**
+     * @notice Called by FundRouter after Ceffu confirms the order fill.
+     *         Transitions vault from PendingFill to Locked, sets lockStartAt and lockPeriodEndTime.
+     *         Interest accrual starts from this point.
+     */
+    function confirmOrderFill() external;
 
     /**
      * @notice Called by FundRouter after transferring Ceffu's repayment to this vault.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-pragma solidity 0.8.25;
+pragma solidity 0.8.28;
 
 /**
  * @title IFundRouter
@@ -8,7 +8,7 @@ pragma solidity 0.8.25;
  *         between FixedRateVaults and Ceffu.
  *
  * Fund flow:
- *   Outbound: Vault → receiveFundsFromVault() → transferToCeffu() → Ceffu sub-wallet
+ *   Outbound: Vault → receiveFundsFromVault() → transferToCeffu() → confirmOrderFillForVault() → Ceffu sub-wallet
  *   Inbound:  Ceffu sends on-chain → recordRepayment() → distributeRepaymentToVault() → Vault
  *
  * @custom:security-contact security@venus.io
@@ -22,7 +22,7 @@ interface IFundRouter {
      * @notice Per-vault fund allocation and lifecycle tracking.
      *
      * Struct packing (4 slots):
-     *   Slot 1: supplyAsset (20B) + 4 bools (4B) = 24 bytes
+     *   Slot 1: supplyAsset (20B) + 5 bools (5B) = 25 bytes
      *   Slot 2: ceffuSubWalletAddress (20B)
      *   Slot 3: principalAmount (32B)
      *   Slot 4: repaymentAmount (32B)
@@ -37,6 +37,8 @@ interface IFundRouter {
         bool fundsReceivedFromVault;
         /// @notice True after router has transferred funds to the Ceffu sub-wallet address
         bool fundsSentToCeffu;
+        /// @notice True after Ceffu order fill has been confirmed for this vault
+        bool orderFillConfirmed;
         /// @notice True after backend has recorded Ceffu's on-chain repayment arrival
         bool repaymentReceived;
         /// @notice True after router has pushed repayment to the vault
@@ -71,6 +73,10 @@ interface IFundRouter {
     /// @param ceffuAddress Address of the Ceffu sub-wallet receiving funds
     /// @param amount Amount of the asset transferred (asset decimals)
     event FundsTransferredToCeffu(address indexed vault, address indexed ceffuAddress, uint256 indexed amount);
+
+    /// @notice Emitted when the Ceffu order fill is confirmed for a vault
+    /// @param vault Address of the vault
+    event OrderFillConfirmedForVault(address indexed vault);
 
     /// @notice Emitted when a Ceffu repayment is recorded by the backend
     /// @param vault Address of the vault
@@ -174,6 +180,22 @@ interface IFundRouter {
     function transferToCeffu(address vault) external;
 
     // ──────────────────────────────────────────────
+    //  Step 3.5: Confirm order fill
+    // ──────────────────────────────────────────────
+
+    /**
+     * @notice Confirms the Ceffu order fill for a vault, transitioning it from PendingFill to Locked.
+     *         Called by backend after Ceffu confirms the order has been filled.
+     *
+     * Prerequisites:
+     * - fundsSentToCeffu must be true
+     * - orderFillConfirmed must be false (idempotency)
+     *
+     * @param vault Address of the vault whose order fill to confirm
+     */
+    function confirmOrderFillForVault(address vault) external;
+
+    // ──────────────────────────────────────────────
     //  Step 4: Record Ceffu repayment
     // ──────────────────────────────────────────────
 
@@ -183,6 +205,10 @@ interface IFundRouter {
      *
      *         The two-step pattern (record + distribute) creates an audit trail and allows
      *         the backend to validate the repayment amount before pushing to the vault.
+     *
+     * Prerequisites:
+     * - orderFillConfirmed must be true
+     * - repaymentReceived must be false (idempotency)
      *
      * @param vault Address of the vault this repayment belongs to
      * @param amount Repayment amount received (principal + interest, asset decimals).
