@@ -98,7 +98,7 @@ interface IFixedRateVault {
     /// @notice Emitted when Ceffu confirms the order fill, transitioning PendingFill -> Locked
     /// @param lockStartAt Timestamp when interest accrual begins (set at fill confirmation)
     /// @param lockPeriodEndTime Timestamp when the lock period ends
-    event OrderFillConfirmed(uint256 lockStartAt, uint256 lockPeriodEndTime);
+    event OrderFillConfirmed(uint256 indexed lockStartAt, uint256 indexed lockPeriodEndTime);
 
     // ──────────────────────────────────────────────
     //  Custom errors

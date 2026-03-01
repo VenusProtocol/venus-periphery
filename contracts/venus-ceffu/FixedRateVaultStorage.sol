@@ -3,6 +3,8 @@ pragma solidity 0.8.25;
 
 import { IFixedRateVault } from "./interfaces/IFixedRateVault.sol";
 
+/* solhint-disable max-states-count */
+
 /**
  * @title FixedRateVaultStorageV1
  * @author Venus Protocol

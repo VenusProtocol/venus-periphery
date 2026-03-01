@@ -93,7 +93,7 @@ contract FixedRateVault is
         if (params.fixedAPY == 0) revert InvalidInitParam("fixedAPY");
         if (params.minCap == 0) revert InvalidInitParam("minCap");
         if (params.maxCap < params.minCap) revert InvalidInitParam("maxCap < minCap");
-        if (params.fundraisingEndTime <= params.fundraisingStartTime) revert InvalidInitParam("fundraisingWindow");
+        if (!(params.fundraisingEndTime > params.fundraisingStartTime)) revert InvalidInitParam("fundraisingWindow");
         if (params.lockPeriodDuration == 0) revert InvalidInitParam("lockPeriodDuration");
         if (params.reserveFactorBps > MAX_BPS) revert InvalidInitParam("reserveFactorBps > 100%");
 
@@ -122,7 +122,7 @@ contract FixedRateVault is
             revert InvalidState(state, VaultState.Fundraising);
         }
 
-        if (totalPrincipal >= minCap) {
+        if (!(totalPrincipal < minCap)) {
             _closeFundraisingSuccessful();
         } else {
             state = VaultState.Cancelled;
@@ -313,7 +313,7 @@ contract FixedRateVault is
     function maxDeposit(address receiver) public view override returns (uint256) {
         if (state != VaultState.Fundraising) return 0;
         if (block.timestamp < fundraisingStartTime) return 0;
-        if (block.timestamp >= fundraisingEndTime) return 0;
+        if (!(block.timestamp < fundraisingEndTime)) return 0;
         if (paused()) return 0;
 
         uint256 globalRemaining = maxCap - totalPrincipal;
@@ -376,7 +376,7 @@ contract FixedRateVault is
             revert InvalidState(state, VaultState.Fundraising);
         }
         if (block.timestamp < fundraisingStartTime) revert FundraisingNotStarted();
-        if (block.timestamp >= fundraisingEndTime) revert FundraisingEnded();
+        if (!(block.timestamp < fundraisingEndTime)) revert FundraisingEnded();
 
         // Per-user minimum deposit enforcement:
         // user's total deposit across all calls must be >= minUserDeposit
@@ -392,7 +392,7 @@ contract FixedRateVault is
         totalPrincipal += assets;
 
         // Scenario A: auto-close when maxCap is reached
-        if (totalPrincipal >= maxCap) {
+        if (!(totalPrincipal < maxCap)) {
             _closeFundraisingSuccessful();
         }
     }

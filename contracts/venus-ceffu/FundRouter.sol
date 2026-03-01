@@ -107,6 +107,7 @@ contract FundRouter is
 
     /// @inheritdoc IFundRouter
     function setCeffuAddressForVault(address vault, address ceffuAddress) external {
+        // solhint-disable-next-line gas-small-strings
         _checkAccessAllowed("setCeffuAddressForVault(address,address)");
         ensureNonzeroAddress(vault);
         ensureNonzeroAddress(ceffuAddress);
@@ -155,6 +156,7 @@ contract FundRouter is
 
     /// @inheritdoc IFundRouter
     function confirmOrderFillForVault(address vault) external {
+        // solhint-disable-next-line gas-small-strings
         _checkAccessAllowed("confirmOrderFillForVault(address)");
 
         VaultAllocation storage allocation = vaultAllocations[vault];
@@ -206,6 +208,7 @@ contract FundRouter is
 
     /// @inheritdoc IFundRouter
     function distributeRepaymentToVault(address vault) external nonReentrant whenNotPaused {
+        // solhint-disable-next-line gas-small-strings
         _checkAccessAllowed("distributeRepaymentToVault(address)");
 
         VaultAllocation storage allocation = vaultAllocations[vault];
@@ -244,6 +247,7 @@ contract FundRouter is
 
     /// @inheritdoc IFundRouter
     function sweepToken(address token, address to, uint256 amount) external nonReentrant {
+        // solhint-disable-next-line gas-small-strings
         _checkAccessAllowed("sweepToken(address,address,uint256)");
         ensureNonzeroAddress(to);
 
