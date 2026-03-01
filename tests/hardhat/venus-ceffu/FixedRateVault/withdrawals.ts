@@ -4,21 +4,13 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import chai from "chai";
 import { BigNumber } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
-import { ethers } from "hardhat";
+import "hardhat";
 
 import { FixedRateVault, FundRouter, IAccessControlManagerV8, MockToken, VaultFactory } from "../../../../typechain";
 import { VaultInitParams, deployFullSystemFixture } from "../fixtures";
 
 const { expect } = chai;
 chai.use(smock.matchers);
-
-const State = {
-  Fundraising: 0,
-  PendingFill: 1,
-  Locked: 2,
-  Matured: 3,
-  Cancelled: 4,
-};
 
 describe("FixedRateVault - Withdrawals", () => {
   let owner: SignerWithAddress;
@@ -29,14 +21,26 @@ describe("FixedRateVault - Withdrawals", () => {
   let acm: FakeContract<IAccessControlManagerV8>;
   let usdcToken: MockToken;
   let fundRouter: FundRouter;
-  let factory: VaultFactory;
+  let _factory: VaultFactory;
   let vault: FixedRateVault;
   let vaultAddress: string;
   let params: VaultInitParams;
 
   beforeEach(async () => {
-    ({ owner, alice, bob, treasury, ceffuWallet, acm, usdcToken, fundRouter, factory, vault, vaultAddress, params } =
-      await loadFixture(deployFullSystemFixture));
+    ({
+      owner,
+      alice,
+      bob,
+      treasury,
+      ceffuWallet,
+      acm,
+      usdcToken,
+      fundRouter,
+      factory: _factory,
+      vault,
+      vaultAddress,
+      params,
+    } = await loadFixture(deployFullSystemFixture));
     acm.isAllowedToCall.returns(true);
   });
 
@@ -84,7 +88,7 @@ describe("FixedRateVault - Withdrawals", () => {
     describe("Matured state — normal repayment", () => {
       // principal=2000, repayment=2100, grossInterest=100, protocolReserve=10, userNet=2090
       const repayment = parseUnits("2100", 18);
-      const expectedUserNet = parseUnits("2090", 18);
+      // principal=2000, repayment=2100, grossInterest=100, protocolReserve=10, userNet=2090
 
       beforeEach(async () => {
         await advanceToMatured(repayment);
@@ -350,9 +354,9 @@ describe("FixedRateVault - Withdrawals", () => {
     it("reverts without sufficient allowance", async () => {
       const shares = await vault.balanceOf(alice.address);
 
-      await expect(
-        vault.connect(bob).redeem(shares, bob.address, alice.address),
-      ).to.be.revertedWith("ERC20: insufficient allowance");
+      await expect(vault.connect(bob).redeem(shares, bob.address, alice.address)).to.be.revertedWith(
+        "ERC20: insufficient allowance",
+      );
     });
   });
 });

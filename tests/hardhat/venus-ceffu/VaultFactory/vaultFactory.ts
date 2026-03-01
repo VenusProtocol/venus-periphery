@@ -5,23 +5,17 @@ import chai from "chai";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
-import {
-  FixedRateVault,
-  FundRouter,
-  IAccessControlManagerV8,
-  MockToken,
-  VaultFactory,
-} from "../../../../typechain";
+import { FixedRateVault, FundRouter, IAccessControlManagerV8, MockToken, VaultFactory } from "../../../../typechain";
 import { VaultInitParams, defaultVaultParams, deployFullSystemFixture } from "../fixtures";
 
 const { expect } = chai;
 chai.use(smock.matchers);
 
 describe("VaultFactory", () => {
-  let owner: SignerWithAddress;
+  let _owner: SignerWithAddress;
   let alice: SignerWithAddress;
-  let bob: SignerWithAddress;
-  let treasury: SignerWithAddress;
+  let _bob: SignerWithAddress;
+  let _treasury: SignerWithAddress;
   let acm: FakeContract<IAccessControlManagerV8>;
   let usdcToken: MockToken;
   let vaultImpl: FixedRateVault;
@@ -29,11 +23,23 @@ describe("VaultFactory", () => {
   let factory: VaultFactory;
   let vault: FixedRateVault;
   let vaultAddress: string;
-  let params: VaultInitParams;
+  let _params: VaultInitParams;
 
   beforeEach(async () => {
-    ({ owner, alice, bob, treasury, acm, usdcToken, vaultImpl, fundRouter, factory, vault, vaultAddress, params } =
-      await loadFixture(deployFullSystemFixture));
+    ({
+      owner: _owner,
+      alice,
+      bob: _bob,
+      treasury: _treasury,
+      acm,
+      usdcToken,
+      vaultImpl,
+      fundRouter,
+      factory,
+      vault,
+      vaultAddress,
+      params: _params,
+    } = await loadFixture(deployFullSystemFixture));
     // Reset smock state — .returns() persists in JS memory across evm_revert snapshots
     acm.isAllowedToCall.returns(true);
   });
@@ -56,30 +62,26 @@ describe("VaultFactory", () => {
     });
 
     it("should revert on re-initialization", async () => {
-      await expect(
-        factory.initialize(acm.address, vaultImpl.address, fundRouter.address),
-      ).to.be.revertedWith("Initializable: contract is already initialized");
+      await expect(factory.initialize(acm.address, vaultImpl.address, fundRouter.address)).to.be.revertedWith(
+        "Initializable: contract is already initialized",
+      );
     });
 
     it("should revert if vaultImplementation is zero address", async () => {
       const VaultFactoryFactory = await ethers.getContractFactory("VaultFactory");
       await expect(
-        upgrades.deployProxy(
-          VaultFactoryFactory,
-          [acm.address, ethers.constants.AddressZero, fundRouter.address],
-          { unsafeAllow: ["constructor"] },
-        ),
+        upgrades.deployProxy(VaultFactoryFactory, [acm.address, ethers.constants.AddressZero, fundRouter.address], {
+          unsafeAllow: ["constructor"],
+        }),
       ).to.be.revertedWithCustomError(factory, "ZeroAddressNotAllowed");
     });
 
     it("should revert if fundRouter is zero address", async () => {
       const VaultFactoryFactory = await ethers.getContractFactory("VaultFactory");
       await expect(
-        upgrades.deployProxy(
-          VaultFactoryFactory,
-          [acm.address, vaultImpl.address, ethers.constants.AddressZero],
-          { unsafeAllow: ["constructor"] },
-        ),
+        upgrades.deployProxy(VaultFactoryFactory, [acm.address, vaultImpl.address, ethers.constants.AddressZero], {
+          unsafeAllow: ["constructor"],
+        }),
       ).to.be.revertedWithCustomError(factory, "ZeroAddressNotAllowed");
     });
   });
@@ -158,10 +160,7 @@ describe("VaultFactory", () => {
 
     it("should revert on empty ceffuRequestId", async () => {
       const badParams = await defaultVaultParams(usdcToken.address, { ceffuRequestId: "" });
-      await expect(factory.deployVault(badParams)).to.be.revertedWithCustomError(
-        factory,
-        "EmptyCeffuRequestId",
-      );
+      await expect(factory.deployVault(badParams)).to.be.revertedWithCustomError(factory, "EmptyCeffuRequestId");
     });
 
     it("should revert on duplicate ceffuRequestId", async () => {
@@ -176,10 +175,7 @@ describe("VaultFactory", () => {
       const badParams = await defaultVaultParams(ethers.constants.AddressZero, {
         ceffuRequestId: "CR-0002",
       });
-      await expect(factory.deployVault(badParams)).to.be.revertedWithCustomError(
-        factory,
-        "ZeroAddressNotAllowed",
-      );
+      await expect(factory.deployVault(badParams)).to.be.revertedWithCustomError(factory, "ZeroAddressNotAllowed");
     });
 
     it("should revert when ACM denies access", async () => {
@@ -231,9 +227,10 @@ describe("VaultFactory", () => {
     });
 
     it("should revert on zero address", async () => {
-      await expect(
-        factory.setVaultImplementation(ethers.constants.AddressZero),
-      ).to.be.revertedWithCustomError(factory, "ZeroAddressNotAllowed");
+      await expect(factory.setVaultImplementation(ethers.constants.AddressZero)).to.be.revertedWithCustomError(
+        factory,
+        "ZeroAddressNotAllowed",
+      );
     });
 
     it("should revert on same address", async () => {
@@ -269,9 +266,10 @@ describe("VaultFactory", () => {
     });
 
     it("should revert on zero address", async () => {
-      await expect(
-        factory.setFundRouter(ethers.constants.AddressZero),
-      ).to.be.revertedWithCustomError(factory, "ZeroAddressNotAllowed");
+      await expect(factory.setFundRouter(ethers.constants.AddressZero)).to.be.revertedWithCustomError(
+        factory,
+        "ZeroAddressNotAllowed",
+      );
     });
 
     it("should revert on same address", async () => {
@@ -283,10 +281,7 @@ describe("VaultFactory", () => {
 
     it("should revert when ACM denies access", async () => {
       acm.isAllowedToCall.returns(false);
-      await expect(factory.setFundRouter(alice.address)).to.be.revertedWithCustomError(
-        factory,
-        "Unauthorized",
-      );
+      await expect(factory.setFundRouter(alice.address)).to.be.revertedWithCustomError(factory, "Unauthorized");
     });
   });
 

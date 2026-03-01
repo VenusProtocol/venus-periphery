@@ -6,14 +6,8 @@ import { BigNumber } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
-import {
-  FixedRateVault,
-  FundRouter,
-  IAccessControlManagerV8,
-  MockToken,
-  VaultFactory,
-} from "../../../../typechain";
-import { VaultInitParams, deployFullSystemFixture, THIRTY_DAYS, SEVEN_DAYS } from "../fixtures";
+import { FixedRateVault, FundRouter, IAccessControlManagerV8, MockToken, VaultFactory } from "../../../../typechain";
+import { SEVEN_DAYS, THIRTY_DAYS, VaultInitParams, deployFullSystemFixture } from "../fixtures";
 
 const { expect } = chai;
 chai.use(smock.matchers);
@@ -29,19 +23,30 @@ const State = {
 describe("FixedRateVault - Lifecycle", () => {
   let owner: SignerWithAddress;
   let alice: SignerWithAddress;
-  let bob: SignerWithAddress;
+  let _bob: SignerWithAddress;
   let ceffuWallet: SignerWithAddress;
   let acm: FakeContract<IAccessControlManagerV8>;
   let usdcToken: MockToken;
   let fundRouter: FundRouter;
-  let factory: VaultFactory;
+  let _factory: VaultFactory;
   let vault: FixedRateVault;
   let vaultAddress: string;
   let params: VaultInitParams;
 
   beforeEach(async () => {
-    ({ owner, alice, bob, ceffuWallet, acm, usdcToken, fundRouter, factory, vault, vaultAddress, params } =
-      await loadFixture(deployFullSystemFixture));
+    ({
+      owner,
+      alice,
+      bob: _bob,
+      ceffuWallet,
+      acm,
+      usdcToken,
+      fundRouter,
+      factory: _factory,
+      vault,
+      vaultAddress,
+      params,
+    } = await loadFixture(deployFullSystemFixture));
     acm.isAllowedToCall.returns(true);
   });
 
@@ -227,14 +232,14 @@ describe("FixedRateVault - Lifecycle", () => {
 
       it("sets lockStartAt to current block.timestamp", async () => {
         const tx = await fundRouter.confirmOrderFillForVault(vaultAddress);
-        const block = await ethers.provider.getBlock(tx.blockNumber!);
+        const block = await ethers.provider.getBlock(tx.blockNumber as number);
 
         expect(await vault.lockStartAt()).to.equal(block.timestamp);
       });
 
       it("sets lockPeriodEndTime = lockStartAt + lockPeriodDuration", async () => {
         const tx = await fundRouter.confirmOrderFillForVault(vaultAddress);
-        const block = await ethers.provider.getBlock(tx.blockNumber!);
+        const block = await ethers.provider.getBlock(tx.blockNumber as number);
 
         expect(await vault.lockPeriodEndTime()).to.equal(block.timestamp + THIRTY_DAYS);
       });
@@ -247,10 +252,7 @@ describe("FixedRateVault - Lifecycle", () => {
     it("reverts if caller is not fundRouter (OnlyFundRouter)", async () => {
       await advanceToPendingFill();
 
-      await expect(vault.connect(alice).confirmOrderFill()).to.be.revertedWithCustomError(
-        vault,
-        "OnlyFundRouter",
-      );
+      await expect(vault.connect(alice).confirmOrderFill()).to.be.revertedWithCustomError(vault, "OnlyFundRouter");
     });
 
     it("reverts if vault is not in PendingFill state", async () => {

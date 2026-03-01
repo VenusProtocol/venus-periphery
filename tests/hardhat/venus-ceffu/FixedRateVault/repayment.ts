@@ -23,20 +23,32 @@ const State = {
 describe("FixedRateVault - Repayment", () => {
   let owner: SignerWithAddress;
   let alice: SignerWithAddress;
-  let bob: SignerWithAddress;
+  let _bob: SignerWithAddress;
   let treasury: SignerWithAddress;
   let ceffuWallet: SignerWithAddress;
   let acm: FakeContract<IAccessControlManagerV8>;
   let usdcToken: MockToken;
   let fundRouter: FundRouter;
-  let factory: VaultFactory;
+  let _factory: VaultFactory;
   let vault: FixedRateVault;
   let vaultAddress: string;
   let params: VaultInitParams;
 
   beforeEach(async () => {
-    ({ owner, alice, bob, treasury, ceffuWallet, acm, usdcToken, fundRouter, factory, vault, vaultAddress, params } =
-      await loadFixture(deployFullSystemFixture));
+    ({
+      owner,
+      alice,
+      bob: _bob,
+      treasury,
+      ceffuWallet,
+      acm,
+      usdcToken,
+      fundRouter,
+      factory: _factory,
+      vault,
+      vaultAddress,
+      params,
+    } = await loadFixture(deployFullSystemFixture));
     acm.isAllowedToCall.returns(true);
   });
 

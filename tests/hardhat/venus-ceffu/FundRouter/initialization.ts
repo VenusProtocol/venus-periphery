@@ -11,13 +11,13 @@ const { expect } = chai;
 chai.use(smock.matchers);
 
 describe("FundRouter - Initialization", () => {
-  let owner: SignerWithAddress;
+  let _owner: SignerWithAddress;
   let acm: FakeContract<IAccessControlManagerV8>;
   let fundRouter: FundRouter;
   let factory: VaultFactory;
 
   beforeEach(async () => {
-    ({ owner, acm, fundRouter, factory } = await loadFixture(deployFullSystemFixture));
+    ({ owner: _owner, acm, fundRouter, factory } = await loadFixture(deployFullSystemFixture));
     acm.isAllowedToCall.returns(true);
   });
 

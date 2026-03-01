@@ -15,7 +15,7 @@ chai.use(smock.matchers);
 describe("FundRouter - Admin", () => {
   let owner: SignerWithAddress;
   let alice: SignerWithAddress;
-  let bob: SignerWithAddress;
+  let _bob: SignerWithAddress;
   let treasury: SignerWithAddress;
   let ceffuWallet: SignerWithAddress;
   let acm: FakeContract<IAccessControlManagerV8>;
@@ -27,8 +27,20 @@ describe("FundRouter - Admin", () => {
   let params: VaultInitParams;
 
   beforeEach(async () => {
-    ({ owner, alice, bob, treasury, ceffuWallet, acm, usdcToken, fundRouter, factory, vault, vaultAddress, params } =
-      await loadFixture(deployFullSystemFixture));
+    ({
+      owner,
+      alice,
+      bob: _bob,
+      treasury,
+      ceffuWallet,
+      acm,
+      usdcToken,
+      fundRouter,
+      factory,
+      vault,
+      vaultAddress,
+      params,
+    } = await loadFixture(deployFullSystemFixture));
     acm.isAllowedToCall.returns(true);
   });
 
@@ -83,15 +95,17 @@ describe("FundRouter - Admin", () => {
 
     it("reverts when ACM denies access", async () => {
       acm.isAllowedToCall.returns(false);
-      await expect(
-        fundRouter.setAssetApproval(usdcToken.address, true),
-      ).to.be.revertedWithCustomError(fundRouter, "Unauthorized");
+      await expect(fundRouter.setAssetApproval(usdcToken.address, true)).to.be.revertedWithCustomError(
+        fundRouter,
+        "Unauthorized",
+      );
     });
 
     it("reverts with ZeroAddressNotAllowed for zero asset", async () => {
-      await expect(
-        fundRouter.setAssetApproval(ethers.constants.AddressZero, true),
-      ).to.be.revertedWithCustomError(fundRouter, "ZeroAddressNotAllowed");
+      await expect(fundRouter.setAssetApproval(ethers.constants.AddressZero, true)).to.be.revertedWithCustomError(
+        fundRouter,
+        "ZeroAddressNotAllowed",
+      );
     });
   });
 
@@ -143,9 +157,10 @@ describe("FundRouter - Admin", () => {
     });
 
     it("reverts with ZeroAmount for zero amount", async () => {
-      await expect(
-        fundRouter.sweepToken(usdcToken.address, treasury.address, 0),
-      ).to.be.revertedWithCustomError(fundRouter, "ZeroAmount");
+      await expect(fundRouter.sweepToken(usdcToken.address, treasury.address, 0)).to.be.revertedWithCustomError(
+        fundRouter,
+        "ZeroAmount",
+      );
     });
 
     it("reverts when insufficient balance", async () => {
@@ -230,9 +245,7 @@ describe("FundRouter - Admin", () => {
       await advanceToPendingFill();
       await fundRouter.pause();
 
-      await expect(
-        fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address),
-      ).to.not.be.reverted;
+      await expect(fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address)).to.not.be.reverted;
     });
 
     it("confirmOrderFillForVault works when paused (no whenNotPaused)", async () => {

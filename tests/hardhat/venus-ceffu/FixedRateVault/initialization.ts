@@ -23,7 +23,7 @@ const State = {
 describe("FixedRateVault - Initialization & Access Control", () => {
   let owner: SignerWithAddress;
   let alice: SignerWithAddress;
-  let bob: SignerWithAddress;
+  let _bob: SignerWithAddress;
   let treasury: SignerWithAddress;
   let ceffuWallet: SignerWithAddress;
   let acm: FakeContract<IAccessControlManagerV8>;
@@ -39,7 +39,7 @@ describe("FixedRateVault - Initialization & Access Control", () => {
     ({
       owner,
       alice,
-      bob,
+      bob: _bob,
       treasury,
       ceffuWallet,
       acm,
@@ -59,7 +59,9 @@ describe("FixedRateVault - Initialization & Access Control", () => {
   let paramCounter = 0;
 
   /** Deploy a new vault via factory with param overrides (auto-generates unique ceffuRequestId) */
-  async function deployWithOverrides(overrides: Partial<VaultInitParams>): Promise<ReturnType<typeof factory.deployVault>> {
+  async function deployWithOverrides(
+    overrides: Partial<VaultInitParams>,
+  ): Promise<ReturnType<typeof factory.deployVault>> {
     paramCounter++;
     const p = await defaultVaultParams(usdcToken.address, {
       ceffuRequestId: `CR-INIT-${paramCounter}`,
@@ -139,16 +141,16 @@ describe("FixedRateVault - Initialization & Access Control", () => {
 
       it("reverts on re-initialization", async () => {
         const p = await defaultVaultParams(usdcToken.address);
-        await expect(
-          vault.initialize(acm.address, fundRouter.address, p),
-        ).to.be.revertedWith("Initializable: contract is already initialized");
+        await expect(vault.initialize(acm.address, fundRouter.address, p)).to.be.revertedWith(
+          "Initializable: contract is already initialized",
+        );
       });
 
       it("implementation contract cannot be initialized (constructor disables initializers)", async () => {
         const p = await defaultVaultParams(usdcToken.address);
-        await expect(
-          vaultImpl.initialize(acm.address, fundRouter.address, p),
-        ).to.be.revertedWith("Initializable: contract is already initialized");
+        await expect(vaultImpl.initialize(acm.address, fundRouter.address, p)).to.be.revertedWith(
+          "Initializable: contract is already initialized",
+        );
       });
     });
 
@@ -377,9 +379,9 @@ describe("FixedRateVault - Initialization & Access Control", () => {
       await vault.pause();
       await usdcToken.connect(alice).approve(vault.address, parseUnits("1000", 18));
 
-      await expect(
-        vault.connect(alice).deposit(parseUnits("1000", 18), alice.address),
-      ).to.be.revertedWith("Pausable: paused");
+      await expect(vault.connect(alice).deposit(parseUnits("1000", 18), alice.address)).to.be.revertedWith(
+        "Pausable: paused",
+      );
     });
 
     it("mint blocked when paused", async () => {
@@ -387,9 +389,9 @@ describe("FixedRateVault - Initialization & Access Control", () => {
       await vault.pause();
       await usdcToken.connect(alice).approve(vault.address, parseUnits("1000", 18));
 
-      await expect(
-        vault.connect(alice).mint(parseUnits("1000", 18), alice.address),
-      ).to.be.revertedWith("Pausable: paused");
+      await expect(vault.connect(alice).mint(parseUnits("1000", 18), alice.address)).to.be.revertedWith(
+        "Pausable: paused",
+      );
     });
 
     it("redeem allowed when paused (user safety valve)", async () => {

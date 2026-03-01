@@ -4,13 +4,7 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
-import {
-  FixedRateVault,
-  FundRouter,
-  IAccessControlManagerV8,
-  MockToken,
-  VaultFactory,
-} from "../../../typechain";
+import { FixedRateVault, FundRouter, IAccessControlManagerV8, MockToken, VaultFactory } from "../../../typechain";
 
 export type VaultInitParams = {
   supplyAsset: string;
@@ -95,11 +89,9 @@ export async function deployFullSystemFixture(): Promise<FullSystemFixture> {
   const VaultFactoryFactory = await ethers.getContractFactory("VaultFactory");
 
   // Step 1: Deploy factory with owner as placeholder fundRouter
-  const factory = (await upgrades.deployProxy(
-    VaultFactoryFactory,
-    [acm.address, vaultImpl.address, owner.address],
-    { unsafeAllow: ["constructor"] },
-  )) as VaultFactory;
+  const factory = (await upgrades.deployProxy(VaultFactoryFactory, [acm.address, vaultImpl.address, owner.address], {
+    unsafeAllow: ["constructor"],
+  })) as VaultFactory;
 
   // Step 2: Deploy FundRouter with the real factory address
   const fundRouter = (await upgrades.deployProxy(FundRouterFactory, [acm.address, factory.address], {

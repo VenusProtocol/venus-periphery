@@ -4,7 +4,7 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import chai from "chai";
 import { BigNumber } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
-import { ethers } from "hardhat";
+import "hardhat";
 
 import { FixedRateVault, FundRouter, IAccessControlManagerV8, MockToken, VaultFactory } from "../../../../typechain";
 import { SEVEN_DAYS, THIRTY_DAYS, VaultInitParams, deployFullSystemFixture } from "../fixtures";
@@ -32,14 +32,26 @@ describe("FixedRateVault - Views", () => {
   let acm: FakeContract<IAccessControlManagerV8>;
   let usdcToken: MockToken;
   let fundRouter: FundRouter;
-  let factory: VaultFactory;
+  let _factory: VaultFactory;
   let vault: FixedRateVault;
   let vaultAddress: string;
   let params: VaultInitParams;
 
   beforeEach(async () => {
-    ({ owner, alice, bob, treasury, ceffuWallet, acm, usdcToken, fundRouter, factory, vault, vaultAddress, params } =
-      await loadFixture(deployFullSystemFixture));
+    ({
+      owner,
+      alice,
+      bob,
+      treasury,
+      ceffuWallet,
+      acm,
+      usdcToken,
+      fundRouter,
+      factory: _factory,
+      vault,
+      vaultAddress,
+      params,
+    } = await loadFixture(deployFullSystemFixture));
     acm.isAllowedToCall.returns(true);
   });
 
@@ -416,9 +428,7 @@ describe("FixedRateVault - Views", () => {
       expect(await vault.totalRepayment()).to.equal(parseUnits("2100", 18));
       expect(await vault.protocolReserve()).to.equal(parseUnits("10", 18));
       expect(await vault.lockStartAt()).to.be.gt(0);
-      expect(await vault.lockPeriodEndTime()).to.equal(
-        (await vault.lockStartAt()).add(params.lockPeriodDuration),
-      );
+      expect(await vault.lockPeriodEndTime()).to.equal((await vault.lockStartAt()).add(params.lockPeriodDuration));
     });
   });
 

@@ -28,14 +28,25 @@ describe("FundRouter - Fund Flow", () => {
   let acm: FakeContract<IAccessControlManagerV8>;
   let usdcToken: MockToken;
   let fundRouter: FundRouter;
-  let factory: VaultFactory;
+  let _factory: VaultFactory;
   let vault: FixedRateVault;
   let vaultAddress: string;
   let params: VaultInitParams;
 
   beforeEach(async () => {
-    ({ owner, alice, bob, ceffuWallet, acm, usdcToken, fundRouter, factory, vault, vaultAddress, params } =
-      await loadFixture(deployFullSystemFixture));
+    ({
+      owner,
+      alice,
+      bob,
+      ceffuWallet,
+      acm,
+      usdcToken,
+      fundRouter,
+      factory: _factory,
+      vault,
+      vaultAddress,
+      params,
+    } = await loadFixture(deployFullSystemFixture));
     acm.isAllowedToCall.returns(true);
   });
 
@@ -98,9 +109,7 @@ describe("FundRouter - Fund Flow", () => {
         const routerBalBefore = await usdcToken.balanceOf(fundRouter.address);
         await advanceToPendingFill();
 
-        expect(await usdcToken.balanceOf(fundRouter.address)).to.equal(
-          routerBalBefore.add(parseUnits("2000", 18)),
-        );
+        expect(await usdcToken.balanceOf(fundRouter.address)).to.equal(routerBalBefore.add(parseUnits("2000", 18)));
         expect(await usdcToken.balanceOf(vaultAddress)).to.equal(0);
       });
 
@@ -127,9 +136,10 @@ describe("FundRouter - Fund Flow", () => {
         await ethers.provider.send("hardhat_setBalance", [vaultAddress, "0x56BC75E2D63100000"]);
         const vaultSigner = await ethers.getSigner(vaultAddress);
 
-        await expect(
-          fundRouter.connect(vaultSigner).receiveFundsFromVault(0),
-        ).to.be.revertedWithCustomError(fundRouter, "ZeroAmount");
+        await expect(fundRouter.connect(vaultSigner).receiveFundsFromVault(0)).to.be.revertedWithCustomError(
+          fundRouter,
+          "ZeroAmount",
+        );
       });
 
       it("reverts with AssetNotApproved when asset is not whitelisted", async () => {
@@ -241,9 +251,7 @@ describe("FundRouter - Fund Flow", () => {
         const ceffuBalBefore = await usdcToken.balanceOf(ceffuWallet.address);
         await fundRouter.transferToCeffu(vaultAddress);
 
-        expect(await usdcToken.balanceOf(ceffuWallet.address)).to.equal(
-          ceffuBalBefore.add(parseUnits("2000", 18)),
-        );
+        expect(await usdcToken.balanceOf(ceffuWallet.address)).to.equal(ceffuBalBefore.add(parseUnits("2000", 18)));
         expect(await usdcToken.balanceOf(fundRouter.address)).to.equal(0);
       });
 
@@ -337,7 +345,7 @@ describe("FundRouter - Fund Flow", () => {
       it("sets lockStartAt and lockPeriodEndTime on vault", async () => {
         await advanceToFundsSentToCeffu();
         const tx = await fundRouter.confirmOrderFillForVault(vaultAddress);
-        const block = await ethers.provider.getBlock(tx.blockNumber!);
+        const block = await ethers.provider.getBlock(tx.blockNumber as number);
 
         expect(await vault.lockStartAt()).to.equal(block.timestamp);
         expect(await vault.lockPeriodEndTime()).to.equal(block.timestamp + params.lockPeriodDuration);
@@ -415,9 +423,10 @@ describe("FundRouter - Fund Flow", () => {
     describe("Reverts", () => {
       it("reverts when ACM denies access", async () => {
         acm.isAllowedToCall.returns(false);
-        await expect(
-          fundRouter.recordRepayment(vaultAddress, parseUnits("2100", 18)),
-        ).to.be.revertedWithCustomError(fundRouter, "Unauthorized");
+        await expect(fundRouter.recordRepayment(vaultAddress, parseUnits("2100", 18))).to.be.revertedWithCustomError(
+          fundRouter,
+          "Unauthorized",
+        );
       });
 
       it("reverts with ZeroAmount", async () => {
@@ -431,17 +440,19 @@ describe("FundRouter - Fund Flow", () => {
       it("reverts with PrerequisiteNotMet when order fill not confirmed", async () => {
         await advanceToFundsSentToCeffu();
         // Skip confirmOrderFillForVault
-        await expect(
-          fundRouter.recordRepayment(vaultAddress, parseUnits("2100", 18)),
-        ).to.be.revertedWithCustomError(fundRouter, "PrerequisiteNotMet");
+        await expect(fundRouter.recordRepayment(vaultAddress, parseUnits("2100", 18))).to.be.revertedWithCustomError(
+          fundRouter,
+          "PrerequisiteNotMet",
+        );
       });
 
       it("reverts with OperationAlreadyCompleted on double call", async () => {
         await advanceToRepaymentRecorded();
 
-        await expect(
-          fundRouter.recordRepayment(vaultAddress, parseUnits("100", 18)),
-        ).to.be.revertedWithCustomError(fundRouter, "OperationAlreadyCompleted");
+        await expect(fundRouter.recordRepayment(vaultAddress, parseUnits("100", 18))).to.be.revertedWithCustomError(
+          fundRouter,
+          "OperationAlreadyCompleted",
+        );
       });
     });
   });

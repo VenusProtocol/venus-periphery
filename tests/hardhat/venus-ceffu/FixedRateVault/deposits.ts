@@ -6,20 +6,14 @@ import { BigNumber } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
-import {
-  FixedRateVault,
-  FundRouter,
-  IAccessControlManagerV8,
-  MockToken,
-  VaultFactory,
-} from "../../../../typechain";
+import { FixedRateVault, FundRouter, IAccessControlManagerV8, MockToken, VaultFactory } from "../../../../typechain";
 import { VaultInitParams, defaultVaultParams, deployFullSystemFixture } from "../fixtures";
 
 const { expect } = chai;
 chai.use(smock.matchers);
 
 describe("FixedRateVault - Deposits", () => {
-  let owner: SignerWithAddress;
+  let _owner: SignerWithAddress;
   let alice: SignerWithAddress;
   let bob: SignerWithAddress;
   let treasury: SignerWithAddress;
@@ -32,8 +26,19 @@ describe("FixedRateVault - Deposits", () => {
   let params: VaultInitParams;
 
   beforeEach(async () => {
-    ({ owner, alice, bob, treasury, acm, usdcToken, fundRouter, factory, vault, vaultAddress, params } =
-      await loadFixture(deployFullSystemFixture));
+    ({
+      owner: _owner,
+      alice,
+      bob,
+      treasury,
+      acm,
+      usdcToken,
+      fundRouter,
+      factory,
+      vault,
+      vaultAddress,
+      params,
+    } = await loadFixture(deployFullSystemFixture));
     acm.isAllowedToCall.returns(true);
   });
 
@@ -162,9 +167,9 @@ describe("FixedRateVault - Deposits", () => {
         const amount = parseUnits("1000", 18);
         await usdcToken.connect(alice).approve(vault.address, amount);
 
-        await expect(
-          vault.connect(alice).deposit(amount, alice.address),
-        ).to.be.revertedWith("ERC4626: deposit more than max");
+        await expect(vault.connect(alice).deposit(amount, alice.address)).to.be.revertedWith(
+          "ERC4626: deposit more than max",
+        );
       });
 
       it("reverts after fundraising end time", async () => {
@@ -173,9 +178,9 @@ describe("FixedRateVault - Deposits", () => {
         const amount = parseUnits("1000", 18);
         await usdcToken.connect(alice).approve(vault.address, amount);
 
-        await expect(
-          vault.connect(alice).deposit(amount, alice.address),
-        ).to.be.revertedWith("ERC4626: deposit more than max");
+        await expect(vault.connect(alice).deposit(amount, alice.address)).to.be.revertedWith(
+          "ERC4626: deposit more than max",
+        );
       });
 
       it("reverts when vault is not in Fundraising state", async () => {
@@ -184,9 +189,9 @@ describe("FixedRateVault - Deposits", () => {
         const amount = parseUnits("1000", 18);
         await usdcToken.connect(alice).approve(vault.address, amount);
 
-        await expect(
-          vault.connect(alice).deposit(amount, alice.address),
-        ).to.be.revertedWith("ERC4626: deposit more than max");
+        await expect(vault.connect(alice).deposit(amount, alice.address)).to.be.revertedWith(
+          "ERC4626: deposit more than max",
+        );
       });
 
       it("reverts below cumulative minUserDeposit", async () => {
@@ -207,9 +212,9 @@ describe("FixedRateVault - Deposits", () => {
         const overMax = parseUnits("6000", 18);
         await usdcToken.connect(alice).approve(vault.address, overMax);
 
-        await expect(
-          vault.connect(alice).deposit(overMax, alice.address),
-        ).to.be.revertedWith("ERC4626: deposit more than max");
+        await expect(vault.connect(alice).deposit(overMax, alice.address)).to.be.revertedWith(
+          "ERC4626: deposit more than max",
+        );
       });
 
       it("reverts when vault is paused", async () => {
@@ -220,9 +225,7 @@ describe("FixedRateVault - Deposits", () => {
         await usdcToken.connect(alice).approve(vault.address, amount);
 
         // whenNotPaused modifier fires before ERC4626 maxDeposit check
-        await expect(
-          vault.connect(alice).deposit(amount, alice.address),
-        ).to.be.revertedWith("Pausable: paused");
+        await expect(vault.connect(alice).deposit(amount, alice.address)).to.be.revertedWith("Pausable: paused");
       });
 
       it("reverts with insufficient ERC20 allowance", async () => {
@@ -231,9 +234,9 @@ describe("FixedRateVault - Deposits", () => {
 
         const amount = parseUnits("1000", 18);
 
-        await expect(
-          vault.connect(alice).deposit(amount, alice.address),
-        ).to.be.revertedWith("ERC20: insufficient allowance");
+        await expect(vault.connect(alice).deposit(amount, alice.address)).to.be.revertedWith(
+          "ERC20: insufficient allowance",
+        );
       });
     });
 
@@ -307,9 +310,7 @@ describe("FixedRateVault - Deposits", () => {
       await usdcToken.connect(alice).approve(vault.address, shares);
 
       // whenNotPaused modifier fires before ERC4626 maxMint check
-      await expect(
-        vault.connect(alice).mint(shares, alice.address),
-      ).to.be.revertedWith("Pausable: paused");
+      await expect(vault.connect(alice).mint(shares, alice.address)).to.be.revertedWith("Pausable: paused");
     });
   });
 
