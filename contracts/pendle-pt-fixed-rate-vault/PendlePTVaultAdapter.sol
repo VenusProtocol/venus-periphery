@@ -148,7 +148,8 @@ contract PendlePTVaultAdapter is
             // 3. Deposit PT into Venus — vTokens go to user
             netVTokensMinted = _mintVTokens(config.pt, config.vToken, netPtOut);
 
-            // 4. Sweep only dust from this transaction back to user (PT rounding + leftover tokenIn)
+            // 4. Safety sweep: not expected with exact-in swap, but guards against
+            //    unexpected Router/token behavior leaving residual tokens in the adapter
             _sweepDust(config.pt, msg.sender, ptBalanceBefore);
             _sweepDust(input.tokenIn, msg.sender, balanceBefore);
         }
@@ -187,10 +188,11 @@ contract PendlePTVaultAdapter is
         // 2. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(config.pt, config.vToken, netPtOut);
 
-        // 3. Sweep only PT dust from this transaction back to user
+        // 3. Safety sweep: not expected with exact-in swap, but guards against
+        //    unexpected Router behavior leaving residual PT in the adapter
         _sweepDust(config.pt, msg.sender, ptBalanceBefore);
 
-        // 4. Refund only excess native BNB from this transaction to the caller
+        // 4. Refund any excess native BNB returned by Pendle Router to the caller
         _refundNativeDust(nativeBalanceBefore);
 
         emit Deposited(pendleMarket, msg.sender, input.tokenIn, msg.value, netPtOut, netVTokensMinted);
@@ -226,7 +228,8 @@ contract PendlePTVaultAdapter is
         // 2. Swap PT → tokenOut via Pendle (sent directly to user, Pendle handles routing)
         netTokenOut = _swapPtToToken(config.pt, pendleMarket, ptReceived, output, limit);
 
-        // 3. Sweep only PT dust from this transaction back to user
+        // 3. Safety sweep: not expected with exact-in swap, but guards against
+        //    unexpected Router behavior leaving residual PT in the adapter
         _sweepDust(config.pt, msg.sender, ptBefore);
 
         emit Withdrawn(pendleMarket, msg.sender, output.tokenOut, vTokenAmount, ptReceived, netTokenOut);
@@ -257,7 +260,8 @@ contract PendlePTVaultAdapter is
         // 2. Redeem PT 1:1 → tokenOut via Pendle (sent directly to user, Pendle handles routing)
         netTokenOut = _redeemPtToToken(config.pt, config.yt, ptReceived, output);
 
-        // 3. Sweep only PT dust from this transaction back to user
+        // 3. Safety sweep: not expected with exact-in redemption, but guards against
+        //    unexpected Router behavior leaving residual PT in the adapter
         _sweepDust(config.pt, msg.sender, ptBefore);
 
         emit RedeemedAtMaturity(pendleMarket, msg.sender, output.tokenOut, vTokenAmount, ptReceived, netTokenOut);
