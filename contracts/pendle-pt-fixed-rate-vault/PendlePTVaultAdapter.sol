@@ -147,7 +147,7 @@ contract PendlePTVaultAdapter is
             netPtOut = _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
 
             // 3. Deposit PT into Venus — vTokens go to user
-            netVTokensMinted = _mintVTokens(config, netPtOut);
+            netVTokensMinted = _mintVTokens(config.pt, config.vToken, netPtOut);
 
             // 4. Sweep only dust from this transaction back to user (PT rounding + leftover tokenIn)
             _sweepDust(config.pt, msg.sender, ptBalanceBefore);
@@ -186,7 +186,7 @@ contract PendlePTVaultAdapter is
         );
 
         // 2. Deposit PT into Venus — vTokens go to user
-        netVTokensMinted = _mintVTokens(config, netPtOut);
+        netVTokensMinted = _mintVTokens(config.pt, config.vToken, netPtOut);
 
         // 3. Sweep only PT dust from this transaction back to user
         _sweepDust(config.pt, msg.sender, ptBalanceBefore);
@@ -392,22 +392,23 @@ contract PendlePTVaultAdapter is
 
     /**
      * @notice Deposits PT into Venus and mints vTokens on behalf of the caller.
-     * @param config The market configuration containing vToken and PT addresses.
+     * @param pt The PT token address to deposit.
+     * @param vToken The Venus vToken address to mint into.
      * @param ptAmount Amount of PT tokens to deposit.
      * @return netVTokensMinted Amount of vTokens minted to msg.sender.
      * @dev Approves vToken, calls mintBehalf, then resets approval to zero.
      *      Reverts with VTokenMintFailed if the mint operation returns non-zero error.
      */
-    function _mintVTokens(MarketConfig storage config, uint256 ptAmount) internal returns (uint256 netVTokensMinted) {
-        uint256 vTokenBalanceBefore = IVenusVToken(config.vToken).balanceOf(msg.sender);
+    function _mintVTokens(address pt, address vToken, uint256 ptAmount) internal returns (uint256 netVTokensMinted) {
+        uint256 vTokenBalanceBefore = IVenusVToken(vToken).balanceOf(msg.sender);
 
-        IERC20(config.pt).forceApprove(config.vToken, ptAmount);
-        uint256 mintErr = IVenusVToken(config.vToken).mintBehalf(msg.sender, ptAmount);
+        IERC20(pt).forceApprove(vToken, ptAmount);
+        uint256 mintErr = IVenusVToken(vToken).mintBehalf(msg.sender, ptAmount);
         if (mintErr != 0) revert VTokenMintFailed(mintErr);
 
-        netVTokensMinted = IVenusVToken(config.vToken).balanceOf(msg.sender) - vTokenBalanceBefore;
+        netVTokensMinted = IVenusVToken(vToken).balanceOf(msg.sender) - vTokenBalanceBefore;
 
-        IERC20(config.pt).forceApprove(config.vToken, 0);
+        IERC20(pt).forceApprove(vToken, 0);
     }
 
     /**
