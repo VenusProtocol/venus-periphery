@@ -60,7 +60,7 @@ function describeTests() {
         // Execute deposit
         const tx = await adapter
           .connect(user)
-          .deposit(marketAddress, depositAmount, minPtOut, approxParams, tokenInput, limitOrderData);
+          .deposit(marketAddress, minPtOut, approxParams, tokenInput, limitOrderData);
         const receipt = await tx.wait();
 
         // Record balances after deposit
@@ -137,7 +137,7 @@ function describeTests() {
         // Execute deposit
         const tx = await adapter
           .connect(user)
-          .deposit(marketAddress, depositAmount, minPtOut, approxParams, tokenInput, limitOrderData);
+          .deposit(marketAddress, minPtOut, approxParams, tokenInput, limitOrderData);
         const receipt = await tx.wait();
 
         // Record balances after deposit
@@ -285,7 +285,7 @@ function describeTests() {
         await expect(
           adapter
             .connect(user)
-            .deposit(marketAddress, depositAmount, minPtOut, approxParams, tokenInput, limitOrderData),
+            .deposit(marketAddress, minPtOut, approxParams, tokenInput, limitOrderData),
         ).to.be.revertedWithCustomError(pendleMarketContract, "MarketExpired");
       });
     });
@@ -297,12 +297,12 @@ function describeTests() {
       const dummyApprox = getDummyApproxParams();
       const dummyLimit = getDummyLimitOrderData();
 
-      it("should revert with ZeroAmount when amount is 0", async () => {
+      it("should revert with ZeroAmount when netTokenIn is 0", async () => {
         const { adapter, user, marketAddress } = await loadFixture(baseFixture);
         const input = getDummyTokenInput(SLISBNB, 0);
 
         await expect(
-          adapter.connect(user).deposit(marketAddress, 0, 0, dummyApprox, input, dummyLimit),
+          adapter.connect(user).deposit(marketAddress, 0, dummyApprox, input, dummyLimit),
         ).to.be.revertedWithCustomError(adapter, "ZeroAmount");
       });
 
@@ -311,28 +311,15 @@ function describeTests() {
         const input = getDummyTokenInput(ethers.constants.AddressZero, depositAmount);
 
         await expect(
-          adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit),
+          adapter.connect(user).deposit(marketAddress, 0, dummyApprox, input, dummyLimit),
         ).to.be.revertedWithCustomError(adapter, "InvalidTokenInput");
-      });
-
-      it("should revert with InputAmountMismatch when netTokenIn != amount", async () => {
-        const { adapter, user, slisbnb, marketAddress } = await loadFixture(baseFixture);
-        const mismatchedNetTokenIn = parseUnits("2", 18);
-        const input = getDummyTokenInput(SLISBNB, mismatchedNetTokenIn);
-
-        // Approve adapter so safeTransferFrom succeeds; the mismatch check triggers after
-        await slisbnb.connect(user).approve(adapter.address, depositAmount);
-
-        await expect(adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit))
-          .to.be.revertedWithCustomError(adapter, "InputAmountMismatch")
-          .withArgs(depositAmount, mismatchedNetTokenIn);
       });
 
       it("should revert with MarketNotRegistered for unregistered market", async () => {
         const { adapter, user } = await loadFixture(baseFixture);
         const input = getDummyTokenInput(SLISBNB, depositAmount);
 
-        await expect(adapter.connect(user).deposit(FAKE_MARKET, depositAmount, 0, dummyApprox, input, dummyLimit))
+        await expect(adapter.connect(user).deposit(FAKE_MARKET, 0, dummyApprox, input, dummyLimit))
           .to.be.revertedWithCustomError(adapter, "MarketNotRegistered")
           .withArgs(FAKE_MARKET);
       });
@@ -345,7 +332,7 @@ function describeTests() {
         const input = getDummyTokenInput(SLISBNB, depositAmount);
 
         await expect(
-          adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit),
+          adapter.connect(user).deposit(marketAddress, 0, dummyApprox, input, dummyLimit),
         ).to.be.revertedWith("Pausable: paused");
       });
 
@@ -356,7 +343,7 @@ function describeTests() {
         // Ensure zero allowance
         await slisbnb.connect(user).approve(adapter.address, 0);
 
-        await expect(adapter.connect(user).deposit(marketAddress, depositAmount, 0, dummyApprox, input, dummyLimit)).to
+        await expect(adapter.connect(user).deposit(marketAddress, 0, dummyApprox, input, dummyLimit)).to
           .be.reverted;
       });
     });

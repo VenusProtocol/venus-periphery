@@ -121,13 +121,12 @@ contract PendlePTVaultAdapter is
     /// @inheritdoc IPendlePTVaultAdapter
     function deposit(
         address pendleMarket,
-        uint256 amount,
         uint256 minPtOut,
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
     ) external whenNotPaused nonReentrant onlyRegisteredMarket(pendleMarket) returns (uint256 netVTokensMinted) {
-        if (amount == 0) revert ZeroAmount();
+        if (input.netTokenIn == 0) revert ZeroAmount();
         if (input.tokenIn == address(0)) revert InvalidTokenInput();
 
         uint256 netPtOut;
@@ -137,7 +136,7 @@ contract PendlePTVaultAdapter is
 
             // 1. Pull tokens from user → adapter (accepts any token from Pendle's tokensIn)
             uint256 balanceBefore = IERC20(input.tokenIn).balanceOf(address(this));
-            IERC20(input.tokenIn).safeTransferFrom(msg.sender, address(this), amount);
+            IERC20(input.tokenIn).safeTransferFrom(msg.sender, address(this), input.netTokenIn);
             uint256 received = IERC20(input.tokenIn).balanceOf(address(this)) - balanceBefore;
 
             // Validate actual received amount matches Pendle's expected input
@@ -154,7 +153,7 @@ contract PendlePTVaultAdapter is
             _sweepDust(input.tokenIn, msg.sender, balanceBefore);
         }
 
-        emit Deposited(pendleMarket, msg.sender, input.tokenIn, amount, netPtOut, netVTokensMinted);
+        emit Deposited(pendleMarket, msg.sender, input.tokenIn, input.netTokenIn, netPtOut, netVTokensMinted);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter

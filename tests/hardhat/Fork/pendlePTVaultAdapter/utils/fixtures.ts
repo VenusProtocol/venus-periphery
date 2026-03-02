@@ -149,7 +149,7 @@ export async function depositedFixture(): Promise<DepositedFixture> {
   // Deposit to get vTokens
   const tx = await base.adapter
     .connect(base.user)
-    .deposit(base.marketAddress, depositAmount, minPtOut, approxParams, tokenInput, limitOrderData);
+    .deposit(base.marketAddress, minPtOut, approxParams, tokenInput, limitOrderData);
   const receipt = await tx.wait();
 
   // Extract deposit amounts from event

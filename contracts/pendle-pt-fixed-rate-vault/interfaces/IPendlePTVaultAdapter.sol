@@ -178,21 +178,19 @@ interface IPendlePTVaultAdapter {
 
     /**
      * @notice Deposit tokenIn → swap to PT via Pendle → deposit PT into Venus → user receives vTokens.
-     * @dev User must approve this adapter for `amount` of tokenIn beforehand.
+     * @dev User must approve this adapter for `input.netTokenIn` of tokenIn beforehand.
      *      The contract will be paused during emergency situations.
      *      Accepts any token from Pendle's tokensIn array for the given market.
      *      No beforeMaturity check — Pendle Router naturally reverts post-maturity swaps.
      * @param pendleMarket Pendle market address identifying the PT market
-     * @param amount Amount of tokenIn to deposit
      * @param minPtOut Minimum PT to receive from Pendle swap (slippage protection)
      * @param guessPtOut Off-chain binary search hint from the Pendle API (saves ~180k gas)
-     * @param input Token routing configuration from the Pendle API
+     * @param input Token routing configuration from the Pendle API (includes tokenIn and netTokenIn)
      * @param limit Limit order fill data (can be empty struct for simple swaps)
      * @return netVTokensMinted Amount of vTokens credited to the user
      */
     function deposit(
         address pendleMarket,
-        uint256 amount,
         uint256 minPtOut,
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
