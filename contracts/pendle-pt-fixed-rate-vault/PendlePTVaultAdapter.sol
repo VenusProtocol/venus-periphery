@@ -275,6 +275,9 @@ contract PendlePTVaultAdapter is
         if (vToken == address(0)) revert ZeroAddress();
         if (markets[pendleMarket].pt != address(0)) revert MarketAlreadyRegistered(pendleMarket);
 
+        // Validate that the vToken is listed in the Comptroller
+        if (!IVenusComptroller(COMPTROLLER).isMarketListed(vToken)) revert VTokenNotListed(vToken);
+
         // Derive token addresses and maturity from Pendle market contract
         // solhint-disable-next-line var-name-mixedcase
         (IStandardizedYield _SY, IPPrincipalToken _PT, IPYieldToken _YT) = IPMarket(pendleMarket).readTokens();

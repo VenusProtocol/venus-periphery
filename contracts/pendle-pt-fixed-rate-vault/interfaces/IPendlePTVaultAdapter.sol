@@ -166,6 +166,12 @@ interface IPendlePTVaultAdapter {
      */
     error UnderlyingMismatch(address vToken, address expectedUnderlying);
 
+    /**
+     * @notice Error thrown when the vToken is not listed in the Comptroller.
+     * @param vToken The vToken address that is not listed
+     */
+    error VTokenNotListed(address vToken);
+
     // ═══════════════════════════════════════════════════════════════════════
     //                          CORE — DEPOSIT
     // ═══════════════════════════════════════════════════════════════════════

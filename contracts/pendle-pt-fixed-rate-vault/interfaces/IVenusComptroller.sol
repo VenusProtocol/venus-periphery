@@ -10,4 +10,9 @@ interface IVenusComptroller {
     /// @param delegate The account that was granted delegation.
     /// @return True if `delegate` is approved.
     function approvedDelegates(address user, address delegate) external view returns (bool);
+
+    /// @notice Checks whether the given vToken market is listed in the Comptroller.
+    /// @param vToken The vToken address to check.
+    /// @return True if the market is listed.
+    function isMarketListed(address vToken) external view returns (bool);
 }

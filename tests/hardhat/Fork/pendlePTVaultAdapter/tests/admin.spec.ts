@@ -62,6 +62,17 @@ function describeTests() {
           .withArgs(marketAddress);
       });
 
+      it("should revert with VTokenNotListed when vToken is not listed in Comptroller", async () => {
+        const { adapter, owner } = await loadFixture(baseFixture);
+
+        // Any address not listed in the Comptroller
+        const NOT_LISTED_VTOKEN = "0x0000000000000000000000000000000000000123";
+
+        await expect(adapter.connect(owner).addMarket(FAKE_MARKET, NOT_LISTED_VTOKEN))
+          .to.be.revertedWithCustomError(adapter, "VTokenNotListed")
+          .withArgs(NOT_LISTED_VTOKEN);
+      });
+
       it("should revert with UnderlyingMismatch when vToken underlying does not match PT", async () => {
         // Deploy a fresh adapter without any registered markets
         const [owner] = await ethers.getSigners();
