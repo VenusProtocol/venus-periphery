@@ -9,14 +9,13 @@ const PENDLE_ROUTER = "0x888888888889758F76e7103c6CbF23ABbF58F946";
 const COMPTROLLER = "0xfD36E2c2a6789Db23113685031d7F16329158384";
 
 const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
-  const { deployments, network, getNamedAccounts } = hre;
+  const { deployments, getNamedAccounts } = hre;
   const { deploy } = deployments;
   const { deployer } = await getNamedAccounts();
 
   const acmAddress = (await deployments.get("AccessControlManager")).address;
 
-  const proxyAdminOwner =
-    network.name === "hardhat" ? deployer : await getContractAddressOrNullAddress(deployments, "NormalTimelock");
+  const proxyAdminOwner = await getContractAddressOrNullAddress(deployments, "NormalTimelock");
 
   const defaultProxyAdmin = await hre.artifacts.readArtifact(
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
@@ -42,7 +41,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   });
 
   // transfer ownership to timelock
-  if (network.name !== "hardhat") {
+  {
     const timelockAddress = await getContractAddressOrNullAddress(deployments, "NormalTimelock");
     const adapter = await ethers.getContract("PendlePTVaultAdapter");
     const currentOwner = (await adapter.owner()).toLowerCase();
@@ -61,7 +60,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 func.tags = ["PendlePTVaultAdapter"];
 
 func.skip = async (hre: HardhatRuntimeEnvironment) => {
-  return hre.network.name !== "bscmainnet" && hre.network.name !== "bsctestnet" && hre.network.name !== "hardhat";
+  return hre.network.name !== "bscmainnet" && hre.network.name !== "bsctestnet";
 };
 
 export default func;
