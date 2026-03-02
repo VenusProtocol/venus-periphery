@@ -466,7 +466,7 @@ contract PendlePTVaultAdapter is
     }
 
     /**
-     * @notice Redeems PT 1:1 to tokenOut via Pendle Router for ERC-20 markets.
+     * @notice Redeems PT 1:1 to tokenOut via Pendle Router (post-maturity).
      * @param pt The Principal Token address to redeem.
      * @param yt The Yield Token address (required for redemption).
      * @param ptBalance Amount of PT tokens to redeem.
