@@ -140,7 +140,7 @@ contract PendlePTVaultAdapter is
             uint256 received = IERC20(input.tokenIn).balanceOf(address(this)) - balanceBefore;
 
             // Validate actual received amount matches Pendle's expected input
-            if (input.netTokenIn != received) revert InputAmountMismatch(received, input.netTokenIn);
+            if (input.netTokenIn != received) revert InputAmountMismatch(input.netTokenIn, received);
 
             // 2. Swap tokenIn → PT via Pendle Router (Pendle handles aggregator routing if needed)
             netPtOut = _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
@@ -179,7 +179,7 @@ contract PendlePTVaultAdapter is
         uint256 nativeBalanceBefore = address(this).balance - msg.value;
 
         // Validate calldata consistency
-        if (input.netTokenIn != msg.value) revert InputAmountMismatch(msg.value, input.netTokenIn);
+        if (input.netTokenIn != msg.value) revert InputAmountMismatch(input.netTokenIn, msg.value);
 
         // 1. Swap native BNB → PT via Pendle Router
         //    Inline swap (cannot reuse _swapToPt — requires { value } for native BNB)

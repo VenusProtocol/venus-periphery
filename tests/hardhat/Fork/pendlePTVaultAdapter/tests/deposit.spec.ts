@@ -372,7 +372,7 @@ function describeTests() {
             .depositNative(marketAddress, 0, dummyApprox, input, dummyLimit, { value: nativeDepositAmount }),
         )
           .to.be.revertedWithCustomError(adapter, "InputAmountMismatch")
-          .withArgs(nativeDepositAmount, mismatchedNetTokenIn);
+          .withArgs(mismatchedNetTokenIn, nativeDepositAmount);
       });
     });
   });

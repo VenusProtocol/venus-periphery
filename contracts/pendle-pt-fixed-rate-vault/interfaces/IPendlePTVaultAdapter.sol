@@ -141,9 +141,9 @@ interface IPendlePTVaultAdapter {
     error InvalidTokenInput();
 
     /**
-     * @notice Error thrown when the input amount in the calldata does not match the amount parameter.
-     * @param expected The expected amount
-     * @param received The amount provided in the calldata
+     * @notice Error thrown when the actual amount received does not match the expected input amount.
+     * @param expected The expected amount (input.netTokenIn from calldata)
+     * @param received The actual amount received (token balance delta or msg.value)
      */
     error InputAmountMismatch(uint256 expected, uint256 received);
 
