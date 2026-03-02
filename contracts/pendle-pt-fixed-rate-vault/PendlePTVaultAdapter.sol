@@ -199,7 +199,8 @@ contract PendlePTVaultAdapter is
         //    unexpected Router behavior leaving residual PT in the adapter
         _sweepDust(config.pt, msg.sender, ptBalanceBefore);
 
-        // 4. Refund any excess native BNB returned by Pendle Router to the caller
+        // 4. Safety refund: not expected with exact-in swap, but guards against
+        //    unexpected native BNB returned to the adapter during the swap
         _refundNativeDust(nativeBalanceBefore);
 
         emit Deposited(pendleMarket, msg.sender, input.tokenIn, msg.value, netPtOut, netVTokensMinted);
