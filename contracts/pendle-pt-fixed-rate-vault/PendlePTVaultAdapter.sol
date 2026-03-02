@@ -164,7 +164,14 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    ) external payable whenNotPaused nonReentrant onlyRegisteredMarket(pendleMarket) returns (uint256 netVTokensMinted) {
+    )
+        external
+        payable
+        whenNotPaused
+        nonReentrant
+        onlyRegisteredMarket(pendleMarket)
+        returns (uint256 netVTokensMinted)
+    {
         if (msg.value == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
@@ -349,7 +356,7 @@ contract PendlePTVaultAdapter is
 
     /// @inheritdoc IPendlePTVaultAdapter
     function isMatured(address pendleMarket) external view returns (bool) {
-        if(markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
+        if (markets[pendleMarket].pt == address(0)) revert MarketNotRegistered(pendleMarket);
         return !(block.timestamp < markets[pendleMarket].maturity);
     }
 

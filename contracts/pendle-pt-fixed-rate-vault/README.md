@@ -74,12 +74,12 @@ contracts/pendle-pt-fixed-rate-vault/
 
 ## Admin Functions
 
-| Function                          | Purpose                          |
-| --------------------------------- | -------------------------------- |
-| `addMarket(pendleMarket, vToken)` | Register a new PT market         |
-| `pause()` / `unpause()`           | Emergency pause all operations   |
-| `sweepTokens(token, to, amount)`  | Recover stuck ERC-20 tokens      |
-| `sweepNative(to, amount)`         | Recover stuck native BNB         |
+| Function                          | Purpose                        |
+| --------------------------------- | ------------------------------ |
+| `addMarket(pendleMarket, vToken)` | Register a new PT market       |
+| `pause()` / `unpause()`           | Emergency pause all operations |
+| `sweepTokens(token, to, amount)`  | Recover stuck ERC-20 tokens    |
+| `sweepNative(to, amount)`         | Recover stuck native BNB       |
 
 ## External Dependencies
 

@@ -237,7 +237,9 @@ export async function increaseVenusOracleMaxStalePeriod(): Promise<void> {
             );
             const tokenConfig = await chainlink.tokenConfigs(token.address);
             if (tokenConfig.asset !== ethers.constants.AddressZero) {
-              await acm.connect(NORMAL_TIMELOCKSigner).giveCallPermission(oracleAddr, "setTokenConfig(TokenConfig)", NORMAL_TIMELOCK);
+              await acm
+                .connect(NORMAL_TIMELOCKSigner)
+                .giveCallPermission(oracleAddr, "setTokenConfig(TokenConfig)", NORMAL_TIMELOCK);
               await chainlink.connect(NORMAL_TIMELOCKSigner).setTokenConfig({
                 asset: token.address,
                 feed: tokenConfig.feed,

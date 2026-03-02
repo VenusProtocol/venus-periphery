@@ -6,7 +6,7 @@ import { getContractAddressOrNullAddress } from "../helpers/deploymentConfig";
 
 // BSC Mainnet addresses
 const PENDLE_ROUTER = "0x888888888889758F76e7103c6CbF23ABbF58F946";
-const COMPTROLLER = "0xfD36E2c2a6789Db23113685031d7F16329158384"; 
+const COMPTROLLER = "0xfD36E2c2a6789Db23113685031d7F16329158384";
 
 const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployments, network, getNamedAccounts } = hre;
@@ -16,9 +16,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const acmAddress = (await deployments.get("AccessControlManager")).address;
 
   const proxyAdminOwner =
-    network.name === "hardhat"
-      ? deployer
-      : await getContractAddressOrNullAddress(deployments, "NormalTimelock");
+    network.name === "hardhat" ? deployer : await getContractAddressOrNullAddress(deployments, "NormalTimelock");
 
   const defaultProxyAdmin = await hre.artifacts.readArtifact(
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",

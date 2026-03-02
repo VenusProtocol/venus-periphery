@@ -78,10 +78,9 @@ function describeTests() {
       it("should revert for unregistered market", async () => {
         const { adapter } = await loadFixture(baseFixture);
 
-        await expect(adapter.isMatured(FAKE_MARKET)).to.be.revertedWithCustomError(
-          adapter,
-          "MarketNotRegistered",
-        ).withArgs(FAKE_MARKET);
+        await expect(adapter.isMatured(FAKE_MARKET))
+          .to.be.revertedWithCustomError(adapter, "MarketNotRegistered")
+          .withArgs(FAKE_MARKET);
       });
 
       it("should return true after maturity", async () => {

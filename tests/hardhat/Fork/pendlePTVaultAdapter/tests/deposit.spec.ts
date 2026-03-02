@@ -283,9 +283,7 @@ function describeTests() {
         const pendleMarketContract = await ethers.getContractAt(["error MarketExpired()"], PENDLE_MARKET);
 
         await expect(
-          adapter
-            .connect(user)
-            .deposit(marketAddress, minPtOut, approxParams, tokenInput, limitOrderData),
+          adapter.connect(user).deposit(marketAddress, minPtOut, approxParams, tokenInput, limitOrderData),
         ).to.be.revertedWithCustomError(pendleMarketContract, "MarketExpired");
       });
     });
@@ -343,8 +341,7 @@ function describeTests() {
         // Ensure zero allowance
         await slisbnb.connect(user).approve(adapter.address, 0);
 
-        await expect(adapter.connect(user).deposit(marketAddress, 0, dummyApprox, input, dummyLimit)).to
-          .be.reverted;
+        await expect(adapter.connect(user).deposit(marketAddress, 0, dummyApprox, input, dummyLimit)).to.be.reverted;
       });
     });
 

@@ -89,11 +89,7 @@ export async function baseFixture(): Promise<BaseFixture> {
   const adapter = await ethers.getContractAt("PendlePTVaultAdapter", proxy.address);
 
   // Grant ACM permissions to the owner via impersonated NORMAL_TIMELOCK (holds DEFAULT_ADMIN_ROLE)
-  const acmGuardedFunctions = [
-    "addMarket(address,address)",
-    "pause()",
-    "unpause()",
-  ];
+  const acmGuardedFunctions = ["addMarket(address,address)", "pause()", "unpause()"];
   for (const funcSig of acmGuardedFunctions) {
     await acm.connect(timelockSigner).giveCallPermission(adapter.address, funcSig, owner.address);
   }
