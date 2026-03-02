@@ -522,6 +522,13 @@ interface IRelativePositionManager {
     function setPositionAccountImplementation(address positionAccountImpl) external;
 
     /**
+     * @notice Sets the proportional close tolerance (in basis points)
+     * @dev Callable only by governance via AccessControlManager. 100 bps = 1%.
+     * @param newTolerance New tolerance value in basis points
+     */
+    function setProportionalCloseTolerance(uint256 newTolerance) external;
+
+    /**
      * @notice Returns the position data for a user and asset pair
      * @param user User address
      * @param longVToken The vToken market for the long asset
@@ -595,7 +602,7 @@ interface IRelativePositionManager {
      *      4. Caps by supplied principal
      *      5. Calculates available capital remaining
      *      6. Calculates withdrawable amount in DSA token terms
-     *      Used by calculateMaxBorrow to determine maximum borrowing capacity. DSA is read from the position.
+     *      Used by getAvailableShortCapacity to determine maximum borrowing capacity. DSA is read from the position.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
@@ -608,18 +615,30 @@ interface IRelativePositionManager {
     ) external returns (UtilizationInfo memory utilization);
 
     /**
-     * @notice Calculates the maximum allowed borrow amount for a position
-     * @dev Uses getUtilizationInfo internally to get available capital, then calculates:
-     *      maxBorrow = availableCapital * effectiveLeverage
-     *      This leverages the sophisticated capital utilization calculation in getUtilizationInfo. DSA is read from the position.
+     * @notice Returns the remaining short borrow capacity for a position under current market conditions
+     * @dev Computes availableCapitalUSD via getUtilizationInfo (which uses live CFs), then applies:
+     *      clampedLeverage = min(storedEffectiveLeverage, currentMaxLeverageAllowed)
+     *      maxBorrow = (availableCapitalUSD * clampedLeverage) / shortPrice
+     *      The leverage clamp ensures that any post-activation CF reduction is reflected immediately —
+     *      the stored leverage is never applied beyond what current CFs permit.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @return maxBorrowAmount Maximum amount that can be borrowed in shortAsset terms
+     * @return availableCapacity Remaining borrow capacity in short asset terms
      */
-    function calculateMaxBorrow(
+    function getAvailableShortCapacity(
         address user,
         IVToken longVToken,
         IVToken shortVToken
-    ) external returns (uint256 maxBorrowAmount);
+    ) external returns (uint256 availableCapacity);
+
+    /**
+     * @notice Returns the maximum allowed leverage for a given DSA/long market pair based on current collateral factors
+     * @dev maxLeverage = CF_dsa / (1 - CF_long * (1 - proportionalCloseTolerance))
+     *      Reverts with InvalidCollateralFactor if either CF >= 1 or the denominator is zero.
+     * @param dsaVToken The DSA vToken market (CF_dsa used as collateral)
+     * @param longVToken The long asset vToken market (CF_long used as hedge coverage)
+     * @return maxLeverage The maximum leverage ratio (1e18 mantissa)
+     */
+    function getMaxLeverageAllowed(IVToken dsaVToken, address longVToken) external view returns (uint256 maxLeverage);
 }

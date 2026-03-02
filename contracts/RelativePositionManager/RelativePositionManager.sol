@@ -716,20 +716,33 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Calculates the maximum allowed borrow amount for a position
-     * @dev Uses getUtilizationInfo internally. See IRelativePositionManager for full description.
+     * @notice Returns the remaining short borrow capacity for a position under current market conditions
+     * @dev Computes availableCapitalUSD from live utilization, then clamps the stored effectiveLeverage
+     *      against the current maxLeverageAllowed (derived from live CFs)
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @return maxBorrowAmount Maximum amount that can be borrowed in shortAsset terms
+     * @return availableCapacity Remaining borrow capacity in short asset terms
      */
-    function calculateMaxBorrow(
+    function getAvailableShortCapacity(
         address user,
         IVToken longVToken,
         IVToken shortVToken
-    ) external returns (uint256 maxBorrowAmount) {
+    ) external returns (uint256 availableCapacity) {
         Position storage position = positions[user][address(longVToken)][address(shortVToken)];
         return _calculateMaxBorrowAllowed(position);
+    }
+
+    /**
+     * @notice Returns the maximum allowed leverage for a given DSA/long market pair based on current collateral factors
+     * @dev maxLeverage = CF_dsa / (1 - CF_long * (1 - proportionalCloseTolerance))
+     *      Reverts with InvalidCollateralFactor if either CF >= 1 or the denominator is zero.
+     * @param dsaVToken The DSA vToken market (CF_dsa used as collateral)
+     * @param longVToken The long asset vToken market (CF_long used as hedge coverage)
+     * @return maxLeverage The maximum leverage ratio (1e18 mantissa)
+     */
+    function getMaxLeverageAllowed(IVToken dsaVToken, address longVToken) external view returns (uint256 maxLeverage) {
+        return _getMaxLeverage(dsaVToken, longVToken);
     }
 
     /**
@@ -1188,8 +1201,14 @@ contract RelativePositionManager is
         // Get utilization info which calculates available capital (DSA from position)
         UtilizationInfo memory utilization = _getUtilizationInfo(position);
 
-        // Calculate max additional borrow amount: availableCapital * effectiveLeverage
-        uint256 maxAdditionalBorrowUSD = (utilization.availableCapitalUSD * position.effectiveLeverage) / MANTISSA_ONE;
+        // Clamp stored leverage against current max leverage (CFs may have been reduced since activation)
+        uint256 currentMaxLeverage = _getMaxLeverage(IVToken(position.dsaVToken), position.longVToken);
+        uint256 clampedLeverage = position.effectiveLeverage < currentMaxLeverage
+            ? position.effectiveLeverage
+            : currentMaxLeverage;
+
+        // Calculate max additional borrow amount: availableCapital * clampedLeverage
+        uint256 maxAdditionalBorrowUSD = (utilization.availableCapitalUSD * clampedLeverage) / MANTISSA_ONE;
 
         // Convert to shortAsset amount
         ResilientOracleInterface oracle = COMPTROLLER.oracle();
@@ -1216,7 +1235,7 @@ contract RelativePositionManager is
         // Calculate nominalCapitalUtilized borrowValueUSD/effectiveLeverage (rounded up for conservative estimate)
         utilization.nominalCapitalUtilized = ceilDiv(values.borrowValueUSD * MANTISSA_ONE, position.effectiveLeverage);
 
-        // Calculate actualCapitalUtilized: (borrowValueUSD - longValueUSD * longCF) / dsaCF (rounded up for conservative estimate)
+        // Calculate actualCapitalUtilized: (borrowValueUSD - (longValueUSD * longCF)) / dsaCF (rounded up for conservative estimate)
         uint256 longCollateralValueUSD = (values.longValueUSD * longCF) / MANTISSA_ONE;
         uint256 excessBorrowUSD = values.borrowValueUSD > longCollateralValueUSD
             ? values.borrowValueUSD - longCollateralValueUSD

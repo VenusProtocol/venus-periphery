@@ -1181,6 +1181,18 @@ describe("RelativePositionManager", () => {
       ).to.be.revertedWithCustomError(relativePositionManager, "ZeroAmount");
     });
 
+    it("should revert when dust amount rounds down to zero vTokens minted", async () => {
+      // Exchange rate is 1e28, so vTokensMinted = floor(amount * 1e18 / 1e28) = floor(amount / 1e10).
+      // Any amount < 1e10 rounds down to 0 vTokens, triggering ZeroVTokensMinted.
+      const dustAmount = BigNumber.from(10).pow(10).sub(1); // 9_999_999_999 wei — one below the threshold
+      await fundAndApproveToken(dsaToken, admin, aliceAddress, alice, relativePositionManager.address, dustAmount);
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .supplyPrincipal(collateralMarket.address, borrowMarket.address, dustAmount),
+      ).to.be.revertedWithCustomError(relativePositionManager, "ZeroVTokensMinted");
+    });
+
     it("should revert when position is not active", async () => {
       const signers = await ethers.getSigners();
       const bob = signers[2];
@@ -2693,7 +2705,7 @@ describe("RelativePositionManager", () => {
    * UTILIZATION INFO & MAX BORROW
    * ============================================================================
    */
-  describe("getUtilizationInfo and calculateMaxBorrow", () => {
+  describe("getUtilizationInfo and getAvailableShortCapacity", () => {
     it("should return valid utilization info for active position with principal", async () => {
       const principalAmount = parseEther("10");
       await fundAndApproveToken(dsaToken, admin, aliceAddress, alice, relativePositionManager.address, principalAmount);
@@ -2819,7 +2831,7 @@ describe("RelativePositionManager", () => {
           "0x",
         );
 
-      const maxBorrow = await relativePositionManager.callStatic.calculateMaxBorrow(
+      const maxBorrow = await relativePositionManager.callStatic.getAvailableShortCapacity(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
@@ -2866,7 +2878,7 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      const maxBorrowAtPrice1 = await relativePositionManager.callStatic.calculateMaxBorrow(
+      const maxBorrowAtPrice1 = await relativePositionManager.callStatic.getAvailableShortCapacity(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
@@ -2893,7 +2905,7 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      const maxBorrowAtPrice2 = await relativePositionManager.callStatic.calculateMaxBorrow(
+      const maxBorrowAtPrice2 = await relativePositionManager.callStatic.getAvailableShortCapacity(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
@@ -2942,7 +2954,7 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      const maxBorrowBefore = await relativePositionManager.callStatic.calculateMaxBorrow(
+      const maxBorrowBefore = await relativePositionManager.callStatic.getAvailableShortCapacity(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
@@ -2975,7 +2987,7 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      const maxBorrow = await relativePositionManager.callStatic.calculateMaxBorrow(
+      const maxBorrow = await relativePositionManager.callStatic.getAvailableShortCapacity(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
@@ -3063,7 +3075,7 @@ describe("RelativePositionManager", () => {
       expect(utilization.availableCapitalUSD).to.equal(0);
       expect(utilization.withdrawableAmount).to.equal(0);
 
-      const maxBorrow = await relativePositionManager.callStatic.calculateMaxBorrow(
+      const maxBorrow = await relativePositionManager.callStatic.getAvailableShortCapacity(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
@@ -3105,7 +3117,7 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      const maxBorrowAvailable = await relativePositionManager.callStatic.calculateMaxBorrow(
+      const maxBorrowAvailable = await relativePositionManager.callStatic.getAvailableShortCapacity(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
@@ -3139,13 +3151,282 @@ describe("RelativePositionManager", () => {
         collateralMarket.address,
         borrowMarket.address,
       );
-      const maxBorrowAfterScale = await relativePositionManager.callStatic.calculateMaxBorrow(
+      const maxBorrowAfterScale = await relativePositionManager.callStatic.getAvailableShortCapacity(
         aliceAddress,
         collateralMarket.address,
         borrowMarket.address,
       );
       expect(utilizationAfterScale.availableCapitalUSD).to.equal(0);
       expect(maxBorrowAfterScale).to.equal(0);
+    });
+
+    describe("Collateral Factor Impact on Capital Utilization", () => {
+      it("should successfully scale position when collateral factors remain unchanged", async () => {
+        // Baseline: open position under original CFs (longCF=0.8, dsaCF=0.8) and scale using
+        // the full available borrow capacity — no CF change means the scale goes through normally.
+        const principalAmount = parseEther("10");
+        await fundAndApproveToken(
+          dsaToken,
+          admin,
+          aliceAddress,
+          alice,
+          relativePositionManager.address,
+          principalAmount,
+        );
+
+        const openSwapData = await createSwapMulticallData(
+          swapHelper,
+          collateralToken,
+          leverageManager.address,
+          parseEther("1"),
+          ethers.utils.formatBytes32String("cf-success-open"),
+        );
+
+        await relativePositionManager
+          .connect(alice)
+          .activateAndOpenPosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            principalAmount,
+            parseEther("2"),
+            parseEther("1"),
+            parseEther("0.9"),
+            openSwapData,
+          );
+
+        const utilization = await relativePositionManager.callStatic.getUtilizationInfo(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+        const maxBorrow = await relativePositionManager.callStatic.getAvailableShortCapacity(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+
+        // maxBorrow = availableCapitalUSD * effectiveLeverage / shortPrice
+        // With shortPrice=1 and effectiveLeverage=2: maxBorrow = availableCapitalUSD * 2
+        expect(maxBorrow).to.be.gt(0);
+        expect(maxBorrow).to.equal(utilization.availableCapitalUSD.mul(2));
+
+        // Scale with exactly maxBorrow — no CF change so this should succeed without reverting
+        const scaleSwapData = await createSwapMulticallData(
+          swapHelper,
+          collateralToken,
+          leverageManager.address,
+          maxBorrow,
+          ethers.utils.formatBytes32String("cf-success-scale"),
+          borrowToken,
+        );
+
+        // Scale with full available borrow capacity — should succeed without reverting
+        await relativePositionManager
+          .connect(alice)
+          .scalePosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            noAdditionalPrincipal,
+            maxBorrow,
+            parseEther("1"),
+            scaleSwapData,
+          );
+      });
+
+      it("should constrain available capital and max borrow when collateral factors are reduced", async () => {
+        // effectiveLeverage is stored at activation but getAvailableShortCapacity re-validates it against
+        // the current maxLeverageAllowed (derived from live CFs) on every call.
+        // If CFs are later reduced, two things happen simultaneously:
+        //   1. actualCapitalUtilized rises (lower longCF → more excessBorrowUSD; lower dsaCF → larger divisor),
+        //      shrinking availableCapitalUSD.
+        //   2. maxLeverageAllowed drops, and the stored leverage is clamped to it, reducing the multiplier.
+        // Both effects combine to shrink maxBorrow without any explicit revalidation of effectiveLeverage.
+        const principalAmount = parseEther("10");
+        await fundAndApproveToken(
+          dsaToken,
+          admin,
+          aliceAddress,
+          alice,
+          relativePositionManager.address,
+          principalAmount,
+        );
+
+        // Open position with 2x leverage — effectiveLeverage is stored at activation under original CFs (0.8, 0.8)
+        const activateSwapData = await createSwapMulticallData(
+          swapHelper,
+          collateralToken,
+          leverageManager.address,
+          parseEther("1.0"),
+          ethers.utils.formatBytes32String("cf-reduction-activate"),
+        );
+
+        await relativePositionManager
+          .connect(alice)
+          .activateAndOpenPosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            principalAmount,
+            parseEther("2"),
+            parseEther("1"),
+            parseEther("0.9"),
+            activateSwapData,
+          );
+
+        // Snapshot utilization under original CFs (longCF=0.8, dsaCF=0.8)
+        const utilizationBefore = await relativePositionManager.callStatic.getUtilizationInfo(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+        const maxBorrowBefore = await relativePositionManager.callStatic.getAvailableShortCapacity(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+
+        // Reduce collateral factors: simulate a market risk event where Venus governance lowers CFs
+        // Position's stored effectiveLeverage (2x) now exceeds what would be allowed under new CFs —
+        // this is the exact scenario from the CertIK finding.
+        const reducedCF = parseEther("0.5");
+        const reducedLiqThreshold = parseEther("0.6");
+        await comptroller["setCollateralFactor(address,uint256,uint256)"](
+          collateralMarket.address, // longVToken CF reduced 0.8 → 0.5
+          reducedCF,
+          reducedLiqThreshold,
+        );
+        await comptroller["setCollateralFactor(address,uint256,uint256)"](
+          dsaMarket.address, // dsaVToken CF reduced 0.8 → 0.5
+          reducedCF,
+          reducedLiqThreshold,
+        );
+
+        // Check utilization after CF reduction — live CFs flow through actualCapitalUtilized
+        const utilizationAfter = await relativePositionManager.callStatic.getUtilizationInfo(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+        const maxBorrowAfter = await relativePositionManager.callStatic.getAvailableShortCapacity(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+
+        expect(utilizationAfter.actualCapitalUtilized).to.be.gt(utilizationBefore.actualCapitalUtilized as any);
+        expect(utilizationAfter.availableCapitalUSD).to.be.lt(utilizationBefore.availableCapitalUSD as any);
+        expect(maxBorrowAfter).to.be.lt(maxBorrowBefore as any);
+        // After CF drop the clamped leverage < stored 2x, so maxBorrow < availableCapitalUSD * 2
+        expect(maxBorrowAfter).to.be.lt(utilizationAfter.availableCapitalUSD.mul(2) as any);
+      });
+
+      it("should revert scale with BorrowAmountExceedsMaximum when CF drop reduces maxBorrow to zero", async () => {
+        // Scenario: position opened under original CFs, then CFs are dropped sharply.
+        // getAvailableShortCapacity clamps the stored leverage against the live maxLeverageAllowed,
+        // so both the leverage multiplier and availableCapitalUSD shrink together.
+        // The stored effectiveLeverage remains unchanged in storage, but the revalidation
+        // against current CFs in getAvailableShortCapacity prevents over-leveraging on any new borrow.
+        const principalAmount = parseEther("10");
+        await fundAndApproveToken(
+          dsaToken,
+          admin,
+          aliceAddress,
+          alice,
+          relativePositionManager.address,
+          principalAmount,
+        );
+
+        const openSwapData = await createSwapMulticallData(
+          swapHelper,
+          collateralToken,
+          leverageManager.address,
+          parseEther("1"),
+          ethers.utils.formatBytes32String("cf-scale-revert-open"),
+        );
+
+        await relativePositionManager
+          .connect(alice)
+          .activateAndOpenPosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            principalAmount,
+            parseEther("2"),
+            parseEther("1"),
+            parseEther("0.9"),
+            openSwapData,
+          );
+
+        // Verify pre-drop state: getMaxLeverage > stored 2x, maxBorrow > 0
+        const maxLeverageBefore = await relativePositionManager.getMaxLeverageAllowed(
+          dsaMarket.address,
+          collateralMarket.address,
+        );
+        const maxBorrowBefore = await relativePositionManager.callStatic.getAvailableShortCapacity(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+        const storedLeverage = (
+          await relativePositionManager.getPosition(aliceAddress, collateralMarket.address, borrowMarket.address)
+        ).effectiveLeverage;
+
+        expect(maxLeverageBefore).to.be.gt(parseEther("2") as any); // ~3.84x under original CFs
+        expect(maxBorrowBefore).to.be.gt(0);
+        expect(storedLeverage).to.equal(parseEther("2"));
+
+        // Drop CFs sharply: longCF 0.8→0.2, dsaCF 0.8→0.08
+        // stored effectiveLeverage (2x) now exceeds getMaxLeverage (~0.1x → capped at 1x MIN)
+        await comptroller["setCollateralFactor(address,uint256,uint256)"](
+          collateralMarket.address,
+          parseEther("0.2"),
+          parseEther("0.3"),
+        );
+        await comptroller["setCollateralFactor(address,uint256,uint256)"](
+          dsaMarket.address,
+          parseEther("0.08"),
+          parseEther("0.1"),
+        );
+
+        const maxLeverageAfter = await relativePositionManager.getMaxLeverageAllowed(
+          dsaMarket.address,
+          collateralMarket.address,
+        );
+        const maxBorrowAfter = await relativePositionManager.callStatic.getAvailableShortCapacity(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+        const storedLeverageAfter = (
+          await relativePositionManager.getPosition(aliceAddress, collateralMarket.address, borrowMarket.address)
+        ).effectiveLeverage;
+
+        expect(maxLeverageAfter).to.equal(parseEther("1")); // capped at MIN_LEVERAGE
+        expect(storedLeverageAfter).to.equal(parseEther("2")); // unchanged in storage
+        expect(maxBorrowAfter).to.lt(maxBorrowBefore);
+
+        const utilization = await relativePositionManager.callStatic.getUtilizationInfo(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+        const availabeToWithdraw = utilization.availableCapitalUSD;
+
+        // After CF drop the clamped leverage < stored 2x, so maxBorrow < availableCapitalUSD * 2
+        expect(maxBorrowAfter).to.be.lt(availabeToWithdraw.mul(2) as any);
+
+        await expect(
+          relativePositionManager.connect(alice).scalePosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            noAdditionalPrincipal,
+            availabeToWithdraw.mul(2), // shortAmount exceeds maxBorrow after CF drop
+            parseEther("1"),
+            "0x", // wont be used — reverts before swap
+          ),
+        ).to.be.revertedWithCustomError(relativePositionManager, "BorrowAmountExceedsMaximum");
+      });
     });
   });
 
