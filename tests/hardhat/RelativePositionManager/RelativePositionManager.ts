@@ -2049,6 +2049,122 @@ describe("RelativePositionManager", () => {
       );
       expect(positionAfter.isActive).to.be.true;
     });
+
+    describe("Treasury Percent Handling", () => {
+      it("closeWithProfit (90%): should NOT revert when treasuryPercent is non-zero (profit leg fix)", async () => {
+        // Regression test for: _redeemLongAndSwapToDSA() previously used `amountToRedeem` for the
+        // swap input, but with treasuryPercent > 0 the vToken sends only `amountToRedeem * (1 - fee)`
+        // to the contract. The fix uses `amountReceived` (balance delta) instead, preventing
+        // an ERC20 transfer revert when trying to send more tokens than the contract holds.
+        const treasuryPercent = parseUnits("1", 16); // 1% = 1e16
+        await comptroller._setTreasuryData(admin.address, admin.address, treasuryPercent);
+        expect(await comptroller.treasuryPercent()).to.equal(treasuryPercent);
+
+        const principalAmount = parseEther("20");
+        const effectiveLeverage = parseEther("2");
+        const shortAmount = parseEther("1");
+        const minLongAmount = parseEther("0.9");
+        const longReceivedFromOpen = parseEther("1");
+
+        await fundAndApproveToken(
+          dsaToken,
+          admin,
+          aliceAddress,
+          alice,
+          relativePositionManager.address,
+          principalAmount,
+        );
+
+        const saltOpen = ethers.utils.formatBytes32String("treasury-pct-cwp-open");
+        const openSwapData = await createSwapMulticallData(
+          swapHelper,
+          collateralToken,
+          leverageManager.address,
+          longReceivedFromOpen,
+          saltOpen,
+        );
+        await relativePositionManager
+          .connect(alice)
+          .activateAndOpenPosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            principalAmount,
+            effectiveLeverage,
+            shortAmount,
+            minLongAmount,
+            openSwapData,
+          );
+
+        const positionAccountAddr = (
+          await relativePositionManager.getPosition(aliceAddress, collateralMarket.address, borrowMarket.address)
+        ).positionAccount;
+        const currentShortDebt = await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr);
+        const longBalance = await relativePositionManager.callStatic.getLongCollateralBalance(
+          aliceAddress,
+          collateralMarket.address,
+          borrowMarket.address,
+        );
+
+        const longPrice = parseUnits("2", 18);
+        const shortPrice = parseUnits("1", 18);
+        const dsaPrice = parseUnits("1", 18);
+        resilientOracle.getUnderlyingPrice.whenCalledWith(collateralMarket.address).returns(longPrice);
+        resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(shortPrice);
+        resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(dsaPrice);
+
+        const closeFractionBps = BPS_90_PCT;
+        const expectedShort = currentShortDebt.mul(closeFractionBps).div(BPS_BASE);
+        const expectedLong = longBalance.mul(closeFractionBps).div(BPS_BASE);
+
+        // Repay leg: redeem enough long to cover short debt at long=2×short price, with 5% buffer
+        const collateralToRedeem = expectedShort.div(2).add(expectedShort.mul(5).div(100));
+        const profitLong = expectedLong.sub(collateralToRedeem);
+
+        const repaySwapAmount = expectedShort.mul(102).div(100);
+        const saltRepay = ethers.utils.formatBytes32String("treasury-pct-cwp-repay");
+        const exitSwapDataRepay = await createSwapMulticallData(
+          swapHelper,
+          borrowToken,
+          leverageManager.address,
+          repaySwapAmount,
+          saltRepay,
+        );
+
+        // Profit leg: with 1% treasuryPercent, the contract receives profitLong * 0.99 from the redeem.
+        // The fix in _redeemLongAndSwapToDSA uses amountReceived (not amountToRedeem) for the swap,
+        // so the safeTransfer to swapHelper matches the actual balance and does not revert.
+        const minAmountOutProfit = profitLong.mul(2).div(100);
+        const profitSwapDsaOut = minAmountOutProfit.add(parseEther("0.01"));
+        const saltProfit = ethers.utils.formatBytes32String("treasury-pct-cwp-realize");
+        const swapDataProfit = await createSwapMulticallData(
+          swapHelper,
+          dsaToken,
+          relativePositionManager.address,
+          profitSwapDsaOut,
+          saltProfit,
+          collateralToken,
+        );
+
+        await expect(
+          relativePositionManager
+            .connect(alice)
+            .closeWithProfit(
+              collateralMarket.address,
+              borrowMarket.address,
+              closeFractionBps,
+              collateralToRedeem,
+              expectedShort,
+              exitSwapDataRepay,
+              profitLong,
+              minAmountOutProfit,
+              swapDataProfit,
+            ),
+        )
+          .to.emit(relativePositionManager, "ProfitConverted")
+          .withArgs(aliceAddress, positionAccountAddr, profitLong, anyValue);
+      });
+    });
   });
 
   /**
