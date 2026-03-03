@@ -81,7 +81,7 @@ contract FundRouter is
 
         // Read supply asset from vault (ERC-4626 standard function)
         address supplyAsset = IERC4626Upgradeable(vault).asset();
-        if (!approvedAssets[supplyAsset]) {
+        if (!_approvedAssets[supplyAsset]) {
             revert AssetNotApproved(supplyAsset);
         }
 
@@ -288,7 +288,7 @@ contract FundRouter is
         _checkAccessAllowed("setAssetApproval(address,bool)");
         ensureNonzeroAddress(asset);
 
-        approvedAssets[asset] = approved;
+        _approvedAssets[asset] = approved;
 
         emit AssetApprovalUpdated(asset, approved);
     }
@@ -340,5 +340,10 @@ contract FundRouter is
     /// @inheritdoc IFundRouter
     function getVaultAllocation(address vault) external view returns (VaultAllocation memory) {
         return vaultAllocations[vault];
+    }
+
+    /// @inheritdoc IFundRouter
+    function approvedAssets(address asset) external view returns (bool) {
+            return _approvedAssets[asset];
     }
 }

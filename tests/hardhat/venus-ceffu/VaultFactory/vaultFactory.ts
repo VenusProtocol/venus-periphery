@@ -178,6 +178,16 @@ describe("VaultFactory", () => {
       await expect(factory.deployVault(badParams)).to.be.revertedWithCustomError(factory, "ZeroAddressNotAllowed");
     });
 
+    it("should revert when supplyAsset is not approved on FundRouter", async () => {
+      const MockTokenFactory = await ethers.getContractFactory("MockToken");
+      const unapprovedToken = await MockTokenFactory.deploy("Wrapped BTC", "WBTC", 8);
+
+      const badParams = await defaultVaultParams(unapprovedToken.address, { ceffuRequestId: "CR-0002" });
+      await expect(factory.deployVault(badParams))
+        .to.be.revertedWithCustomError(factory, "AssetNotApproved")
+        .withArgs(unapprovedToken.address);
+    });
+
     it("should revert when ACM denies access", async () => {
       acm.isAllowedToCall.returns(false);
       const newParams = await defaultVaultParams(usdcToken.address, { ceffuRequestId: "CR-0002" });

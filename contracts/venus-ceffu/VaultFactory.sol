@@ -7,6 +7,7 @@ import { ensureNonzeroAddress } from "@venusprotocol/solidity-utilities/contract
 
 import { VaultFactoryStorageV1 } from "./VaultFactoryStorage.sol";
 import { IFixedRateVault } from "./interfaces/IFixedRateVault.sol";
+import { IFundRouter } from "./interfaces/IFundRouter.sol";
 import { IVaultFactory } from "./interfaces/IVaultFactory.sol";
 
 /**
@@ -60,6 +61,9 @@ contract VaultFactory is AccessControlledV8, VaultFactoryStorageV1, IVaultFactor
         }
 
         ensureNonzeroAddress(params.supplyAsset);
+        if (!IFundRouter(fundRouter).approvedAssets(params.supplyAsset)) {
+            revert AssetNotApproved(params.supplyAsset);
+        }
 
         // Deploy deterministic clone — salt derived from ceffuRequestId for predictable addressing
         bytes32 salt = keccak256(abi.encodePacked(params.ceffuRequestId));
@@ -97,6 +101,9 @@ contract VaultFactory is AccessControlledV8, VaultFactoryStorageV1, IVaultFactor
     }
 
     /// @inheritdoc IVaultFactory
+    /// @dev WARNING: Only affects future vault deployments. Existing vaults retain their original
+    ///      fundRouter reference (set during initialization). Ensure all in-flight vaults have
+    ///      reached terminal state (Matured/Cancelled) before decommissioning the old FundRouter.
     function setFundRouter(address newFundRouter) external {
         _checkAccessAllowed("setFundRouter(address)");
         ensureNonzeroAddress(newFundRouter);

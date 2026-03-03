@@ -15,7 +15,7 @@ abstract contract FundRouterStorageV1 {
 
     /// @notice Whitelist of approved supply assets (e.g., USDC, USDT).
     ///         Only vaults with an approved asset can use this router.
-    mapping(address => bool) public approvedAssets;
+    mapping(address => bool) internal _approvedAssets;
 
     /// @notice Per-vault allocation tracking. Key: vault contract address.
     mapping(address => IFundRouter.VaultAllocation) public vaultAllocations;

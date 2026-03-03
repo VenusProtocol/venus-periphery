@@ -55,6 +55,10 @@ interface IVaultFactory {
     /// @notice Thrown when the new fund router address is the same as the current one
     error FundRouterUnchanged();
 
+    /// @notice Thrown when the vault's supply asset is not approved on FundRouter
+    /// @param asset Address of the unapproved asset
+    error AssetNotApproved(address asset);
+
     // ──────────────────────────────────────────────
     //  Initialization
     // ──────────────────────────────────────────────

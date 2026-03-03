@@ -314,4 +314,11 @@ interface IFundRouter {
      * @return The VaultAllocation struct with all lifecycle tracking data
      */
     function getVaultAllocation(address vault) external view returns (VaultAllocation memory);
+
+    /**
+     * @notice Returns whether an asset is approved for use with this router.
+     * @param asset Address of the ERC-20 token to check
+     * @return True if the asset is in the approved whitelist
+     */
+    function approvedAssets(address asset) external view returns (bool);
 }
