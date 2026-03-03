@@ -117,6 +117,9 @@ contract FundRouter is
         if (!allocation.fundsReceivedFromVault) {
             revert AllocationNotFound(vault);
         }
+        if (ceffuAddress == allocation.ceffuSubWalletAddress) {
+            revert CeffuAddressUnchanged();
+        }
 
         allocation.ceffuSubWalletAddress = ceffuAddress;
 
@@ -157,7 +160,7 @@ contract FundRouter is
     // ──────────────────────────────────────────────
 
     /// @inheritdoc IFundRouter
-    function confirmOrderFillForVault(address vault) external {
+    function confirmOrderFillForVault(address vault) external nonReentrant {
         // solhint-disable-next-line gas-small-strings
         _checkAccessAllowed("confirmOrderFillForVault(address)");
 
@@ -298,6 +301,15 @@ contract FundRouter is
 
         if (amount == 0) {
             revert ZeroAmount();
+        }
+
+        // Prevent sweeping tokens committed to active vault allocations
+        uint256 committed = totalCommittedPerAsset[token];
+        if (committed > 0) {
+            uint256 balance = IERC20Upgradeable(token).balanceOf(address(this));
+            if (amount > balance - committed) {
+                revert InsufficientFreeBalance();
+            }
         }
 
         IERC20Upgradeable(token).safeTransfer(to, amount);

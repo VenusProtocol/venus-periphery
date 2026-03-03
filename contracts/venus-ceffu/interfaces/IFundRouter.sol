@@ -132,8 +132,11 @@ interface IFundRouter {
     /// @notice Thrown when attempting to cancel a vault whose funds have already been sent to Ceffu
     error FundsAlreadySentToCeffu();
 
-    /// @notice Thrown when recordRepayment amount exceeds free (uncommitted) balance
+    /// @notice Thrown when recordRepayment or sweepToken amount exceeds free (uncommitted) balance
     error InsufficientFreeBalance();
+
+    /// @notice Thrown when setCeffuAddressForVault is called with the same address already set
+    error CeffuAddressUnchanged();
 
     // ──────────────────────────────────────────────
     //  Initialization

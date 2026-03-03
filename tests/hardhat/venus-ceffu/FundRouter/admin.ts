@@ -167,6 +167,31 @@ describe("FundRouter - Admin", () => {
       const tooMuch = sweepAmount.add(1);
       await expect(fundRouter.sweepToken(usdcToken.address, treasury.address, tooMuch)).to.be.reverted;
     });
+
+    it("allows sweeping free (uncommitted) tokens when committed funds exist", async () => {
+      // Create committed funds by closing fundraising
+      await time.increaseTo(params.fundraisingStartTime);
+      await depositInFundraising(alice, parseUnits("2000", 18));
+      await vault.closeFundraising();
+      // Router now has: 2000 committed (vault principal) + 500 free (from beforeEach)
+
+      // Sweeping 500 (free portion) should succeed
+      await expect(fundRouter.sweepToken(usdcToken.address, treasury.address, sweepAmount)).to.not.be.reverted;
+      expect(await usdcToken.balanceOf(treasury.address)).to.equal(sweepAmount);
+    });
+
+    it("reverts with InsufficientFreeBalance when sweeping committed funds", async () => {
+      // Create committed funds by closing fundraising
+      await time.increaseTo(params.fundraisingStartTime);
+      await depositInFundraising(alice, parseUnits("2000", 18));
+      await vault.closeFundraising();
+      // Router now has: 2000 committed + 500 free = 2500 total
+
+      // Try to sweep 501 (more than the 500 free balance)
+      await expect(
+        fundRouter.sweepToken(usdcToken.address, treasury.address, parseUnits("501", 18)),
+      ).to.be.revertedWithCustomError(fundRouter, "InsufficientFreeBalance");
+    });
   });
 
   // ══════════════════════════════════════════════════

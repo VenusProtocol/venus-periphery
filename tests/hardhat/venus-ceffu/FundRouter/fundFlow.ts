@@ -200,7 +200,7 @@ describe("FundRouter - Fund Flow", () => {
           .withArgs(vaultAddress, ceffuWallet.address);
       });
 
-      it("allows updating ceffu address (no idempotency guard)", async () => {
+      it("allows updating ceffu address to a different value", async () => {
         await fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address);
         await fundRouter.setCeffuAddressForVault(vaultAddress, bob.address);
 
@@ -210,6 +210,13 @@ describe("FundRouter - Fund Flow", () => {
     });
 
     describe("Reverts", () => {
+      it("reverts with CeffuAddressUnchanged when setting same address", async () => {
+        await fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address);
+        await expect(
+          fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address),
+        ).to.be.revertedWithCustomError(fundRouter, "CeffuAddressUnchanged");
+      });
+
       it("reverts when ACM denies access", async () => {
         acm.isAllowedToCall.returns(false);
         await expect(
