@@ -142,7 +142,9 @@ contract PendlePTVaultAdapter is
         uint256 netPtOut;
         {
             MarketConfig storage config = markets[pendleMarket];
-            uint256 ptBalanceBefore = IERC20(config.pt).balanceOf(address(this));
+            address pt = config.pt;
+            address vToken = config.vToken;
+            uint256 ptBalanceBefore = IERC20(pt).balanceOf(address(this));
 
             // 1. Pull tokens from user → adapter (accepts any token from Pendle's tokensIn)
             uint256 balanceBefore = IERC20(input.tokenIn).balanceOf(address(this));
@@ -156,11 +158,11 @@ contract PendlePTVaultAdapter is
             netPtOut = _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
 
             // 3. Deposit PT into Venus — vTokens go to user
-            netVTokensMinted = _mintVTokens(config.pt, config.vToken, netPtOut);
+            netVTokensMinted = _mintVTokens(pt, vToken, netPtOut);
 
             // 4. Safety sweep: not expected with exact-in swap, but guards against
             //    unexpected Router/token behavior leaving residual tokens in the adapter
-            _sweepDust(config.pt, msg.sender, ptBalanceBefore);
+            _sweepDust(pt, msg.sender, ptBalanceBefore);
             _sweepDust(input.tokenIn, msg.sender, balanceBefore);
         }
 
@@ -185,29 +187,23 @@ contract PendlePTVaultAdapter is
         if (msg.value == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
-        uint256 ptBalanceBefore = IERC20(config.pt).balanceOf(address(this));
+        address pt = config.pt;
+        address vToken = config.vToken;
+        uint256 ptBalanceBefore = IERC20(pt).balanceOf(address(this));
         uint256 nativeBalanceBefore = address(this).balance - msg.value;
 
         // Validate calldata consistency
         if (input.netTokenIn != msg.value) revert InputAmountMismatch(input.netTokenIn, msg.value);
 
         // 1. Swap native BNB → PT via Pendle Router
-        //    Inline swap (cannot reuse _swapToPt — requires { value } for native BNB)
-        (uint256 netPtOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt{ value: msg.value }(
-            address(this),
-            pendleMarket,
-            minPtOut,
-            guessPtOut,
-            input,
-            limit
-        );
+        uint256 netPtOut = _swapToPtNative(pendleMarket, minPtOut, guessPtOut, input, limit);
 
         // 2. Deposit PT into Venus — vTokens go to user
-        netVTokensMinted = _mintVTokens(config.pt, config.vToken, netPtOut);
+        netVTokensMinted = _mintVTokens(pt, vToken, netPtOut);
 
         // 3. Safety sweep: not expected with exact-in swap, but guards against
         //    unexpected Router behavior leaving residual PT in the adapter
-        _sweepDust(config.pt, msg.sender, ptBalanceBefore);
+        _sweepDust(pt, msg.sender, ptBalanceBefore);
 
         // 4. Safety refund: not expected with exact-in swap, but guards against
         //    unexpected native BNB returned to the adapter during the swap
@@ -237,18 +233,20 @@ contract PendlePTVaultAdapter is
         if (vTokenAmount == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
+        address pt = config.pt;
+        address vToken = config.vToken;
 
         // 1. Redeem vTokens → adapter receives PT
-        uint256 ptBefore = IERC20(config.pt).balanceOf(address(this));
-        _redeemVTokens(config.vToken, vTokenAmount);
-        uint256 ptReceived = IERC20(config.pt).balanceOf(address(this)) - ptBefore;
+        uint256 ptBefore = IERC20(pt).balanceOf(address(this));
+        _redeemVTokens(vToken, vTokenAmount);
+        uint256 ptReceived = IERC20(pt).balanceOf(address(this)) - ptBefore;
 
         // 2. Swap PT → tokenOut via Pendle (sent directly to user, Pendle handles routing)
-        netTokenOut = _swapPtToToken(config.pt, pendleMarket, ptReceived, output, limit);
+        netTokenOut = _swapPtToToken(pt, pendleMarket, ptReceived, output, limit);
 
         // 3. Safety sweep: not expected with exact-in swap, but guards against
         //    unexpected Router behavior leaving residual PT in the adapter
-        _sweepDust(config.pt, msg.sender, ptBefore);
+        _sweepDust(pt, msg.sender, ptBefore);
 
         emit Withdrawn(pendleMarket, msg.sender, output.tokenOut, vTokenAmount, ptReceived, netTokenOut);
     }
@@ -269,18 +267,21 @@ contract PendlePTVaultAdapter is
         if (vTokenAmount == 0) revert ZeroAmount();
 
         MarketConfig storage config = markets[pendleMarket];
+        address pt = config.pt;
+        address vToken = config.vToken;
+        address yt = config.yt;
 
         // 1. Redeem vTokens → adapter receives PT
-        uint256 ptBefore = IERC20(config.pt).balanceOf(address(this));
-        _redeemVTokens(config.vToken, vTokenAmount);
-        uint256 ptReceived = IERC20(config.pt).balanceOf(address(this)) - ptBefore;
+        uint256 ptBefore = IERC20(pt).balanceOf(address(this));
+        _redeemVTokens(vToken, vTokenAmount);
+        uint256 ptReceived = IERC20(pt).balanceOf(address(this)) - ptBefore;
 
         // 2. Redeem PT 1:1 → tokenOut via Pendle (sent directly to user, Pendle handles routing)
-        netTokenOut = _redeemPtToToken(config.pt, config.yt, ptReceived, output);
+        netTokenOut = _redeemPtToToken(pt, yt, ptReceived, output);
 
         // 3. Safety sweep: not expected with exact-in redemption, but guards against
         //    unexpected Router behavior leaving residual PT in the adapter
-        _sweepDust(config.pt, msg.sender, ptBefore);
+        _sweepDust(pt, msg.sender, ptBefore);
 
         emit RedeemedAtMaturity(pendleMarket, msg.sender, output.tokenOut, vTokenAmount, ptReceived, netTokenOut);
     }
@@ -409,6 +410,33 @@ contract PendlePTVaultAdapter is
         );
 
         IERC20(input.tokenIn).forceApprove(PENDLE_ROUTER, 0);
+    }
+
+    /**
+     * @notice Swaps native BNB to PT via Pendle Router.
+     * @param pendleMarket The Pendle market address for the swap.
+     * @param minPtOut Minimum PT to receive (slippage protection).
+     * @param guessPtOut Off-chain binary search approximation parameters.
+     * @param input Token input configuration from Pendle API.
+     * @param limit Limit order fill data.
+     * @return netPtOut Amount of PT tokens received from the swap.
+     * @dev Separated from _swapToPt to avoid stack-too-deep in depositNative.
+     */
+    function _swapToPtNative(
+        address pendleMarket,
+        uint256 minPtOut,
+        ApproxParams calldata guessPtOut,
+        TokenInput calldata input,
+        LimitOrderData calldata limit
+    ) internal returns (uint256 netPtOut) {
+        (netPtOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt{ value: msg.value }(
+            address(this),
+            pendleMarket,
+            minPtOut,
+            guessPtOut,
+            input,
+            limit
+        );
     }
 
     /**
