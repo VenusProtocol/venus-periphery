@@ -93,10 +93,13 @@ contract FixedRateVault is
 
         // Validate parameters
         if (params.fixedAPY == 0) revert InvalidInitParam("fixedAPY");
+        if (params.fixedAPY > MAX_BPS) revert InvalidInitParam("fixedAPY too high");
         if (params.minCap == 0) revert InvalidInitParam("minCap");
         if (params.maxCap < params.minCap) revert InvalidInitParam("maxCap < minCap");
         if (!(params.fundraisingEndTime > params.fundraisingStartTime)) revert InvalidInitParam("fundraisingWindow");
+        if (params.fundraisingEndTime <= block.timestamp) revert InvalidInitParam("fundraisingEndTime in past");
         if (params.lockPeriodDuration == 0) revert InvalidInitParam("lockPeriodDuration");
+        if (params.gracePeriod > 365 days) revert InvalidInitParam("gracePeriod too large");
         if (params.reserveFactorBps > MAX_BPS) revert InvalidInitParam("reserveFactorBps > 100%");
         if (params.minUserDeposit > 0 && params.maxUserDeposit > 0) {
             if (params.maxUserDeposit < params.minUserDeposit)

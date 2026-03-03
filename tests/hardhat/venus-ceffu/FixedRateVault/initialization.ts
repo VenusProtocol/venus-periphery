@@ -233,6 +233,44 @@ describe("FixedRateVault - Initialization & Access Control", () => {
           .withArgs("maxUserDeposit < minUserDeposit");
       });
 
+      it("reverts if fixedAPY > 10000 (100%)", async () => {
+        await expect(deployWithOverrides({ fixedAPY: 10001 }))
+          .to.be.revertedWithCustomError(vault, "InvalidInitParam")
+          .withArgs("fixedAPY too high");
+      });
+
+      it("reverts if fundraisingEndTime is in the past", async () => {
+        const now = await time.latest();
+        await expect(
+          deployWithOverrides({
+            fundraisingStartTime: now - 200,
+            fundraisingEndTime: now - 100,
+          }),
+        )
+          .to.be.revertedWithCustomError(vault, "InvalidInitParam")
+          .withArgs("fundraisingEndTime in past");
+      });
+
+      it("reverts if fundraisingEndTime equals current timestamp", async () => {
+        const now = await time.latest();
+        // deployWithOverrides mines a block, so now+1 is the execution timestamp
+        // We set fundraisingEndTime = now + 1 which will equal block.timestamp at execution
+        await expect(
+          deployWithOverrides({
+            fundraisingStartTime: now - 100,
+            fundraisingEndTime: now + 1,
+          }),
+        )
+          .to.be.revertedWithCustomError(vault, "InvalidInitParam")
+          .withArgs("fundraisingEndTime in past");
+      });
+
+      it("reverts if gracePeriod > 365 days", async () => {
+        await expect(deployWithOverrides({ gracePeriod: 365 * 24 * 60 * 60 + 1 }))
+          .to.be.revertedWithCustomError(vault, "InvalidInitParam")
+          .withArgs("gracePeriod too large");
+      });
+
       it("reverts if minUserDeposit > maxCap", async () => {
         await expect(
           deployWithOverrides({
@@ -266,6 +304,14 @@ describe("FixedRateVault - Initialization & Access Control", () => {
 
       it("accepts maxUserDeposit == 0 (no per-user cap)", async () => {
         await expect(deployWithOverrides({ maxUserDeposit: "0" })).to.not.be.reverted;
+      });
+
+      it("accepts fixedAPY == 10000 (100% boundary)", async () => {
+        await expect(deployWithOverrides({ fixedAPY: 10000 })).to.not.be.reverted;
+      });
+
+      it("accepts gracePeriod == 365 days (boundary)", async () => {
+        await expect(deployWithOverrides({ gracePeriod: 365 * 24 * 60 * 60 })).to.not.be.reverted;
       });
 
       it("accepts gracePeriod == 0", async () => {
