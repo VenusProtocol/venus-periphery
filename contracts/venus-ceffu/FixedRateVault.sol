@@ -149,6 +149,8 @@ contract FixedRateVault is
     }
 
     /// @inheritdoc IFixedRateVault
+    /// @dev No nonReentrant: cancelVault() makes no external calls, so reentrancy is not possible.
+    ///      No whenNotPaused: admin must be able to cancel even when paused (emergency scenario).
     function cancelVault() external {
         if (state == VaultState.PendingFill) {
             // PendingFill cancellation must come through FundRouter.returnFundsAndCancelVault()
@@ -166,6 +168,8 @@ contract FixedRateVault is
     }
 
     /// @inheritdoc IFixedRateVault
+    /// @dev No whenNotPaused: lifecycle progression (PendingFill → Locked) should not be blocked
+    ///      by pause. Blocking would trap funds in FundRouter with no path to maturity.
     function confirmOrderFill() external {
         if (msg.sender != fundRouter) revert OnlyFundRouter();
         if (state != VaultState.PendingFill) {
@@ -180,6 +184,8 @@ contract FixedRateVault is
     }
 
     /// @inheritdoc IFixedRateVault
+    /// @dev No whenNotPaused: repayment (Locked → Matured) must not be blocked by pause.
+    ///      Blocking would prevent users from ever reaching the redeemable Matured state.
     function receiveRepayment(uint256 amount) external {
         if (msg.sender != fundRouter) revert OnlyFundRouter();
         if (state != VaultState.Locked) {
@@ -258,6 +264,9 @@ contract FixedRateVault is
     // ──────────────────────────────────────────────
 
     /// @inheritdoc IFixedRateVault
+    /// @dev Integer division truncation: for dust amounts with low APY and short lock periods,
+    ///      the result may round to 0. Acceptable for the intended stablecoin use case with
+    ///      meaningful deposit sizes. Same truncation applies to protocolReserve in receiveRepayment().
     function calculateExpectedInterest(uint256 principal) external view returns (uint256) {
         return (principal * fixedAPY * lockPeriodDuration) / (SECONDS_PER_YEAR * MAX_BPS);
     }
