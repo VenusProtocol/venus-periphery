@@ -708,9 +708,7 @@ describe("FundRouter - Fund Flow", () => {
 
       // Router has 5000 total, committed = 5000
       expect(await usdcToken.balanceOf(fundRouter.address)).to.equal(principalA.add(principalB));
-      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(
-        principalA.add(principalB),
-      );
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(principalA.add(principalB));
 
       // Vault A: transfer to Ceffu → committed drops by 2000
       await fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address);
@@ -729,14 +727,14 @@ describe("FundRouter - Fund Flow", () => {
 
       // Admin tries to record inflated repayment (5000 instead of 2100)
       // Free balance = 5100 - 3000 = 2100 — recording 5000 would consume B's principal
-      await expect(fundRouter.recordRepayment(vaultAddress, parseUnits("5000", 18)))
-        .to.be.revertedWithCustomError(fundRouter, "InsufficientFreeBalance");
+      await expect(fundRouter.recordRepayment(vaultAddress, parseUnits("5000", 18))).to.be.revertedWithCustomError(
+        fundRouter,
+        "InsufficientFreeBalance",
+      );
 
       // Correct amount works
       await fundRouter.recordRepayment(vaultAddress, repaymentA);
-      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(
-        principalB.add(repaymentA),
-      );
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(principalB.add(repaymentA));
     });
 
     it("returnFundsAndCancelVault decrements committed correctly", async () => {

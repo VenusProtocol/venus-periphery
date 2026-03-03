@@ -344,6 +344,6 @@ contract FundRouter is
 
     /// @inheritdoc IFundRouter
     function approvedAssets(address asset) external view returns (bool) {
-            return _approvedAssets[asset];
+        return _approvedAssets[asset];
     }
 }
