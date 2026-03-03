@@ -1361,6 +1361,10 @@ contract RelativePositionManager is
         // MinimumOut should never be smaller than expected to repay; for 100% close with one asset, user should account for the extra bumped amount (similar to profit case).
         if (minAmountOutFirst < shortAmountToRepayForFirstSwap) revert MinAmountOutRepayBelowDebt();
 
+        // First leg is skipped when longAmountToRedeemForFirstSwap == 0; a non-zero shortAmountToRepayForFirstSwap would illegitimately reduce the second-leg repay.
+        if (longAmountToRedeemForFirstSwap == 0 && shortAmountToRepayForFirstSwap != 0)
+            revert InvalidLongAmountToRedeem();
+
         (
             uint256 expectedLongToWithdraw,
             uint256 expectedShortToRepay,

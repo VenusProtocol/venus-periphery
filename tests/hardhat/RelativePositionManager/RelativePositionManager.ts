@@ -2226,6 +2226,51 @@ describe("RelativePositionManager", () => {
       ).to.be.revertedWithCustomError(relativePositionManager, "ZeroDebt");
     });
 
+    it("closeWithLoss: should revert when longAmountToRedeemForFirstSwap is zero but shortAmountToRepayForFirstSwap is non-zero", async () => {
+      // Regression: first leg is skipped when longAmountToRedeemForFirstSwap == 0, so a non-zero
+      // shortAmountToRepayForFirstSwap would illegitimately reduce the second-leg repay without
+      // any actual repayment occurring. The guard must revert early (before _getProportionalCloseAmounts).
+      const principalAmount = parseEther("20");
+      await fundAndApproveToken(dsaToken, admin, aliceAddress, alice, relativePositionManager.address, principalAmount);
+
+      const saltOpen = ethers.utils.formatBytes32String("loss-zero-long-open");
+      const openSwapData = await createSwapMulticallData(
+        swapHelper,
+        collateralToken,
+        leverageManager.address,
+        parseEther("0.9"),
+        saltOpen,
+        borrowToken,
+      );
+      await relativePositionManager
+        .connect(alice)
+        .activateAndOpenPosition(
+          collateralMarket.address,
+          borrowMarket.address,
+          dsaIndex,
+          principalAmount,
+          parseEther("2"),
+          parseEther("1"),
+          parseEther("0.8"),
+          openSwapData,
+        );
+
+      await expect(
+        relativePositionManager.connect(alice).closeWithLoss(
+          collateralMarket.address,
+          borrowMarket.address,
+          BPS_50_PCT,
+          0, // longAmountToRedeemForFirstSwap = 0 → first leg skipped
+          parseEther("0.1"), // shortAmountToRepayForFirstSwap != 0 → must revert
+          parseEther("0.1"),
+          "0x",
+          0,
+          0,
+          "0x",
+        ),
+      ).to.be.revertedWithCustomError(relativePositionManager, "InvalidLongAmountToRedeem");
+    });
+
     it("closeWithLoss (partial 95%): should repay 95% of debt and redeem 95% of long; 5% remains", async () => {
       const principalAmount = parseEther("20");
       await fundAndApproveToken(dsaToken, admin, aliceAddress, alice, relativePositionManager.address, principalAmount);
