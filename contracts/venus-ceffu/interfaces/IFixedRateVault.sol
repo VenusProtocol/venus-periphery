@@ -156,6 +156,13 @@ interface IFixedRateVault {
      * @notice Closes the fundraising period.
      *         If totalPrincipal >= minCap, transitions to PendingFill and sends funds to FundRouter.
      *         If totalPrincipal < minCap, transitions to Cancelled for user refunds.
+     *
+     *         Access control behavior depends on timing:
+     *         - Before fundraisingEndTime: admin-only and pausable (early close).
+     *         - After fundraisingEndTime: permissionless — anyone can trigger the transition.
+     *           This prevents user funds from being locked if admin fails to act.
+     *           The cancel path (below minCap) also bypasses pause for the same reason.
+     *           The success path (above minCap) still requires unpaused (FundRouter interaction).
      */
     function closeFundraising() external;
 

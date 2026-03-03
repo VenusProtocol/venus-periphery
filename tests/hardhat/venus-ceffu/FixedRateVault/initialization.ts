@@ -369,11 +369,11 @@ describe("FixedRateVault - Initialization & Access Control", () => {
     });
 
     describe("ACL check ordering", () => {
-      it("closeFundraising: ACL fires after whenNotPaused", async () => {
-        // whenNotPaused runs before _checkAccessAllowed
+      it("closeFundraising: ACL fires before pause check (before deadline)", async () => {
+        // Before deadline: state check → ACL → _requireNotPaused
         await vault.pause();
         acm.isAllowedToCall.returns(false);
-        await expect(vault.closeFundraising()).to.be.revertedWith("Pausable: paused");
+        await expect(vault.closeFundraising()).to.be.revertedWithCustomError(vault, "Unauthorized");
       });
 
       it("cancelVault: ACL fires first (no modifiers)", async () => {

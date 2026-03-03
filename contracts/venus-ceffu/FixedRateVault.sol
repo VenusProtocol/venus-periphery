@@ -122,16 +122,23 @@ contract FixedRateVault is
     }
 
     /// @inheritdoc IFixedRateVault
-    function closeFundraising() external nonReentrant whenNotPaused {
-        _checkAccessAllowed("closeFundraising()");
-
+    function closeFundraising() external nonReentrant {
         if (state != VaultState.Fundraising) {
             revert InvalidState(state, VaultState.Fundraising);
         }
 
+        if (block.timestamp < fundraisingEndTime) {
+            // Before deadline: admin-only, fully pausable
+            _checkAccessAllowed("closeFundraising()");
+            _requireNotPaused();
+        }
+
         if (!(totalPrincipal < minCap)) {
+            // Success path: requires unpaused (external call to FundRouter)
+            _requireNotPaused();
             _closeFundraisingSuccessful();
         } else {
+            // Cancel path: after deadline, works even when paused (no external calls)
             state = VaultState.Cancelled;
             emit VaultCancelled();
         }

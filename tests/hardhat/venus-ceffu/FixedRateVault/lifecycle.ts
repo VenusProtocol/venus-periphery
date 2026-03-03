@@ -155,10 +155,71 @@ describe("FixedRateVault - Lifecycle", () => {
           .withArgs(State.Cancelled, State.Fundraising);
       });
 
-      it("reverts when paused", async () => {
+      it("reverts when paused (before deadline)", async () => {
         await vault.pause();
 
         await expect(vault.closeFundraising()).to.be.revertedWith("Pausable: paused");
+      });
+
+      it("reverts when non-admin calls before deadline", async () => {
+        acm.isAllowedToCall.returns(false);
+
+        await expect(vault.connect(alice).closeFundraising()).to.be.revertedWithCustomError(vault, "Unauthorized");
+      });
+    });
+
+    describe("After fundraisingEndTime (permissionless)", () => {
+      it("non-admin can close (cancel path: below minCap)", async () => {
+        acm.isAllowedToCall.returns(false);
+        await time.increaseTo(params.fundraisingEndTime);
+
+        await vault.connect(alice).closeFundraising();
+        expect(await vault.state()).to.equal(State.Cancelled);
+      });
+
+      it("non-admin can close (success path: above minCap)", async () => {
+        await time.increaseTo(params.fundraisingStartTime);
+        await depositInFundraising(alice, parseUnits("2000", 18));
+        acm.isAllowedToCall.returns(false);
+        await time.increaseTo(params.fundraisingEndTime);
+
+        await vault.connect(alice).closeFundraising();
+        expect(await vault.state()).to.equal(State.PendingFill);
+      });
+
+      it("cancel path works even when paused (no external calls)", async () => {
+        await time.increaseTo(params.fundraisingEndTime);
+        await vault.pause();
+        acm.isAllowedToCall.returns(false);
+
+        await vault.connect(alice).closeFundraising();
+        expect(await vault.state()).to.equal(State.Cancelled);
+      });
+
+      it("success path reverts when paused (needs FundRouter interaction)", async () => {
+        await time.increaseTo(params.fundraisingStartTime);
+        await depositInFundraising(alice, parseUnits("2000", 18));
+        await time.increaseTo(params.fundraisingEndTime);
+        await vault.pause();
+
+        await expect(vault.connect(alice).closeFundraising()).to.be.revertedWith("Pausable: paused");
+      });
+
+      it("users can redeem 1:1 after permissionless cancel", async () => {
+        await time.increaseTo(params.fundraisingStartTime);
+        await depositInFundraising(alice, parseUnits("500", 18));
+        await time.increaseTo(params.fundraisingEndTime);
+        acm.isAllowedToCall.returns(false);
+
+        // 500 < minCap(1000), so this cancels
+        await vault.connect(alice).closeFundraising();
+        expect(await vault.state()).to.equal(State.Cancelled);
+
+        // Alice redeems her shares 1:1
+        const shares = await vault.balanceOf(alice.address);
+        const balBefore = await usdcToken.balanceOf(alice.address);
+        await vault.connect(alice).redeem(shares, alice.address, alice.address);
+        expect(await usdcToken.balanceOf(alice.address)).to.equal(balBefore.add(shares));
       });
     });
   });
