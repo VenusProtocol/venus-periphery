@@ -7,7 +7,7 @@ import { parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import { FixedRateVault, FundRouter, IAccessControlManagerV8, MockToken, VaultFactory } from "../../../../typechain";
-import { VaultInitParams, deployFullSystemFixture } from "../fixtures";
+import { VaultInitParams, defaultVaultParams, deployFullSystemFixture } from "../fixtures";
 
 const { expect } = chai;
 chai.use(smock.matchers);
@@ -630,6 +630,116 @@ describe("FundRouter - Fund Flow", () => {
           "FundsAlreadySentToCeffu",
         );
       });
+    });
+  });
+
+  // ══════════════════════════════════════════════════
+  //  Cross-vault balance isolation (totalCommittedPerAsset)
+  // ══════════════════════════════════════════════════
+
+  describe("Cross-vault balance isolation", () => {
+    let vaultB: FixedRateVault;
+    let vaultBAddress: string;
+    let paramsB: VaultInitParams;
+    const principalA = parseUnits("2000", 18);
+    const principalB = parseUnits("3000", 18);
+
+    async function deploySecondVault(): Promise<void> {
+      paramsB = await defaultVaultParams(usdcToken.address, {
+        name: "Venus Fixed Rate USDC #002",
+        symbol: "vfrUSDC-002",
+        ceffuRequestId: "CR-0002",
+      });
+      await _factory.deployVault(paramsB);
+      vaultBAddress = await _factory.vaultByCeffuRequestId("CR-0002");
+      vaultB = (await ethers.getContractAt("FixedRateVault", vaultBAddress)) as FixedRateVault;
+    }
+
+    beforeEach(async () => {
+      await deploySecondVault();
+    });
+
+    it("tracks totalCommittedPerAsset correctly through full lifecycle", async () => {
+      // Start: committed = 0
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(0);
+
+      // Vault A closes fundraising → principal committed
+      await time.increaseTo(params.fundraisingStartTime);
+      await depositInFundraising(alice, principalA);
+      await vault.closeFundraising();
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(principalA);
+
+      // Vault A transferToCeffu → committed decreases (tokens leave router)
+      await fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address);
+      await fundRouter.transferToCeffu(vaultAddress);
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(0);
+
+      // Vault A: confirmOrderFill → Locked
+      await fundRouter.confirmOrderFillForVault(vaultAddress);
+
+      // Ceffu repays → recordRepayment increases committed
+      const repayment = parseUnits("2100", 18);
+      await usdcToken.connect(owner).faucet(repayment);
+      await usdcToken.connect(owner).transfer(fundRouter.address, repayment);
+      await fundRouter.recordRepayment(vaultAddress, repayment);
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(repayment);
+
+      // distributeRepaymentToVault → committed decreases back to 0
+      await fundRouter.distributeRepaymentToVault(vaultAddress);
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(0);
+    });
+
+    it("prevents recordRepayment from over-committing tokens belonging to another vault", async () => {
+      // Both vaults close fundraising → funds in router
+      await time.increaseTo(params.fundraisingStartTime);
+      await depositInFundraising(alice, principalA);
+      await vault.closeFundraising(); // 2000 → router
+      // Vault B needs its own deposit (time already past fundraisingStartTime from vault A ops)
+      await usdcToken.connect(bob).approve(vaultB.address, principalB);
+      await vaultB.connect(bob).deposit(principalB, bob.address);
+      await vaultB.closeFundraising(); // 3000 → router
+
+      // Router has 5000 total, committed = 5000
+      expect(await usdcToken.balanceOf(fundRouter.address)).to.equal(principalA.add(principalB));
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(
+        principalA.add(principalB),
+      );
+
+      // Vault A: transfer to Ceffu → committed drops by 2000
+      await fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address);
+      await fundRouter.transferToCeffu(vaultAddress);
+      // Router: 3000 (all Vault B's), committed: 3000
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(principalB);
+
+      // Vault A: confirm order → Locked
+      await fundRouter.confirmOrderFillForVault(vaultAddress);
+
+      // Ceffu repays 2100 for Vault A
+      const repaymentA = parseUnits("2100", 18);
+      await usdcToken.connect(owner).faucet(repaymentA);
+      await usdcToken.connect(owner).transfer(fundRouter.address, repaymentA);
+      // Router: 5100 (3000 B's principal + 2100 A's repayment), committed: 3000
+
+      // Admin tries to record inflated repayment (5000 instead of 2100)
+      // Free balance = 5100 - 3000 = 2100 — recording 5000 would consume B's principal
+      await expect(fundRouter.recordRepayment(vaultAddress, parseUnits("5000", 18)))
+        .to.be.revertedWithCustomError(fundRouter, "InsufficientFreeBalance");
+
+      // Correct amount works
+      await fundRouter.recordRepayment(vaultAddress, repaymentA);
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(
+        principalB.add(repaymentA),
+      );
+    });
+
+    it("returnFundsAndCancelVault decrements committed correctly", async () => {
+      await time.increaseTo(params.fundraisingStartTime);
+      await depositInFundraising(alice, principalA);
+      await vault.closeFundraising();
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(principalA);
+
+      await fundRouter.returnFundsAndCancelVault(vaultAddress);
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(0);
     });
   });
 

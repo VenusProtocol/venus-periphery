@@ -94,6 +94,7 @@ contract FundRouter is
         allocation.supplyAsset = supplyAsset;
         allocation.principalAmount = amount;
         allocation.fundsReceivedFromVault = true;
+        totalCommittedPerAsset[supplyAsset] += amount;
 
         // Pull tokens from vault (vault must have called safeIncreaseAllowance before this)
         IERC20Upgradeable(supplyAsset).safeTransferFrom(vault, address(this), amount);
@@ -141,6 +142,7 @@ contract FundRouter is
         ensureNonzeroAddress(allocation.ceffuSubWalletAddress);
 
         allocation.fundsSentToCeffu = true;
+        totalCommittedPerAsset[allocation.supplyAsset] -= allocation.principalAmount;
 
         IERC20Upgradeable(allocation.supplyAsset).safeTransfer(
             allocation.ceffuSubWalletAddress,
@@ -196,8 +198,17 @@ contract FundRouter is
             revert OperationAlreadyCompleted();
         }
 
+        // Validate that recording this repayment won't over-commit tokens belonging to other vaults.
+        // Free balance = actual balance - tokens already committed to other vault allocations.
+        uint256 balance = IERC20Upgradeable(allocation.supplyAsset).balanceOf(address(this));
+        uint256 committed = totalCommittedPerAsset[allocation.supplyAsset];
+        if (committed + amount > balance) {
+            revert InsufficientFreeBalance();
+        }
+
         allocation.repaymentAmount = amount;
         allocation.repaymentReceived = true;
+        totalCommittedPerAsset[allocation.supplyAsset] += amount;
 
         emit RepaymentRecorded(vault, amount);
     }
@@ -223,6 +234,7 @@ contract FundRouter is
         allocation.repaymentDistributed = true;
 
         uint256 amount = allocation.repaymentAmount;
+        totalCommittedPerAsset[allocation.supplyAsset] -= amount;
 
         // Transfer tokens to vault, then notify vault to transition to Matured state
         IERC20Upgradeable(allocation.supplyAsset).safeTransfer(vault, amount);
@@ -250,6 +262,7 @@ contract FundRouter is
         }
 
         uint256 amount = allocation.principalAmount;
+        totalCommittedPerAsset[allocation.supplyAsset] -= amount;
 
         // Clean up allocation to prevent stale operations (e.g., transferToCeffu after cancel)
         allocation.fundsReceivedFromVault = false;

@@ -132,6 +132,9 @@ interface IFundRouter {
     /// @notice Thrown when attempting to cancel a vault whose funds have already been sent to Ceffu
     error FundsAlreadySentToCeffu();
 
+    /// @notice Thrown when recordRepayment amount exceeds free (uncommitted) balance
+    error InsufficientFreeBalance();
+
     // ──────────────────────────────────────────────
     //  Initialization
     // ──────────────────────────────────────────────

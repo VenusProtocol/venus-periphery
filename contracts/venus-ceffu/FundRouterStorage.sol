@@ -20,7 +20,13 @@ abstract contract FundRouterStorageV1 {
     /// @notice Per-vault allocation tracking. Key: vault contract address.
     mapping(address => IFundRouter.VaultAllocation) public vaultAllocations;
 
+    /// @notice Total tokens committed (reserved) per asset across all active vault allocations.
+    ///         Tracks principal held for vaults + recorded-but-undistributed repayments.
+    ///         Prevents cross-vault contamination by ensuring recordRepayment() cannot
+    ///         over-commit tokens that belong to other vaults.
+    mapping(address => uint256) public totalCommittedPerAsset;
+
     /// @dev Reserved storage gap for future upgrades.
-    ///      Slots used: 3 (1 address + 2 mappings). Gap: 47.
-    uint256[47] private __gap;
+    ///      Slots used: 4 (1 address + 3 mappings). Gap: 46.
+    uint256[46] private __gap;
 }
