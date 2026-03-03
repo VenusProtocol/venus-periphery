@@ -221,6 +221,29 @@ describe("FixedRateVault - Initialization & Access Control", () => {
         });
         await expect(factory.deployVault(p)).to.be.revertedWithCustomError(vault, "ZeroAddressNotAllowed");
       });
+
+      it("reverts if maxUserDeposit < minUserDeposit (both non-zero)", async () => {
+        await expect(
+          deployWithOverrides({
+            minUserDeposit: parseUnits("500", 18).toString(),
+            maxUserDeposit: parseUnits("100", 18).toString(),
+          }),
+        )
+          .to.be.revertedWithCustomError(vault, "InvalidInitParam")
+          .withArgs("maxUserDeposit < minUserDeposit");
+      });
+
+      it("reverts if minUserDeposit > maxCap", async () => {
+        await expect(
+          deployWithOverrides({
+            minUserDeposit: parseUnits("20000", 18).toString(),
+            maxUserDeposit: parseUnits("20000", 18).toString(),
+            maxCap: parseUnits("10000", 18).toString(),
+          }),
+        )
+          .to.be.revertedWithCustomError(vault, "InvalidInitParam")
+          .withArgs("minUserDeposit > maxCap");
+      });
     });
 
     describe("Boundary values accepted", () => {
@@ -247,6 +270,30 @@ describe("FixedRateVault - Initialization & Access Control", () => {
 
       it("accepts gracePeriod == 0", async () => {
         await expect(deployWithOverrides({ gracePeriod: 0 })).to.not.be.reverted;
+      });
+
+      it("accepts minUserDeposit == maxUserDeposit (both non-zero)", async () => {
+        const amount = parseUnits("500", 18).toString();
+        await expect(deployWithOverrides({ minUserDeposit: amount, maxUserDeposit: amount })).to.not.be.reverted;
+      });
+
+      it("accepts minUserDeposit == maxCap", async () => {
+        await expect(
+          deployWithOverrides({
+            minUserDeposit: parseUnits("10000", 18).toString(),
+            maxUserDeposit: parseUnits("10000", 18).toString(),
+            maxCap: parseUnits("10000", 18).toString(),
+          }),
+        ).to.not.be.reverted;
+      });
+
+      it("accepts minUserDeposit > 0 with maxUserDeposit == 0 (no per-user cap)", async () => {
+        await expect(
+          deployWithOverrides({
+            minUserDeposit: parseUnits("100", 18).toString(),
+            maxUserDeposit: "0",
+          }),
+        ).to.not.be.reverted;
       });
     });
   });

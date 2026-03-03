@@ -98,6 +98,11 @@ contract FixedRateVault is
         if (!(params.fundraisingEndTime > params.fundraisingStartTime)) revert InvalidInitParam("fundraisingWindow");
         if (params.lockPeriodDuration == 0) revert InvalidInitParam("lockPeriodDuration");
         if (params.reserveFactorBps > MAX_BPS) revert InvalidInitParam("reserveFactorBps > 100%");
+        if (params.minUserDeposit > 0 && params.maxUserDeposit > 0) {
+            if (params.maxUserDeposit < params.minUserDeposit)
+                revert InvalidInitParam("maxUserDeposit < minUserDeposit");
+        }
+        if (params.minUserDeposit > params.maxCap) revert InvalidInitParam("minUserDeposit > maxCap");
 
         // Set vault config (immutable after initialization)
         fundRouter = fundRouter_;
