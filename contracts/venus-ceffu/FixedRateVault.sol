@@ -131,9 +131,10 @@ contract FixedRateVault is
         }
 
         if (block.timestamp < fundraisingEndTime) {
-            // Before deadline: admin-only, fully pausable
+            // Before deadline: admin-only, fully pausable, must have started
             _checkAccessAllowed("closeFundraising()");
             _requireNotPaused();
+            if (block.timestamp < fundraisingStartTime) revert FundraisingNotStarted();
         }
 
         if (!(totalPrincipal < minCap)) {

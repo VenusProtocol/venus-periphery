@@ -359,6 +359,7 @@ describe("FixedRateVault - Initialization & Access Control", () => {
 
       it("succeeds when ACM allows access", async () => {
         // closeFundraising with 0 deposits → Cancelled (below minCap)
+        await time.increaseTo(params.fundraisingStartTime);
         await expect(vault.closeFundraising()).to.not.be.reverted;
       });
     });

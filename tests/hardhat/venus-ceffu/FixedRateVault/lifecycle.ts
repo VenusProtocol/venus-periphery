@@ -118,6 +118,7 @@ describe("FixedRateVault - Lifecycle", () => {
 
     describe("when totalPrincipal < minCap", () => {
       it("transitions to Cancelled with zero deposits", async () => {
+        await time.increaseTo(params.fundraisingStartTime);
         await vault.closeFundraising();
         expect(await vault.state()).to.equal(State.Cancelled);
       });
@@ -130,6 +131,7 @@ describe("FixedRateVault - Lifecycle", () => {
       });
 
       it("emits VaultCancelled event", async () => {
+        await time.increaseTo(params.fundraisingStartTime);
         await expect(vault.closeFundraising()).to.emit(vault, "VaultCancelled");
       });
 
@@ -165,6 +167,11 @@ describe("FixedRateVault - Lifecycle", () => {
         acm.isAllowedToCall.returns(false);
 
         await expect(vault.connect(alice).closeFundraising()).to.be.revertedWithCustomError(vault, "Unauthorized");
+      });
+
+      it("reverts when called before fundraisingStartTime", async () => {
+        // Default fixture: fundraisingStartTime is in the future (now + 60)
+        await expect(vault.closeFundraising()).to.be.revertedWithCustomError(vault, "FundraisingNotStarted");
       });
     });
 
