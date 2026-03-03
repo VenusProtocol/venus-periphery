@@ -232,6 +232,38 @@ contract FundRouter is
     }
 
     // ──────────────────────────────────────────────
+    //  Cancellation: Return funds and cancel vault
+    // ──────────────────────────────────────────────
+
+    /// @inheritdoc IFundRouter
+    function returnFundsAndCancelVault(address vault) external nonReentrant {
+        // solhint-disable-next-line gas-small-strings
+        _checkAccessAllowed("returnFundsAndCancelVault(address)");
+
+        VaultAllocation storage allocation = vaultAllocations[vault];
+
+        if (!allocation.fundsReceivedFromVault) {
+            revert AllocationNotFound(vault);
+        }
+        if (allocation.fundsSentToCeffu) {
+            revert FundsAlreadySentToCeffu();
+        }
+
+        uint256 amount = allocation.principalAmount;
+
+        // Clean up allocation to prevent stale operations (e.g., transferToCeffu after cancel)
+        allocation.fundsReceivedFromVault = false;
+        allocation.principalAmount = 0;
+
+        // Transfer funds back to vault, then cancel atomically.
+        // Funds arrive before state change, so users always redeem for actual assets.
+        IERC20Upgradeable(allocation.supplyAsset).safeTransfer(vault, amount);
+        IFixedRateVault(vault).cancelVault();
+
+        emit FundsReturnedAndVaultCancelled(vault, amount);
+    }
+
+    // ──────────────────────────────────────────────
     //  Admin: Asset management
     // ──────────────────────────────────────────────
 

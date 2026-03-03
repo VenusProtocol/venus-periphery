@@ -537,6 +537,103 @@ describe("FundRouter - Fund Flow", () => {
   });
 
   // ══════════════════════════════════════════════════
+  //  returnFundsAndCancelVault()
+  // ══════════════════════════════════════════════════
+
+  describe("returnFundsAndCancelVault()", () => {
+    const principal = parseUnits("2000", 18);
+
+    describe("Happy path", () => {
+      it("returns funds to vault and transitions to Cancelled", async () => {
+        await advanceToPendingFill();
+
+        expect(await usdcToken.balanceOf(fundRouter.address)).to.equal(principal);
+        expect(await usdcToken.balanceOf(vaultAddress)).to.equal(0);
+
+        await fundRouter.returnFundsAndCancelVault(vaultAddress);
+
+        expect(await vault.state()).to.equal(State.Cancelled);
+        expect(await usdcToken.balanceOf(vaultAddress)).to.equal(principal);
+        expect(await usdcToken.balanceOf(fundRouter.address)).to.equal(0);
+      });
+
+      it("cleans up allocation to prevent stale operations", async () => {
+        await advanceToPendingFill();
+        await fundRouter.returnFundsAndCancelVault(vaultAddress);
+
+        const alloc = await fundRouter.getVaultAllocation(vaultAddress);
+        expect(alloc.fundsReceivedFromVault).to.equal(false);
+        expect(alloc.principalAmount).to.equal(0);
+      });
+
+      it("users can redeem 1:1 after cancel (funds are in vault)", async () => {
+        await advanceToPendingFill();
+        await fundRouter.returnFundsAndCancelVault(vaultAddress);
+
+        const shares = await vault.balanceOf(alice.address);
+        expect(shares).to.equal(principal);
+
+        const balBefore = await usdcToken.balanceOf(alice.address);
+        await vault.connect(alice).redeem(shares, alice.address, alice.address);
+        expect(await usdcToken.balanceOf(alice.address)).to.equal(balBefore.add(principal));
+      });
+
+      it("emits FundsReturnedAndVaultCancelled event", async () => {
+        await advanceToPendingFill();
+
+        await expect(fundRouter.returnFundsAndCancelVault(vaultAddress))
+          .to.emit(fundRouter, "FundsReturnedAndVaultCancelled")
+          .withArgs(vaultAddress, principal);
+      });
+
+      it("emits VaultCancelled event on the vault", async () => {
+        await advanceToPendingFill();
+
+        await expect(fundRouter.returnFundsAndCancelVault(vaultAddress)).to.emit(vault, "VaultCancelled");
+      });
+
+      it("blocks subsequent transferToCeffu after cancel (allocation cleaned)", async () => {
+        await advanceToPendingFill();
+        await fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address);
+        await fundRouter.returnFundsAndCancelVault(vaultAddress);
+
+        await expect(fundRouter.transferToCeffu(vaultAddress)).to.be.revertedWithCustomError(
+          fundRouter,
+          "PrerequisiteNotMet",
+        );
+      });
+    });
+
+    describe("Reverts", () => {
+      it("reverts when ACM denies access", async () => {
+        acm.isAllowedToCall.returns(false);
+        await expect(fundRouter.returnFundsAndCancelVault(vaultAddress)).to.be.revertedWithCustomError(
+          fundRouter,
+          "Unauthorized",
+        );
+      });
+
+      it("reverts with AllocationNotFound when no funds received", async () => {
+        // No allocation exists yet
+        await expect(fundRouter.returnFundsAndCancelVault(vaultAddress))
+          .to.be.revertedWithCustomError(fundRouter, "AllocationNotFound")
+          .withArgs(vaultAddress);
+      });
+
+      it("reverts with FundsAlreadySentToCeffu after transferToCeffu", async () => {
+        await advanceToPendingFill();
+        await fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address);
+        await fundRouter.transferToCeffu(vaultAddress);
+
+        await expect(fundRouter.returnFundsAndCancelVault(vaultAddress)).to.be.revertedWithCustomError(
+          fundRouter,
+          "FundsAlreadySentToCeffu",
+        );
+      });
+    });
+  });
+
+  // ══════════════════════════════════════════════════
   //  End-to-end flow
   // ══════════════════════════════════════════════════
 

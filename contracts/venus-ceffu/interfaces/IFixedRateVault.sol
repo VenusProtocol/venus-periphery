@@ -9,8 +9,8 @@ pragma solidity 0.8.25;
  *
  * Lifecycle state machine:
  *   Fundraising -> PendingFill -> Locked -> Matured
- *        |
- *    Cancelled
+ *        |              |
+ *        └── Cancelled ←┘ (PendingFill cancel via FundRouter only)
  */
 interface IFixedRateVault {
     // ──────────────────────────────────────────────
@@ -160,8 +160,16 @@ interface IFixedRateVault {
     function closeFundraising() external;
 
     /**
-     * @notice Admin force-cancel during Fundraising or PendingFill.
-     *         Users can withdraw full refunds once funds are returned to the vault.
+     * @notice Cancels the vault and transitions to Cancelled state for user refunds.
+     *
+     *         Two paths depending on current state:
+     *         - Fundraising: Admin calls directly. Funds are in the vault, users redeem 1:1.
+     *         - PendingFill: Only callable by FundRouter (via returnFundsAndCancelVault).
+     *           This ensures funds are atomically returned to the vault before state transition,
+     *           preventing users from redeeming shares for zero assets.
+     *
+     *         Cancellation after transferToCeffu() is blocked at the FundRouter level because
+     *         funds are no longer on-chain recoverable.
      */
     function cancelVault() external;
 

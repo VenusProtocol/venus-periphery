@@ -166,52 +166,75 @@ describe("FixedRateVault - Lifecycle", () => {
   // ── cancelVault() ────────────────────────────────
 
   describe("cancelVault()", () => {
-    it("cancels from Fundraising state", async () => {
-      await vault.cancelVault();
-      expect(await vault.state()).to.equal(State.Cancelled);
+    describe("From Fundraising (direct admin call)", () => {
+      it("cancels from Fundraising state", async () => {
+        await vault.cancelVault();
+        expect(await vault.state()).to.equal(State.Cancelled);
+      });
+
+      it("emits VaultCancelled event", async () => {
+        await expect(vault.cancelVault()).to.emit(vault, "VaultCancelled");
+      });
+
+      it("succeeds when vault is paused (no whenNotPaused modifier)", async () => {
+        await vault.pause();
+
+        await vault.cancelVault();
+        expect(await vault.state()).to.equal(State.Cancelled);
+      });
     });
 
-    it("cancels from PendingFill state", async () => {
-      await advanceToPendingFill();
-      expect(await vault.state()).to.equal(State.PendingFill);
+    describe("From PendingFill (must go through FundRouter)", () => {
+      it("cancels via fundRouter.returnFundsAndCancelVault (atomic fund return)", async () => {
+        await advanceToPendingFill();
+        const principal = parseUnits("2000", 18);
+        expect(await vault.state()).to.equal(State.PendingFill);
+        expect(await usdcToken.balanceOf(vaultAddress)).to.equal(0);
 
-      await vault.cancelVault();
-      expect(await vault.state()).to.equal(State.Cancelled);
+        await fundRouter.returnFundsAndCancelVault(vaultAddress);
+
+        expect(await vault.state()).to.equal(State.Cancelled);
+        // Funds atomically returned — vault has balance for user redemptions
+        expect(await usdcToken.balanceOf(vaultAddress)).to.equal(principal);
+      });
+
+      it("reverts when admin calls cancelVault() directly in PendingFill (OnlyFundRouter)", async () => {
+        await advanceToPendingFill();
+
+        await expect(vault.cancelVault()).to.be.revertedWithCustomError(vault, "OnlyFundRouter");
+      });
+
+      it("reverts when non-FundRouter address calls cancelVault() in PendingFill", async () => {
+        await advanceToPendingFill();
+
+        await expect(vault.connect(alice).cancelVault()).to.be.revertedWithCustomError(vault, "OnlyFundRouter");
+      });
     });
 
-    it("emits VaultCancelled event", async () => {
-      await expect(vault.cancelVault()).to.emit(vault, "VaultCancelled");
-    });
+    describe("Revert conditions", () => {
+      it("reverts from Locked state", async () => {
+        await advanceToLocked();
 
-    it("reverts from Locked state", async () => {
-      await advanceToLocked();
+        await expect(vault.cancelVault())
+          .to.be.revertedWithCustomError(vault, "InvalidState")
+          .withArgs(State.Locked, State.Fundraising);
+      });
 
-      await expect(vault.cancelVault())
-        .to.be.revertedWithCustomError(vault, "InvalidState")
-        .withArgs(State.Locked, State.Fundraising);
-    });
+      it("reverts from Cancelled state", async () => {
+        await vault.cancelVault();
 
-    it("reverts from Cancelled state", async () => {
-      await vault.cancelVault();
+        await expect(vault.cancelVault())
+          .to.be.revertedWithCustomError(vault, "InvalidState")
+          .withArgs(State.Cancelled, State.Fundraising);
+      });
 
-      await expect(vault.cancelVault())
-        .to.be.revertedWithCustomError(vault, "InvalidState")
-        .withArgs(State.Cancelled, State.Fundraising);
-    });
+      it("reverts from Matured state", async () => {
+        await advanceToMatured();
 
-    it("reverts from Matured state", async () => {
-      await advanceToMatured();
-
-      await expect(vault.cancelVault())
-        .to.be.revertedWithCustomError(vault, "InvalidState")
-        .withArgs(State.Matured, State.Fundraising);
-    });
-
-    it("succeeds when vault is paused (no whenNotPaused modifier)", async () => {
-      await vault.pause();
-
-      await vault.cancelVault();
-      expect(await vault.state()).to.equal(State.Cancelled);
+        await expect(vault.cancelVault())
+          .to.be.revertedWithCustomError(vault, "InvalidState")
+          .withArgs(State.Matured, State.Fundraising);
+      });
     });
   });
 

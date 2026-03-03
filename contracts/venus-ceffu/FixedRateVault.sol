@@ -21,14 +21,16 @@ import { FixedRateVaultStorageV1 } from "./FixedRateVaultStorage.sol";
  *
  * Lifecycle state machine:
  *   Fundraising -> PendingFill -> Locked -> Matured
- *        |
- *    Cancelled
+ *        |              |
+ *        └── Cancelled ←┘ (PendingFill cancel via FundRouter only)
  *
  * - Fundraising: users deposit stablecoins, shares minted 1:1
  * - PendingFill: funds sent to Ceffu via FundRouter, awaiting order fill confirmation
  * - Locked: order filled, interest accruing from lockStartAt, awaiting repayment
  * - Matured: repayment received, shares redeemable for principal + net interest
- * - Cancelled: fundraising failed (below minCap) or admin-cancelled, 1:1 refund
+ * - Cancelled: fundraising failed (below minCap) or admin-cancelled, 1:1 refund.
+ *             From PendingFill, cancellation must go through FundRouter.returnFundsAndCancelVault()
+ *             to ensure funds are atomically returned before state transition.
  *
  * The critical `totalAssets()` override drives all ERC-4626 share math:
  *   Fundraising/PendingFill/Locked -> totalPrincipal (1:1 ratio)
@@ -132,9 +134,14 @@ contract FixedRateVault is
 
     /// @inheritdoc IFixedRateVault
     function cancelVault() external {
-        _checkAccessAllowed("cancelVault()");
-
-        if (state != VaultState.Fundraising && state != VaultState.PendingFill) {
+        if (state == VaultState.PendingFill) {
+            // PendingFill cancellation must come through FundRouter.returnFundsAndCancelVault()
+            // to ensure funds are atomically returned before state transition.
+            // Direct admin calls would leave vault with 0 balance while users hold shares.
+            if (msg.sender != fundRouter) revert OnlyFundRouter();
+        } else if (state == VaultState.Fundraising) {
+            _checkAccessAllowed("cancelVault()");
+        } else {
             revert InvalidState(state, VaultState.Fundraising);
         }
 

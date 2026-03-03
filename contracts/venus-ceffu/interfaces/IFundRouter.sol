@@ -93,6 +93,11 @@ interface IFundRouter {
     /// @param approved Whether the asset is now approved (true) or not (false)
     event AssetApprovalUpdated(address indexed asset, bool indexed approved);
 
+    /// @notice Emitted when funds are returned to a vault and the vault is cancelled
+    /// @param vault Address of the cancelled vault
+    /// @param amount Amount of principal returned to the vault (asset decimals)
+    event FundsReturnedAndVaultCancelled(address indexed vault, uint256 indexed amount);
+
     /// @notice Emitted when stuck tokens are swept out by admin
     /// @param token Address of the token swept
     /// @param to Recipient address of the swept tokens
@@ -123,6 +128,9 @@ interface IFundRouter {
     /// @notice Thrown when no allocation exists for the given vault
     /// @param vault Address of the vault with missing allocation
     error AllocationNotFound(address vault);
+
+    /// @notice Thrown when attempting to cancel a vault whose funds have already been sent to Ceffu
+    error FundsAlreadySentToCeffu();
 
     // ──────────────────────────────────────────────
     //  Initialization
@@ -232,6 +240,30 @@ interface IFundRouter {
      * @param vault Address of the vault to distribute repayment to
      */
     function distributeRepaymentToVault(address vault) external;
+
+    // ──────────────────────────────────────────────
+    //  Cancellation: Return funds and cancel vault
+    // ──────────────────────────────────────────────
+
+    /**
+     * @notice Atomically returns funds to a PendingFill vault and cancels it.
+     *         This is the only safe way to cancel a vault after fundraising has closed successfully.
+     *
+     *         The function:
+     *         1. Validates funds are still in this router (not yet sent to Ceffu)
+     *         2. Cleans up the allocation to prevent stale operations
+     *         3. Transfers principal back to the vault
+     *         4. Calls vault.cancelVault() to transition to Cancelled state
+     *
+     *         This ensures users always redeem shares for actual assets (no zero-asset redemption).
+     *
+     * Prerequisites:
+     * - fundsReceivedFromVault must be true (allocation exists)
+     * - fundsSentToCeffu must be false (funds still recoverable)
+     *
+     * @param vault Address of the vault to cancel
+     */
+    function returnFundsAndCancelVault(address vault) external;
 
     // ──────────────────────────────────────────────
     //  Admin: Asset management
