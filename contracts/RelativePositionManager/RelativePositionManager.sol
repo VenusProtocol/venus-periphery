@@ -1184,8 +1184,15 @@ contract RelativePositionManager is
 
         uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
 
-        (bool success, ) = swapHelperAddr.call(param);
-        if (!success) revert TokenSwapCallFailed();
+        (bool success, bytes memory returnData) = swapHelperAddr.call(param);
+        if (!success) {
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(returnData, 32), mload(returnData))
+                }
+            }
+            revert TokenSwapCallFailed();
+        }
 
         uint256 tokenOutBalanceAfter = tokenOut.balanceOf(address(this));
         amountOut = tokenOutBalanceAfter - tokenOutBalanceBefore;
