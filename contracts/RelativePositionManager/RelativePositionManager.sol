@@ -352,7 +352,7 @@ contract RelativePositionManager is
     /**
      * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
      * @dev 1) Repay is derived from closeFractionBps (not passed directly), and total long
-     *         used (repay + profit) must stay within PROPORTIONAL_CLOSE_TOLERANCE to absorb
+     *         used (repay + profit) must stay within proportionalCloseTolerance to absorb
      *         execution variance such as swap slippage and flash-loan fees.
      *      2) minAmountOutRepay must fully cover the repay debt required at execution time; for a
      *         100% close, a small extra buffer is sufficient (it does not need to match the internal
@@ -1267,8 +1267,8 @@ contract RelativePositionManager is
      * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @return expectedLongToWithdraw Amount of long to redeem (BPS of current long balance)
      * @return expectedShortToRepay Amount of short to repay (BPS of current short debt)
-     * @return minLongToWithdraw Minimum long amount within PROPORTIONAL_CLOSE_TOLERANCE
-     * @return maxLongToWithdraw Maximum long amount within PROPORTIONAL_CLOSE_TOLERANCE
+     * @return minLongToWithdraw Minimum long amount within proportionalCloseTolerance
+     * @return maxLongToWithdraw Maximum long amount within proportionalCloseTolerance
      * @return maxExpectedShortToRepay Expected short + tolerance (for 100% close / first-leg cap in loss close)
      */
     function _getProportionalCloseAmounts(
@@ -1307,7 +1307,7 @@ contract RelativePositionManager is
 
     /**
      * @notice Validates proportional close for profit path and returns amount to repay
-     * @dev Validates totalLongAmountToRedeem (repay + profit) within PROPORTIONAL_CLOSE_TOLERANCE of BPS expected. Reverts if out of band.
+     * @dev Validates totalLongAmountToRedeem (repay + profit) within proportionalCloseTolerance of BPS expected. Reverts if out of band.
      * @param position Position storage (used to derive expected long/short amounts)
      * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @param totalLongAmountToRedeem Sum of long to redeem for repay and for profit swap
@@ -1352,7 +1352,7 @@ contract RelativePositionManager is
      *      then the second leg becomes 0 (second repay amount is 0).
      * @param position Snapshot of the position (used to derive expected long/short amounts)
      * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
-     * @param longAmountToRedeemForFirstSwap Long amount to redeem for the first swap (must be within PROPORTIONAL_CLOSE_TOLERANCE of expected long)
+     * @param longAmountToRedeemForFirstSwap Long amount to redeem for the first swap (must be within proportionalCloseTolerance of expected long)
      * @param shortAmountToRepayForFirstSwap Short amount to repay in the first exit; for 100% close with one leg, should cover the extra bumped amount
      * @param minAmountOutFirst Minimum short out from the first swap (must be >= shortAmountToRepayForFirstSwap)
      * @param minAmountOutSecond Minimum short out from the second swap (must be >= internally calculated second repay; for 100% close should cover the bumped amount)
@@ -1541,7 +1541,7 @@ contract RelativePositionManager is
 
     /**
      * @notice Computes the maximum allowed leverage: λ_max = CF_c / (1 - CF_l * (1 - f))
-     * @dev c = Collateral (DSA), L = Long asset. CF_c = collateral CF, CF_l = Long asset CF, f = friction (PROPORTIONAL_CLOSE_TOLERANCE).
+     * @dev c = Collateral (DSA), L = Long asset. CF_c = collateral CF, CF_l = Long asset CF, f = friction (proportionalCloseTolerance).
      * @param dsaVToken Collateral (DSA) vToken market
      * @param longVToken Long asset vToken market (CF_l)
      * @return maxLeverage The maximum leverage ratio allowed (1e18 mantissa)

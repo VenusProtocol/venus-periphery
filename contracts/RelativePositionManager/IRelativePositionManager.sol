@@ -405,7 +405,7 @@ interface IRelativePositionManager {
 
     /**
      * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
-     * @dev Repay amount is derived from BPS. Total long validated against BPS (within PROPORTIONAL_CLOSE_TOLERANCE).
+     * @dev Repay amount is derived from BPS. Total long validated against BPS (within proportionalCloseTolerance).
      * minAmountOutRepay must be >= calculated repay.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
@@ -436,7 +436,7 @@ interface IRelativePositionManager {
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
-     * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within PROPORTIONAL_CLOSE_TOLERANCE)
+     * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within proportionalCloseTolerance)
      * @param shortAmountToRepayForFirstSwap Short to repay in first exit (0 <= value <= BPS-derived expected short)
      * @param minAmountOutFirst Minimum amount out from first swap (must be >= borrowedAmountToRepayFirst when first repay > 0)
      * @param swapDataFirst Calldata for first swap (long → short)
