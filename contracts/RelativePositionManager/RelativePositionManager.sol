@@ -849,7 +849,10 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Opens or scales a leveraged position (borrow short, swap to long)
+     * @notice Opens or scales a leveraged position (borrow short, swap to long). The flash loan fee
+     *         is borrowed on behalf of the position account and repaid immediately, so the position's
+     *         actual short debt after this call is shortAmount + flashLoanFee. Users should account
+     *         for this overhead when calculating close parameters.
      * @dev Supplies optional additionalPrincipal, calculates max borrow, and executes leverage via
      *      the position account. Event emission (PositionOpened or PositionScaled) is the
      *      responsibility of the caller.
