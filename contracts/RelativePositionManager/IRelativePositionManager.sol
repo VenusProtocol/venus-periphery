@@ -32,6 +32,7 @@ interface IRelativePositionManager {
         uint256 finalCapitalUtilized; // Position capital capped by supplied principal (in USD)
         uint256 availableCapitalUSD; // Remaining capital available for borrowing (in USD)
         uint256 withdrawableAmount; // Amount that can be withdrawn in DSA token terms
+        uint256 clampedLeverage; // min(storedEffectiveLeverage, currentMaxLeverage) at time of computation
     }
 
     /// @dev USD values for long collateral, short debt, and supplied principal (and prices used for conversions)

@@ -1201,14 +1201,8 @@ contract RelativePositionManager is
         // Get utilization info which calculates available capital (DSA from position)
         UtilizationInfo memory utilization = _getUtilizationInfo(position);
 
-        // Clamp stored leverage against current max leverage (CFs may have been reduced since activation)
-        uint256 currentMaxLeverage = _getMaxLeverage(IVToken(position.dsaVToken), position.longVToken);
-        uint256 clampedLeverage = position.effectiveLeverage < currentMaxLeverage
-            ? position.effectiveLeverage
-            : currentMaxLeverage;
-
-        // Calculate max additional borrow amount: availableCapital * clampedLeverage
-        uint256 maxAdditionalBorrowUSD = (utilization.availableCapitalUSD * clampedLeverage) / MANTISSA_ONE;
+        // Calculate max additional borrow amount: availableCapital * clampedLeverage (precomputed in utilization)
+        uint256 maxAdditionalBorrowUSD = (utilization.availableCapitalUSD * utilization.clampedLeverage) / MANTISSA_ONE;
 
         // Convert to shortAsset amount
         ResilientOracleInterface oracle = COMPTROLLER.oracle();
@@ -1222,7 +1216,7 @@ contract RelativePositionManager is
      * @dev Computes actualCapitalUtilized (LTV-based), nominalCapitalUtilized (leverage-based), caps by supplied principal,
      *      then availableCapitalUSD and withdrawableAmount in DSA terms.
      * @param position In-memory snapshot of the position data
-     * @return utilization Struct with actualCapitalUtilized, nominalCapitalUtilized, finalCapitalUtilized, availableCapitalUSD, withdrawableAmount
+     * @return utilization Struct with actualCapitalUtilized, nominalCapitalUtilized, finalCapitalUtilized, availableCapitalUSD, withdrawableAmount, clampedLeverage
      */
     function _getUtilizationInfo(Position storage position) internal returns (UtilizationInfo memory utilization) {
         IVToken longVToken = IVToken(position.longVToken);
@@ -1232,15 +1226,29 @@ contract RelativePositionManager is
         (, uint256 dsaCF, ) = COMPTROLLER.markets(address(dsaVToken));
         (, uint256 longCF, ) = COMPTROLLER.markets(address(longVToken));
 
-        // Calculate nominalCapitalUtilized borrowValueUSD/effectiveLeverage (rounded up for conservative estimate)
-        utilization.nominalCapitalUtilized = ceilDiv(values.borrowValueUSD * MANTISSA_ONE, position.effectiveLeverage);
+        // Clamp stored leverage against current max (CFs may have been reduced since activation)
+        uint256 currentMaxLeverage = _getMaxLeverage(dsaVToken, position.longVToken);
+        utilization.clampedLeverage = position.effectiveLeverage < currentMaxLeverage
+            ? position.effectiveLeverage
+            : currentMaxLeverage;
 
-        // Calculate actualCapitalUtilized: (borrowValueUSD - (longValueUSD * longCF)) / dsaCF (rounded up for conservative estimate)
+        // Calculate nominalCapitalUtilized using clampedLeverage (rounded up for conservative estimate)
+        utilization.nominalCapitalUtilized = ceilDiv(values.borrowValueUSD * MANTISSA_ONE, utilization.clampedLeverage);
+
+        // Calculate actualCapitalUtilized: DSA principal required to back the borrow not covered by long collateral.
+        // excessBorrowUSD = borrowValueUSD - (longValueUSD * longCF); actualCapitalUtilized = excessBorrowUSD / dsaCF.
+        // If dsaCF == 0 the DSA asset provides no borrowing power, so all supplied principal is consumed if any excessBorrow exists.
         uint256 longCollateralValueUSD = (values.longValueUSD * longCF) / MANTISSA_ONE;
         uint256 excessBorrowUSD = values.borrowValueUSD > longCollateralValueUSD
             ? values.borrowValueUSD - longCollateralValueUSD
             : 0;
-        utilization.actualCapitalUtilized = excessBorrowUSD > 0 ? ceilDiv(excessBorrowUSD * MANTISSA_ONE, dsaCF) : 0;
+
+        // if long collateral fully covers the borrow (excessBorrowUSD == 0); actualCapitalUtilized remains 0 (default)
+        if (excessBorrowUSD > 0) {
+            utilization.actualCapitalUtilized = dsaCF == 0
+                ? values.suppliedPrincipalUSD
+                : ceilDiv(excessBorrowUSD * MANTISSA_ONE, dsaCF);
+        }
 
         utilization.finalCapitalUtilized = max(utilization.actualCapitalUtilized, utilization.nominalCapitalUtilized);
         utilization.finalCapitalUtilized = min(values.suppliedPrincipalUSD, utilization.finalCapitalUtilized);
