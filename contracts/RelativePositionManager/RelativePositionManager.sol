@@ -450,7 +450,9 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Closes a position with loss proportionally (BPS-based, same pattern as closeWithProfit)
+     * @notice Closes a position with loss proportionally (BPS-based, same pattern as closeWithProfit).
+     *         If treasuryPercent is enabled, the LM redeems more than the requested DSA amount on behalf
+     *         of the position account to cover the fee.
      * @dev
      *      - First exit (long → short): long/short amounts are derived from BPS; the user passes shortAmountToRepayForFirstSwap,
      *        which is validated to be within [0, expectedShort] and minAmountOutFirst must be >= shortAmountToRepayForFirstSwap.
@@ -480,7 +482,7 @@ contract RelativePositionManager is
      * @custom:error Throw MinAmountOutRepayBelowDebt if minAmountOutFirst is below shortAmountToRepayForFirstSwap.
      * @custom:error Throw ProportionalCloseAmountOutOfTolerance if first-exit amounts are not within the tolerated BPS band.
      * @custom:error Throw MinAmountOutSecondBelowDebt if minAmountOutSecond is below the internally calculated second repay.
-     * @custom:error Throw InsufficientWithdrawableAmount if dsaAmountToRedeemForSecondSwap exceeds available DSA principal.
+     * @custom:error Throw InsufficientWithdrawableAmount if either leg's effective amount (after treasury grossup) exceeds its bucket in the shared pool (DSA==long only).
      * @custom:error Throw RedeemBehalfFailed if redeeming long or DSA vTokens on behalf fails.
      * @custom:error Throw TokenSwapCallFailed if a swap helper call fails, or SlippageExceeded if swap output is too low.
      * @custom:event Emits PositionClosed event.
@@ -502,13 +504,8 @@ contract RelativePositionManager is
         address positionAccount = position.positionAccount;
         if (shortVToken.borrowBalanceCurrent(positionAccount) == 0) revert ZeroDebt();
 
-        // When using DSA principal to repay in the second leg, ensure the requested amount does not exceed
-        // the available principal balance (and later update principal accounting accordingly).
-        IVToken dsaVToken = IVToken(position.dsaVToken);
-        if (dsaAmountToRedeemForSecondSwap > 0) {
-            uint256 principalUnderlying = _getSuppliedPrincipalBalance(position);
-            if (dsaAmountToRedeemForSecondSwap > principalUnderlying) revert InsufficientWithdrawableAmount();
-        }
+        // Validate both close legs against their respective buckets in the shared pool (DSA==long only).
+        _validateDsaCloseRedeemAmounts(position, longAmountToRedeemForFirstSwap, dsaAmountToRedeemForSecondSwap);
 
         uint256 amountToRepaySecond = _validateLossClose(
             position,
@@ -535,7 +532,7 @@ contract RelativePositionManager is
         uint256 dsaAmountRedeemed = _closePositionWithDSA(
             position,
             positionAccount,
-            dsaVToken,
+            IVToken(position.dsaVToken),
             shortVToken,
             dsaAmountToRedeemForSecondSwap,
             amountToRepaySecond,
@@ -1352,6 +1349,49 @@ contract RelativePositionManager is
         amountToRepay = (closeFractionBps == PROPORTIONAL_CLOSE_MAX && expectedShortToRepay > 0)
             ? maxExpectedShortToRepay
             : expectedShortToRepay;
+    }
+
+    /**
+     * @notice Validates both close legs against their respective buckets in the shared DSA/long pool,
+     *         accounting for any treasury fee grossup applied by the LM when redeeming underlying on
+     *         behalf of the position account.
+     * @dev Only applies when DSA == long; skipped otherwise as pools are separate and Venus enforces limits.
+     *      Treasury grossup is applied to each leg before comparing against its bucket.
+     * @param position The active position
+     * @param longAmountToRedeemForFirstSwap Long underlying amount requested for the first leg
+     * @param dsaAmountToRedeemForSecondSwap DSA underlying amount requested for the second leg
+     */
+    function _validateDsaCloseRedeemAmounts(
+        Position storage position,
+        uint256 longAmountToRedeemForFirstSwap,
+        uint256 dsaAmountToRedeemForSecondSwap
+    ) internal {
+        // When DSA != long, pools are separate — Venus's own balance checks prevent over-redemption.
+        if (position.dsaVToken != position.longVToken) return;
+
+        uint256 treasuryPercent = COMPTROLLER.treasuryPercent();
+
+        if (
+            _applyTreasuryGrossup(longAmountToRedeemForFirstSwap, treasuryPercent) > _getLongCollateralBalance(position)
+        ) revert InsufficientWithdrawableAmount();
+
+        if (
+            _applyTreasuryGrossup(dsaAmountToRedeemForSecondSwap, treasuryPercent) >
+            _getSuppliedPrincipalBalance(position)
+        ) revert InsufficientWithdrawableAmount();
+    }
+
+    /**
+     * @notice Applies ceiling-division treasury grossup to an amount, mirroring the LM's internal fee logic.
+     * @dev The LM redeems `ceil(amount / (1 - treasuryPercent))` underlying so the position account bears
+     *      the treasury fee. Returns the raw amount unchanged when treasury is zero or amount is zero.
+     * @param amount The raw underlying amount
+     * @param treasuryPercent The treasury fee mantissa (0 = disabled)
+     * @return The effective grossed-up amount the LM will actually burn from the position account
+     */
+    function _applyTreasuryGrossup(uint256 amount, uint256 treasuryPercent) internal pure returns (uint256) {
+        if (amount == 0 || treasuryPercent == 0) return amount;
+        return (amount * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) / (MANTISSA_ONE - treasuryPercent);
     }
 
     /**

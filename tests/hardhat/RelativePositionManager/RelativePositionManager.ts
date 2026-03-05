@@ -2554,6 +2554,162 @@ describe("RelativePositionManager", () => {
       // 100% close does not deactivate; explicit deactivatePosition is required to flip isActive
       expect(positionAfter.isActive).to.be.true;
     });
+
+    describe("Treasury Percent Handling", () => {
+      it("closeWithLoss: should revert with InsufficientWithdrawableAmount when treasuryPercent > 0 and grossed-up dsaAmountToRedeemForSecondSwap exceeds principal", async () => {
+        // When treasuryPercent is enabled, the LM redeems a grossed-up amount on behalf of the
+        // position account. _validateDsaCloseRedeemAmounts checks the effective (grossed-up) second-leg
+        // amount rather than the raw user-supplied amount, so a value that passes the raw check
+        // (dsaAmount < principal) but fails after grossing up (dsaAmount / (1 - fee) > principal)
+        // should revert with InsufficientWithdrawableAmount.
+
+        const principalAmount = parseEther("5");
+        await fundAndApproveToken(
+          dsaToken,
+          admin,
+          aliceAddress,
+          alice,
+          relativePositionManager.address,
+          principalAmount,
+        );
+
+        const shortAmount = parseEther("1");
+        const minLongAmount = parseEther("0.9");
+        const longReceivedFromOpen = parseEther("0.95");
+        const openSwapData = await createSwapMulticallData(
+          swapHelper,
+          dsaToken,
+          leverageManager.address,
+          longReceivedFromOpen,
+          ethers.utils.formatBytes32String("treasury-cwl-dsa-open"),
+          borrowToken,
+        );
+        await relativePositionManager
+          .connect(alice)
+          .activateAndOpenPosition(
+            dsaMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            principalAmount,
+            parseEther("2"),
+            shortAmount,
+            minLongAmount,
+            openSwapData,
+          );
+
+        // Enable 5% treasury fee AFTER opening so it only affects the close validation
+        const treasuryPercent = parseUnits("5", 16); // 5% = 5e16
+        await comptroller._setTreasuryData(await admin.getAddress(), await admin.getAddress(), treasuryPercent);
+        expect(await comptroller.treasuryPercent()).to.equal(treasuryPercent);
+
+        // Set a loss price so closeWithLoss is valid
+        resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(parseUnits("0.9", 18));
+        resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(parseUnits("1", 18));
+
+        const principalUnderlying = await relativePositionManager.callStatic.getSuppliedPrincipalBalance(
+          aliceAddress,
+          dsaMarket.address,
+          borrowMarket.address,
+        );
+
+        // dsaAmountToRedeemForSecondSwap is 98% of principal — passes the raw check (98% < 100%)
+        // but grossed-up at 5% treasury: 0.98 * 5 / 0.95 ≈ 5.158 > 5 → should revert
+        const dsaAmountToRedeemForSecondSwap = principalUnderlying.mul(98).div(100);
+
+        await expect(
+          relativePositionManager
+            .connect(alice)
+            .closeWithLoss(
+              dsaMarket.address,
+              borrowMarket.address,
+              BPS_100_PCT,
+              0,
+              0,
+              0,
+              "0x",
+              dsaAmountToRedeemForSecondSwap,
+              0,
+              "0x",
+            ),
+        ).to.be.revertedWithCustomError(relativePositionManager, "InsufficientWithdrawableAmount");
+      });
+
+      it("closeWithLoss: should revert with InsufficientWithdrawableAmount when treasuryPercent > 0 and grossed-up longAmountToRedeemForFirstSwap exceeds long collateral", async () => {
+        // When DSA==long, both legs share the same vToken pool. _validateDsaCloseRedeemAmounts applies
+        // treasury grossup to the first-leg amount and validates it against long collateral
+        // (total pool minus principal). A value that passes the raw check (98% < 100%) but fails
+        // after grossing up at 5% (0.98/0.95 ≈ 1.032 > 1.0 of long collateral) should revert.
+
+        const principalAmount = parseEther("5");
+        await fundAndApproveToken(
+          dsaToken,
+          admin,
+          aliceAddress,
+          alice,
+          relativePositionManager.address,
+          principalAmount,
+        );
+
+        const shortAmount = parseEther("1");
+        const minLongAmount = parseEther("0.9");
+        const longReceivedFromOpen = parseEther("0.95");
+        const openSwapData = await createSwapMulticallData(
+          swapHelper,
+          dsaToken,
+          leverageManager.address,
+          longReceivedFromOpen,
+          ethers.utils.formatBytes32String("treasury-cwl-first-leg-open"),
+          borrowToken,
+        );
+        await relativePositionManager
+          .connect(alice)
+          .activateAndOpenPosition(
+            dsaMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            principalAmount,
+            parseEther("2"),
+            shortAmount,
+            minLongAmount,
+            openSwapData,
+          );
+
+        // Enable 5% treasury fee AFTER opening so it only affects the close validation
+        const treasuryPercent = parseUnits("5", 16); // 5% = 5e16
+        await comptroller._setTreasuryData(await admin.getAddress(), await admin.getAddress(), treasuryPercent);
+
+        // Set a loss price so closeWithLoss is valid
+        resilientOracle.getUnderlyingPrice.whenCalledWith(dsaMarket.address).returns(parseUnits("0.9", 18));
+        resilientOracle.getUnderlyingPrice.whenCalledWith(borrowMarket.address).returns(parseUnits("1", 18));
+
+        const longCollateral = await relativePositionManager.callStatic.getLongCollateralBalance(
+          aliceAddress,
+          dsaMarket.address,
+          borrowMarket.address,
+        );
+
+        // longAmountToRedeemForFirstSwap is 98% of long collateral — passes the raw check (98% < 100%)
+        // but grossed-up at 5% treasury: 0.98/0.95 ≈ 1.032 > 1.0 → should revert
+        const longAmountToRedeemForFirstSwap = longCollateral.mul(98).div(100);
+
+        await expect(
+          relativePositionManager
+            .connect(alice)
+            .closeWithLoss(
+              dsaMarket.address,
+              borrowMarket.address,
+              BPS_100_PCT,
+              longAmountToRedeemForFirstSwap,
+              0,
+              0,
+              "0x",
+              0,
+              0,
+              "0x",
+            ),
+        ).to.be.revertedWithCustomError(relativePositionManager, "InsufficientWithdrawableAmount");
+      });
+    });
   });
 
   /**
