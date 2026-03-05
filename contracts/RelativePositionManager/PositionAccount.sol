@@ -89,6 +89,12 @@ contract PositionAccount is Initializable, IPositionAccount {
     event ExitSingleAssetLeverageForwarded(address indexed market, uint256 amount);
 
     /**
+     * @notice Emitted when a market is exited via the Comptroller
+     * @param vToken Address of the vToken market exited
+     */
+    event MarketExited(address indexed vToken);
+
+    /**
      * @notice Emitted when dust (remaining token balance) is transferred to the position owner
      * @param token Address of the ERC20 token transferred
      * @param owner Address of the position account owner receiving the dust
@@ -265,6 +271,7 @@ contract PositionAccount is Initializable, IPositionAccount {
     function exitMarket(address vTokenToExit) external onlyRelativePositionManager {
         uint256 err = COMPTROLLER.exitMarket(vTokenToExit);
         if (err != 0) revert ExitMarketFailed(err);
+        emit MarketExited(vTokenToExit);
     }
 
     /**
