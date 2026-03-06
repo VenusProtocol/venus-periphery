@@ -194,6 +194,16 @@ describe("VaultFactory", () => {
       await expect(factory.deployVault(newParams)).to.be.revertedWithCustomError(factory, "Unauthorized");
     });
 
+    it("should revert when maxUserDeposit > maxCap", async () => {
+      const badParams = await defaultVaultParams(usdcToken.address, {
+        ceffuRequestId: "CR-0002",
+        maxUserDeposit: parseUnits("20000", 18).toString(), // > maxCap of 10000
+      });
+      await expect(factory.deployVault(badParams))
+        .to.be.revertedWithCustomError(vault, "InvalidInitParam")
+        .withArgs("maxUserDeposit > maxCap");
+    });
+
     it("should deploy multiple vaults with sequential IDs", async () => {
       const params2 = await defaultVaultParams(usdcToken.address, { ceffuRequestId: "CR-0002" });
       const params3 = await defaultVaultParams(usdcToken.address, { ceffuRequestId: "CR-0003" });

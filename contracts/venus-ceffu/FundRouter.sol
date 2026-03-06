@@ -90,16 +90,18 @@ contract FundRouter is
             revert OperationAlreadyCompleted();
         }
 
-        // Record allocation
-        allocation.supplyAsset = supplyAsset;
-        allocation.principalAmount = amount;
-        allocation.fundsReceivedFromVault = true;
-        totalCommittedPerAsset[supplyAsset] += amount;
-
         // Pull tokens from vault (vault must have called safeIncreaseAllowance before this)
+        uint256 balanceBefore = IERC20Upgradeable(supplyAsset).balanceOf(address(this));
         IERC20Upgradeable(supplyAsset).safeTransferFrom(vault, address(this), amount);
+        uint256 actualReceived = IERC20Upgradeable(supplyAsset).balanceOf(address(this)) - balanceBefore;
 
-        emit FundsReceivedFromVault(vault, supplyAsset, amount);
+        // Record allocation with actual received amount
+        allocation.supplyAsset = supplyAsset;
+        allocation.principalAmount = actualReceived;
+        allocation.fundsReceivedFromVault = true;
+        totalCommittedPerAsset[supplyAsset] += actualReceived;
+
+        emit FundsReceivedFromVault(vault, supplyAsset, actualReceived);
     }
 
     // ──────────────────────────────────────────────

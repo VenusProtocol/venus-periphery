@@ -242,6 +242,16 @@ describe("FundRouter - Fund Flow", () => {
           .to.be.revertedWithCustomError(fundRouter, "AllocationNotFound")
           .withArgs(bob.address);
       });
+
+      it("reverts with OperationAlreadyCompleted after funds sent to Ceffu", async () => {
+        await fundRouter.setCeffuAddressForVault(vaultAddress, ceffuWallet.address);
+        await fundRouter.transferToCeffu(vaultAddress);
+
+        await expect(fundRouter.setCeffuAddressForVault(vaultAddress, bob.address)).to.be.revertedWithCustomError(
+          fundRouter,
+          "OperationAlreadyCompleted",
+        );
+      });
     });
   });
 
@@ -637,6 +647,23 @@ describe("FundRouter - Fund Flow", () => {
           "FundsAlreadySentToCeffu",
         );
       });
+    });
+  });
+
+  // ══════════════════════════════════════════════════
+  //  sweepToken()
+  // ══════════════════════════════════════════════════
+
+  describe("sweepToken()", () => {
+    it("reverts with InsufficientFreeBalance when balance < committed", async () => {
+      // Vault A closes fundraising → 2000 committed in router
+      await advanceToPendingFill();
+      expect(await fundRouter.totalCommittedPerAsset(usdcToken.address)).to.equal(parseUnits("2000", 18));
+
+      // Try sweeping any amount — all balance is committed
+      await expect(
+        fundRouter.sweepToken(usdcToken.address, owner.address, parseUnits("1", 18)),
+      ).to.be.revertedWithCustomError(fundRouter, "InsufficientFreeBalance");
     });
   });
 

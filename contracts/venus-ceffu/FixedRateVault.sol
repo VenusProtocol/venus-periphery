@@ -419,11 +419,14 @@ contract FixedRateVault is
         }
 
         // Execute ERC-4626 deposit (safeTransferFrom + mint)
+        IERC20Upgradeable asset_ = IERC20Upgradeable(asset());
+        uint256 balanceBefore = asset_.balanceOf(address(this));
         super._deposit(caller, receiver, assets, shares);
+        uint256 actualReceived = asset_.balanceOf(address(this)) - balanceBefore;
 
-        // Update tracking
-        userDeposits[receiver] += assets;
-        totalPrincipal += assets;
+        // Update tracking with actual received amount
+        userDeposits[receiver] += actualReceived;
+        totalPrincipal += actualReceived;
 
         // Scenario A: auto-close when maxCap is reached
         if (!(totalPrincipal < maxCap)) {
