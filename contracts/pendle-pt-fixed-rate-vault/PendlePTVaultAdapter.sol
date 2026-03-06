@@ -340,12 +340,14 @@ contract PendlePTVaultAdapter is
         if (token == address(0)) revert ZeroAddress();
         if (to == address(0)) revert ZeroAddress();
         IERC20(token).safeTransfer(to, amount);
+        emit SweepTokens(token, to, amount);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
     function sweepNative(address payable to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert ZeroAddress();
         Address.sendValue(to, amount);
+        emit SweepNative(to, amount);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

@@ -106,6 +106,21 @@ interface IPendlePTVaultAdapter {
         uint256 amountOut
     );
 
+    /**
+     * @notice Emitted when the owner sweeps ERC-20 tokens from the contract.
+     * @param token The ERC-20 token address swept
+     * @param to The recipient address
+     * @param amount Amount of tokens swept
+     */
+    event SweepTokens(address indexed token, address indexed to, uint256 amount);
+
+    /**
+     * @notice Emitted when the owner sweeps native BNB from the contract.
+     * @param to The recipient address
+     * @param amount Amount of native BNB swept
+     */
+    event SweepNative(address indexed to, uint256 amount);
+
     // ═══════════════════════════════════════════════════════════════════════
     //                           CUSTOM ERRORS
     // ═══════════════════════════════════════════════════════════════════════

@@ -166,7 +166,9 @@ function describeTests() {
 
         // Sweep tokens to owner
         const ownerBalBefore = await slisbnb.balanceOf(owner.address);
-        await adapter.connect(owner).sweepTokens(SLISBNB, owner.address, sweepAmount);
+        await expect(adapter.connect(owner).sweepTokens(SLISBNB, owner.address, sweepAmount))
+          .to.emit(adapter, "SweepTokens")
+          .withArgs(SLISBNB, owner.address, sweepAmount);
         const ownerBalAfter = await slisbnb.balanceOf(owner.address);
 
         expect(ownerBalAfter.sub(ownerBalBefore)).to.equal(sweepAmount);
@@ -212,7 +214,9 @@ function describeTests() {
 
         // Sweep native BNB to user
         const userBalBefore = await ethers.provider.getBalance(user.address);
-        await adapter.connect(owner).sweepNative(user.address, amount);
+        await expect(adapter.connect(owner).sweepNative(user.address, amount))
+          .to.emit(adapter, "SweepNative")
+          .withArgs(user.address, amount);
         const userBalAfter = await ethers.provider.getBalance(user.address);
 
         expect(userBalAfter.sub(userBalBefore)).to.equal(amount);
