@@ -50,7 +50,7 @@ interface IRelativePositionManager {
     /// @custom:error PositionNotActive when trying to operate on inactive position
     error PositionNotActive();
 
-    /// @custom:error PositionNotFullyClosed when trying to deactivate a position that still has collateral or debt
+    /// @custom:error PositionNotFullyClosed when trying to deactivate a position that still has short debt
     error PositionNotFullyClosed();
 
     /// @custom:error InvalidDSA when DSA index or address is not valid
@@ -280,14 +280,14 @@ interface IRelativePositionManager {
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
     /// @param cycleId The cycle ID of the position
-    /// @param dsaAsset Address of the DSA asset used for principal
-    /// @param amountWithdrawn Amount of DSA underlying withdrawn on deactivation
+    /// @param longRedeemed Amount of long underlying redeemed to user (0 when DSA == long)
+    /// @param dsaRedeemed Amount of DSA underlying redeemed to user
     event PositionDeactivated(
         address indexed user,
         address indexed positionAccount,
         uint256 cycleId,
-        address dsaAsset,
-        uint256 amountWithdrawn
+        uint256 longRedeemed,
+        uint256 dsaRedeemed
     );
 
     /// @notice Emitted when underlying tokens are transferred from this contract to a user
@@ -469,8 +469,8 @@ interface IRelativePositionManager {
 
     /**
      * @notice Deactivates a position account
-     * @dev Removes DSA selection and resets leverage. User can activate with new DSA later.
-     *      The DSA asset is retrieved from the position data (set during activation).
+     * @dev Redeems any remaining long collateral and DSA principal to the user, then deactivates.
+     *      Reverts if short debt remains. User can activate with new DSA later.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      */

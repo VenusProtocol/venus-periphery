@@ -612,38 +612,50 @@ contract RelativePositionManager is
 
     /**
      * @notice Deactivates a position account
-     * @dev Reverts if position still has long collateral or short debt (PositionNotFullyClosed).
-     *      Withdraws all remaining DSA principal to the user, then sets isActive False.
+     * @dev Reverts if position still has short debt (PositionNotFullyClosed).
+     *      Sets isActive to false, then redeems any remaining long collateral and DSA principal to the user.
      *      User may activate again later (possibly with a different DSA via dsaIndex).
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:error Throw PositionNotFullyClosed if long collateral or short debt remains.
+     * @custom:error Throw PositionNotFullyClosed if short debt remains.
      * @custom:event Emits PositionDeactivated event.
      */
     function deactivatePosition(IVToken longVToken, IVToken shortVToken) external nonReentrant whenNotPaused {
         Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
         address positionAccount = position.positionAccount;
 
-        // Check that position is fully closed: no long collateral and no short debt
-        uint256 longCollateral = _getLongCollateralBalance(position);
+        // Check that position has no short debt remaining
         uint256 shortDebt = shortVToken.borrowBalanceCurrent(positionAccount);
+        if (shortDebt > 0) revert PositionNotFullyClosed();
 
-        if (longCollateral > 0 || shortDebt > 0) revert PositionNotFullyClosed();
         IVToken dsaVToken = IVToken(position.dsaVToken);
+        bool dsaIsLong = address(dsaVToken) == address(longVToken);
+
+        // Capture long collateral before clearing state (needed for accurate event when dsaIsLong)
+        uint256 longCollateral = _getLongCollateralBalance(position);
 
         position.isActive = false;
         position.suppliedPrincipalVTokens = 0;
 
-        // Exit the DSA market from position account (unless DSA is the long asset)
-        // DSA market is guaranteed to be entered during _activatePosition, so no membership check needed
-        if (address(dsaVToken) != address(longVToken)) {
+        uint256 longRedeemed;
+        uint256 dsaRedeemed;
+
+        if (dsaIsLong) {
+            // DSA and long share the same market — single redeem covers both principal and long collateral
+            uint256 totalRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
+            longRedeemed = longCollateral > totalRedeemed ? totalRedeemed : longCollateral;
+            dsaRedeemed = totalRedeemed - longRedeemed;
+        } else {
+            // Redeem long collateral back to user
+            longRedeemed = _redeemAllVTokensToUser(longVToken, positionAccount);
+
+            // Exit DSA market and redeem remaining DSA principal to user
             IPositionAccount(positionAccount).exitMarket(address(dsaVToken));
+            dsaRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
         }
 
-        // Withdraw any remaining DSA principal to user (for complete withdraw use redeemBehalf instead of redeemUnderlyingToUser)
-        uint256 underlyingRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
-        emit PositionDeactivated(msg.sender, positionAccount, position.cycleId, address(dsaVToken), underlyingRedeemed);
+        emit PositionDeactivated(msg.sender, positionAccount, position.cycleId, longRedeemed, dsaRedeemed);
     }
 
     /**
