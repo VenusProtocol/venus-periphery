@@ -185,6 +185,7 @@ contract PendlePTVaultAdapter is
         returns (uint256 netVTokensMinted)
     {
         if (msg.value == 0) revert ZeroAmount();
+        if (input.tokenIn != address(0)) revert InvalidTokenInput();
 
         MarketConfig storage config = markets[pendleMarket];
         address pt = config.pt;

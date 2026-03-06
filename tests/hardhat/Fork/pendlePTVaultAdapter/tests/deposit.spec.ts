@@ -360,6 +360,18 @@ function describeTests() {
         ).to.be.revertedWithCustomError(adapter, "ZeroAmount");
       });
 
+      it("should revert with InvalidTokenInput when tokenIn is not address(0)", async () => {
+        const { adapter, user, marketAddress } = await loadFixture(baseFixture);
+        const nativeDepositAmount = parseUnits("1", 18);
+        const input = getDummyTokenInput(SLISBNB, nativeDepositAmount);
+
+        await expect(
+          adapter
+            .connect(user)
+            .depositNative(marketAddress, 0, dummyApprox, input, dummyLimit, { value: nativeDepositAmount }),
+        ).to.be.revertedWithCustomError(adapter, "InvalidTokenInput");
+      });
+
       it("should revert with InputAmountMismatch when netTokenIn != msg.value", async () => {
         const { adapter, user, marketAddress } = await loadFixture(baseFixture);
         const nativeDepositAmount = parseUnits("1", 18);
