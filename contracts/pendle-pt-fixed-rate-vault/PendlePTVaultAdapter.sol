@@ -115,7 +115,7 @@ contract PendlePTVaultAdapter is
 
     /// @notice Initializes the proxy state. Called once after proxy deployment.
     /// @param accessControlManager_ Address of the Venus AccessControlManager contract.
-    function initialize(address accessControlManager_) external reinitializer(1) {
+    function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
         __Pausable_init();
         __ReentrancyGuard_init();
