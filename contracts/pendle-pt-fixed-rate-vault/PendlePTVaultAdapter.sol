@@ -457,6 +457,7 @@ contract PendlePTVaultAdapter is
         if (mintErr != 0) revert VTokenMintFailed(mintErr);
 
         netVTokensMinted = IVenusVToken(vToken).balanceOf(msg.sender) - vTokenBalanceBefore;
+        if (netVTokensMinted == 0) revert ZeroVTokensMinted();
 
         IERC20(pt).forceApprove(vToken, 0);
     }

@@ -158,6 +158,9 @@ interface IPendlePTVaultAdapter {
      */
     error VTokenMintFailed(uint256 errorCode);
 
+    /// @notice Error thrown when a mint operation succeeds but produces zero vTokens (dust input).
+    error ZeroVTokensMinted();
+
     /**
      * @notice Error thrown when Venus VToken redeem operation fails.
      * @param errorCode The error code returned by the VToken contract
