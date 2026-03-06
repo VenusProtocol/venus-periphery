@@ -106,6 +106,8 @@ contract FixedRateVault is
                 revert InvalidInitParam("maxUserDeposit < minUserDeposit");
         }
         if (params.minUserDeposit > params.maxCap) revert InvalidInitParam("minUserDeposit > maxCap");
+        if (params.maxUserDeposit > 0 && params.maxUserDeposit > params.maxCap)
+            revert InvalidInitParam("maxUserDeposit > maxCap");
 
         // Set vault config (immutable after initialization)
         fundRouter = fundRouter_;
@@ -160,7 +162,7 @@ contract FixedRateVault is
         } else if (state == VaultState.Fundraising) {
             _checkAccessAllowed("cancelVault()");
         } else {
-            revert InvalidState(state, VaultState.Fundraising);
+            revert InvalidState(state, VaultState.PendingFill);
         }
 
         state = VaultState.Cancelled;

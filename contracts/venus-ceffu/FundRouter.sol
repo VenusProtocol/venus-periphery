@@ -117,6 +117,9 @@ contract FundRouter is
         if (!allocation.fundsReceivedFromVault) {
             revert AllocationNotFound(vault);
         }
+        if (allocation.fundsSentToCeffu) {
+            revert OperationAlreadyCompleted();
+        }
         if (ceffuAddress == allocation.ceffuSubWalletAddress) {
             revert CeffuAddressUnchanged();
         }
@@ -265,15 +268,18 @@ contract FundRouter is
         }
 
         uint256 amount = allocation.principalAmount;
-        totalCommittedPerAsset[allocation.supplyAsset] -= amount;
+        address supplyAsset = allocation.supplyAsset;
+        totalCommittedPerAsset[supplyAsset] -= amount;
 
         // Clean up allocation to prevent stale operations (e.g., transferToCeffu after cancel)
         allocation.fundsReceivedFromVault = false;
         allocation.principalAmount = 0;
+        allocation.supplyAsset = address(0);
+        allocation.ceffuSubWalletAddress = address(0);
 
         // Transfer funds back to vault, then cancel atomically.
         // Funds arrive before state change, so users always redeem for actual assets.
-        IERC20Upgradeable(allocation.supplyAsset).safeTransfer(vault, amount);
+        IERC20Upgradeable(supplyAsset).safeTransfer(vault, amount);
         IFixedRateVault(vault).cancelVault();
 
         emit FundsReturnedAndVaultCancelled(vault, amount);
@@ -307,7 +313,7 @@ contract FundRouter is
         uint256 committed = totalCommittedPerAsset[token];
         if (committed > 0) {
             uint256 balance = IERC20Upgradeable(token).balanceOf(address(this));
-            if (amount > balance - committed) {
+            if (balance < committed || amount > balance - committed) {
                 revert InsufficientFreeBalance();
             }
         }
