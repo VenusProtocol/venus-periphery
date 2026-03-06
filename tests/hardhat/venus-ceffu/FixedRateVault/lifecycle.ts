@@ -285,7 +285,7 @@ describe("FixedRateVault - Lifecycle", () => {
 
         await expect(vault.cancelVault())
           .to.be.revertedWithCustomError(vault, "InvalidState")
-          .withArgs(State.Locked, State.Fundraising);
+          .withArgs(State.Locked, State.PendingFill);
       });
 
       it("reverts from Cancelled state", async () => {
@@ -293,7 +293,7 @@ describe("FixedRateVault - Lifecycle", () => {
 
         await expect(vault.cancelVault())
           .to.be.revertedWithCustomError(vault, "InvalidState")
-          .withArgs(State.Cancelled, State.Fundraising);
+          .withArgs(State.Cancelled, State.PendingFill);
       });
 
       it("reverts from Matured state", async () => {
@@ -301,7 +301,7 @@ describe("FixedRateVault - Lifecycle", () => {
 
         await expect(vault.cancelVault())
           .to.be.revertedWithCustomError(vault, "InvalidState")
-          .withArgs(State.Matured, State.Fundraising);
+          .withArgs(State.Matured, State.PendingFill);
       });
     });
   });
