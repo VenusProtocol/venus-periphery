@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import {
     SafeERC20Upgradeable,
     IERC20Upgradeable
@@ -23,12 +22,7 @@ import { IPositionAccount } from "./IPositionAccount.sol";
  *      trading relative prices rather than traditional leverage. Uses 3-token logic (DSA + Long + Short)
  *      and deploys isolated PositionAccount contracts for each position.
  */
-contract RelativePositionManager is
-    AccessControlledV8,
-    ReentrancyGuardUpgradeable,
-    PausableUpgradeable,
-    IRelativePositionManager
-{
+contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeable, IRelativePositionManager {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @dev Success return value for Comptroller operations (e.g. enterMarketBehalf)
@@ -61,6 +55,12 @@ contract RelativePositionManager is
 
     /// @notice Counter / next index for newly added DSA vTokens (also equals current count)
     uint8 public dsaVTokenIndexCounter;
+
+    /// @notice Whether the contract is partially paused (blocks open, scale, withdraw, deactivate but allows close and supply)
+    bool public isPartiallyPaused;
+
+    /// @notice Whether the contract is completely paused (blocks all state-changing user operations)
+    bool public isCompletelyPaused;
 
     /// @notice Mapping from DSA index to supported DSA (Default Settlement Asset) vToken markets
     mapping(uint8 => address) public dsaVTokens;
@@ -102,26 +102,61 @@ contract RelativePositionManager is
     function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
         __ReentrancyGuard_init();
-        __Pausable_init();
         proportionalCloseTolerance = 100; // 1% default tolerance
     }
 
-    /**
-     * @notice Pauses state-changing user operations on the manager (activation, opening/closing, principal changes)
-     * @dev Callable only by governance via AccessControlManager. View and admin functions remain available.
-     */
-    function pause() external {
-        _checkAccessAllowed("pause()");
-        _pause();
+    /// @dev Reverts if partially or completely paused
+    modifier whenNotPaused() {
+        if (isPartiallyPaused) revert PartiallyPaused();
+        if (isCompletelyPaused) revert CompletelyPaused();
+        _;
+    }
+
+    /// @dev Reverts if completely paused
+    modifier whenNotCompletelyPaused() {
+        if (isCompletelyPaused) revert CompletelyPaused();
+        _;
     }
 
     /**
-     * @notice Unpauses state-changing user operations on the manager
+     * @notice Partially pauses the manager — blocks risk-increasing operations (open, scale, withdraw, deactivate)
+     *         while allowing defensive operations (close, supply principal).
      * @dev Callable only by governance via AccessControlManager.
      */
-    function unpause() external {
-        _checkAccessAllowed("unpause()");
-        _unpause();
+    function partialPause() external {
+        _checkAccessAllowed("partialPause()");
+        isPartiallyPaused = true;
+        emit PartialPauseToggled(true);
+    }
+
+    /**
+     * @notice Removes partial pause, re-enabling risk operations (unless completely paused).
+     * @dev Callable only by governance via AccessControlManager.
+     */
+    function partialUnpause() external {
+        _checkAccessAllowed("partialUnpause()");
+        isPartiallyPaused = false;
+        emit PartialPauseToggled(false);
+    }
+
+    /**
+     * @notice Completely pauses all state-changing user operations on the manager
+     * @dev Callable only by governance via AccessControlManager. View and admin functions remain available.
+     */
+    function completePause() external {
+        _checkAccessAllowed("completePause()");
+        isCompletelyPaused = true;
+        emit CompletePauseToggled(true);
+    }
+
+    /**
+     * @notice Removes complete pause, re-enabling all operations (unless partially paused).
+     * @dev Callable only by governance via AccessControlManager.
+     */
+    function completeUnpause() external {
+        _checkAccessAllowed("completeUnpause()");
+        isCompletelyPaused = false;
+        emit CompletePauseToggled(false);
     }
 
     /**
@@ -343,7 +378,7 @@ contract RelativePositionManager is
         address longVToken,
         address shortVToken,
         uint256 amount
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotCompletelyPaused {
         if (amount == 0) revert ZeroAmount();
         Position storage position = _getActivePosition(msg.sender, longVToken, shortVToken);
         _supplyPrincipalToPositionAccount(position, IVToken(position.dsaVToken), amount);
@@ -392,7 +427,7 @@ contract RelativePositionManager is
         uint256 longAmountToRedeemForProfit,
         uint256 minAmountOutProfit,
         bytes calldata swapDataProfit
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotCompletelyPaused {
         Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
 
         uint256 amountToRepay = _validateProfitClose(
@@ -498,7 +533,7 @@ contract RelativePositionManager is
         uint256 dsaAmountToRedeemForSecondSwap,
         uint256 minAmountOutSecond,
         bytes calldata swapDataSecond
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotCompletelyPaused {
         Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
 
         address positionAccount = position.positionAccount;
