@@ -437,6 +437,9 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
             minAmountOutRepay
         );
 
+        // Validate repay leg against long collateral bucket in the shared pool (DSA==long only).
+        _validateSharedPoolRedeemAmounts(position, longAmountToRedeemForRepay, 0);
+
         address positionAccount = position.positionAccount;
 
         // Proportional repay via exitLeverage (amountToRepay already includes 100% tolerance bump when applicable)
@@ -540,7 +543,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         if (shortVToken.borrowBalanceCurrent(positionAccount) == 0) revert ZeroDebt();
 
         // Validate both close legs against their respective buckets in the shared pool (DSA==long only).
-        _validateDsaCloseRedeemAmounts(position, longAmountToRedeemForFirstSwap, dsaAmountToRedeemForSecondSwap);
+        _validateSharedPoolRedeemAmounts(position, longAmountToRedeemForFirstSwap, dsaAmountToRedeemForSecondSwap);
 
         uint256 amountToRepaySecond = _validateLossClose(
             position,
@@ -1399,19 +1402,20 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     }
 
     /**
-     * @notice Validates both close legs against their respective buckets in the shared DSA/long pool,
+     * @notice Validates redeem amounts against their respective buckets in the shared DSA/long pool,
      *         accounting for any treasury fee grossup applied by the LM when redeeming underlying on
      *         behalf of the position account.
      * @dev Only applies when DSA == long; skipped otherwise as pools are separate and Venus enforces limits.
      *      Treasury grossup is applied to each leg before comparing against its bucket.
+     *      Used by both closeWithProfit (longAmount only, dsaAmount=0) and closeWithLoss (both legs).
      * @param position The active position
-     * @param longAmountToRedeemForFirstSwap Long underlying amount requested for the first leg
-     * @param dsaAmountToRedeemForSecondSwap DSA underlying amount requested for the second leg
+     * @param longAmountToRedeem Long underlying amount to redeem (validated against long collateral bucket)
+     * @param dsaAmountToRedeem DSA underlying amount to redeem (validated against principal bucket, 0 to skip)
      */
-    function _validateDsaCloseRedeemAmounts(
+    function _validateSharedPoolRedeemAmounts(
         Position storage position,
-        uint256 longAmountToRedeemForFirstSwap,
-        uint256 dsaAmountToRedeemForSecondSwap
+        uint256 longAmountToRedeem,
+        uint256 dsaAmountToRedeem
     ) internal {
         // When DSA != long, pools are separate — Venus's own balance checks prevent over-redemption.
         if (position.dsaVToken != position.longVToken) return;
@@ -1419,12 +1423,13 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
         uint256 treasuryPercent = COMPTROLLER.treasuryPercent();
 
         if (
-            _applyTreasuryGrossup(longAmountToRedeemForFirstSwap, treasuryPercent) > _getLongCollateralBalance(position)
+            longAmountToRedeem > 0 &&
+            _applyTreasuryGrossup(longAmountToRedeem, treasuryPercent) > _getLongCollateralBalance(position)
         ) revert InsufficientWithdrawableAmount();
 
         if (
-            _applyTreasuryGrossup(dsaAmountToRedeemForSecondSwap, treasuryPercent) >
-            _getSuppliedPrincipalBalance(position)
+            dsaAmountToRedeem > 0 &&
+            _applyTreasuryGrossup(dsaAmountToRedeem, treasuryPercent) > _getSuppliedPrincipalBalance(position)
         ) revert InsufficientWithdrawableAmount();
     }
 
