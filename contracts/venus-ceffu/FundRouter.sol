@@ -150,14 +150,14 @@ contract FundRouter is
         ensureNonzeroAddress(allocation.ceffuSubWalletAddress);
 
         allocation.fundsSentToCeffu = true;
-        totalCommittedPerAsset[allocation.supplyAsset] -= allocation.principalAmount;
 
-        IERC20Upgradeable(allocation.supplyAsset).safeTransfer(
-            allocation.ceffuSubWalletAddress,
-            allocation.principalAmount
-        );
+        address supplyAsset = allocation.supplyAsset;
+        uint256 principalAmount = allocation.principalAmount;
+        totalCommittedPerAsset[supplyAsset] -= principalAmount;
 
-        emit FundsTransferredToCeffu(vault, allocation.ceffuSubWalletAddress, allocation.principalAmount);
+        IERC20Upgradeable(supplyAsset).safeTransfer(allocation.ceffuSubWalletAddress, principalAmount);
+
+        emit FundsTransferredToCeffu(vault, allocation.ceffuSubWalletAddress, principalAmount);
     }
 
     // ──────────────────────────────────────────────
@@ -242,10 +242,11 @@ contract FundRouter is
         allocation.repaymentDistributed = true;
 
         uint256 amount = allocation.repaymentAmount;
-        totalCommittedPerAsset[allocation.supplyAsset] -= amount;
+        address supplyAsset = allocation.supplyAsset;
+        totalCommittedPerAsset[supplyAsset] -= amount;
 
         // Transfer tokens to vault, then notify vault to transition to Matured state
-        IERC20Upgradeable(allocation.supplyAsset).safeTransfer(vault, amount);
+        IERC20Upgradeable(supplyAsset).safeTransfer(vault, amount);
         IFixedRateVault(vault).receiveRepayment(amount);
 
         emit RepaymentDistributed(vault, amount);
