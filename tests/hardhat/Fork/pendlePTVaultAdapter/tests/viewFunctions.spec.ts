@@ -18,13 +18,13 @@ const { expect } = chai;
 
 function describeTests() {
   describe("PendlePTVaultAdapter - View Functions", () => {
-    // ── getMarketConfig ───────────────────────────────────────────────
+    // ── markets (auto-generated getter) ─────────────────────────────
 
-    describe("getMarketConfig", () => {
+    describe("markets", () => {
       it("should return correct config for registered market", async () => {
         const { adapter, marketAddress } = await loadFixture(baseFixture);
 
-        const config = await adapter.getMarketConfig(marketAddress);
+        const config = await adapter.markets(marketAddress);
         expect(config.pt).to.equal(PT_CLISBNBX_25JUN2026);
         expect(config.vToken).to.equal(VTOKEN_PT_CLISBNBX_25JUN2026);
         expect(config.maturity).to.be.gt(0);
@@ -35,7 +35,7 @@ function describeTests() {
       it("should return zeroed config for unregistered market", async () => {
         const { adapter } = await loadFixture(baseFixture);
 
-        const config = await adapter.getMarketConfig(FAKE_MARKET);
+        const config = await adapter.markets(FAKE_MARKET);
         expect(config.pt).to.equal(ethers.constants.AddressZero);
         expect(config.sy).to.equal(ethers.constants.AddressZero);
         expect(config.yt).to.equal(ethers.constants.AddressZero);

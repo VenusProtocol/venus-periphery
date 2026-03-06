@@ -353,11 +353,6 @@ contract PendlePTVaultAdapter is
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IPendlePTVaultAdapter
-    function getMarketConfig(address pendleMarket) external view returns (MarketConfig memory) {
-        return markets[pendleMarket];
-    }
-
-    /// @inheritdoc IPendlePTVaultAdapter
     function getMarketCount() external view returns (uint256) {
         return marketList.length;
     }

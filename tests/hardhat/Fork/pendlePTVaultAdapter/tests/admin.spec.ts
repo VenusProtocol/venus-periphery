@@ -30,7 +30,7 @@ function describeTests() {
         // baseFixture already adds the market; verify the config
         const { adapter, marketAddress } = await loadFixture(baseFixture);
 
-        const config = await adapter.getMarketConfig(marketAddress);
+        const config = await adapter.markets(marketAddress);
         expect(config.pt).to.equal(PT_CLISBNBX_25JUN2026);
         expect(config.vToken).to.equal(VTOKEN_PT_CLISBNBX_25JUN2026);
         expect(config.maturity).to.be.gt(0);

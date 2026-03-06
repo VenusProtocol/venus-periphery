@@ -270,7 +270,7 @@ function describeTests() {
         const { adapter, user, marketAddress } = await loadFixture(depositedFixture);
 
         // Time travel past maturity
-        const marketConfig = await adapter.getMarketConfig(marketAddress);
+        const marketConfig = await adapter.markets(marketAddress);
         const maturity = marketConfig.maturity.toNumber();
         await time.increaseTo(maturity + 1);
 

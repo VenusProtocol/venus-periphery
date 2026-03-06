@@ -317,13 +317,6 @@ interface IPendlePTVaultAdapter {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Get full configuration for a registered market.
-     * @param pendleMarket Pendle market address
-     * @return Full MarketConfig struct containing all market parameters
-     */
-    function getMarketConfig(address pendleMarket) external view returns (MarketConfig memory);
-
-    /**
      * @notice Get the number of registered markets.
      * @return Total count of markets registered in the adapter
      */

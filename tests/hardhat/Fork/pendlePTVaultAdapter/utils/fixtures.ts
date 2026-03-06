@@ -98,7 +98,7 @@ export async function baseFixture(): Promise<BaseFixture> {
   await adapter.connect(owner).addMarket(PENDLE_MARKET, VTOKEN_PT_CLISBNBX_25JUN2026);
 
   // Get PT token
-  const marketConfig = await adapter.getMarketConfig(PENDLE_MARKET);
+  const marketConfig = await adapter.markets(PENDLE_MARKET);
   const ptToken = await ethers.getContractAt("IERC20", marketConfig.pt);
 
   // Acquire slisBNB for user (15 BNB worth -- enough for all deposit tests)
@@ -127,7 +127,7 @@ export async function depositedFixture(): Promise<DepositedFixture> {
   const depositAmount = parseUnits("5", 18);
 
   // Fetch swap params from Pendle API
-  const marketConfig = await base.adapter.getMarketConfig(base.marketAddress);
+  const marketConfig = await base.adapter.markets(base.marketAddress);
   const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
     BSC_CHAIN_ID,
     SLISBNB,
@@ -173,7 +173,7 @@ export async function maturedWithDepositsFixture(): Promise<MaturedWithDepositsF
   await increaseListaOracleTimeDeltaTolerance();
 
   // Time travel past maturity
-  const marketConfig = await deposited.adapter.getMarketConfig(deposited.marketAddress);
+  const marketConfig = await deposited.adapter.markets(deposited.marketAddress);
   const maturity = marketConfig.maturity.toNumber();
   await time.increaseTo(maturity + 1);
 
