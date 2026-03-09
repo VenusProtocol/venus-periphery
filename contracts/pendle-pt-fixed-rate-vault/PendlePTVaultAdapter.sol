@@ -308,6 +308,7 @@ contract PendlePTVaultAdapter is
         if (IVenusVToken(vToken).underlying() != address(_PT)) revert UnderlyingMismatch(vToken, address(_PT));
 
         uint256 maturity = IPMarket(pendleMarket).expiry();
+        if (!(block.timestamp < maturity)) revert MarketAlreadyMatured(maturity, block.timestamp);
 
         markets[pendleMarket] = MarketConfig({
             pt: address(_PT),
