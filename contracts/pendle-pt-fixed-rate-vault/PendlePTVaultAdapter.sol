@@ -145,6 +145,7 @@ contract PendlePTVaultAdapter is
             address pt = config.pt;
             address vToken = config.vToken;
             uint256 ptBalanceBefore = IERC20(pt).balanceOf(address(this));
+            uint256 syBalanceBefore = IERC20(config.sy).balanceOf(address(this));
 
             // 1. Pull tokens from user → adapter (accepts any token from Pendle's tokensIn)
             uint256 balanceBefore = IERC20(input.tokenIn).balanceOf(address(this));
@@ -162,9 +163,10 @@ contract PendlePTVaultAdapter is
             // 3. Deposit PT into Venus — vTokens go to user
             netVTokensMinted = _mintVTokens(pt, vToken, netPtOut);
 
-            // 4. Safety sweep: not expected with exact-in swap, but guards against
-            //    unexpected Router/token behavior leaving residual tokens in the adapter
+            // 4. Safety sweep: return residual tokens to user — SY dust can occur when
+            //    limit orders trigger Pendle's epsSkipMarket threshold
             _sweepDust(pt, msg.sender, ptBalanceBefore);
+            _sweepDust(config.sy, msg.sender, syBalanceBefore);
             _sweepDust(input.tokenIn, msg.sender, balanceBefore);
         }
 
@@ -192,6 +194,7 @@ contract PendlePTVaultAdapter is
         address pt = config.pt;
         address vToken = config.vToken;
         uint256 ptBalanceBefore = IERC20(pt).balanceOf(address(this));
+        uint256 syBalanceBefore = IERC20(config.sy).balanceOf(address(this));
         uint256 nativeBalanceBefore = address(this).balance - msg.value;
 
         // Validate calldata consistency
@@ -205,12 +208,12 @@ contract PendlePTVaultAdapter is
         // 2. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(pt, vToken, netPtOut);
 
-        // 3. Safety sweep: not expected with exact-in swap, but guards against
-        //    unexpected Router behavior leaving residual PT in the adapter
+        // 3. Safety sweep: return residual tokens to user — SY dust can occur when
+        //    limit orders trigger Pendle's epsSkipMarket threshold
         _sweepDust(pt, msg.sender, ptBalanceBefore);
+        _sweepDust(config.sy, msg.sender, syBalanceBefore);
 
-        // 4. Safety refund: not expected with exact-in swap, but guards against
-        //    unexpected native BNB returned to the adapter during the swap
+        // 4. Refund any native BNB returned to the adapter during the swap
         _refundNativeDust(nativeBalanceBefore);
 
         emit Deposited(pendleMarket, msg.sender, input.tokenIn, msg.value, netPtOut, netVTokensMinted);
