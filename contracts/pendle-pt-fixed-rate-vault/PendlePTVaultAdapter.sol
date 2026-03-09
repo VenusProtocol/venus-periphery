@@ -155,7 +155,9 @@ contract PendlePTVaultAdapter is
             if (input.netTokenIn != received) revert InputAmountMismatch(input.netTokenIn, received);
 
             // 2. Swap tokenIn → PT via Pendle Router (Pendle handles aggregator routing if needed)
-            netPtOut = _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
+            //    Use balance delta instead of return value to prevent inflation via malicious limitRouter
+            _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
+            netPtOut = IERC20(pt).balanceOf(address(this)) - ptBalanceBefore;
 
             // 3. Deposit PT into Venus — vTokens go to user
             netVTokensMinted = _mintVTokens(pt, vToken, netPtOut);
@@ -196,7 +198,9 @@ contract PendlePTVaultAdapter is
         if (input.netTokenIn != msg.value) revert InputAmountMismatch(input.netTokenIn, msg.value);
 
         // 1. Swap native BNB → PT via Pendle Router
-        uint256 netPtOut = _swapToPtNative(pendleMarket, minPtOut, guessPtOut, input, limit);
+        //    Use balance delta instead of return value to prevent inflation via malicious limitRouter
+        _swapToPtNative(pendleMarket, minPtOut, guessPtOut, input, limit);
+        uint256 netPtOut = IERC20(pt).balanceOf(address(this)) - ptBalanceBefore;
 
         // 2. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(pt, vToken, netPtOut);
@@ -389,8 +393,9 @@ contract PendlePTVaultAdapter is
      * @param guessPtOut Off-chain binary search approximation parameters.
      * @param input Token input configuration from Pendle API (contains tokenIn address).
      * @param limit Limit order fill data.
-     * @return netPtOut Amount of PT tokens received from the swap.
      * @dev Approves router, performs swap, then resets approval to zero.
+     *      Return value is intentionally discarded — callers use balance delta
+     *      to prevent inflation via malicious limitRouter.
      */
     function _swapToPt(
         address pendleMarket,
@@ -398,10 +403,10 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    ) internal returns (uint256 netPtOut) {
+    ) internal {
         IERC20(input.tokenIn).forceApprove(PENDLE_ROUTER, input.netTokenIn);
 
-        (netPtOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt(
+        IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt(
             address(this), // PT receiver = adapter (so we can deposit into Venus)
             pendleMarket,
             minPtOut,
@@ -420,8 +425,9 @@ contract PendlePTVaultAdapter is
      * @param guessPtOut Off-chain binary search approximation parameters.
      * @param input Token input configuration from Pendle API.
      * @param limit Limit order fill data.
-     * @return netPtOut Amount of PT tokens received from the swap.
      * @dev Separated from _swapToPt to avoid stack-too-deep in depositNative.
+     *      Return value is intentionally discarded — callers use balance delta
+     *      to prevent inflation via malicious limitRouter.
      */
     function _swapToPtNative(
         address pendleMarket,
@@ -429,8 +435,8 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    ) internal returns (uint256 netPtOut) {
-        (netPtOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt{ value: msg.value }(
+    ) internal {
+        IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt{ value: msg.value }(
             address(this),
             pendleMarket,
             minPtOut,
