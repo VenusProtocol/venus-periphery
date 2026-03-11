@@ -158,6 +158,9 @@ interface IRelativePositionManager {
     /// @custom:error InvalidCloseFractionBps when closeFractionBps is not between 1 and 10000 (basis points)
     error InvalidCloseFractionBps();
 
+    /// @custom:error ExcessiveShortDust when short token dust on position account after closeWithLoss exit legs exceeds proportional tolerance of total repaid
+    error ExcessiveShortDust();
+
     /// @notice Emitted when a user activates a position account
     /// @param user Address of the user
     /// @param longAsset Address of the long asset

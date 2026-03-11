@@ -523,6 +523,7 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @custom:error Throw InsufficientWithdrawableAmount if either leg's effective amount (after treasury grossup) exceeds its bucket in the shared pool (DSA==long only).
      * @custom:error Throw RedeemBehalfFailed if redeeming long or DSA vTokens on behalf fails.
      * @custom:error Throw TokenSwapCallFailed if a swap helper call fails, or SlippageExceeded if swap output is too low.
+     * @custom:error Throw ExcessiveShortDust if short token dust after both exit legs exceeds proportional tolerance.
      * @custom:event Emits PositionClosed event.
      */
     function closeWithLoss(
@@ -578,9 +579,14 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
             swapDataSecond
         );
 
+        // Verify short dust does not exceed proportional tolerance relative to total debt repaid.
+        // Prevents disproportionate DSA collateral extraction via oversized dsaAmountToRedeemForSecondSwap.
+        address shortUnderlying = shortVToken.underlying();
+        _validateShortDust(positionAccount, shortUnderlying, shortAmountToRepayForFirstSwap + amountToRepaySecond);
+
         // Transfer any dust from LM (sent to position account) to user
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
-        _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, shortUnderlying);
 
         uint256 longDustRedeemed;
         if (closeFractionBps == PROPORTIONAL_CLOSE_MAX) {
@@ -1444,6 +1450,26 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     function _applyTreasuryGrossup(uint256 amount, uint256 treasuryPercent) internal pure returns (uint256) {
         if (amount == 0 || treasuryPercent == 0) return amount;
         return (amount * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) / (MANTISSA_ONE - treasuryPercent);
+    }
+
+    /**
+     * @notice Validates that short token dust on the position account does not exceed proportional tolerance.
+     * @dev After both exit legs of closeWithLoss, any short underlying remaining on the position account
+     *      is swap surplus. If dsaAmountToRedeemForSecondSwap is disproportionately large relative to the
+     *      BPS-derived debt repayment, the surplus would be excessive — allowing collateral extraction
+     *      beyond what the close fraction implies. This check bounds that surplus.
+     * @param positionAccount The position account to check
+     * @param shortUnderlying The short underlying token address
+     * @param totalShortRepaid Total short amount repaid across both legs
+     */
+    function _validateShortDust(
+        address positionAccount,
+        address shortUnderlying,
+        uint256 totalShortRepaid
+    ) internal view {
+        uint256 shortDust = IERC20Upgradeable(shortUnderlying).balanceOf(positionAccount);
+        if (shortDust > (totalShortRepaid * proportionalCloseTolerance) / PROPORTIONAL_CLOSE_MAX)
+            revert ExcessiveShortDust();
     }
 
     /**
