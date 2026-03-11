@@ -106,6 +106,21 @@ interface IPendlePTVaultAdapter {
         uint256 amountOut
     );
 
+    /**
+     * @notice Emitted when the owner sweeps ERC-20 tokens from the contract.
+     * @param token The ERC-20 token address swept
+     * @param to The recipient address
+     * @param amount Amount of tokens swept
+     */
+    event SweepTokens(address indexed token, address indexed to, uint256 amount);
+
+    /**
+     * @notice Emitted when the owner sweeps native BNB from the contract.
+     * @param to The recipient address
+     * @param amount Amount of native BNB swept
+     */
+    event SweepNative(address indexed to, uint256 amount);
+
     // ═══════════════════════════════════════════════════════════════════════
     //                           CUSTOM ERRORS
     // ═══════════════════════════════════════════════════════════════════════
@@ -157,6 +172,9 @@ interface IPendlePTVaultAdapter {
      * @param errorCode The error code returned by the VToken contract
      */
     error VTokenMintFailed(uint256 errorCode);
+
+    /// @notice Error thrown when a mint operation succeeds but produces zero vTokens (dust input).
+    error ZeroVTokensMinted();
 
     /**
      * @notice Error thrown when Venus VToken redeem operation fails.
@@ -312,13 +330,6 @@ interface IPendlePTVaultAdapter {
     // ═══════════════════════════════════════════════════════════════════════
     //                          VIEW FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice Get full configuration for a registered market.
-     * @param pendleMarket Pendle market address
-     * @return Full MarketConfig struct containing all market parameters
-     */
-    function getMarketConfig(address pendleMarket) external view returns (MarketConfig memory);
 
     /**
      * @notice Get the number of registered markets.

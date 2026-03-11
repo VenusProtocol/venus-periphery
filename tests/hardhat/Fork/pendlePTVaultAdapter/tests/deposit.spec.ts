@@ -30,7 +30,7 @@ function describeTests() {
         const depositAmount = parseUnits("1", 18);
 
         // Fetch swap params from Pendle API (enableAggregator=false)
-        const marketConfig = await adapter.getMarketConfig(marketAddress);
+        const marketConfig = await adapter.markets(marketAddress);
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
           BSC_CHAIN_ID,
           SLISBNB,
@@ -108,7 +108,7 @@ function describeTests() {
         expect(userWbnbBalance).to.be.gte(depositAmount);
 
         // Fetch swap params from Pendle API (enableAggregator=true)
-        const marketConfig = await adapter.getMarketConfig(marketAddress);
+        const marketConfig = await adapter.markets(marketAddress);
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
           BSC_CHAIN_ID,
           WBNB,
@@ -186,7 +186,7 @@ function describeTests() {
         const NATIVE = ethers.constants.AddressZero;
 
         // Fetch swap params for native BNB
-        const marketConfig = await adapter.getMarketConfig(marketAddress);
+        const marketConfig = await adapter.markets(marketAddress);
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
           BSC_CHAIN_ID,
           NATIVE,
@@ -257,7 +257,7 @@ function describeTests() {
         const depositAmount = parseUnits("1", 18);
 
         // Get swap params BEFORE time travel (Pendle API queries real chain)
-        const marketConfig = await adapter.getMarketConfig(marketAddress);
+        const marketConfig = await adapter.markets(marketAddress);
         const maturity = marketConfig.maturity.toNumber();
         const { minPtOut, approxParams, tokenInput, limitOrderData } = await getPendleSwapParams(
           BSC_CHAIN_ID,
@@ -358,6 +358,18 @@ function describeTests() {
         await expect(
           adapter.connect(user).depositNative(marketAddress, 0, dummyApprox, input, dummyLimit, { value: 0 }),
         ).to.be.revertedWithCustomError(adapter, "ZeroAmount");
+      });
+
+      it("should revert with InvalidTokenInput when tokenIn is not address(0)", async () => {
+        const { adapter, user, marketAddress } = await loadFixture(baseFixture);
+        const nativeDepositAmount = parseUnits("1", 18);
+        const input = getDummyTokenInput(SLISBNB, nativeDepositAmount);
+
+        await expect(
+          adapter
+            .connect(user)
+            .depositNative(marketAddress, 0, dummyApprox, input, dummyLimit, { value: nativeDepositAmount }),
+        ).to.be.revertedWithCustomError(adapter, "InvalidTokenInput");
       });
 
       it("should revert with InputAmountMismatch when netTokenIn != msg.value", async () => {

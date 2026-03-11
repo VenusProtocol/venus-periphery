@@ -115,7 +115,7 @@ contract PendlePTVaultAdapter is
 
     /// @notice Initializes the proxy state. Called once after proxy deployment.
     /// @param accessControlManager_ Address of the Venus AccessControlManager contract.
-    function initialize(address accessControlManager_) external reinitializer(1) {
+    function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
         __Pausable_init();
         __ReentrancyGuard_init();
@@ -145,6 +145,7 @@ contract PendlePTVaultAdapter is
             address pt = config.pt;
             address vToken = config.vToken;
             uint256 ptBalanceBefore = IERC20(pt).balanceOf(address(this));
+            uint256 syBalanceBefore = IERC20(config.sy).balanceOf(address(this));
 
             // 1. Pull tokens from user → adapter (accepts any token from Pendle's tokensIn)
             uint256 balanceBefore = IERC20(input.tokenIn).balanceOf(address(this));
@@ -155,14 +156,17 @@ contract PendlePTVaultAdapter is
             if (input.netTokenIn != received) revert InputAmountMismatch(input.netTokenIn, received);
 
             // 2. Swap tokenIn → PT via Pendle Router (Pendle handles aggregator routing if needed)
-            netPtOut = _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
+            //    Use balance delta instead of return value to prevent inflation via malicious limitRouter
+            _swapToPt(pendleMarket, minPtOut, guessPtOut, input, limit);
+            netPtOut = IERC20(pt).balanceOf(address(this)) - ptBalanceBefore;
 
             // 3. Deposit PT into Venus — vTokens go to user
             netVTokensMinted = _mintVTokens(pt, vToken, netPtOut);
 
-            // 4. Safety sweep: not expected with exact-in swap, but guards against
-            //    unexpected Router/token behavior leaving residual tokens in the adapter
+            // 4. Safety sweep: return residual tokens to user — SY dust can occur when
+            //    limit orders trigger Pendle's epsSkipMarket threshold
             _sweepDust(pt, msg.sender, ptBalanceBefore);
+            _sweepDust(config.sy, msg.sender, syBalanceBefore);
             _sweepDust(input.tokenIn, msg.sender, balanceBefore);
         }
 
@@ -185,28 +189,32 @@ contract PendlePTVaultAdapter is
         returns (uint256 netVTokensMinted)
     {
         if (msg.value == 0) revert ZeroAmount();
+        if (input.tokenIn != address(0)) revert InvalidTokenInput();
 
         MarketConfig storage config = markets[pendleMarket];
         address pt = config.pt;
         address vToken = config.vToken;
         uint256 ptBalanceBefore = IERC20(pt).balanceOf(address(this));
+        uint256 syBalanceBefore = IERC20(config.sy).balanceOf(address(this));
         uint256 nativeBalanceBefore = address(this).balance - msg.value;
 
         // Validate calldata consistency
         if (input.netTokenIn != msg.value) revert InputAmountMismatch(input.netTokenIn, msg.value);
 
         // 1. Swap native BNB → PT via Pendle Router
-        uint256 netPtOut = _swapToPtNative(pendleMarket, minPtOut, guessPtOut, input, limit);
+        //    Use balance delta instead of return value to prevent inflation via malicious limitRouter
+        _swapToPtNative(pendleMarket, minPtOut, guessPtOut, input, limit);
+        uint256 netPtOut = IERC20(pt).balanceOf(address(this)) - ptBalanceBefore;
 
         // 2. Deposit PT into Venus — vTokens go to user
         netVTokensMinted = _mintVTokens(pt, vToken, netPtOut);
 
-        // 3. Safety sweep: not expected with exact-in swap, but guards against
-        //    unexpected Router behavior leaving residual PT in the adapter
+        // 3. Safety sweep: return residual tokens to user — SY dust can occur when
+        //    limit orders trigger Pendle's epsSkipMarket threshold
         _sweepDust(pt, msg.sender, ptBalanceBefore);
+        _sweepDust(config.sy, msg.sender, syBalanceBefore);
 
-        // 4. Safety refund: not expected with exact-in swap, but guards against
-        //    unexpected native BNB returned to the adapter during the swap
+        // 4. Refund any native BNB returned to the adapter during the swap
         _refundNativeDust(nativeBalanceBefore);
 
         emit Deposited(pendleMarket, msg.sender, input.tokenIn, msg.value, netPtOut, netVTokensMinted);
@@ -308,6 +316,7 @@ contract PendlePTVaultAdapter is
         if (IVenusVToken(vToken).underlying() != address(_PT)) revert UnderlyingMismatch(vToken, address(_PT));
 
         uint256 maturity = IPMarket(pendleMarket).expiry();
+        if (!(block.timestamp < maturity)) revert MarketAlreadyMatured(maturity, block.timestamp);
 
         markets[pendleMarket] = MarketConfig({
             pt: address(_PT),
@@ -339,22 +348,19 @@ contract PendlePTVaultAdapter is
         if (token == address(0)) revert ZeroAddress();
         if (to == address(0)) revert ZeroAddress();
         IERC20(token).safeTransfer(to, amount);
+        emit SweepTokens(token, to, amount);
     }
 
     /// @inheritdoc IPendlePTVaultAdapter
     function sweepNative(address payable to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert ZeroAddress();
         Address.sendValue(to, amount);
+        emit SweepNative(to, amount);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
     //                          VIEW FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════
-
-    /// @inheritdoc IPendlePTVaultAdapter
-    function getMarketConfig(address pendleMarket) external view returns (MarketConfig memory) {
-        return markets[pendleMarket];
-    }
 
     /// @inheritdoc IPendlePTVaultAdapter
     function getMarketCount() external view returns (uint256) {
@@ -388,8 +394,9 @@ contract PendlePTVaultAdapter is
      * @param guessPtOut Off-chain binary search approximation parameters.
      * @param input Token input configuration from Pendle API (contains tokenIn address).
      * @param limit Limit order fill data.
-     * @return netPtOut Amount of PT tokens received from the swap.
      * @dev Approves router, performs swap, then resets approval to zero.
+     *      Return value is intentionally discarded — callers use balance delta
+     *      to prevent inflation via malicious limitRouter.
      */
     function _swapToPt(
         address pendleMarket,
@@ -397,10 +404,10 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    ) internal returns (uint256 netPtOut) {
+    ) internal {
         IERC20(input.tokenIn).forceApprove(PENDLE_ROUTER, input.netTokenIn);
 
-        (netPtOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt(
+        IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt(
             address(this), // PT receiver = adapter (so we can deposit into Venus)
             pendleMarket,
             minPtOut,
@@ -419,8 +426,9 @@ contract PendlePTVaultAdapter is
      * @param guessPtOut Off-chain binary search approximation parameters.
      * @param input Token input configuration from Pendle API.
      * @param limit Limit order fill data.
-     * @return netPtOut Amount of PT tokens received from the swap.
      * @dev Separated from _swapToPt to avoid stack-too-deep in depositNative.
+     *      Return value is intentionally discarded — callers use balance delta
+     *      to prevent inflation via malicious limitRouter.
      */
     function _swapToPtNative(
         address pendleMarket,
@@ -428,8 +436,8 @@ contract PendlePTVaultAdapter is
         ApproxParams calldata guessPtOut,
         TokenInput calldata input,
         LimitOrderData calldata limit
-    ) internal returns (uint256 netPtOut) {
-        (netPtOut, , ) = IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt{ value: msg.value }(
+    ) internal {
+        IPAllActionV3(PENDLE_ROUTER).swapExactTokenForPt{ value: msg.value }(
             address(this),
             pendleMarket,
             minPtOut,
@@ -456,6 +464,7 @@ contract PendlePTVaultAdapter is
         if (mintErr != 0) revert VTokenMintFailed(mintErr);
 
         netVTokensMinted = IVenusVToken(vToken).balanceOf(msg.sender) - vTokenBalanceBefore;
+        if (netVTokensMinted == 0) revert ZeroVTokensMinted();
 
         IERC20(pt).forceApprove(vToken, 0);
     }
