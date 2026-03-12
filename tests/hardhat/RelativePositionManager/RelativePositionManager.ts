@@ -442,8 +442,8 @@ describe("RelativePositionManager", () => {
    * ============================================================================
    */
   describe("pause", () => {
-    it("should block state-changing user operations when paused", async () => {
-      await relativePositionManager.connect(admin).pause();
+    it("should block risk-increasing operations when partially paused", async () => {
+      await relativePositionManager.connect(admin).partialPause();
 
       await expect(
         relativePositionManager
@@ -458,13 +458,7 @@ describe("RelativePositionManager", () => {
             parseEther("0.9"),
             "0x",
           ),
-      ).to.be.revertedWith("Pausable: paused");
-
-      await expect(
-        relativePositionManager
-          .connect(alice)
-          .supplyPrincipal(collateralMarket.address, borrowMarket.address, parseEther("1")),
-      ).to.be.revertedWith("Pausable: paused");
+      ).to.be.revertedWithCustomError(relativePositionManager, "PartiallyPaused");
 
       await expect(
         relativePositionManager
@@ -477,34 +471,107 @@ describe("RelativePositionManager", () => {
             0,
             "0x",
           ),
-      ).to.be.revertedWith("Pausable: paused");
-
-      await expect(
-        relativePositionManager
-          .connect(alice)
-          .closeWithProfit(collateralMarket.address, borrowMarket.address, BPS_100_PCT, 0, 0, "0x", 0, 0, "0x"),
-      ).to.be.revertedWith("Pausable: paused");
-
-      await expect(
-        relativePositionManager
-          .connect(alice)
-          .closeWithLoss(collateralMarket.address, borrowMarket.address, BPS_100_PCT, 0, 0, 0, "0x", 0, 0, "0x"),
-      ).to.be.revertedWith("Pausable: paused");
+      ).to.be.revertedWithCustomError(relativePositionManager, "PartiallyPaused");
 
       await expect(
         relativePositionManager
           .connect(alice)
           .withdrawPrincipal(collateralMarket.address, borrowMarket.address, parseEther("1")),
-      ).to.be.revertedWith("Pausable: paused");
+      ).to.be.revertedWithCustomError(relativePositionManager, "PartiallyPaused");
 
       await expect(
         relativePositionManager.connect(alice).deactivatePosition(collateralMarket.address, borrowMarket.address),
-      ).to.be.revertedWith("Pausable: paused");
+      ).to.be.revertedWithCustomError(relativePositionManager, "PartiallyPaused");
     });
 
-    it("should allow activation again after unpause", async () => {
-      await relativePositionManager.connect(admin).pause();
-      await relativePositionManager.connect(admin).unpause();
+    it("should allow defensive operations when partially paused", async () => {
+      await relativePositionManager.connect(admin).partialPause();
+
+      // supplyPrincipal, closeWithProfit, closeWithLoss should NOT revert with PartiallyPaused.
+      // They pass the pause guard but revert with PositionNotActive (no active position for alice),
+      // proving the partial pause did not block them.
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .supplyPrincipal(collateralMarket.address, borrowMarket.address, parseEther("1")),
+      ).to.be.revertedWithCustomError(relativePositionManager, "PositionNotActive");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .closeWithProfit(collateralMarket.address, borrowMarket.address, BPS_100_PCT, 0, 0, "0x", 0, 0, "0x"),
+      ).to.be.revertedWithCustomError(relativePositionManager, "PositionNotActive");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .closeWithLoss(collateralMarket.address, borrowMarket.address, BPS_100_PCT, 0, 0, 0, "0x", 0, 0, "0x"),
+      ).to.be.revertedWithCustomError(relativePositionManager, "PositionNotActive");
+    });
+
+    it("should block all state-changing user operations when completely paused", async () => {
+      await relativePositionManager.connect(admin).completePause();
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .activateAndOpenPosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            dsaIndex,
+            initialPrincipal,
+            parseEther("2"),
+            parseEther("1"),
+            parseEther("0.9"),
+            "0x",
+          ),
+      ).to.be.revertedWithCustomError(relativePositionManager, "CompletelyPaused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .supplyPrincipal(collateralMarket.address, borrowMarket.address, parseEther("1")),
+      ).to.be.revertedWithCustomError(relativePositionManager, "CompletelyPaused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .scalePosition(
+            collateralMarket.address,
+            borrowMarket.address,
+            noAdditionalPrincipal,
+            parseEther("1"),
+            0,
+            "0x",
+          ),
+      ).to.be.revertedWithCustomError(relativePositionManager, "CompletelyPaused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .closeWithProfit(collateralMarket.address, borrowMarket.address, BPS_100_PCT, 0, 0, "0x", 0, 0, "0x"),
+      ).to.be.revertedWithCustomError(relativePositionManager, "CompletelyPaused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .closeWithLoss(collateralMarket.address, borrowMarket.address, BPS_100_PCT, 0, 0, 0, "0x", 0, 0, "0x"),
+      ).to.be.revertedWithCustomError(relativePositionManager, "CompletelyPaused");
+
+      await expect(
+        relativePositionManager
+          .connect(alice)
+          .withdrawPrincipal(collateralMarket.address, borrowMarket.address, parseEther("1")),
+      ).to.be.revertedWithCustomError(relativePositionManager, "CompletelyPaused");
+
+      await expect(
+        relativePositionManager.connect(alice).deactivatePosition(collateralMarket.address, borrowMarket.address),
+      ).to.be.revertedWithCustomError(relativePositionManager, "CompletelyPaused");
+    });
+
+    it("should allow activation again after complete unpause", async () => {
+      await relativePositionManager.connect(admin).completePause();
+      await relativePositionManager.connect(admin).completeUnpause();
 
       // Approve tokens for the reopened call
       await fundAndApproveToken(
@@ -2333,7 +2400,7 @@ describe("RelativePositionManager", () => {
         swapHelper,
         borrowToken,
         leverageManager.address,
-        borrowedAmountToRepayFirst.mul(102).div(100),
+        borrowedAmountToRepayFirst.mul(10050).div(10000),
         saltSwapDataFirst,
         collateralToken,
       );
@@ -2342,7 +2409,7 @@ describe("RelativePositionManager", () => {
         swapHelper,
         borrowToken,
         leverageManager.address,
-        amountToRepaySecond.mul(102).div(100),
+        amountToRepaySecond.mul(10050).div(10000),
         saltSwapDataSecond,
         dsaToken,
       );
@@ -2433,13 +2500,13 @@ describe("RelativePositionManager", () => {
 
       const amountToRepaySecond = currentShortDebt;
       const minAmountOutSecond = amountToRepaySecond;
-      const dsaAmountToRedeemForRepay = amountToRepaySecond.mul(102).div(100);
+      const dsaAmountToRedeemForRepay = amountToRepaySecond.mul(10050).div(10000);
       const saltSwapDataSecond = ethers.utils.formatBytes32String("loss-dsa-only-second");
       const swapDataSecond = await createSwapMulticallData(
         swapHelper,
         borrowToken,
         leverageManager.address,
-        amountToRepaySecond.mul(102).div(100),
+        amountToRepaySecond.mul(10050).div(10000),
         saltSwapDataSecond,
         dsaToken,
       );
@@ -2518,7 +2585,7 @@ describe("RelativePositionManager", () => {
         swapHelper,
         borrowToken,
         leverageManager.address,
-        currentShortDebt.mul(102).div(100),
+        currentShortDebt.mul(10050).div(10000),
         saltSwapDataFirst,
         collateralToken,
       );
@@ -2948,8 +3015,8 @@ describe("RelativePositionManager", () => {
       const borrowedAmountToRepayFirst = theoreticalShortFromLong.mul(10000 - SLIPPAGE_BPS).div(10000);
       const remainingDebt = currentShortDebt.sub(borrowedAmountToRepayFirst);
 
-      const repayFirstSwapAmount = borrowedAmountToRepayFirst.mul(102).div(100); // 2% extra to model exact-in behavior
-      const repaySecondSwapAmount = remainingDebt.mul(102).div(100);
+      const repayFirstSwapAmount = borrowedAmountToRepayFirst.mul(10050).div(10000); // 0.5% extra to model exact-in behavior
+      const repaySecondSwapAmount = remainingDebt.mul(10050).div(10000);
       const swapDataFirst = await createSwapMulticallData(
         swapHelper,
         borrowToken,

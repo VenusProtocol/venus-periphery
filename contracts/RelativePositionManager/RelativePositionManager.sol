@@ -555,6 +555,10 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
             minAmountOutSecond
         );
 
+        // Snapshot short balance before close legs to measure only operation-produced dust.
+        address shortUnderlying = shortVToken.underlying();
+        uint256 accountShortBalanceBefore = IERC20Upgradeable(shortUnderlying).balanceOf(positionAccount);
+
         // 1. First exitLeverage (long → short): repay first leg of short debt from long collateral.
         if (longAmountToRedeemForFirstSwap > 0) {
             IPositionAccount(positionAccount).exitLeverage(
@@ -579,10 +583,14 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
             swapDataSecond
         );
 
-        // Verify short dust does not exceed proportional tolerance relative to total debt repaid.
+        // Verify short dust produced by this operation does not exceed proportional tolerance.
         // Prevents disproportionate DSA collateral extraction via oversized dsaAmountToRedeemForSecondSwap.
-        address shortUnderlying = shortVToken.underlying();
-        _validateShortDust(positionAccount, shortUnderlying, shortAmountToRepayForFirstSwap + amountToRepaySecond);
+        _validateShortDust(
+            positionAccount,
+            shortUnderlying,
+            accountShortBalanceBefore,
+            shortAmountToRepayForFirstSwap + amountToRepaySecond
+        );
 
         // Transfer any dust from LM (sent to position account) to user
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
@@ -1097,7 +1105,11 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
             position.suppliedPrincipalVTokens -= vTokensBurned;
         }
 
-        _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
+        // When DSA != short, transfer DSA dust now. When DSA == short, defer to after
+        // _validateShortDust so the delta-based dust check sees the correct balance.
+        if (!isSameAsset) {
+            _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
+        }
     }
 
     /**
@@ -1460,14 +1472,20 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      *      beyond what the close fraction implies. This check bounds that surplus.
      * @param positionAccount The position account to check
      * @param shortUnderlying The short underlying token address
+     * @param accountShortBalanceBefore Short token balance of the position account before the close operation
      * @param totalShortRepaid Total short amount repaid across both legs
      */
     function _validateShortDust(
         address positionAccount,
         address shortUnderlying,
+        uint256 accountShortBalanceBefore,
         uint256 totalShortRepaid
     ) internal view {
-        uint256 shortDust = IERC20Upgradeable(shortUnderlying).balanceOf(positionAccount);
+        uint256 shortBalanceAfter = IERC20Upgradeable(shortUnderlying).balanceOf(positionAccount);
+        // Only measure dust produced by this operation (delta), not pre-existing balance.
+        uint256 shortDust = shortBalanceAfter > accountShortBalanceBefore
+            ? shortBalanceAfter - accountShortBalanceBefore
+            : 0;
         if (shortDust > (totalShortRepaid * proportionalCloseTolerance) / PROPORTIONAL_CLOSE_MAX)
             revert ExcessiveShortDust();
     }
