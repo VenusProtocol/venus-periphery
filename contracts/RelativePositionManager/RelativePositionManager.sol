@@ -385,7 +385,10 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     }
 
     /**
-     * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
+     * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full).
+     *         If treasuryPercent is enabled, the LM redeems more than the requested long amount on behalf
+     *         of the position account to cover the fee; callers should reduce redeem amounts accordingly
+     *         to avoid exceeding the available collateral bucket and causing a revert.
      * @dev 1) Repay is derived from closeFractionBps (not passed directly), and total long
      *         used (repay + profit) must stay within proportionalCloseTolerance to absorb
      *         execution variance such as swap slippage and flash-loan fees.
