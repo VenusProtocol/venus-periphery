@@ -17,6 +17,12 @@ import { IPositionAccount } from "./IPositionAccount.sol";
  *      It allows the RelativePositionManager to execute calls on behalf of the user.
  *      The constructor sets immutable values shared across all clones.
  *      The initialize function sets clone-specific data.
+ *
+ *      DESIGN INVARIANT - External Token Transfers & Accounting Drift:
+ *      Do not call mintBehalf or perform direct transfers to this contract. Use only the RelativePositionManager.
+ *      External transfers to this account are not accurately tracked by the manager, causing accounting drift.
+ *      No funds are lost, only accounting can drift. All operations must be routed through the RelativePositionManager
+ *      to maintain accurate accounting.
  */
 contract PositionAccount is Initializable, IPositionAccount {
     using AddressUpgradeable for address;
@@ -83,6 +89,12 @@ contract PositionAccount is Initializable, IPositionAccount {
     event ExitSingleAssetLeverageForwarded(address indexed market, uint256 amount);
 
     /**
+     * @notice Emitted when a market is exited via the Comptroller
+     * @param vToken Address of the vToken market exited
+     */
+    event MarketExited(address indexed vToken);
+
+    /**
      * @notice Emitted when dust (remaining token balance) is transferred to the position owner
      * @param token Address of the ERC20 token transferred
      * @param owner Address of the position account owner receiving the dust
@@ -98,6 +110,9 @@ contract PositionAccount is Initializable, IPositionAccount {
 
     /// @notice Thrown when genericCalls is invoked with invalid calls length (empty or lengths mismatch)
     error InvalidCallsLength();
+
+    /// @notice Thrown when exitMarket fails with a non-zero error code
+    error ExitMarketFailed(uint256 err);
 
     /**
      * @notice Modifier to restrict access to only the RelativePositionManager
@@ -244,6 +259,19 @@ contract PositionAccount is Initializable, IPositionAccount {
             collateralMarket,
             collateralAmountToFlashLoan
         );
+    }
+
+    /**
+     * @notice Exits a market by calling comptroller.exitMarket with this position account as the sender
+     * @dev Only callable by the RelativePositionManager. The position account directly calls the Comptroller.
+     * @param vTokenToExit Address of the vToken market to exit
+     * @custom:error UnauthorizedCaller if caller is not the RelativePositionManager.
+     * @custom:error ExitMarketFailed if the exit market operation fails.
+     */
+    function exitMarket(address vTokenToExit) external onlyRelativePositionManager {
+        uint256 err = COMPTROLLER.exitMarket(vTokenToExit);
+        if (err != 0) revert ExitMarketFailed(err);
+        emit MarketExited(vTokenToExit);
     }
 
     /**

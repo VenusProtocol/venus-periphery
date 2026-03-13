@@ -32,6 +32,7 @@ interface IRelativePositionManager {
         uint256 finalCapitalUtilized; // Position capital capped by supplied principal (in USD)
         uint256 availableCapitalUSD; // Remaining capital available for borrowing (in USD)
         uint256 withdrawableAmount; // Amount that can be withdrawn in DSA token terms
+        uint256 clampedLeverage; // min(storedEffectiveLeverage, currentMaxLeverage) at time of computation
     }
 
     /// @dev USD values for long collateral, short debt, and supplied principal (and prices used for conversions)
@@ -92,6 +93,10 @@ interface IRelativePositionManager {
     /// @param errorCode Error code returned by the vToken mintBehalf call
     error MintBehalfFailed(uint256 errorCode);
 
+    /// @custom:error ZeroVTokensMinted when supplied amount rounds down to 0 vTokens due to exchange rate
+    /// (e.g., supplying 1 wei when vToken exchange rate > 1e18). Ensure amount is large enough to mint at least 1 vToken.
+    error ZeroVTokensMinted();
+
     /// @custom:error EnterMarketFailed when entering market on behalf fails
     error EnterMarketFailed(uint256 errorCode);
 
@@ -126,8 +131,14 @@ interface IRelativePositionManager {
     /// @custom:error PositionAccountImplementationNotSet when trying to deploy or compute position accounts before implementation is configured
     error PositionAccountImplementationNotSet();
 
-    /// @custom:error SamePositionAccountImplementation when setter is called with the current implementation address
-    error SamePositionAccountImplementation();
+    /// @custom:error PositionAccountImplementationLocked when PositionAccountImplementation is already locked and cannot be changed
+    error PositionAccountImplementationLocked();
+
+    /// @custom:error SameProportionalCloseTolerance when setter is called with the current tolerance value
+    error SameProportionalCloseTolerance();
+
+    /// @custom:error InvalidProportionalCloseTolerance when tolerance is outside [1, 10000]
+    error InvalidProportionalCloseTolerance();
 
     /// @custom:error ProportionalCloseAmountOutOfTolerance when user-provided close amounts are not within 1% of BPS-derived expected amounts
     error ProportionalCloseAmountOutOfTolerance();
@@ -138,7 +149,7 @@ interface IRelativePositionManager {
     /// @custom:error InvalidLongAmountToRedeem when proportional close expects zero long (no long to close) but user passed non-zero total long amount
     error InvalidLongAmountToRedeem();
 
-    /// @custom:error InvalidCloseFractionBps when closeFractionBps is not between 1 and 100 (percentage)
+    /// @custom:error InvalidCloseFractionBps when closeFractionBps is not between 1 and 10000 (basis points)
     error InvalidCloseFractionBps();
 
     /// @notice Emitted when a user activates a position account
@@ -147,7 +158,8 @@ interface IRelativePositionManager {
     /// @param shortAsset Address of the short asset
     /// @param dsaAsset Address of the DSA asset
     /// @param positionAccount Address of the deployed PositionAccount
-    /// @param initialPrincipal Initial principal supplied (optional)
+    /// @param cycleId Current cycle ID of the position (increments on each activation)
+    /// @param initialPrincipal Initial principal supplied during activation (required, > 0)
     /// @param effectiveLeverage Target leverage ratio for the position
     event PositionActivated(
         address indexed user,
@@ -176,15 +188,36 @@ interface IRelativePositionManager {
         uint256 newTotalPrincipal
     );
 
-    /// @notice Emitted when a position is opened or scaled (borrow + swap to long)
+    /// @notice Emitted when a position is opened (during activateAndOpenPosition flow)
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
+    /// @param cycleId The cycle ID of the position
+    /// @param longAsset Address of the long asset
+    /// @param shortAsset Address of the short asset
+    /// @param dsaAsset Address of the DSA asset
+    /// @param shortAmount Amount borrowed in short asset
+    /// @param initialPrincipal Initial principal supplied during activation (required, > 0)
+    event PositionOpened(
+        address indexed user,
+        address indexed positionAccount,
+        uint256 cycleId,
+        address longAsset,
+        address shortAsset,
+        address dsaAsset,
+        uint256 shortAmount,
+        uint256 initialPrincipal
+    );
+
+    /// @notice Emitted when an existing position is scaled (additional borrow-long added to existing position)
+    /// @param user Address of the user
+    /// @param positionAccount Address of the position account
+    /// @param cycleId The cycle ID of the position
     /// @param longAsset Address of the long asset
     /// @param shortAsset Address of the short asset
     /// @param dsaAsset Address of the DSA asset
     /// @param shortAmount Amount borrowed in short asset
     /// @param additionalPrincipal Additional principal supplied this call (0 if none)
-    event PositionOpened(
+    event PositionScaled(
         address indexed user,
         address indexed positionAccount,
         uint256 cycleId,
@@ -199,7 +232,7 @@ interface IRelativePositionManager {
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
     /// @param cycleId The cycle ID of the position
-    /// @param closeFractionBps Proportion closed in percentage (100 = 100%)
+    /// @param closeFractionBps Proportion closed in basis points (10000 = 100%, 1 = 0.01% minimum)
     /// @param amountRepaid Short debt repaid in this close
     /// @param amountRedeemed Long collateral redeemed in this close
     /// @param amountRedeemedDsa DSA amount redeemed in this close (loss close second leg; 0 for profit close)
@@ -230,12 +263,14 @@ interface IRelativePositionManager {
     /// @notice Emitted when principal is withdrawn
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
+    /// @param cycleId The cycle ID of the position
     /// @param dsaAsset Address of the DSA asset
     /// @param amount Amount withdrawn
     /// @param remainingPrincipal Remaining principal after withdrawal
     event PrincipalWithdrawn(
         address indexed user,
         address indexed positionAccount,
+        uint256 cycleId,
         address dsaAsset,
         uint256 amount,
         uint256 remainingPrincipal
@@ -285,10 +320,14 @@ interface IRelativePositionManager {
     /// @param active New active flag (true to allow new activations, false to block them)
     event DSAVTokenActiveUpdated(address indexed dsaVToken, uint8 index, bool active);
 
-    /// @notice Emitted when the PositionAccount implementation address is updated
-    /// @param oldImplementation Previous implementation address (zero if first set)
-    /// @param newImplementation New implementation address
-    event PositionAccountImplementationUpdated(address indexed oldImplementation, address indexed newImplementation);
+    /// @notice Emitted when the PositionAccount implementation address is set (can only be set once)
+    /// @param implementation PositionAccount implementation address
+    event PositionAccountImplementationSet(address indexed implementation);
+
+    /// @notice Emitted when the proportional close tolerance is updated
+    /// @param oldTolerance Previous tolerance value (in basis points)
+    /// @param newTolerance New tolerance value (in basis points)
+    event ProportionalCloseToleranceUpdated(uint256 indexed oldTolerance, uint256 indexed newTolerance);
 
     /// @notice Emitted when a new PositionAccount clone is deployed for a user and asset pair
     /// @param user Owner of the position account
@@ -309,32 +348,15 @@ interface IRelativePositionManager {
     function dsaVTokenIndexCounter() external view returns (uint8 count);
 
     /**
-     * @notice Activates a position account for the user with specified asset pair and DSA
+     * @notice Activates a position and opens it with initial leverage (combined in one transaction)
      * @dev Deploys a new PositionAccount contract if one doesn't exist for this user/asset combination.
-     *      The effective leverage must be set during activation and will be used to validate borrow amounts
-     *      in openPosition operations.
+     *      Sets up the position with initial principal, then immediately opens/borrows with shortAmount.
+     *      Emits both PositionActivated and PositionOpened events.
      * @param longVToken The vToken market address for the asset to long
      * @param shortVToken The vToken market address for the asset to short
      * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
-     * @param initialPrincipal Optional initial principal amount to supply
+     * @param initialPrincipal Required initial principal amount to supply during activation (must be > 0)
      * @param effectiveLeverage The target leverage ratio for this position (in mantissa, e.g., 2e18 = 2x leverage)
-     */
-    function activatePosition(
-        address longVToken,
-        address shortVToken,
-        uint8 dsaIndex,
-        uint256 initialPrincipal,
-        uint256 effectiveLeverage
-    ) external;
-
-    /**
-     * @notice Activates and opens a position in a single transaction
-     * @dev Runs activatePosition flow first, then openPosition flow.
-     * @param longVToken The vToken market address for the asset to long
-     * @param shortVToken The vToken market address for the asset to short
-     * @param dsaIndex Index of the DSA vToken in the dsaVTokens array
-     * @param initialPrincipal Optional initial principal amount to supply during activation
-     * @param effectiveLeverage The target leverage ratio for this position
      * @param shortAmount Amount to borrow in shortAsset terms
      * @param minLongAmount Minimum amount of long asset expected from swap
      * @param swapData Swap instructions for converting shortAsset to longAsset
@@ -360,10 +382,11 @@ interface IRelativePositionManager {
     function supplyPrincipal(address longVToken, address shortVToken, uint256 amount) external;
 
     /**
-     * @notice Opens a leveraged position or scales an existing one (borrow short, swap to long)
-     * @dev Can be called multiple times to scale the position. Optionally supply additional principal
+     * @notice Scales an existing position by adding additional leverage (borrow + swap to long)
+     * @dev Can only be called on an already-active position. Optionally supply additional principal
      *      via additionalPrincipal; otherwise uses existing principal. Validates that shortAmount doesn't
      *      exceed the maximum allowed based on capital utilization. DSA is taken from the position (set during activation).
+     *      Emits PositionScaled event to distinguish from initial opening.
      * @param longVToken The vToken market for the asset to long
      * @param shortVToken The vToken market for the asset to short
      * @param additionalPrincipal Additional principal to supply this call (0 if none)
@@ -371,7 +394,7 @@ interface IRelativePositionManager {
      * @param minLongAmount Minimum amount of long asset expected from swap (protects against slippage)
      * @param swapData Swap instructions for converting shortAsset to longAsset
      */
-    function openPosition(
+    function scalePosition(
         IVToken longVToken,
         IVToken shortVToken,
         uint256 additionalPrincipal,
@@ -382,10 +405,11 @@ interface IRelativePositionManager {
 
     /**
      * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
-     * @dev Repay amount is derived from BPS. Total long validated against BPS (within PROPORTIONAL_CLOSE_TOLERANCE). minAmountOutRepay must be >= calculated repay.
+     * @dev Repay amount is derived from BPS. Total long validated against BPS (within proportionalCloseTolerance).
+     * minAmountOutRepay must be >= calculated repay.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param closeFractionBps Proportion to close in percentage (100 = 100%, 1 = 1% minimum)
+     * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
      * @param longAmountToRedeemForRepay Amount of long to redeem for the repay leg (validated against BPS)
      * @param minAmountOutRepay Minimum short out from the repay swap (must be >= calculated repay amount for this BPS)
      * @param swapDataRepay Swap #1: long → short for debt repayment
@@ -407,12 +431,12 @@ interface IRelativePositionManager {
 
     /**
      * @notice Closes a position with loss proportionally
-     * @dev closeFractionBps: 100 = 100%, 1 = 1% min. First-exit long is proportion-derived; short repay in [0, expectedShort].
+     * @dev closeFractionBps: 10000 = 100%, 1 = 0.01% min. First-exit long is proportion-derived; short repay in [0, expectedShort].
      *      First exit long→short, second exit DSA→short for remainder. Position fully closed.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param closeFractionBps Proportion to close in percentage (100 = 100%)
-     * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within PROPORTIONAL_CLOSE_TOLERANCE)
+     * @param closeFractionBps Proportion to close in basis points (10000 = 100%, 1 = 0.01% minimum)
+     * @param longAmountToRedeemForFirstSwap Long to redeem for first swap (validated against BPS within proportionalCloseTolerance)
      * @param shortAmountToRepayForFirstSwap Short to repay in first exit (0 <= value <= BPS-derived expected short)
      * @param minAmountOutFirst Minimum amount out from first swap (must be >= borrowedAmountToRepayFirst when first repay > 0)
      * @param swapDataFirst Calldata for first swap (long → short)
@@ -477,7 +501,8 @@ interface IRelativePositionManager {
 
     /**
      * @notice Returns the address at which the PositionAccount would be deployed for the given user and markets
-     * @dev Same salt as used when deploying via activatePosition. Returns the address that would be used if the position account were deployed.
+     * @dev Same salt as used when deploying via activateAndOpenPosition (keccak256(user, longVToken, shortVToken)).
+     *      Returns the address that cloneDeterministic would deploy to if called by this contract.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
@@ -496,6 +521,13 @@ interface IRelativePositionManager {
      * @param positionAccountImpl Implementation contract for PositionAccount EIP-1167 clones
      */
     function setPositionAccountImplementation(address positionAccountImpl) external;
+
+    /**
+     * @notice Sets the proportional close tolerance (in basis points)
+     * @dev Callable only by governance via AccessControlManager. 100 bps = 1%.
+     * @param newTolerance New tolerance value in basis points
+     */
+    function setProportionalCloseTolerance(uint256 newTolerance) external;
 
     /**
      * @notice Returns the position data for a user and asset pair
@@ -571,7 +603,7 @@ interface IRelativePositionManager {
      *      4. Caps by supplied principal
      *      5. Calculates available capital remaining
      *      6. Calculates withdrawable amount in DSA token terms
-     *      Used by calculateMaxBorrow to determine maximum borrowing capacity. DSA is read from the position.
+     *      Used by getAvailableShortCapacity to determine maximum borrowing capacity. DSA is read from the position.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
@@ -584,18 +616,30 @@ interface IRelativePositionManager {
     ) external returns (UtilizationInfo memory utilization);
 
     /**
-     * @notice Calculates the maximum allowed borrow amount for a position
-     * @dev Uses getUtilizationInfo internally to get available capital, then calculates:
-     *      maxBorrow = availableCapital * effectiveLeverage
-     *      This leverages the sophisticated capital utilization calculation in getUtilizationInfo. DSA is read from the position.
+     * @notice Returns the remaining short borrow capacity for a position under current market conditions
+     * @dev Computes availableCapitalUSD via getUtilizationInfo (which uses live CFs), then applies:
+     *      clampedLeverage = min(storedEffectiveLeverage, currentMaxLeverageAllowed)
+     *      maxBorrow = (availableCapitalUSD * clampedLeverage) / shortPrice
+     *      The leverage clamp ensures that any post-activation CF reduction is reflected immediately —
+     *      the stored leverage is never applied beyond what current CFs permit.
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @return maxBorrowAmount Maximum amount that can be borrowed in shortAsset terms
+     * @return availableCapacity Remaining borrow capacity in short asset terms
      */
-    function calculateMaxBorrow(
+    function getAvailableShortCapacity(
         address user,
         IVToken longVToken,
         IVToken shortVToken
-    ) external returns (uint256 maxBorrowAmount);
+    ) external returns (uint256 availableCapacity);
+
+    /**
+     * @notice Returns the maximum allowed leverage for a given DSA/long market pair based on current collateral factors
+     * @dev maxLeverage = CF_dsa / (1 - CF_long * (1 - proportionalCloseTolerance))
+     *      Reverts with InvalidCollateralFactor if either CF >= 1 or the denominator is zero.
+     * @param dsaVToken The DSA vToken market (CF_dsa used as collateral)
+     * @param longVToken The long asset vToken market (CF_long used as hedge coverage)
+     * @return maxLeverage The maximum leverage ratio (1e18 mantissa)
+     */
+    function getMaxLeverageAllowed(IVToken dsaVToken, address longVToken) external view returns (uint256 maxLeverage);
 }
