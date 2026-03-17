@@ -337,11 +337,11 @@ describe("LeverageStrategiesManager", () => {
     it("should initialize correctly", async () => {
       expect(leverageManager.address).to.satisfy(ethers.utils.isAddress);
 
-      await expect(leverageManager.initialize()).to.be.rejectedWith("Initializable: contract is already initialized");
+      await expect(leverageManager.initialize()).to.be.revertedWith("Initializable: contract is already initialized");
     });
 
     it("should revert if initialized twice", async () => {
-      await expect(leverageManager.initialize()).to.be.rejectedWith("Initializable: contract is already initialized");
+      await expect(leverageManager.initialize()).to.be.revertedWith("Initializable: contract is already initialized");
     });
   });
 
