@@ -39,6 +39,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
         artifact: defaultProxyAdmin,
       },
     },
+    waitConfirmations: 1,
   });
 
   const leverageStrategiesManager = await ethers.getContract("LeverageStrategiesManager");
