@@ -50,8 +50,14 @@ interface IRelativePositionManager {
     /// @custom:error PositionNotActive when trying to operate on inactive position
     error PositionNotActive();
 
-    /// @custom:error PositionNotFullyClosed when trying to deactivate a position that still has collateral or debt
+    /// @custom:error PositionNotFullyClosed when trying to deactivate a position that still has short debt
     error PositionNotFullyClosed();
+
+    /// @custom:error PartiallyPaused when a risk action is called while partially paused
+    error PartiallyPaused();
+
+    /// @custom:error CompletelyPaused when any state-changing function is called while completely paused
+    error CompletelyPaused();
 
     /// @custom:error InvalidDSA when DSA index or address is not valid
     error InvalidDSA();
@@ -151,6 +157,9 @@ interface IRelativePositionManager {
 
     /// @custom:error InvalidCloseFractionBps when closeFractionBps is not between 1 and 10000 (basis points)
     error InvalidCloseFractionBps();
+
+    /// @custom:error ExcessiveShortDust when short token dust on position account after closeWithLoss exit legs exceeds proportional tolerance of total repaid
+    error ExcessiveShortDust();
 
     /// @notice Emitted when a user activates a position account
     /// @param user Address of the user
@@ -280,14 +289,14 @@ interface IRelativePositionManager {
     /// @param user Address of the user
     /// @param positionAccount Address of the position account
     /// @param cycleId The cycle ID of the position
-    /// @param dsaAsset Address of the DSA asset used for principal
-    /// @param amountWithdrawn Amount of DSA underlying withdrawn on deactivation
+    /// @param longRedeemed Amount of long underlying redeemed to user (0 when DSA == long)
+    /// @param dsaRedeemed Amount of DSA underlying redeemed to user
     event PositionDeactivated(
         address indexed user,
         address indexed positionAccount,
         uint256 cycleId,
-        address dsaAsset,
-        uint256 amountWithdrawn
+        uint256 longRedeemed,
+        uint256 dsaRedeemed
     );
 
     /// @notice Emitted when underlying tokens are transferred from this contract to a user
@@ -308,6 +317,14 @@ interface IRelativePositionManager {
         uint256 oldSuppliedPrincipal,
         uint256 newSuppliedPrincipal
     );
+
+    /// @notice Emitted when partial pause state is toggled
+    /// @param paused New partial pause state
+    event PartialPauseToggled(bool paused);
+
+    /// @notice Emitted when complete pause state is toggled
+    /// @param paused New complete pause state
+    event CompletePauseToggled(bool paused);
 
     /// @notice Emitted when a new DSA vToken is added
     /// @param dsaVToken Address of the DSA vToken added
@@ -469,8 +486,8 @@ interface IRelativePositionManager {
 
     /**
      * @notice Deactivates a position account
-     * @dev Removes DSA selection and resets leverage. User can activate with new DSA later.
-     *      The DSA asset is retrieved from the position data (set during activation).
+     * @dev Redeems any remaining long collateral and DSA principal to the user, then deactivates.
+     *      Reverts if short debt remains. User can activate with new DSA later.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      */
@@ -583,16 +600,29 @@ interface IRelativePositionManager {
     ) external;
 
     /**
-     * @notice Pauses state-changing user operations on the manager (activation, open/close, principal changes).
+     * @notice Partially pauses the manager — blocks risk-increasing operations (open, scale, withdraw, deactivate)
+     *         while allowing defensive operations (close, supply principal).
      * @dev Callable only by governance via AccessControlManager.
      */
-    function pause() external;
+    function partialPause() external;
 
     /**
-     * @notice Unpauses state-changing user operations on the manager.
+     * @notice Removes partial pause, re-enabling risk operations (unless completely paused).
      * @dev Callable only by governance via AccessControlManager.
      */
-    function unpause() external;
+    function partialUnpause() external;
+
+    /**
+     * @notice Completely pauses all state-changing user operations on the manager.
+     * @dev Callable only by governance via AccessControlManager. Blocks all user operations including close and supply.
+     */
+    function completePause() external;
+
+    /**
+     * @notice Removes complete pause, re-enabling all operations (unless partially paused).
+     * @dev Callable only by governance via AccessControlManager.
+     */
+    function completeUnpause() external;
 
     /**
      * @notice Calculates capital utilization for a position

@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import {
     SafeERC20Upgradeable,
     IERC20Upgradeable
@@ -23,12 +22,7 @@ import { IPositionAccount } from "./IPositionAccount.sol";
  *      trading relative prices rather than traditional leverage. Uses 3-token logic (DSA + Long + Short)
  *      and deploys isolated PositionAccount contracts for each position.
  */
-contract RelativePositionManager is
-    AccessControlledV8,
-    ReentrancyGuardUpgradeable,
-    PausableUpgradeable,
-    IRelativePositionManager
-{
+contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeable, IRelativePositionManager {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @dev Success return value for Comptroller operations (e.g. enterMarketBehalf)
@@ -61,6 +55,12 @@ contract RelativePositionManager is
 
     /// @notice Counter / next index for newly added DSA vTokens (also equals current count)
     uint8 public dsaVTokenIndexCounter;
+
+    /// @notice Whether the contract is partially paused (blocks open, scale, withdraw, deactivate but allows close and supply)
+    bool public isPartiallyPaused;
+
+    /// @notice Whether the contract is completely paused (blocks all state-changing user operations)
+    bool public isCompletelyPaused;
 
     /// @notice Mapping from DSA index to supported DSA (Default Settlement Asset) vToken markets
     mapping(uint8 => address) public dsaVTokens;
@@ -102,26 +102,61 @@ contract RelativePositionManager is
     function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
         __ReentrancyGuard_init();
-        __Pausable_init();
         proportionalCloseTolerance = 100; // 1% default tolerance
     }
 
-    /**
-     * @notice Pauses state-changing user operations on the manager (activation, opening/closing, principal changes)
-     * @dev Callable only by governance via AccessControlManager. View and admin functions remain available.
-     */
-    function pause() external {
-        _checkAccessAllowed("pause()");
-        _pause();
+    /// @dev Reverts if partially or completely paused
+    modifier whenNotPaused() {
+        if (isPartiallyPaused) revert PartiallyPaused();
+        if (isCompletelyPaused) revert CompletelyPaused();
+        _;
+    }
+
+    /// @dev Reverts if completely paused
+    modifier whenNotCompletelyPaused() {
+        if (isCompletelyPaused) revert CompletelyPaused();
+        _;
     }
 
     /**
-     * @notice Unpauses state-changing user operations on the manager
+     * @notice Partially pauses the manager — blocks risk-increasing operations (open, scale, withdraw, deactivate)
+     *         while allowing defensive operations (close, supply principal).
      * @dev Callable only by governance via AccessControlManager.
      */
-    function unpause() external {
-        _checkAccessAllowed("unpause()");
-        _unpause();
+    function partialPause() external {
+        _checkAccessAllowed("partialPause()");
+        isPartiallyPaused = true;
+        emit PartialPauseToggled(true);
+    }
+
+    /**
+     * @notice Removes partial pause, re-enabling risk operations (unless completely paused).
+     * @dev Callable only by governance via AccessControlManager.
+     */
+    function partialUnpause() external {
+        _checkAccessAllowed("partialUnpause()");
+        isPartiallyPaused = false;
+        emit PartialPauseToggled(false);
+    }
+
+    /**
+     * @notice Completely pauses all state-changing user operations on the manager
+     * @dev Callable only by governance via AccessControlManager. View and admin functions remain available.
+     */
+    function completePause() external {
+        _checkAccessAllowed("completePause()");
+        isCompletelyPaused = true;
+        emit CompletePauseToggled(true);
+    }
+
+    /**
+     * @notice Removes complete pause, re-enabling all operations (unless partially paused).
+     * @dev Callable only by governance via AccessControlManager.
+     */
+    function completeUnpause() external {
+        _checkAccessAllowed("completeUnpause()");
+        isCompletelyPaused = false;
+        emit CompletePauseToggled(false);
     }
 
     /**
@@ -343,14 +378,17 @@ contract RelativePositionManager is
         address longVToken,
         address shortVToken,
         uint256 amount
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotCompletelyPaused {
         if (amount == 0) revert ZeroAmount();
         Position storage position = _getActivePosition(msg.sender, longVToken, shortVToken);
         _supplyPrincipalToPositionAccount(position, IVToken(position.dsaVToken), amount);
     }
 
     /**
-     * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full)
+     * @notice Closes a position proportionally; can realize profit on the closed slice (partial or full).
+     *         If treasuryPercent is enabled, the LM redeems more than the requested long amount on behalf
+     *         of the position account to cover the fee; callers should reduce redeem amounts accordingly
+     *         to avoid exceeding the available collateral bucket and causing a revert.
      * @dev 1) Repay is derived from closeFractionBps (not passed directly), and total long
      *         used (repay + profit) must stay within proportionalCloseTolerance to absorb
      *         execution variance such as swap slippage and flash-loan fees.
@@ -392,7 +430,7 @@ contract RelativePositionManager is
         uint256 longAmountToRedeemForProfit,
         uint256 minAmountOutProfit,
         bytes calldata swapDataProfit
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotCompletelyPaused {
         Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
 
         uint256 amountToRepay = _validateProfitClose(
@@ -401,6 +439,9 @@ contract RelativePositionManager is
             longAmountToRedeemForRepay + longAmountToRedeemForProfit,
             minAmountOutRepay
         );
+
+        // Validate repay leg against long collateral bucket in the shared pool (DSA==long only).
+        _validateSharedPoolRedeemAmounts(position, longAmountToRedeemForRepay, 0);
 
         address positionAccount = position.positionAccount;
 
@@ -450,7 +491,9 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Closes a position with loss proportionally (BPS-based, same pattern as closeWithProfit)
+     * @notice Closes a position with loss proportionally (BPS-based, same pattern as closeWithProfit).
+     *         If treasuryPercent is enabled, the LM redeems more than the requested DSA amount on behalf
+     *         of the position account to cover the fee.
      * @dev
      *      - First exit (long → short): long/short amounts are derived from BPS; the user passes shortAmountToRepayForFirstSwap,
      *        which is validated to be within [0, expectedShort] and minAmountOutFirst must be >= shortAmountToRepayForFirstSwap.
@@ -480,9 +523,10 @@ contract RelativePositionManager is
      * @custom:error Throw MinAmountOutRepayBelowDebt if minAmountOutFirst is below shortAmountToRepayForFirstSwap.
      * @custom:error Throw ProportionalCloseAmountOutOfTolerance if first-exit amounts are not within the tolerated BPS band.
      * @custom:error Throw MinAmountOutSecondBelowDebt if minAmountOutSecond is below the internally calculated second repay.
-     * @custom:error Throw InsufficientWithdrawableAmount if dsaAmountToRedeemForSecondSwap exceeds available DSA principal.
+     * @custom:error Throw InsufficientWithdrawableAmount if either leg's effective amount (after treasury grossup) exceeds its bucket in the shared pool (DSA==long only).
      * @custom:error Throw RedeemBehalfFailed if redeeming long or DSA vTokens on behalf fails.
      * @custom:error Throw TokenSwapCallFailed if a swap helper call fails, or SlippageExceeded if swap output is too low.
+     * @custom:error Throw ExcessiveShortDust if short token dust after both exit legs exceeds proportional tolerance.
      * @custom:event Emits PositionClosed event.
      */
     function closeWithLoss(
@@ -496,19 +540,14 @@ contract RelativePositionManager is
         uint256 dsaAmountToRedeemForSecondSwap,
         uint256 minAmountOutSecond,
         bytes calldata swapDataSecond
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotCompletelyPaused {
         Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
 
         address positionAccount = position.positionAccount;
         if (shortVToken.borrowBalanceCurrent(positionAccount) == 0) revert ZeroDebt();
 
-        // When using DSA principal to repay in the second leg, ensure the requested amount does not exceed
-        // the available principal balance (and later update principal accounting accordingly).
-        IVToken dsaVToken = IVToken(position.dsaVToken);
-        if (dsaAmountToRedeemForSecondSwap > 0) {
-            uint256 principalUnderlying = _getSuppliedPrincipalBalance(position);
-            if (dsaAmountToRedeemForSecondSwap > principalUnderlying) revert InsufficientWithdrawableAmount();
-        }
+        // Validate both close legs against their respective buckets in the shared pool (DSA==long only).
+        _validateSharedPoolRedeemAmounts(position, longAmountToRedeemForFirstSwap, dsaAmountToRedeemForSecondSwap);
 
         uint256 amountToRepaySecond = _validateLossClose(
             position,
@@ -518,6 +557,10 @@ contract RelativePositionManager is
             minAmountOutFirst,
             minAmountOutSecond
         );
+
+        // Snapshot short balance before close legs to measure only operation-produced dust.
+        address shortUnderlying = shortVToken.underlying();
+        uint256 accountShortBalanceBefore = IERC20Upgradeable(shortUnderlying).balanceOf(positionAccount);
 
         // 1. First exitLeverage (long → short): repay first leg of short debt from long collateral.
         if (longAmountToRedeemForFirstSwap > 0) {
@@ -535,7 +578,7 @@ contract RelativePositionManager is
         uint256 dsaAmountRedeemed = _closePositionWithDSA(
             position,
             positionAccount,
-            dsaVToken,
+            IVToken(position.dsaVToken),
             shortVToken,
             dsaAmountToRedeemForSecondSwap,
             amountToRepaySecond,
@@ -543,9 +586,18 @@ contract RelativePositionManager is
             swapDataSecond
         );
 
+        // Verify short dust produced by this operation does not exceed proportional tolerance.
+        // Prevents disproportionate DSA collateral extraction via oversized dsaAmountToRedeemForSecondSwap.
+        _validateShortDust(
+            positionAccount,
+            shortUnderlying,
+            accountShortBalanceBefore,
+            shortAmountToRepayForFirstSwap + amountToRepaySecond
+        );
+
         // Transfer any dust from LM (sent to position account) to user
         _transferDustFromAccountToUser(positionAccount, longVToken.underlying());
-        _transferDustFromAccountToUser(positionAccount, shortVToken.underlying());
+        _transferDustFromAccountToUser(positionAccount, shortUnderlying);
 
         uint256 longDustRedeemed;
         if (closeFractionBps == PROPORTIONAL_CLOSE_MAX) {
@@ -615,38 +667,50 @@ contract RelativePositionManager is
 
     /**
      * @notice Deactivates a position account
-     * @dev Reverts if position still has long collateral or short debt (PositionNotFullyClosed).
-     *      Withdraws all remaining DSA principal to the user, then sets isActive False.
+     * @dev Reverts if position still has short debt (PositionNotFullyClosed).
+     *      Sets isActive to false, then redeems any remaining long collateral and DSA principal to the user.
      *      User may activate again later (possibly with a different DSA via dsaIndex).
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @custom:error Throw PositionNotActive if the position is not active.
-     * @custom:error Throw PositionNotFullyClosed if long collateral or short debt remains.
+     * @custom:error Throw PositionNotFullyClosed if short debt remains.
      * @custom:event Emits PositionDeactivated event.
      */
     function deactivatePosition(IVToken longVToken, IVToken shortVToken) external nonReentrant whenNotPaused {
         Position storage position = _getActivePosition(msg.sender, address(longVToken), address(shortVToken));
         address positionAccount = position.positionAccount;
 
-        // Check that position is fully closed: no long collateral and no short debt
-        uint256 longCollateral = _getLongCollateralBalance(position);
+        // Check that position has no short debt remaining
         uint256 shortDebt = shortVToken.borrowBalanceCurrent(positionAccount);
+        if (shortDebt > 0) revert PositionNotFullyClosed();
 
-        if (longCollateral > 0 || shortDebt > 0) revert PositionNotFullyClosed();
         IVToken dsaVToken = IVToken(position.dsaVToken);
+        bool dsaIsLong = address(dsaVToken) == address(longVToken);
+
+        // Capture long collateral before clearing state (needed for accurate event when dsaIsLong)
+        uint256 longCollateral = _getLongCollateralBalance(position);
 
         position.isActive = false;
         position.suppliedPrincipalVTokens = 0;
 
-        // Exit the DSA market from position account (unless DSA is the long asset)
-        // DSA market is guaranteed to be entered during _activatePosition, so no membership check needed
-        if (address(dsaVToken) != address(longVToken)) {
+        uint256 longRedeemed;
+        uint256 dsaRedeemed;
+
+        if (dsaIsLong) {
+            // DSA and long share the same market — single redeem covers both principal and long collateral
+            uint256 totalRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
+            longRedeemed = longCollateral > totalRedeemed ? totalRedeemed : longCollateral;
+            dsaRedeemed = totalRedeemed - longRedeemed;
+        } else {
+            // Redeem long collateral back to user
+            longRedeemed = _redeemAllVTokensToUser(longVToken, positionAccount);
+
+            // Exit DSA market and redeem remaining DSA principal to user
             IPositionAccount(positionAccount).exitMarket(address(dsaVToken));
+            dsaRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
         }
 
-        // Withdraw any remaining DSA principal to user (for complete withdraw use redeemBehalf instead of redeemUnderlyingToUser)
-        uint256 underlyingRedeemed = _redeemAllVTokensToUser(dsaVToken, positionAccount);
-        emit PositionDeactivated(msg.sender, positionAccount, position.cycleId, address(dsaVToken), underlyingRedeemed);
+        emit PositionDeactivated(msg.sender, positionAccount, position.cycleId, longRedeemed, dsaRedeemed);
     }
 
     /**
@@ -849,7 +913,10 @@ contract RelativePositionManager is
     }
 
     /**
-     * @notice Opens or scales a leveraged position (borrow short, swap to long)
+     * @notice Opens or scales a leveraged position (borrow short, swap to long). The flash loan fee
+     *         is borrowed on behalf of the position account and repaid immediately, so the position's
+     *         actual short debt after this call is shortAmount + flashLoanFee. Users should account
+     *         for this overhead when calculating close parameters.
      * @dev Supplies optional additionalPrincipal, calculates max borrow, and executes leverage via
      *      the position account. Event emission (PositionOpened or PositionScaled) is the
      *      responsibility of the caller.
@@ -1041,7 +1108,11 @@ contract RelativePositionManager is
             position.suppliedPrincipalVTokens -= vTokensBurned;
         }
 
-        _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
+        // When DSA != short, transfer DSA dust now. When DSA == short, defer to after
+        // _validateShortDust so the delta-based dust check sees the correct balance.
+        if (!isSameAsset) {
+            _transferDustFromAccountToUser(positionAccount, dsaVToken.underlying());
+        }
     }
 
     /**
@@ -1184,8 +1255,15 @@ contract RelativePositionManager is
 
         uint256 tokenOutBalanceBefore = tokenOut.balanceOf(address(this));
 
-        (bool success, ) = swapHelperAddr.call(param);
-        if (!success) revert TokenSwapCallFailed();
+        (bool success, bytes memory returnData) = swapHelperAddr.call(param);
+        if (!success) {
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(returnData, 32), mload(returnData))
+                }
+            }
+            revert TokenSwapCallFailed();
+        }
 
         uint256 tokenOutBalanceAfter = tokenOut.balanceOf(address(this));
         amountOut = tokenOutBalanceAfter - tokenOutBalanceBefore;
@@ -1342,6 +1420,77 @@ contract RelativePositionManager is
         amountToRepay = (closeFractionBps == PROPORTIONAL_CLOSE_MAX && expectedShortToRepay > 0)
             ? maxExpectedShortToRepay
             : expectedShortToRepay;
+    }
+
+    /**
+     * @notice Validates redeem amounts against their respective buckets in the shared DSA/long pool,
+     *         accounting for any treasury fee grossup applied by the LM when redeeming underlying on
+     *         behalf of the position account.
+     * @dev Only applies when DSA == long; skipped otherwise as pools are separate and Venus enforces limits.
+     *      Treasury grossup is applied to each leg before comparing against its bucket.
+     *      Used by both closeWithProfit (longAmount only, dsaAmount=0) and closeWithLoss (both legs).
+     * @param position The active position
+     * @param longAmountToRedeem Long underlying amount to redeem (validated against long collateral bucket)
+     * @param dsaAmountToRedeem DSA underlying amount to redeem (validated against principal bucket, 0 to skip)
+     */
+    function _validateSharedPoolRedeemAmounts(
+        Position storage position,
+        uint256 longAmountToRedeem,
+        uint256 dsaAmountToRedeem
+    ) internal {
+        // When DSA != long, pools are separate — Venus's own balance checks prevent over-redemption.
+        if (position.dsaVToken != position.longVToken) return;
+
+        uint256 treasuryPercent = COMPTROLLER.treasuryPercent();
+
+        if (
+            longAmountToRedeem > 0 &&
+            _applyTreasuryGrossup(longAmountToRedeem, treasuryPercent) > _getLongCollateralBalance(position)
+        ) revert InsufficientWithdrawableAmount();
+
+        if (
+            dsaAmountToRedeem > 0 &&
+            _applyTreasuryGrossup(dsaAmountToRedeem, treasuryPercent) > _getSuppliedPrincipalBalance(position)
+        ) revert InsufficientWithdrawableAmount();
+    }
+
+    /**
+     * @notice Applies ceiling-division treasury grossup to an amount, mirroring the LM's internal fee logic.
+     * @dev The LM redeems `ceil(amount / (1 - treasuryPercent))` underlying so the position account bears
+     *      the treasury fee. Returns the raw amount unchanged when treasury is zero or amount is zero.
+     * @param amount The raw underlying amount
+     * @param treasuryPercent The treasury fee mantissa (0 = disabled)
+     * @return The effective grossed-up amount the LM will actually burn from the position account
+     */
+    function _applyTreasuryGrossup(uint256 amount, uint256 treasuryPercent) internal pure returns (uint256) {
+        if (amount == 0 || treasuryPercent == 0) return amount;
+        return (amount * MANTISSA_ONE + (MANTISSA_ONE - treasuryPercent) - 1) / (MANTISSA_ONE - treasuryPercent);
+    }
+
+    /**
+     * @notice Validates that short token dust on the position account does not exceed proportional tolerance.
+     * @dev After both exit legs of closeWithLoss, any short underlying remaining on the position account
+     *      is swap surplus. If dsaAmountToRedeemForSecondSwap is disproportionately large relative to the
+     *      BPS-derived debt repayment, the surplus would be excessive — allowing collateral extraction
+     *      beyond what the close fraction implies. This check bounds that surplus.
+     * @param positionAccount The position account to check
+     * @param shortUnderlying The short underlying token address
+     * @param accountShortBalanceBefore Short token balance of the position account before the close operation
+     * @param totalShortRepaid Total short amount repaid across both legs
+     */
+    function _validateShortDust(
+        address positionAccount,
+        address shortUnderlying,
+        uint256 accountShortBalanceBefore,
+        uint256 totalShortRepaid
+    ) internal view {
+        uint256 shortBalanceAfter = IERC20Upgradeable(shortUnderlying).balanceOf(positionAccount);
+        // Only measure dust produced by this operation (delta), not pre-existing balance.
+        uint256 shortDust = shortBalanceAfter > accountShortBalanceBefore
+            ? shortBalanceAfter - accountShortBalanceBefore
+            : 0;
+        if (shortDust > (totalShortRepaid * proportionalCloseTolerance) / PROPORTIONAL_CLOSE_MAX)
+            revert ExcessiveShortDust();
     }
 
     /**
