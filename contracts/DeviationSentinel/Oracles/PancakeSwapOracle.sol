@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: BSD-3-Clause
+pragma solidity ^0.8.25;
+import { IPancakeV3Pool } from "../../Interfaces/IPancakeV3Pool.sol";
+import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
+import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
+import { FixedPoint96 } from "../../Libraries/FixedPoint96.sol";
+import { FullMath } from "../../Libraries/FullMath.sol";
+
+/**
+ * @title PancakeSwapOracle
+ * @author Venus
+ * @notice Oracle contract for fetching asset prices from PancakeSwap V3
+ */
+contract PancakeSwapOracle is AccessControlledV8 {
+    /// @notice Resilient Oracle for getting reference token prices
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    ResilientOracleInterface public immutable RESILIENT_ORACLE;
+
+    /// @notice Mapping of token addresses to their pool addresses
+    mapping(address => address) public tokenPools;
+
+    /// @notice Emitted when a token's pool configuration is updated
+    /// @param token The token address
+    /// @param pool The pool address
+    event PoolConfigUpdated(address indexed token, address indexed pool);
+
+    /// @notice Thrown when a zero address is provided
+    error ZeroAddress();
+
+    /// @notice Thrown when an invalid pool address is provided
+    error InvalidPool();
+
+    /// @notice Thrown when token is not configured
+    error TokenNotConfigured();
+
+    /// @notice Constructor for PancakeSwapPriceOracle
+    /// @param resilientOracle_ Address of the resilient oracle
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor(ResilientOracleInterface resilientOracle_) {
+        RESILIENT_ORACLE = resilientOracle_;
+
+        // Note that the contract is upgradeable. Use initialize() or reinitializers
+        // to set the state variables.
+        _disableInitializers();
+    }
+
+    /// @notice Initialize the contract
+    /// @param accessControlManager_ Address of the access control manager
+    function initialize(address accessControlManager_) external initializer {
+        __AccessControlled_init(accessControlManager_);
+    }
+
+    /// @notice Set pool configuration for a token
+    /// @param token Address of the token
+    /// @param pool Address of the PancakeSwap V3 pool
+    /// @custom:event Emits PoolConfigUpdated event
+    /// @custom:error ZeroAddress is thrown when token or pool address is zero
+    function setPoolConfig(address token, address pool) external {
+        _checkAccessAllowed("setPoolConfig(address,address)");
+
+        if (token == address(0) || pool == address(0)) revert ZeroAddress();
+
+        tokenPools[token] = pool;
+        emit PoolConfigUpdated(token, pool);
+    }
+
+    /// @notice Get the price of an asset from PancakeSwap V3
+    /// @param asset Address of the asset
+    /// @return price Price in (36 - asset decimals) format, same as ResilientOracle
+    /// @custom:error TokenNotConfigured is thrown when asset has no pool configured
+    function getPrice(address asset) external view returns (uint256 price) {
+        address pool = tokenPools[asset];
+        if (pool == address(0)) revert TokenNotConfigured();
+
+        return _getPancakeSwapV3Price(pool, asset);
+    }
+
+    /// @notice Get token price from PancakeSwap V3 pool
+    /// @param pool PancakeSwap V3 pool address
+    /// @param token Target token address
+    /// @return price Price in (36 - token decimals) format
+    function _getPancakeSwapV3Price(address pool, address token) internal view returns (uint256 price) {
+        IPancakeV3Pool v3Pool = IPancakeV3Pool(pool);
+        address token0 = v3Pool.token0();
+        address token1 = v3Pool.token1();
+        (uint160 sqrtPriceX96, , , , , , ) = v3Pool.slot0();
+
+        uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, FixedPoint96.Q96);
+
+        address referenceToken;
+        bool targetIsToken0;
+
+        if (token == token0) {
+            targetIsToken0 = true;
+            referenceToken = token1;
+        } else if (token == token1) {
+            targetIsToken0 = false;
+            referenceToken = token0;
+        } else {
+            revert InvalidPool();
+        }
+
+        uint256 referencePrice = RESILIENT_ORACLE.getPrice(referenceToken);
+
+        if (targetIsToken0) {
+            price = FullMath.mulDiv(referencePrice, priceX96, FixedPoint96.Q96);
+        } else {
+            price = FullMath.mulDiv(referencePrice, FixedPoint96.Q96, priceX96);
+        }
+    }
+}

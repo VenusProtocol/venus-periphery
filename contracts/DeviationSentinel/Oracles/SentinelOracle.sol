@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: BSD-3-Clause
+pragma solidity ^0.8.25;
+
+import { OracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
+import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
+
+/**
+ * @title SentinelOracle
+ * @author Venus
+ * @notice Aggregator oracle that routes price requests to appropriate DEX oracles
+ */
+contract SentinelOracle is AccessControlledV8 {
+    /// @notice Configuration for token price source
+    /// @param oracle Address of the DEX oracle to use for this token
+    struct TokenConfig {
+        address oracle;
+    }
+
+    /// @notice Mapping of token addresses to their oracle configuration
+    mapping(address => TokenConfig) public tokenConfigs;
+
+    /// @notice Mapping of token addresses to their direct prices (0 means not set)
+    mapping(address => uint256) public directPrices;
+
+    /// @notice Emitted when a token's oracle configuration is updated
+    /// @param token The token address
+    /// @param oracle The oracle address
+    event TokenOracleConfigUpdated(address indexed token, address indexed oracle);
+
+    /// @notice Emitted when a token's direct price is set or unset
+    /// @param token The token address
+    /// @param price The direct price (0 means unset)
+    event DirectPriceUpdated(address indexed token, uint256 price);
+
+    /// @notice Thrown when a zero address is provided
+    error ZeroAddress();
+
+    /// @notice Thrown when token is not configured
+    error TokenNotConfigured();
+
+    /// @notice Constructor for PriceSentinelOracle
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        // Note that the contract is upgradeable. Use initialize() or reinitializers
+        // to set the state variables.
+        _disableInitializers();
+    }
+
+    /// @notice Initialize the contract
+    /// @param accessControlManager_ Address of the access control manager
+    function initialize(address accessControlManager_) external initializer {
+        __AccessControlled_init(accessControlManager_);
+    }
+
+    /// @notice Set oracle configuration for a token
+    /// @param token Address of the token
+    /// @param oracle Address of the DEX oracle to use
+    /// @custom:event Emits TokenOracleConfigUpdated event
+    /// @custom:error ZeroAddress is thrown when token or oracle address is zero
+    function setTokenOracleConfig(address token, address oracle) external {
+        _checkAccessAllowed("setTokenOracleConfig(address,address)");
+
+        if (token == address(0)) revert ZeroAddress();
+        if (oracle == address(0)) revert ZeroAddress();
+
+        tokenConfigs[token] = TokenConfig({ oracle: oracle });
+        emit TokenOracleConfigUpdated(token, oracle);
+    }
+
+    /// @notice Set direct price for a token
+    /// @param token Address of the token
+    /// @param price Direct price to set (set to 0 to unset and use DEX oracle)
+    /// @dev When a direct price is set (non-zero), it will be used instead of fetching from DEX oracle
+    /// @custom:event Emits DirectPriceUpdated event
+    /// @custom:error ZeroAddress is thrown when token address is zero
+    function setDirectPrice(address token, uint256 price) external {
+        _checkAccessAllowed("setDirectPrice(address,uint256)");
+
+        if (token == address(0)) revert ZeroAddress();
+
+        directPrices[token] = price;
+        emit DirectPriceUpdated(token, price);
+    }
+
+    /// @notice Get the price of an asset from the configured DEX oracle
+    /// @param asset Address of the asset
+    /// @return price Price in (36 - asset decimals) format, same as ResilientOracle
+    /// @custom:error TokenNotConfigured is thrown when asset has no oracle configured
+    function getPrice(address asset) external view returns (uint256 price) {
+        // Check if direct price is set first
+        uint256 directPrice = directPrices[asset];
+        if (directPrice != 0) {
+            return directPrice;
+        }
+
+        // Otherwise, fetch from DEX oracle
+        TokenConfig memory config = tokenConfigs[asset];
+        if (config.oracle == address(0)) revert TokenNotConfigured();
+
+        return OracleInterface(config.oracle).getPrice(asset);
+    }
+}
