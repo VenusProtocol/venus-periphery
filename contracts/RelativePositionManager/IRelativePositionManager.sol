@@ -35,6 +35,27 @@ interface IRelativePositionManager {
         uint256 clampedLeverage; // min(storedEffectiveLeverage, currentMaxLeverage) at time of computation
     }
 
+    /// @notice Swap parameters for closeWithProfitAndDeactivate
+    struct CloseWithProfitParams {
+        uint256 longAmountToRedeemForRepay;
+        uint256 minAmountOutRepay;
+        bytes swapDataRepay;
+        uint256 longAmountToRedeemForProfit;
+        uint256 minAmountOutProfit;
+        bytes swapDataProfit;
+    }
+
+    /// @notice Swap parameters for closeWithLossAndDeactivate
+    struct CloseWithLossParams {
+        uint256 longAmountToRedeemForFirstSwap;
+        uint256 shortAmountToRepayForFirstSwap;
+        uint256 minAmountOutFirst;
+        bytes swapDataFirst;
+        uint256 dsaAmountToRedeemForSecondSwap;
+        uint256 minAmountOutSecond;
+        bytes swapDataSecond;
+    }
+
     /// @dev USD values for long collateral, short debt, and supplied principal (and prices used for conversions)
     struct PositionValuesUSD {
         uint256 longValueUSD;
@@ -475,14 +496,30 @@ interface IRelativePositionManager {
     ) external;
 
     /**
-     * @notice Withdraws unused principal from an active position
-     * @dev Calculates utilization to determine how much can be safely withdrawn.
-     *      The DSA asset is retrieved from the position data (set during activation).
+     * @notice Fully closes a profitable position and deactivates it in a single atomic transaction.
+     * @dev Hardcodes closeFractionBps to 100%. See closeWithProfit and deactivatePosition for detailed errors and events.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @param amount Amount to withdraw
+     * @param profitSwapParams CloseWithProfitParams struct containing swap parameters
      */
-    function withdrawPrincipal(IVToken longVToken, IVToken shortVToken, uint256 amount) external;
+    function closeWithProfitAndDeactivate(
+        IVToken longVToken,
+        IVToken shortVToken,
+        CloseWithProfitParams calldata profitSwapParams
+    ) external;
+
+    /**
+     * @notice Fully closes a position at a loss and deactivates it in a single atomic transaction.
+     * @dev Hardcodes closeFractionBps to 100%. See closeWithLoss and deactivatePosition for detailed errors and events.
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @param lossSwapParams CloseWithLossParams struct containing swap parameters
+     */
+    function closeWithLossAndDeactivate(
+        IVToken longVToken,
+        IVToken shortVToken,
+        CloseWithLossParams calldata lossSwapParams
+    ) external;
 
     /**
      * @notice Deactivates a position account
@@ -492,6 +529,16 @@ interface IRelativePositionManager {
      * @param shortVToken The vToken market for the short asset
      */
     function deactivatePosition(IVToken longVToken, IVToken shortVToken) external;
+
+    /**
+     * @notice Withdraws unused principal from an active position
+     * @dev Calculates utilization to determine how much can be safely withdrawn.
+     *      The DSA asset is retrieved from the position data (set during activation).
+     * @param longVToken The vToken market for the long asset
+     * @param shortVToken The vToken market for the short asset
+     * @param amount Amount to withdraw
+     */
+    function withdrawPrincipal(IVToken longVToken, IVToken shortVToken, uint256 amount) external;
 
     /**
      * @notice Adds a new DSA vToken to the supported list
