@@ -94,7 +94,7 @@ const setupFixture = async (): Promise<SetupFixture> => {
 
   const comptrollerLens = await smock.fake<ComptrollerLensInterface>("ComptrollerLens");
   const protocolShareReserve = await smock.fake<IProtocolShareReserve>(
-    "contracts/Interfaces.sol:IProtocolShareReserve",
+    "contracts/Interfaces/IProtocolShareReserve.sol:IProtocolShareReserve",
   );
   const interestRateModel = await smock.fake<InterestRateModel>("InterestRateModelHarness");
   interestRateModel.isInterestRateModel.returns(true);
