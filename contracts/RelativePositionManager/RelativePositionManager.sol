@@ -32,11 +32,11 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
     uint256 private constant MANTISSA_ONE = 1e18;
 
     /// @dev Minimum leverage ratio (1x)
-    uint256 private constant MIN_LEVERAGE = MANTISSA_ONE;
+    uint256 public constant MIN_LEVERAGE = MANTISSA_ONE;
 
     /// @dev Proportional close in basis points: 10000 = 100%, 1 = 0.01% minimum
-    uint256 private constant PROPORTIONAL_CLOSE_MIN = 1; // 0.01%
-    uint256 private constant PROPORTIONAL_CLOSE_MAX = 10000; // 100%
+    uint256 public constant PROPORTIONAL_CLOSE_MIN = 1; // 0.01%
+    uint256 public constant PROPORTIONAL_CLOSE_MAX = 10000; // 100%
 
     /// @notice The Venus comptroller contract
     IComptroller public immutable COMPTROLLER;
