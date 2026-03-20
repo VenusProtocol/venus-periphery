@@ -97,12 +97,17 @@ const config: HardhatUserConfig = {
         settings: {
           optimizer: {
             enabled: true,
+            runs: 1,
             details: {
-              yul: !process.env.CI,
+              yul: true,
             },
           },
           viaIR: true,
           evmVersion: "cancun",
+          metadata: {
+            bytecodeHash: "none",
+            appendCBOR: false,
+          },
           outputSelection: {
             "*": {
               "*": ["storageLayout"],

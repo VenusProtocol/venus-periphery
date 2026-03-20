@@ -4220,9 +4220,9 @@ describe("RelativePositionManager", () => {
       expect(await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr)).to.equal(0);
       expect(await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr)).to.equal(0);
 
-      // --- Principal returned to user ---
+      // --- Principal + profit returned to user ---
       const aliceDsaAfter = await dsaToken.balanceOf(aliceAddress);
-      expect(aliceDsaAfter.sub(aliceDsaBefore)).to.be.gt(0);
+      expect(aliceDsaAfter.sub(aliceDsaBefore)).to.be.gte(dsaOutActual as any);
     });
 
     it("should revert when position is not active", async () => {
@@ -4430,6 +4430,7 @@ describe("RelativePositionManager", () => {
 
       // --- Balances before ---
       const aliceDsaBefore = await dsaToken.balanceOf(aliceAddress);
+      const dsaPrincipalInAccount = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
 
       // --- Execute atomic close + deactivate ---
       const tx = await relativePositionManager
@@ -4460,10 +4461,11 @@ describe("RelativePositionManager", () => {
       // --- All position account balances zeroed ---
       expect(await collateralMarket.callStatic.balanceOfUnderlying(positionAccountAddr)).to.equal(0);
       expect(await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr)).to.equal(0);
+      expect(await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr)).to.equal(0);
 
-      // --- Principal returned to user ---
+      // --- Principal returned to user (no DSA consumed for second leg) ---
       const aliceDsaAfter = await dsaToken.balanceOf(aliceAddress);
-      expect(aliceDsaAfter.sub(aliceDsaBefore)).to.be.gt(0);
+      expect(aliceDsaAfter.sub(aliceDsaBefore)).to.be.gte(dsaPrincipalInAccount as any);
     });
 
     it("should atomically close a losing position (two swaps) and deactivate it", async () => {
@@ -4537,6 +4539,7 @@ describe("RelativePositionManager", () => {
       );
 
       const aliceDsaBefore = await dsaToken.balanceOf(aliceAddress);
+      const dsaPrincipalInAccount = await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr);
 
       const tx = await relativePositionManager
         .connect(alice)
@@ -4563,13 +4566,14 @@ describe("RelativePositionManager", () => {
       expect(positionAfter.isActive).to.be.false;
       expect(positionAfter.suppliedPrincipalVTokens).to.equal(0);
 
-      // --- Debt fully repaid ---
+      // --- All position account balances zeroed ---
       expect(await borrowMarket.callStatic.borrowBalanceCurrent(positionAccountAddr)).to.equal(0);
       expect(await collateralMarket.callStatic.balanceOfUnderlying(positionAccountAddr)).to.equal(0);
+      expect(await dsaMarket.callStatic.balanceOfUnderlying(positionAccountAddr)).to.equal(0);
 
       // --- Principal returned to user (minus DSA used for second leg) ---
       const aliceDsaAfter = await dsaToken.balanceOf(aliceAddress);
-      expect(aliceDsaAfter.sub(aliceDsaBefore)).to.be.gt(0);
+      expect(aliceDsaAfter.sub(aliceDsaBefore)).to.be.gte(dsaPrincipalInAccount.sub(dsaAmountToRedeem) as any);
     });
 
     it("should revert when position is not active", async () => {
