@@ -266,7 +266,9 @@ interface IRelativePositionManager {
     /// @param amountRepaid Short debt repaid in this close
     /// @param amountRedeemed Long collateral redeemed in this close
     /// @param amountRedeemedDsa DSA amount redeemed in this close (loss close second leg; 0 for profit close)
-    /// @param longDustRedeemed Remaining long collateral redeemed and transferred to user on 100% close (0 for partial close)
+    /// @param longDustRedeemed Remaining long collateral redeemed and transferred to user on 100% close (0 for partial close).
+    ///         When DSA == Long, this represents an internal reclassification rather than a completed transfer;
+    ///         if deactivate is called, the corresponding funds will be paid out as part of dsaRedeemed in the PositionDeactivated event.
     event PositionClosed(
         address indexed user,
         address indexed positionAccount,

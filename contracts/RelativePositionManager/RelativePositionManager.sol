@@ -418,7 +418,9 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @custom:error Throw MintBehalfFailed if minting converted profit as principal fails.
      * @custom:error Throw ZeroVTokensMinted if profit swap output rounds down to 0 vTokens if Minted.
      * @custom:error Throw PositionNotFullyClosed if 100% close is used but short debt remains (e.g. exitLeverage did not repay fully).
-     * @custom:event Emits ProfitConverted and PositionClosed events.
+     * @custom:event Emits ProfitConverted event.
+     * @custom:event Emits PositionClosed event. When DSA == Long, PositionClosed.longDustRedeemed is reclassified back
+     *               as principal vTokens rather than transferred.
      */
     function closeWithProfit(
         IVToken longVToken,
@@ -481,7 +483,8 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @custom:error Throw RedeemBehalfFailed if redeeming long or DSA vTokens on behalf fails.
      * @custom:error Throw TokenSwapCallFailed if a swap helper call fails, or SlippageExceeded if swap output is too low.
      * @custom:error Throw ExcessiveShortDust if short token dust after both exit legs exceeds proportional tolerance.
-     * @custom:event Emits PositionClosed event.
+     * @custom:event Emits PositionClosed event. When DSA == Long, PositionClosed.longDustRedeemed is reclassified
+     *               back as principal vTokens rather than transferred.
      */
     function closeWithLoss(
         IVToken longVToken,
@@ -513,6 +516,8 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @notice Fully closes a profitable position and deactivates it in a single atomic transaction.
      * @dev Hardcodes closeFractionBps to PROPORTIONAL_CLOSE_MAX (100%).
      *      See closeWithProfit and deactivatePosition for detailed errors and events.
+     *      When long == DSA, PositionClosed.longDustRedeemed is reclassified back as principal vTokens
+     *      (not transferred) and later redeemed in _deactivatePosition.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param profitSwapParams CloseWithProfitParams struct containing swap parameters
@@ -540,6 +545,8 @@ contract RelativePositionManager is AccessControlledV8, ReentrancyGuardUpgradeab
      * @notice Fully closes a position at a loss and deactivates it in a single atomic transaction.
      * @dev Hardcodes closeFractionBps to PROPORTIONAL_CLOSE_MAX (100%).
      *      See closeWithLoss and deactivatePosition for detailed errors and events.
+     *      When long == DSA, PositionClosed.longDustRedeemed is reclassified back as principal vTokens
+     *      (not transferred) and later redeemed in _deactivatePosition.
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
      * @param lossSwapParams CloseWithLossParams struct containing swap parameters
