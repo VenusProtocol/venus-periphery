@@ -46,19 +46,6 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     `RelativePositionManager deployed at ${relativePositionManager.address}. Verify: implementation constructor args (Comptroller, LeverageStrategiesManager) and initialize(AccessControlManager).`,
   );
 
-  // Deploy PositionAccount implementation if not already deployed (used for EIP-1167 clones by RPM)
-  const positionAccountDeployment = await deploy("PositionAccount", {
-    from: deployer,
-    log: true,
-    waitConfirmations: 1,
-    args: [comptrollerDeployment.address, relativePositionManager.address, leverageStrategiesManagerDeployment.address],
-    skipIfAlreadyDeployed: true,
-  });
-
-  console.log(
-    `PositionAccount implementation deployed at ${positionAccountDeployment.address}. Set it on RPM via ACM (setPositionAccountImplementation).`,
-  );
-
   // Transfer RPM ownership to NormalTimelock if deployer is the current owner
   const owner = await relativePositionManager.owner();
   if (owner === deployer) {
