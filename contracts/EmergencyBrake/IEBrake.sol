@@ -85,7 +85,7 @@ interface IEBrake {
     /// @notice Thrown when a zero address is passed where a valid address is required.
     error ZeroAddress();
 
-    /// @notice Thrown when a market is not listed in the given pool.
+    /// @notice Thrown when a market is not listed in the given pool (Diamond comptroller).
     /// @param poolId The pool ID that was queried.
     /// @param market The market address that is not listed.
     error MarketNotListed(uint96 poolId, address market);
@@ -179,6 +179,15 @@ interface IEBrake {
      * @param poolId The pool ID (0 for core pool, >0 for e-mode pools).
      */
     function setCFZero(address market, uint96 poolId) external;
+
+    /**
+     * @notice Set collateral factor to zero for a market on an IL comptroller.
+     *         Same safety guarantees as setCFZero — LT is left unchanged.
+     * @dev Separate function because IL comptrollers have a different ABI: markets() returns
+     *      a 3-value tuple (vs 7 on Diamond) and setCollateralFactor returns void (vs uint256).
+     * @param market The vToken market address whose CF should be zeroed.
+     */
+    function setCFZeroIsolated(address market) external;
 
     /**
      * @notice Decrease borrow caps on markets. Can only set caps LOWER than current values.

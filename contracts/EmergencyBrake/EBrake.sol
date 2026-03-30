@@ -3,6 +3,7 @@ pragma solidity ^0.8.25;
 
 import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
+import { IILComptroller } from "../Interfaces/IILComptroller.sol";
 import { IEBrake } from "./IEBrake.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
@@ -96,6 +97,14 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
         uint256 err = COMPTROLLER.setCollateralFactor(poolId, market, 0, currentLT);
         if (err != 0) revert SetCollateralFactorFailed(err);
+    }
+
+    /// @inheritdoc IEBrake
+    function setCFZeroIsolated(address market) external onlyWhitelisted {
+        IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
+        if (!m.isListed) revert MarketNotListed(0, market);
+
+        IILComptroller(address(COMPTROLLER)).setCollateralFactor(market, 0, m.liquidationThresholdMantissa);
     }
 
     /// @inheritdoc IEBrake
