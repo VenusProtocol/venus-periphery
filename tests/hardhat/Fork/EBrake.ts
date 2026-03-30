@@ -473,6 +473,15 @@ if (FORK_MAINNET) {
             eBrake.connect(whitelistedUser).setMarketBorrowCaps([vBTCB, vUSDT], [0]),
           ).to.be.revertedWithCustomError(eBrake, "ArrayLengthMismatch");
         });
+
+        it("should skip markets where current cap is already 0", async () => {
+          // Zero vBTCB cap first
+          await eBrake.connect(whitelistedUser).setMarketBorrowCaps([vBTCB], [0]);
+          expect(await comptroller.borrowCaps(vBTCB)).to.equal(0);
+
+          // Batch with already-zeroed vBTCB and non-zero vUSDT — should not revert
+          await expect(eBrake.connect(whitelistedUser).setMarketBorrowCaps([vBTCB, vUSDT], [0, 0])).to.not.be.reverted;
+        });
       });
 
       // ═════════════════════════════════════════════════════════════════════
@@ -525,6 +534,13 @@ if (FORK_MAINNET) {
           await expect(
             eBrake.connect(whitelistedUser).setMarketSupplyCaps([vBTCB, vUSDT], [0]),
           ).to.be.revertedWithCustomError(eBrake, "ArrayLengthMismatch");
+        });
+
+        it("should skip markets where current cap is already 0", async () => {
+          await eBrake.connect(whitelistedUser).setMarketSupplyCaps([vBTCB], [0]);
+          expect(await comptroller.supplyCaps(vBTCB)).to.equal(0);
+
+          await expect(eBrake.connect(whitelistedUser).setMarketSupplyCaps([vBTCB, vUSDT], [0, 0])).to.not.be.reverted;
         });
       });
     });
