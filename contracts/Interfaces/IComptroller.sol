@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 pragma solidity ^0.8.25;
 
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
@@ -45,6 +46,10 @@ interface IComptroller {
         uint256[] memory underlyingAmounts,
         bytes memory param
     ) external;
+
+    function borrowCaps(address vToken) external view returns (uint256);
+
+    function supplyCaps(address vToken) external view returns (uint256);
 
     function approvedDelegates(address borrower, address delegate) external view returns (bool);
 

@@ -1,0 +1,198 @@
+// SPDX-License-Identifier: BSD-3-Clause
+pragma solidity ^0.8.25;
+
+import { IComptroller } from "../Interfaces/IComptroller.sol";
+
+/**
+ * @title IEBrake
+ * @author Venus Protocol
+ * @notice Interface for the EBrake (Emergency Brake) contract on BNB Chain.
+ *         EBrake is a stateless emergency action router that can only TIGHTEN restrictions,
+ *         never loosen them.
+ *
+ * @dev Design goals and integration patterns:
+ *
+ *   1. DIRECT ACCESS
+ *      The Venus multisig is whitelisted. During an incident, the multisig can call
+ *      any function here (pause, set caps, etc.) without going through governance.
+ *
+ *   2. ON-CHAIN MONITORING CONTRACTS
+ *      Contracts like DeviationSentinel or any Venus monitoring contract are also whitelisted.
+ *      They contain their own detection logic (e.g. price deviation checks) and call into EBrake
+ *      when a threat is detected. Example: DeviationSentinel detects a price anomaly → calls
+ *      EBrake.setSupplyPaused() or EBrake.setCFZero(). The detection logic stays isolated in
+ *      the monitor; EBrake only handles execution.
+ *
+ *   3. THIRD-PARTY MONITORS VIA SAFE MODULES
+ *      External monitoring services (e.g. Hypernative) don't get direct whitelist access. Instead,
+ *      for each service we create a dedicated Safe Module on our multisig. The Safe Module contains
+ *      its own allowlist of which EBrake functions that service can call (e.g. Hypernative can only
+ *      pause supply/borrow, not set caps). This keeps permission scoping outside of EBrake — each
+ *      module enforces its own restrictions.
+ *
+ *   SAFETY INVARIANT — "Do no harm to existing users":
+ *
+ *      This contract can ONLY tighten restrictions, NEVER loosen them. If a whitelisted address
+ *      is compromised, the worst outcome is a temporary freeze — never fund loss or liquidation.
+ *
+ *      This contract intentionally CANNOT:
+ *        - Pause REPAY         → users must always be able to repay to avoid liquidation
+ *        - Pause SEIZE         → liquidations must always work to prevent bad debt accumulation
+ *        - Pause protocol      → setProtocolPaused blocks repay + liquidation, same problem
+ *        - Lower LT            → lowering liquidation threshold would instantly make healthy
+ *                                 positions liquidatable, harming innocent users
+ *        - Increase caps       → caps can only be decreased to reduce exposure, never increased
+ *        - Enable forced       → bypasses shortfall check entirely — ANY borrower becomes
+ *          liquidation            liquidatable even with healthy collateral ratio
+ *        - Target individual   → prevents griefing specific addresses via per-user forced
+ *          users                  liquidation
+ *        - Set close factor    → increasing allows liquidators to seize larger portions of
+ *                                 collateral in one tx
+ *        - Change oracle       → wrong oracle = mass mispricing = mass liquidations
+ *        - Change liquidation  → altering incentive changes liquidation economics for all users
+ *          incentive
+ *
+ *      Worst-case if EBrake is compromised:
+ *        - Pauses minting/borrowing/redeeming/transfers (inconvenient, no fund loss)
+ *        - Zeros supply/borrow caps (blocks new positions, existing ones unaffected)
+ *        - Zeros collateral factor (blocks new borrows against asset, does NOT liquidate
+ *          existing positions — that requires LT change, which EBrake cannot do)
+ *        - Pauses flash loans (blocks flash loan attack vector, no user impact)
+ *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.
+ */
+interface IEBrake {
+    // ═══════════════════════════════════════════════════════════════════════
+    //                              EVENTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Emitted when an address is added to or removed from the whitelist.
+    /// @param addr The address whose whitelist status changed.
+    /// @param isActive Whether the address is now whitelisted (true) or removed (false).
+    event WhitelistUpdated(address indexed addr, bool indexed isActive);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                              ERRORS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Thrown when a non-whitelisted address calls an emergency function.
+    /// @param caller The address that attempted the call.
+    error NotWhitelisted(address caller);
+
+    /// @notice Thrown when a forbidden action (REPAY, SEIZE, etc.) is passed to batch pause.
+    /// @param action The disallowed action that was passed.
+    error ForbiddenAction(IComptroller.Action action);
+
+    /// @notice Thrown when a zero address is passed where a valid address is required.
+    error ZeroAddress();
+
+    /// @notice Thrown when a market is not listed in the given pool.
+    /// @param poolId The pool ID that was queried.
+    /// @param market The market address that is not listed.
+    error MarketNotListed(uint96 poolId, address market);
+
+    /// @notice Thrown when setCollateralFactor returns a non-zero error code.
+    /// @param errorCode The error code returned by the comptroller.
+    error SetCollateralFactorFailed(uint256 errorCode);
+
+    /// @notice Thrown when an empty array is passed where at least one element is required.
+    error EmptyArray();
+
+    /// @notice Thrown when array lengths do not match.
+    /// @param expected The expected array length.
+    /// @param actual The actual array length.
+    error ArrayLengthMismatch(uint256 expected, uint256 actual);
+
+    /// @notice Thrown when a caller tries to set a cap >= its current value.
+    /// @param market The market whose cap was attempted to be increased.
+    /// @param currentCap The current cap value on the comptroller.
+    /// @param requestedCap The new cap value that was rejected.
+    error CapCanOnlyDecrease(address market, uint256 currentCap, uint256 requestedCap);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                            ADMIN
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Add or remove a whitelisted address. Only callable by addresses with ACM permission.
+    /// @param addr The address to whitelist or un-whitelist.
+    /// @param isActive True to whitelist, false to remove.
+    function setWhitelist(address addr, bool isActive) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     EMERGENCY ACTIONS — BATCH OPERATIONS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Pause or unpause multiple actions on multiple markets in one call.
+     * @dev Only MINT, REDEEM, BORROW, and TRANSFER are allowed. Reverts on REPAY, SEIZE,
+     *      LIQUIDATE, ENTER_MARKET, or EXIT_MARKET — see SAFETY INVARIANT.
+     * @param markets The vToken market addresses to pause/unpause actions on.
+     * @param actions The actions to pause/unpause.
+     * @param paused True to pause, false to unpause.
+     */
+    function setActionsPaused(address[] calldata markets, IComptroller.Action[] calldata actions, bool paused) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     EMERGENCY ACTIONS — SINGLE MARKET PAUSING
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Pause or unpause supply (mint) on a single market.
+    ///         Blocks new deposits. Existing suppliers can still redeem.
+    /// @param market The vToken market address.
+    /// @param paused True to pause, false to unpause.
+    function setSupplyPaused(address market, bool paused) external;
+
+    /// @notice Pause or unpause redeem on a single market.
+    ///         Blocks withdrawals. Use when draining must be stopped immediately.
+    /// @param market The vToken market address.
+    /// @param paused True to pause, false to unpause.
+    function setRedeemPaused(address market, bool paused) external;
+
+    /// @notice Pause or unpause borrow on a single market.
+    ///         Blocks new borrows. Existing borrowers can still repay.
+    /// @param market The vToken market address.
+    /// @param paused True to pause, false to unpause.
+    function setBorrowPaused(address market, bool paused) external;
+
+    /// @notice Pause or unpause transfer of vTokens on a single market.
+    ///         Blocks vToken movement, prevents attacker from moving stolen collateral.
+    /// @param market The vToken market address.
+    /// @param paused True to pause, false to unpause.
+    function setTransferPaused(address market, bool paused) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     EMERGENCY ACTIONS — FLASH LOANS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Pause or unpause flash loans across the core pool.
+    /// @param paused True to pause, false to unpause.
+    function setFlashLoanPaused(bool paused) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     EMERGENCY ACTIONS — RISK PARAMETER ADJUSTMENTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Set collateral factor to zero for a market. Liquidation threshold is left unchanged.
+     *         Blocks new borrows against the asset. Does NOT make existing positions liquidatable —
+     *         that would require lowering LT, which this contract cannot do.
+     * @param market The vToken market address whose CF should be zeroed.
+     * @param poolId The pool ID (0 for core pool, >0 for e-mode pools).
+     */
+    function setCFZero(address market, uint96 poolId) external;
+
+    /**
+     * @notice Decrease borrow caps on markets. Can only set caps LOWER than current values.
+     *         Setting to 0 blocks all new borrows. Existing borrows are never affected by caps.
+     * @param markets The vToken market addresses to adjust borrow caps on.
+     * @param newBorrowCaps The new borrow cap values. Each must be < current cap.
+     */
+    function setMarketBorrowCaps(address[] calldata markets, uint256[] calldata newBorrowCaps) external;
+
+    /**
+     * @notice Decrease supply caps on markets. Can only set caps LOWER than current values.
+     *         Setting to 0 blocks all new deposits. Existing deposits are never affected by caps.
+     * @param markets The vToken market addresses to adjust supply caps on.
+     * @param newSupplyCaps The new supply cap values. Each must be < current cap.
+     */
+    function setMarketSupplyCaps(address[] calldata markets, uint256[] calldata newSupplyCaps) external;
+}
