@@ -4,8 +4,8 @@ import { expect } from "chai";
 import { Contract } from "ethers";
 import { ethers } from "hardhat";
 
-import { EBrake } from "../../../typechain";
-import { forking, initMainnetUser } from "./utils";
+import { EBrake } from "../../../../typechain";
+import { forking, initMainnetUser } from "../utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
