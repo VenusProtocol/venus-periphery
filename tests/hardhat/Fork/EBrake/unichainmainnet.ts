@@ -129,20 +129,20 @@ if (FORK_NETWORK) {
       });
 
       describe("Single Market Pausing", () => {
-        it("setSupplyPaused should pause MINT", async () => {
-          await eBrake.connect(whitelistedUser).setSupplyPaused(vToken, true);
+        it("pauseSupply should pause MINT", async () => {
+          await eBrake.connect(whitelistedUser).pauseSupply(vToken);
           expect(await comptroller.actionPaused(vToken, Action.MINT)).to.be.true;
         });
 
-        it("setBorrowPaused should pause BORROW", async () => {
-          await eBrake.connect(whitelistedUser).setBorrowPaused(vToken, true);
+        it("pauseBorrow should pause BORROW", async () => {
+          await eBrake.connect(whitelistedUser).pauseBorrow(vToken);
           expect(await comptroller.actionPaused(vToken, Action.BORROW)).to.be.true;
         });
       });
 
       describe("Batch Pause", () => {
         it("should pause MINT on multiple markets", async () => {
-          await eBrake.connect(whitelistedUser).setActionsPaused([vToken, vToken2], [Action.MINT], true);
+          await eBrake.connect(whitelistedUser).pauseActions([vToken, vToken2], [Action.MINT]);
           expect(await comptroller.actionPaused(vToken, Action.MINT)).to.be.true;
           expect(await comptroller.actionPaused(vToken2, Action.MINT)).to.be.true;
         });

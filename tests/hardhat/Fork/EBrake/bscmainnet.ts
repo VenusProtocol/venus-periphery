@@ -186,10 +186,10 @@ if (FORK_MAINNET) {
             ethers.utils.parseUnits("10"),
           );
           await eBrake.connect(timelock).setWhitelist(tempUser.address, true);
-          await expect(eBrake.connect(tempUser).setSupplyPaused(vBTCB, true)).to.not.be.reverted;
+          await expect(eBrake.connect(tempUser).pauseSupply(vBTCB)).to.not.be.reverted;
 
           await eBrake.connect(timelock).setWhitelist(tempUser.address, false);
-          await expect(eBrake.connect(tempUser).setSupplyPaused(vBTCB, true)).to.be.revertedWithCustomError(
+          await expect(eBrake.connect(tempUser).pauseSupply(vBTCB)).to.be.revertedWithCustomError(
             eBrake,
             "NotWhitelisted",
           );
@@ -201,42 +201,43 @@ if (FORK_MAINNET) {
       // ═════════════════════════════════════════════════════════════════════
 
       describe("Access Control — onlyWhitelisted", () => {
-        it("should revert setActionsPaused from non-whitelisted caller", async () => {
-          await expect(
-            eBrake.connect(randomUser).setActionsPaused([vBTCB], [Action.MINT], true),
-          ).to.be.revertedWithCustomError(eBrake, "NotWhitelisted");
-        });
-
-        it("should revert setSupplyPaused from non-whitelisted caller", async () => {
-          await expect(eBrake.connect(randomUser).setSupplyPaused(vBTCB, true)).to.be.revertedWithCustomError(
+        it("should revert pauseActions from non-whitelisted caller", async () => {
+          await expect(eBrake.connect(randomUser).pauseActions([vBTCB], [Action.MINT])).to.be.revertedWithCustomError(
             eBrake,
             "NotWhitelisted",
           );
         });
 
-        it("should revert setBorrowPaused from non-whitelisted caller", async () => {
-          await expect(eBrake.connect(randomUser).setBorrowPaused(vBTCB, true)).to.be.revertedWithCustomError(
+        it("should revert pauseSupply from non-whitelisted caller", async () => {
+          await expect(eBrake.connect(randomUser).pauseSupply(vBTCB)).to.be.revertedWithCustomError(
             eBrake,
             "NotWhitelisted",
           );
         });
 
-        it("should revert setRedeemPaused from non-whitelisted caller", async () => {
-          await expect(eBrake.connect(randomUser).setRedeemPaused(vBTCB, true)).to.be.revertedWithCustomError(
+        it("should revert pauseBorrow from non-whitelisted caller", async () => {
+          await expect(eBrake.connect(randomUser).pauseBorrow(vBTCB)).to.be.revertedWithCustomError(
             eBrake,
             "NotWhitelisted",
           );
         });
 
-        it("should revert setTransferPaused from non-whitelisted caller", async () => {
-          await expect(eBrake.connect(randomUser).setTransferPaused(vBTCB, true)).to.be.revertedWithCustomError(
+        it("should revert pauseRedeem from non-whitelisted caller", async () => {
+          await expect(eBrake.connect(randomUser).pauseRedeem(vBTCB)).to.be.revertedWithCustomError(
             eBrake,
             "NotWhitelisted",
           );
         });
 
-        it("should revert setFlashLoanPaused from non-whitelisted caller", async () => {
-          await expect(eBrake.connect(randomUser).setFlashLoanPaused(true)).to.be.revertedWithCustomError(
+        it("should revert pauseTransfer from non-whitelisted caller", async () => {
+          await expect(eBrake.connect(randomUser).pauseTransfer(vBTCB)).to.be.revertedWithCustomError(
+            eBrake,
+            "NotWhitelisted",
+          );
+        });
+
+        it("should revert pauseFlashLoan from non-whitelisted caller", async () => {
+          await expect(eBrake.connect(randomUser).pauseFlashLoan()).to.be.revertedWithCustomError(
             eBrake,
             "NotWhitelisted",
           );
@@ -265,33 +266,23 @@ if (FORK_MAINNET) {
       });
 
       // ═════════════════════════════════════════════════════════════════════
-      // 4. BATCH PAUSE — setActionsPaused
+      // 4. BATCH PAUSE — pauseActions
       // ═════════════════════════════════════════════════════════════════════
 
-      describe("Batch Pause — setActionsPaused", () => {
+      describe("Batch Pause — pauseActions", () => {
         it("should pause MINT on multiple markets", async () => {
-          await eBrake.connect(whitelistedUser).setActionsPaused([vBTCB, vUSDT], [Action.MINT], true);
+          await eBrake.connect(whitelistedUser).pauseActions([vBTCB, vUSDT], [Action.MINT]);
 
           expect(await comptroller.actionPaused(vBTCB, Action.MINT)).to.be.true;
           expect(await comptroller.actionPaused(vUSDT, Action.MINT)).to.be.true;
         });
 
         it("should pause multiple actions on a market", async () => {
-          await eBrake
-            .connect(whitelistedUser)
-            .setActionsPaused([vBTCB], [Action.MINT, Action.BORROW, Action.TRANSFER], true);
+          await eBrake.connect(whitelistedUser).pauseActions([vBTCB], [Action.MINT, Action.BORROW, Action.TRANSFER]);
 
           expect(await comptroller.actionPaused(vBTCB, Action.MINT)).to.be.true;
           expect(await comptroller.actionPaused(vBTCB, Action.BORROW)).to.be.true;
           expect(await comptroller.actionPaused(vBTCB, Action.TRANSFER)).to.be.true;
-        });
-
-        it("should unpause actions", async () => {
-          await eBrake.connect(whitelistedUser).setActionsPaused([vBTCB], [Action.MINT], true);
-          expect(await comptroller.actionPaused(vBTCB, Action.MINT)).to.be.true;
-
-          await eBrake.connect(whitelistedUser).setActionsPaused([vBTCB], [Action.MINT], false);
-          expect(await comptroller.actionPaused(vBTCB, Action.MINT)).to.be.false;
         });
 
         // Forbidden actions — REPAY, SEIZE, LIQUIDATE, ENTER_MARKET, EXIT_MARKET
@@ -305,28 +296,31 @@ if (FORK_MAINNET) {
 
         for (const { name, value } of forbiddenActions) {
           it(`should revert on forbidden action ${name}`, async () => {
-            await expect(
-              eBrake.connect(whitelistedUser).setActionsPaused([vBTCB], [value], true),
-            ).to.be.revertedWithCustomError(eBrake, "ForbiddenAction");
+            await expect(eBrake.connect(whitelistedUser).pauseActions([vBTCB], [value])).to.be.revertedWithCustomError(
+              eBrake,
+              "ForbiddenAction",
+            );
           });
         }
 
         it("should revert on mixed allowed + forbidden actions in batch", async () => {
           await expect(
-            eBrake.connect(whitelistedUser).setActionsPaused([vBTCB], [Action.MINT, Action.REPAY], true),
+            eBrake.connect(whitelistedUser).pauseActions([vBTCB], [Action.MINT, Action.REPAY]),
           ).to.be.revertedWithCustomError(eBrake, "ForbiddenAction");
         });
 
         it("should revert on empty markets array", async () => {
-          await expect(
-            eBrake.connect(whitelistedUser).setActionsPaused([], [Action.MINT], true),
-          ).to.be.revertedWithCustomError(eBrake, "EmptyArray");
+          await expect(eBrake.connect(whitelistedUser).pauseActions([], [Action.MINT])).to.be.revertedWithCustomError(
+            eBrake,
+            "EmptyArray",
+          );
         });
 
         it("should revert on empty actions array", async () => {
-          await expect(
-            eBrake.connect(whitelistedUser).setActionsPaused([vBTCB], [], true),
-          ).to.be.revertedWithCustomError(eBrake, "EmptyArray");
+          await expect(eBrake.connect(whitelistedUser).pauseActions([vBTCB], [])).to.be.revertedWithCustomError(
+            eBrake,
+            "EmptyArray",
+          );
         });
       });
 
@@ -336,22 +330,16 @@ if (FORK_MAINNET) {
 
       describe("Single Market Pausing", () => {
         const pauseFunctions = [
-          { name: "setSupplyPaused", action: Action.MINT, fn: "setSupplyPaused" as const },
-          { name: "setRedeemPaused", action: Action.REDEEM, fn: "setRedeemPaused" as const },
-          { name: "setBorrowPaused", action: Action.BORROW, fn: "setBorrowPaused" as const },
-          { name: "setTransferPaused", action: Action.TRANSFER, fn: "setTransferPaused" as const },
+          { name: "pauseSupply", action: Action.MINT, fn: "pauseSupply" as const },
+          { name: "pauseRedeem", action: Action.REDEEM, fn: "pauseRedeem" as const },
+          { name: "pauseBorrow", action: Action.BORROW, fn: "pauseBorrow" as const },
+          { name: "pauseTransfer", action: Action.TRANSFER, fn: "pauseTransfer" as const },
         ];
 
         for (const { name, action, fn } of pauseFunctions) {
           it(`${name} should pause and verify on comptroller`, async () => {
-            await eBrake.connect(whitelistedUser)[fn](vBTCB, true);
+            await eBrake.connect(whitelistedUser)[fn](vBTCB);
             expect(await comptroller.actionPaused(vBTCB, action)).to.be.true;
-          });
-
-          it(`${name} should unpause and verify on comptroller`, async () => {
-            await eBrake.connect(whitelistedUser)[fn](vBTCB, true);
-            await eBrake.connect(whitelistedUser)[fn](vBTCB, false);
-            expect(await comptroller.actionPaused(vBTCB, action)).to.be.false;
           });
         }
       });
@@ -362,14 +350,8 @@ if (FORK_MAINNET) {
 
       describe("Flash Loan Pausing", () => {
         it("should pause flash loans on comptroller", async () => {
-          await eBrake.connect(whitelistedUser).setFlashLoanPaused(true);
+          await eBrake.connect(whitelistedUser).pauseFlashLoan();
           expect(await comptroller.flashLoanPaused()).to.be.true;
-        });
-
-        it("should unpause flash loans on comptroller", async () => {
-          await eBrake.connect(whitelistedUser).setFlashLoanPaused(true);
-          await eBrake.connect(whitelistedUser).setFlashLoanPaused(false);
-          expect(await comptroller.flashLoanPaused()).to.be.false;
         });
       });
 

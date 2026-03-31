@@ -167,23 +167,23 @@ if (FORK_ETHEREUM) {
       // ═════════════════════════════════════════════════════════════════════
 
       describe("Single Market Pausing", () => {
-        it("setSupplyPaused should pause MINT", async () => {
-          await eBrake.connect(whitelistedUser).setSupplyPaused(vToken, true);
+        it("pauseSupply should pause MINT", async () => {
+          await eBrake.connect(whitelistedUser).pauseSupply(vToken);
           expect(await comptroller.actionPaused(vToken, Action.MINT)).to.be.true;
         });
 
-        it("setBorrowPaused should pause BORROW", async () => {
-          await eBrake.connect(whitelistedUser).setBorrowPaused(vToken, true);
+        it("pauseBorrow should pause BORROW", async () => {
+          await eBrake.connect(whitelistedUser).pauseBorrow(vToken);
           expect(await comptroller.actionPaused(vToken, Action.BORROW)).to.be.true;
         });
 
-        it("setRedeemPaused should pause REDEEM", async () => {
-          await eBrake.connect(whitelistedUser).setRedeemPaused(vToken, true);
+        it("pauseRedeem should pause REDEEM", async () => {
+          await eBrake.connect(whitelistedUser).pauseRedeem(vToken);
           expect(await comptroller.actionPaused(vToken, Action.REDEEM)).to.be.true;
         });
 
-        it("setTransferPaused should pause TRANSFER", async () => {
-          await eBrake.connect(whitelistedUser).setTransferPaused(vToken, true);
+        it("pauseTransfer should pause TRANSFER", async () => {
+          await eBrake.connect(whitelistedUser).pauseTransfer(vToken);
           expect(await comptroller.actionPaused(vToken, Action.TRANSFER)).to.be.true;
         });
       });
@@ -194,14 +194,14 @@ if (FORK_ETHEREUM) {
 
       describe("Batch Pause", () => {
         it("should pause MINT on multiple markets", async () => {
-          await eBrake.connect(whitelistedUser).setActionsPaused([vToken, vToken2], [Action.MINT], true);
+          await eBrake.connect(whitelistedUser).pauseActions([vToken, vToken2], [Action.MINT]);
           expect(await comptroller.actionPaused(vToken, Action.MINT)).to.be.true;
           expect(await comptroller.actionPaused(vToken2, Action.MINT)).to.be.true;
         });
 
         it("should revert on forbidden action REPAY", async () => {
           await expect(
-            eBrake.connect(whitelistedUser).setActionsPaused([vToken], [Action.REPAY], true),
+            eBrake.connect(whitelistedUser).pauseActions([vToken], [Action.REPAY]),
           ).to.be.revertedWithCustomError(eBrake, "ForbiddenAction");
         });
       });
