@@ -134,11 +134,11 @@ interface IEBrake {
     /// @param actual The actual array length.
     error ArrayLengthMismatch(uint256 expected, uint256 actual);
 
-    /// @notice Thrown when a caller tries to set a cap >= its current value.
+    /// @notice Thrown when the requested cap exceeds the current cap on the comptroller.
     /// @param market The market whose cap was attempted to be increased.
     /// @param currentCap The current cap value on the comptroller.
     /// @param requestedCap The new cap value that was rejected.
-    error CapCanOnlyDecrease(address market, uint256 currentCap, uint256 requestedCap);
+    error CapExceedsCurrent(address market, uint256 currentCap, uint256 requestedCap);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — BATCH OPERATIONS
@@ -207,18 +207,18 @@ interface IEBrake {
     function setCFZeroIsolated(address market) external;
 
     /**
-     * @notice Decrease borrow caps on markets. Can only set caps LOWER than current values.
+     * @notice Decrease borrow caps on markets. Can only set caps LOWER than or equal to current values.
      *         Setting to 0 blocks all new borrows. Existing borrows are never affected by caps.
      * @param markets The vToken market addresses to adjust borrow caps on.
-     * @param newBorrowCaps The new borrow cap values. Each must be < current cap.
+     * @param newBorrowCaps The new borrow cap values. Each must be <= current cap.
      */
     function setMarketBorrowCaps(address[] calldata markets, uint256[] calldata newBorrowCaps) external;
 
     /**
-     * @notice Decrease supply caps on markets. Can only set caps LOWER than current values.
+     * @notice Decrease supply caps on markets. Can only set caps LOWER than or equal to current values.
      *         Setting to 0 blocks all new deposits. Existing deposits are never affected by caps.
      * @param markets The vToken market addresses to adjust supply caps on.
-     * @param newSupplyCaps The new supply cap values. Each must be < current cap.
+     * @param newSupplyCaps The new supply cap values. Each must be <= current cap.
      */
     function setMarketSupplyCaps(address[] calldata markets, uint256[] calldata newSupplyCaps) external;
 }

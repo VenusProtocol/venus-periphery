@@ -114,9 +114,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
         for (uint256 i; i < marketsLen; ++i) {
             uint256 currentCap = comptroller.borrowCaps(markets[i]);
-            if (currentCap == 0 && newBorrowCaps[i] == 0) continue;
-            if (!(newBorrowCaps[i] < currentCap)) {
-                revert CapCanOnlyDecrease(markets[i], currentCap, newBorrowCaps[i]);
+            if (newBorrowCaps[i] > currentCap) {
+                revert CapExceedsCurrent(markets[i], currentCap, newBorrowCaps[i]);
             }
         }
 
@@ -135,9 +134,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
         for (uint256 i; i < marketsLen; ++i) {
             uint256 currentCap = comptroller.supplyCaps(markets[i]);
-            if (currentCap == 0 && newSupplyCaps[i] == 0) continue;
-            if (!(newSupplyCaps[i] < currentCap)) {
-                revert CapCanOnlyDecrease(markets[i], currentCap, newSupplyCaps[i]);
+            if (newSupplyCaps[i] > currentCap) {
+                revert CapExceedsCurrent(markets[i], currentCap, newSupplyCaps[i]);
             }
         }
 

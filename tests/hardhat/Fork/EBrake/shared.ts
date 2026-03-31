@@ -291,15 +291,14 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
       const currentCap = await comptroller.borrowCaps(config.vToken1);
       await expect(
         eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [currentCap.add(1)]),
-      ).to.be.revertedWithCustomError(eBrake, "CapCanOnlyDecrease");
+      ).to.be.revertedWithCustomError(eBrake, "CapExceedsCurrent");
     });
 
-    it("should revert when setting same borrow cap", async () => {
+    it("should allow setting same borrow cap (no-op)", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
       const currentCap = await comptroller.borrowCaps(config.vToken1);
-      await expect(
-        eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [currentCap]),
-      ).to.be.revertedWithCustomError(eBrake, "CapCanOnlyDecrease");
+      await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [currentCap]);
+      expect(await comptroller.borrowCaps(config.vToken1)).to.equal(currentCap);
     });
 
     it("should handle multiple markets", async () => {
@@ -324,10 +323,12 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
       ).to.be.revertedWithCustomError(eBrake, "ArrayLengthMismatch");
     });
 
-    it("should skip markets where current cap is already 0", async () => {
+    it("should allow batch with already-zeroed markets", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
       await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
       expect(await comptroller.borrowCaps(config.vToken1)).to.equal(0);
+
+      // Batch including already-zeroed market should not revert
       await expect(eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1, config.vToken2], [0, 0])).to.not
         .be.reverted;
     });
@@ -358,15 +359,14 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
       const currentCap = await comptroller.supplyCaps(config.vToken1);
       await expect(
         eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [currentCap.add(1)]),
-      ).to.be.revertedWithCustomError(eBrake, "CapCanOnlyDecrease");
+      ).to.be.revertedWithCustomError(eBrake, "CapExceedsCurrent");
     });
 
-    it("should revert when setting same supply cap", async () => {
+    it("should allow setting same supply cap (no-op)", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
       const currentCap = await comptroller.supplyCaps(config.vToken1);
-      await expect(
-        eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [currentCap]),
-      ).to.be.revertedWithCustomError(eBrake, "CapCanOnlyDecrease");
+      await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [currentCap]);
+      expect(await comptroller.supplyCaps(config.vToken1)).to.equal(currentCap);
     });
 
     it("should handle multiple markets", async () => {
@@ -391,10 +391,12 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
       ).to.be.revertedWithCustomError(eBrake, "ArrayLengthMismatch");
     });
 
-    it("should skip markets where current cap is already 0", async () => {
+    it("should allow batch with already-zeroed markets", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
       await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [0]);
       expect(await comptroller.supplyCaps(config.vToken1)).to.equal(0);
+
+      // Batch including already-zeroed market should not revert
       await expect(eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1, config.vToken2], [0, 0])).to.not
         .be.reverted;
     });
