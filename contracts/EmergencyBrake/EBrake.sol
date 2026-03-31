@@ -51,43 +51,39 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
-    function setActionsPaused(
-        address[] calldata markets,
-        IComptroller.Action[] calldata actions,
-        bool paused
-    ) external onlyWhitelisted {
+    function pauseActions(address[] calldata markets, IComptroller.Action[] calldata actions) external onlyWhitelisted {
         if (markets.length == 0 || actions.length == 0) revert EmptyArray();
 
         uint256 actionsLen = actions.length;
         for (uint256 i; i < actionsLen; ++i) {
             _validateAction(actions[i]);
         }
-        IComptroller(address(COMPTROLLER)).setActionsPaused(markets, actions, paused);
+        IComptroller(address(COMPTROLLER)).setActionsPaused(markets, actions, true);
     }
 
     /// @inheritdoc IEBrake
-    function setSupplyPaused(address market, bool paused) external onlyWhitelisted {
-        _pauseSingleAction(market, IComptroller.Action.MINT, paused);
+    function pauseSupply(address market) external onlyWhitelisted {
+        _pauseSingleAction(market, IComptroller.Action.MINT);
     }
 
     /// @inheritdoc IEBrake
-    function setRedeemPaused(address market, bool paused) external onlyWhitelisted {
-        _pauseSingleAction(market, IComptroller.Action.REDEEM, paused);
+    function pauseRedeem(address market) external onlyWhitelisted {
+        _pauseSingleAction(market, IComptroller.Action.REDEEM);
     }
 
     /// @inheritdoc IEBrake
-    function setBorrowPaused(address market, bool paused) external onlyWhitelisted {
-        _pauseSingleAction(market, IComptroller.Action.BORROW, paused);
+    function pauseBorrow(address market) external onlyWhitelisted {
+        _pauseSingleAction(market, IComptroller.Action.BORROW);
     }
 
     /// @inheritdoc IEBrake
-    function setTransferPaused(address market, bool paused) external onlyWhitelisted {
-        _pauseSingleAction(market, IComptroller.Action.TRANSFER, paused);
+    function pauseTransfer(address market) external onlyWhitelisted {
+        _pauseSingleAction(market, IComptroller.Action.TRANSFER);
     }
 
     /// @inheritdoc IEBrake
-    function setFlashLoanPaused(bool paused) external onlyWhitelisted {
-        COMPTROLLER.setFlashLoanPaused(paused);
+    function pauseFlashLoan() external onlyWhitelisted {
+        COMPTROLLER.setFlashLoanPaused(true);
     }
 
     /// @inheritdoc IEBrake
@@ -153,19 +149,18 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
     /**
      * @notice Wraps a single market and action into arrays for the comptroller's setActionsPaused.
-     * @dev Internal helper used by single-action pause functions.
+     * @dev Internal helper used by single-action pause functions. Always pauses (true).
      * @param market The vToken market address.
-     * @param action The action to pause/unpause.
-     * @param paused True to pause, false to unpause.
+     * @param action The action to pause.
      */
-    function _pauseSingleAction(address market, IComptroller.Action action, bool paused) internal {
+    function _pauseSingleAction(address market, IComptroller.Action action) internal {
         address[] memory markets = new address[](1);
         markets[0] = market;
 
         IComptroller.Action[] memory actions = new IComptroller.Action[](1);
         actions[0] = action;
 
-        IComptroller(address(COMPTROLLER)).setActionsPaused(markets, actions, paused);
+        IComptroller(address(COMPTROLLER)).setActionsPaused(markets, actions, true);
     }
 
     /**

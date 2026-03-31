@@ -20,7 +20,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *      Contracts like DeviationSentinel or any Venus monitoring contract are also whitelisted.
  *      They contain their own detection logic (e.g. price deviation checks) and call into EBrake
  *      when a threat is detected. Example: DeviationSentinel detects a price anomaly → calls
- *      EBrake.setSupplyPaused() or EBrake.setCFZero(). The detection logic stays isolated in
+ *      EBrake.pauseSupply() or EBrake.setCFZero(). The detection logic stays isolated in
  *      the monitor; EBrake only handles execution.
  *
  *   3. THIRD-PARTY MONITORS VIA SAFE MODULES
@@ -36,6 +36,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *      is compromised, the worst outcome is a temporary freeze — never fund loss or liquidation.
  *
  *      This contract intentionally CANNOT:
+ *        - Unpause             → EBrake can only pause, never unpause. Recovery is via governance VIP
  *        - Pause REPAY         → users must always be able to repay to avoid liquidation
  *        - Pause SEIZE         → liquidations must always work to prevent bad debt accumulation
  *        - Pause protocol      → setProtocolPaused blocks repay + liquidation, same problem
@@ -122,50 +123,44 @@ interface IEBrake {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Pause or unpause multiple actions on multiple markets in one call.
+     * @notice Pause multiple actions on multiple markets in one call.
      * @dev Only MINT, REDEEM, BORROW, and TRANSFER are allowed. Reverts on REPAY, SEIZE,
      *      LIQUIDATE, ENTER_MARKET, or EXIT_MARKET — see SAFETY INVARIANT.
-     * @param markets The vToken market addresses to pause/unpause actions on.
-     * @param actions The actions to pause/unpause.
-     * @param paused True to pause, false to unpause.
+     * @param markets The vToken market addresses to pause actions on.
+     * @param actions The actions to pause.
      */
-    function setActionsPaused(address[] calldata markets, IComptroller.Action[] calldata actions, bool paused) external;
+    function pauseActions(address[] calldata markets, IComptroller.Action[] calldata actions) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — SINGLE MARKET PAUSING
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Pause or unpause supply (mint) on a single market.
+    /// @notice Pause supply (mint) on a single market.
     ///         Blocks new deposits. Existing suppliers can still redeem.
     /// @param market The vToken market address.
-    /// @param paused True to pause, false to unpause.
-    function setSupplyPaused(address market, bool paused) external;
+    function pauseSupply(address market) external;
 
-    /// @notice Pause or unpause redeem on a single market.
+    /// @notice Pause redeem on a single market.
     ///         Blocks withdrawals. Use when draining must be stopped immediately.
     /// @param market The vToken market address.
-    /// @param paused True to pause, false to unpause.
-    function setRedeemPaused(address market, bool paused) external;
+    function pauseRedeem(address market) external;
 
-    /// @notice Pause or unpause borrow on a single market.
+    /// @notice Pause borrow on a single market.
     ///         Blocks new borrows. Existing borrowers can still repay.
     /// @param market The vToken market address.
-    /// @param paused True to pause, false to unpause.
-    function setBorrowPaused(address market, bool paused) external;
+    function pauseBorrow(address market) external;
 
-    /// @notice Pause or unpause transfer of vTokens on a single market.
+    /// @notice Pause transfer of vTokens on a single market.
     ///         Blocks vToken movement, prevents attacker from moving stolen collateral.
     /// @param market The vToken market address.
-    /// @param paused True to pause, false to unpause.
-    function setTransferPaused(address market, bool paused) external;
+    function pauseTransfer(address market) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — FLASH LOANS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Pause or unpause flash loans across the core pool.
-    /// @param paused True to pause, false to unpause.
-    function setFlashLoanPaused(bool paused) external;
+    /// @notice Pause flash loans across the core pool.
+    function pauseFlashLoan() external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — RISK PARAMETER ADJUSTMENTS
