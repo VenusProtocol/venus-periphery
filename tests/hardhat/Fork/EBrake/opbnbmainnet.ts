@@ -86,13 +86,19 @@ if (FORK_NETWORK) {
   forking(FORK_BLOCK, () => {
     let eBrake: EBrake;
     let comptroller: Contract;
-    let timelock: SignerWithAddress;
+    let _timelock: SignerWithAddress;
     let whitelistedUser: SignerWithAddress;
     let randomUser: SignerWithAddress;
 
     describe("EBrake Fork Tests (opBNB Mainnet — IL Core Pool)", () => {
       beforeEach(async () => {
-        ({ eBrake, comptroller, timelock, whitelistedUser, randomUser } = await loadFixture(deployEBrakeFixture));
+        ({
+          eBrake,
+          comptroller,
+          timelock: _timelock,
+          whitelistedUser,
+          randomUser,
+        } = await loadFixture(deployEBrakeFixture));
       });
 
       describe("setCFZeroIsolated", () => {
