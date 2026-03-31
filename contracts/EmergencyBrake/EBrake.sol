@@ -8,11 +8,11 @@ import { IEBrake } from "./IEBrake.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
 /**
- * @title EBrake — Emergency Brake Contract (BNB Chain)
+ * @title EBrake — Emergency Brake Contract
  * @author Venus Protocol
- * @notice A standalone emergency action router for Venus Protocol's BNB Chain Core Pool.
+ * @notice A standalone emergency action router for Venus Protocol.
  *         This contract holds NO detection logic — it only exposes Comptroller emergency
- *         functions behind a whitelist. See IEBrake for full design documentation.
+ *         functions behind ACM permissions. See IEBrake for full design documentation.
  */
 contract EBrake is IEBrake, AccessControlledV8 {
     /**
@@ -23,16 +23,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
      */
     ICorePoolComptroller public immutable COMPTROLLER;
 
-    /// @notice Addresses authorized to call emergency functions.
-    mapping(address => bool) public whitelist;
-
-    modifier onlyWhitelisted() {
-        if (!whitelist[msg.sender]) revert NotWhitelisted(msg.sender);
-        _;
-    }
-
     /// @notice Deploy EBrake with the core pool comptroller and ACM.
-    /// @param corePoolComptroller_ Address of the Venus Core Pool Comptroller (Diamond proxy).
+    /// @param corePoolComptroller_ Address of the Venus Core Pool Comptroller.
     /// @param accessControlManager_ Address of the Venus Access Control Manager.
     constructor(ICorePoolComptroller corePoolComptroller_, address accessControlManager_) initializer {
         if (address(corePoolComptroller_) == address(0)) revert ZeroAddress();
@@ -43,15 +35,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
-    function setWhitelist(address addr, bool isActive) external {
-        _checkAccessAllowed("setWhitelist(address,bool)");
-        if (addr == address(0)) revert ZeroAddress();
-        whitelist[addr] = isActive;
-        emit WhitelistUpdated(addr, isActive);
-    }
-
-    /// @inheritdoc IEBrake
-    function pauseActions(address[] calldata markets, IComptroller.Action[] calldata actions) external onlyWhitelisted {
+    function pauseActions(address[] calldata markets, IComptroller.Action[] calldata actions) external {
+        _checkAccessAllowed("pauseActions(address[],uint8[])");
         if (markets.length == 0 || actions.length == 0) revert EmptyArray();
 
         uint256 actionsLen = actions.length;
@@ -62,32 +47,38 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
-    function pauseSupply(address market) external onlyWhitelisted {
+    function pauseSupply(address market) external {
+        _checkAccessAllowed("pauseSupply(address)");
         _pauseSingleAction(market, IComptroller.Action.MINT);
     }
 
     /// @inheritdoc IEBrake
-    function pauseRedeem(address market) external onlyWhitelisted {
+    function pauseRedeem(address market) external {
+        _checkAccessAllowed("pauseRedeem(address)");
         _pauseSingleAction(market, IComptroller.Action.REDEEM);
     }
 
     /// @inheritdoc IEBrake
-    function pauseBorrow(address market) external onlyWhitelisted {
+    function pauseBorrow(address market) external {
+        _checkAccessAllowed("pauseBorrow(address)");
         _pauseSingleAction(market, IComptroller.Action.BORROW);
     }
 
     /// @inheritdoc IEBrake
-    function pauseTransfer(address market) external onlyWhitelisted {
+    function pauseTransfer(address market) external {
+        _checkAccessAllowed("pauseTransfer(address)");
         _pauseSingleAction(market, IComptroller.Action.TRANSFER);
     }
 
     /// @inheritdoc IEBrake
-    function pauseFlashLoan() external onlyWhitelisted {
+    function pauseFlashLoan() external {
+        _checkAccessAllowed("pauseFlashLoan()");
         COMPTROLLER.setFlashLoanPaused(true);
     }
 
     /// @inheritdoc IEBrake
-    function setCFZero(address market, uint96 poolId) external onlyWhitelisted {
+    function setCFZero(address market, uint96 poolId) external {
+        _checkAccessAllowed("setCFZero(address,uint96)");
         (bool isListed, , , uint256 currentLT, , , ) = COMPTROLLER.poolMarkets(poolId, market);
         if (!isListed) revert MarketNotListed(poolId, market);
 
@@ -96,7 +87,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
-    function setCFZeroIsolated(address market) external onlyWhitelisted {
+    function setCFZeroIsolated(address market) external {
+        _checkAccessAllowed("setCFZeroIsolated(address)");
         IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
         if (!m.isListed) revert MarketNotListed(0, market);
 
@@ -104,10 +96,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
-    function setMarketBorrowCaps(
-        address[] calldata markets,
-        uint256[] calldata newBorrowCaps
-    ) external onlyWhitelisted {
+    function setMarketBorrowCaps(address[] calldata markets, uint256[] calldata newBorrowCaps) external {
+        _checkAccessAllowed("setMarketBorrowCaps(address[],uint256[])");
         uint256 marketsLen = markets.length;
         if (marketsLen == 0) revert EmptyArray();
         if (marketsLen != newBorrowCaps.length) revert ArrayLengthMismatch(marketsLen, newBorrowCaps.length);
@@ -126,10 +116,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
-    function setMarketSupplyCaps(
-        address[] calldata markets,
-        uint256[] calldata newSupplyCaps
-    ) external onlyWhitelisted {
+    function setMarketSupplyCaps(address[] calldata markets, uint256[] calldata newSupplyCaps) external {
+        _checkAccessAllowed("setMarketSupplyCaps(address[],uint256[])");
         uint256 marketsLen = markets.length;
         if (marketsLen == 0) revert EmptyArray();
         if (marketsLen != newSupplyCaps.length) revert ArrayLengthMismatch(marketsLen, newSupplyCaps.length);
@@ -149,7 +137,6 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
     /**
      * @notice Wraps a single market and action into arrays for the comptroller's setActionsPaused.
-     * @dev Internal helper used by single-action pause functions. Always pauses (true).
      * @param market The vToken market address.
      * @param action The action to pause.
      */
@@ -165,7 +152,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
     /**
      * @notice Validates that an action is one of the allowed emergency actions.
-     * @dev Only MINT (0), REDEEM (1), BORROW (2), and TRANSFER (6) are permitted.
+     *      Only MINT (0), REDEEM (1), BORROW (2), and TRANSFER (6) are permitted.
      * @param action The action to validate.
      */
     function _validateAction(IComptroller.Action action) internal pure {

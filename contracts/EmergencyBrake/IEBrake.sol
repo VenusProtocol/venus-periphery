@@ -63,21 +63,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  */
 interface IEBrake {
     // ═══════════════════════════════════════════════════════════════════════
-    //                              EVENTS
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /// @notice Emitted when an address is added to or removed from the whitelist.
-    /// @param addr The address whose whitelist status changed.
-    /// @param isActive Whether the address is now whitelisted (true) or removed (false).
-    event WhitelistUpdated(address indexed addr, bool indexed isActive);
-
-    // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════
-
-    /// @notice Thrown when a non-whitelisted address calls an emergency function.
-    /// @param caller The address that attempted the call.
-    error NotWhitelisted(address caller);
 
     /// @notice Thrown when a forbidden action (REPAY, SEIZE, etc.) is passed to batch pause.
     /// @param action The disallowed action that was passed.
@@ -108,15 +95,6 @@ interface IEBrake {
     /// @param currentCap The current cap value on the comptroller.
     /// @param requestedCap The new cap value that was rejected.
     error CapCanOnlyDecrease(address market, uint256 currentCap, uint256 requestedCap);
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                            ADMIN
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /// @notice Add or remove a whitelisted address. Only callable by addresses with ACM permission.
-    /// @param addr The address to whitelist or un-whitelist.
-    /// @param isActive True to whitelist, false to remove.
-    function setWhitelist(address addr, bool isActive) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — BATCH OPERATIONS

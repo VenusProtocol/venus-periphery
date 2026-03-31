@@ -46,7 +46,6 @@ const IL_COMPTROLLER_ABI = [
 type EBrakeFixture = {
   eBrake: EBrake;
   comptroller: Contract;
-  timelock: SignerWithAddress;
   whitelistedUser: SignerWithAddress;
   randomUser: SignerWithAddress;
 };
@@ -65,8 +64,19 @@ async function deployEBrakeFixture(): Promise<EBrakeFixture> {
   const EBrakeFactory = await ethers.getContractFactory("EBrake");
   const eBrake = (await EBrakeFactory.deploy(COMPTROLLER, ACM)) as EBrake;
 
-  await acm.giveCallPermission(eBrake.address, "setWhitelist(address,bool)", NORMAL_TIMELOCK);
-  await eBrake.connect(timelock).setWhitelist(whitelistedUser.address, true);
+  const eBrakeFunctions = [
+    "pauseActions(address[],uint8[])",
+    "pauseSupply(address)",
+    "pauseRedeem(address)",
+    "pauseBorrow(address)",
+    "pauseTransfer(address)",
+    "setCFZeroIsolated(address)",
+    "setMarketBorrowCaps(address[],uint256[])",
+    "setMarketSupplyCaps(address[],uint256[])",
+  ];
+  for (const sig of eBrakeFunctions) {
+    await acm.giveCallPermission(eBrake.address, sig, whitelistedUser.address);
+  }
 
   for (const sig of [
     "setActionsPaused(address[],uint256[],bool)",
@@ -77,7 +87,7 @@ async function deployEBrakeFixture(): Promise<EBrakeFixture> {
     await acm.giveCallPermission(ethers.constants.AddressZero, sig, eBrake.address);
   }
 
-  return { eBrake, comptroller, timelock, whitelistedUser, randomUser };
+  return { eBrake, comptroller, whitelistedUser, randomUser };
 }
 
 if (FORK_NETWORK) {
@@ -86,19 +96,12 @@ if (FORK_NETWORK) {
   forking(FORK_BLOCK, () => {
     let eBrake: EBrake;
     let comptroller: Contract;
-    let _timelock: SignerWithAddress;
     let whitelistedUser: SignerWithAddress;
     let randomUser: SignerWithAddress;
 
     describe("EBrake Fork Tests (Base Mainnet — IL Core Pool)", () => {
       beforeEach(async () => {
-        ({
-          eBrake,
-          comptroller,
-          timelock: _timelock,
-          whitelistedUser,
-          randomUser,
-        } = await loadFixture(deployEBrakeFixture));
+        ({ eBrake, comptroller, whitelistedUser, randomUser } = await loadFixture(deployEBrakeFixture));
       });
 
       describe("setCFZeroIsolated", () => {
@@ -120,10 +123,10 @@ if (FORK_NETWORK) {
           ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
         });
 
-        it("should revert from non-whitelisted caller", async () => {
+        it("should revert from unauthorized caller", async () => {
           await expect(eBrake.connect(randomUser).setCFZeroIsolated(vToken)).to.be.revertedWithCustomError(
             eBrake,
-            "NotWhitelisted",
+            "Unauthorized",
           );
         });
       });

@@ -60,7 +60,6 @@ const COMPTROLLER_ABI = [
 type EBrakeFixture = {
   eBrake: EBrake;
   comptroller: Contract;
-  timelock: SignerWithAddress;
   whitelistedUser: SignerWithAddress;
   randomUser: SignerWithAddress;
 };
@@ -81,9 +80,22 @@ async function deployEBrakeFixture(): Promise<EBrakeFixture> {
   const EBrakeFactory = await ethers.getContractFactory("EBrake");
   const eBrake = (await EBrakeFactory.deploy(COMPTROLLER, ACM)) as EBrake;
 
-  // Grant ACM permissions
-  await acm.giveCallPermission(eBrake.address, "setWhitelist(address,bool)", NORMAL_TIMELOCK);
-  await eBrake.connect(timelock).setWhitelist(whitelistedUser.address, true);
+  // Grant whitelistedUser ACM permissions on EBrake functions
+  const eBrakeFunctions = [
+    "pauseActions(address[],uint8[])",
+    "pauseSupply(address)",
+    "pauseRedeem(address)",
+    "pauseBorrow(address)",
+    "pauseTransfer(address)",
+    "pauseFlashLoan()",
+    "setCFZero(address,uint96)",
+    "setCFZeroIsolated(address)",
+    "setMarketBorrowCaps(address[],uint256[])",
+    "setMarketSupplyCaps(address[],uint256[])",
+  ];
+  for (const sig of eBrakeFunctions) {
+    await acm.giveCallPermission(eBrake.address, sig, whitelistedUser.address);
+  }
 
   // Grant EBrake permissions on comptroller (AddressZero = all comptrollers)
   const comptrollerPermissions = [
@@ -97,7 +109,7 @@ async function deployEBrakeFixture(): Promise<EBrakeFixture> {
     await acm.giveCallPermission(ethers.constants.AddressZero, sig, eBrake.address);
   }
 
-  return { eBrake, comptroller, timelock, whitelistedUser, randomUser };
+  return { eBrake, comptroller, whitelistedUser, randomUser };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -110,13 +122,12 @@ if (FORK_MAINNET) {
   forking(FORK_BLOCK, () => {
     let eBrake: EBrake;
     let comptroller: Contract;
-    let timelock: SignerWithAddress;
     let whitelistedUser: SignerWithAddress;
     let randomUser: SignerWithAddress;
 
     describe("EBrake Fork Tests (BSC Mainnet)", () => {
       beforeEach(async () => {
-        ({ eBrake, comptroller, timelock, whitelistedUser, randomUser } = await loadFixture(deployEBrakeFixture));
+        ({ eBrake, comptroller, whitelistedUser, randomUser } = await loadFixture(deployEBrakeFixture));
       });
 
       // ═════════════════════════════════════════════════════════════════════
@@ -146,121 +157,70 @@ if (FORK_MAINNET) {
       });
 
       // ═════════════════════════════════════════════════════════════════════
-      // 2. WHITELIST MANAGEMENT
+      // 2. ACCESS CONTROL — ACM per-function
       // ═════════════════════════════════════════════════════════════════════
 
-      describe("Whitelist Management", () => {
-        it("should whitelist an address and emit event", async () => {
-          const addr = "0x0000000000000000000000000000000000005678";
-          await expect(eBrake.connect(timelock).setWhitelist(addr, true))
-            .to.emit(eBrake, "WhitelistUpdated")
-            .withArgs(addr, true);
-          expect(await eBrake.whitelist(addr)).to.be.true;
-        });
-
-        it("should remove from whitelist and emit event", async () => {
-          const addr = "0x0000000000000000000000000000000000005678";
-          await eBrake.connect(timelock).setWhitelist(addr, true);
-          await expect(eBrake.connect(timelock).setWhitelist(addr, false))
-            .to.emit(eBrake, "WhitelistUpdated")
-            .withArgs(addr, false);
-          expect(await eBrake.whitelist(addr)).to.be.false;
-        });
-
-        it("should revert when whitelisting zero address", async () => {
-          await expect(
-            eBrake.connect(timelock).setWhitelist(ethers.constants.AddressZero, true),
-          ).to.be.revertedWithCustomError(eBrake, "ZeroAddress");
-        });
-
-        it("should revert when non-ACM caller tries to set whitelist", async () => {
-          await expect(eBrake.connect(randomUser).setWhitelist(randomUser.address, true)).to.be.revertedWithCustomError(
+      describe("Access Control — ACM per-function", () => {
+        it("should revert pauseActions from unauthorized caller", async () => {
+          await expect(eBrake.connect(randomUser).pauseActions([vBTCB], [Action.MINT])).to.be.revertedWithCustomError(
             eBrake,
             "Unauthorized",
           );
         });
 
-        it("should deny access after whitelist removal", async () => {
-          const tempUser = await initMainnetUser(
-            "0x0000000000000000000000000000000000009999",
-            ethers.utils.parseUnits("10"),
-          );
-          await eBrake.connect(timelock).setWhitelist(tempUser.address, true);
-          await expect(eBrake.connect(tempUser).pauseSupply(vBTCB)).to.not.be.reverted;
-
-          await eBrake.connect(timelock).setWhitelist(tempUser.address, false);
-          await expect(eBrake.connect(tempUser).pauseSupply(vBTCB)).to.be.revertedWithCustomError(
-            eBrake,
-            "NotWhitelisted",
-          );
-        });
-      });
-
-      // ═════════════════════════════════════════════════════════════════════
-      // 3. ACCESS CONTROL — onlyWhitelisted
-      // ═════════════════════════════════════════════════════════════════════
-
-      describe("Access Control — onlyWhitelisted", () => {
-        it("should revert pauseActions from non-whitelisted caller", async () => {
-          await expect(eBrake.connect(randomUser).pauseActions([vBTCB], [Action.MINT])).to.be.revertedWithCustomError(
-            eBrake,
-            "NotWhitelisted",
-          );
-        });
-
-        it("should revert pauseSupply from non-whitelisted caller", async () => {
+        it("should revert pauseSupply from unauthorized caller", async () => {
           await expect(eBrake.connect(randomUser).pauseSupply(vBTCB)).to.be.revertedWithCustomError(
             eBrake,
-            "NotWhitelisted",
+            "Unauthorized",
           );
         });
 
-        it("should revert pauseBorrow from non-whitelisted caller", async () => {
+        it("should revert pauseBorrow from unauthorized caller", async () => {
           await expect(eBrake.connect(randomUser).pauseBorrow(vBTCB)).to.be.revertedWithCustomError(
             eBrake,
-            "NotWhitelisted",
+            "Unauthorized",
           );
         });
 
-        it("should revert pauseRedeem from non-whitelisted caller", async () => {
+        it("should revert pauseRedeem from unauthorized caller", async () => {
           await expect(eBrake.connect(randomUser).pauseRedeem(vBTCB)).to.be.revertedWithCustomError(
             eBrake,
-            "NotWhitelisted",
+            "Unauthorized",
           );
         });
 
-        it("should revert pauseTransfer from non-whitelisted caller", async () => {
+        it("should revert pauseTransfer from unauthorized caller", async () => {
           await expect(eBrake.connect(randomUser).pauseTransfer(vBTCB)).to.be.revertedWithCustomError(
             eBrake,
-            "NotWhitelisted",
+            "Unauthorized",
           );
         });
 
-        it("should revert pauseFlashLoan from non-whitelisted caller", async () => {
+        it("should revert pauseFlashLoan from unauthorized caller", async () => {
           await expect(eBrake.connect(randomUser).pauseFlashLoan()).to.be.revertedWithCustomError(
             eBrake,
-            "NotWhitelisted",
+            "Unauthorized",
           );
         });
 
-        it("should revert setCFZero from non-whitelisted caller", async () => {
+        it("should revert setCFZero from unauthorized caller", async () => {
           await expect(eBrake.connect(randomUser).setCFZero(vBTCB, CORE_POOL_ID)).to.be.revertedWithCustomError(
             eBrake,
-            "NotWhitelisted",
+            "Unauthorized",
           );
         });
 
-        it("should revert setMarketBorrowCaps from non-whitelisted caller", async () => {
+        it("should revert setMarketBorrowCaps from unauthorized caller", async () => {
           await expect(eBrake.connect(randomUser).setMarketBorrowCaps([vBTCB], [0])).to.be.revertedWithCustomError(
             eBrake,
-            "NotWhitelisted",
+            "Unauthorized",
           );
         });
 
-        it("should revert setMarketSupplyCaps from non-whitelisted caller", async () => {
+        it("should revert setMarketSupplyCaps from unauthorized caller", async () => {
           await expect(eBrake.connect(randomUser).setMarketSupplyCaps([vBTCB], [0])).to.be.revertedWithCustomError(
             eBrake,
-            "NotWhitelisted",
+            "Unauthorized",
           );
         });
       });
