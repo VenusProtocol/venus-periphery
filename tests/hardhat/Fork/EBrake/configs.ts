@@ -131,7 +131,7 @@ export const ethereumConfig: NetworkConfig = {
 export const arbitrumoneConfig: NetworkConfig = {
   networkName: "arbitrumone",
   label: "Arbitrum One",
-  forkBlock: 336000000,
+  forkBlock: 447543688,
   comptroller: "0x317c1A5739F39046E20b08ac9BeEa3f10fD43326",
   timelock: "0x4b94589Cc23F618687790036726f744D602c4017",
   acm: "0xD9dD18EB0cf10CbA837677f28A8F9Bda4bc2b157",
@@ -146,12 +146,12 @@ export const arbitrumoneConfig: NetworkConfig = {
 export const basemainnetConfig: NetworkConfig = {
   networkName: "basemainnet",
   label: "Base Mainnet",
-  forkBlock: 31000000,
+  forkBlock: 44081996,
   comptroller: "0x0C7973F9598AA62f9e03B94E92C967fD5437426C",
   timelock: "0x21c12f2946a1a66cBFf7eb997022a37167eCf517",
   acm: "0x9E6CeEfDC6183e4D0DF8092A9B90cDF659687daB",
   vToken1: "0x133d3BCD77158D125B75A17Cb517fFD4B4BE64C5", // vwstETH
-  vToken2: "0x3cb752d211f59bbc9c9cabd1bafff6e8fb7b9684", // vUSDC_Core
+  vToken2: "0x3cb752d175740043Ec463673094e06ACDa2F9a2e", // vUSDC_Core
   comptrollerType: "il",
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
@@ -161,12 +161,12 @@ export const basemainnetConfig: NetworkConfig = {
 export const opmainnetConfig: NetworkConfig = {
   networkName: "opmainnet",
   label: "OP Mainnet",
-  forkBlock: 137000000,
+  forkBlock: 149677281,
   comptroller: "0x5593FF68bE84C966821eEf5F0a988C285D5B7CeC",
   timelock: "0x0C6f1E6B4fDa846f63A0d5a8a73EB811E0e0C04b",
   acm: "0xD71b1F33f6B0259683f11174EE4Ddc2bb9cE4eD6",
   vToken1: "0x37ac9731B0B02df54975cd0c7240e0977a051721", // vUSDT_Core
-  vToken2: "0x1C9406ee95B7af55F005996947b19F91B6D55b15", // vWETH_Core
+  vToken2: "0x66d5AE25731Ce99D46770745385e662C8e0B4025", // vWETH_Core
   comptrollerType: "il",
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
@@ -176,12 +176,12 @@ export const opmainnetConfig: NetworkConfig = {
 export const opbnbmainnetConfig: NetworkConfig = {
   networkName: "opbnbmainnet",
   label: "opBNB Mainnet",
-  forkBlock: 48000000,
+  forkBlock: 127345640,
   comptroller: "0xD6e3E2A1d8d95caE355D15b3b9f8E5c2511874dd",
   timelock: "0x10f504e939b912569Dca611851fDAC9E3Ef86819",
   acm: "0xA60Deae5344F1152426cA440fb6552eA0e3005D6",
   vToken1: "0x509e81eF638D489936FA85BC58F52Df01190d26C", // vETH_Core
-  vToken2: "0xb7a01Ba126830692571f1FC8DE55C259d3108770", // vUSDT_Core
+  vToken2: "0xb7a01Ba126830692238521a1aA7E7A7509410b8e", // vUSDT_Core
   comptrollerType: "il",
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
@@ -191,12 +191,12 @@ export const opbnbmainnetConfig: NetworkConfig = {
 export const unichainmainnetConfig: NetworkConfig = {
   networkName: "unichainmainnet",
   label: "Unichain Mainnet",
-  forkBlock: 14000000,
+  forkBlock: 44206481,
   comptroller: "0xe22af1e6b78318e1Fe1053Edbd7209b8Fc62c4Fe",
   timelock: "0x918532A78d22419Da4091930d472bDdf532BE89a",
   acm: "0x1f12014c497a9d905155eB9BfDD9FaC6885e61d0",
   vToken1: "0xbEC19Bef402C697a7be315d3e59E5F65b89Fa1BB", // vwstETH
-  vToken2: "0x67d31Bfa84541E48C5cC10fa5E0Cf502A0c4cB34", // vUSDC_Core
+  vToken2: "0xB953f92B9f759d97d2F2Dec10A8A3cf75fcE3A95", // vUSDC_Core
   comptrollerType: "il",
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
