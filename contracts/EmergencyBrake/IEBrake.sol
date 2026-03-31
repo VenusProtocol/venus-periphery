@@ -60,6 +60,28 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          existing positions — that requires LT change, which EBrake cannot do)
  *        - Pauses flash loans (blocks flash loan attack vector, no user impact)
  *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.
+ *
+ *   BSC vs NON-BSC DIFFERENCES:
+ *
+ *      BSC (BNB Chain) — Diamond Comptroller (venus-protocol repo):
+ *        - setCFZero(market, poolId) — uses poolMarkets() (7-value return) to read LT,
+ *          calls setCollateralFactor(poolId, market, 0, LT) which returns uint256 error code
+ *        - Supports e-mode pools via poolId > 0
+ *        - pauseFlashLoan() — flash loans only exist on Diamond
+ *        - ACM permission strings use underscore prefix:
+ *          _setActionsPaused, _setMarketBorrowCaps, _setMarketSupplyCaps
+ *
+ *      Non-BSC chains — IL Comptroller (isolated-pools repo):
+ *        - setCFZeroIsolated(market) — uses markets() (3-value return) to read LT,
+ *          calls setCollateralFactor(market, 0, LT) which returns void (no error code)
+ *        - No poolId concept — only the core pool exists (other pools are deprecated)
+ *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)
+ *        - ACM permission strings have no underscore:
+ *          setActionsPaused, setMarketBorrowCaps, setMarketSupplyCaps
+ *
+ *      All other functions (pauseActions, pauseSupply, pauseBorrow, pauseRedeem,
+ *      pauseTransfer, setMarketBorrowCaps, setMarketSupplyCaps) are ABI-compatible
+ *      across both comptroller types and work identically on all chains.
  */
 interface IEBrake {
     // ═══════════════════════════════════════════════════════════════════════
