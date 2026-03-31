@@ -152,7 +152,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /**
-     * @dev Wraps a single market and action into arrays for the comptroller's setActionsPaused.
+     * @notice Wraps a single market and action into arrays for the comptroller's setActionsPaused.
+     * @dev Internal helper used by single-action pause functions.
      * @param market The vToken market address.
      * @param action The action to pause/unpause.
      * @param paused True to pause, false to unpause.
@@ -168,8 +169,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /**
-     * @dev Validates that an action is one of the allowed emergency actions.
-     *      Only MINT (0), REDEEM (1), BORROW (2), and TRANSFER (6) are permitted.
+     * @notice Validates that an action is one of the allowed emergency actions.
+     * @dev Only MINT (0), REDEEM (1), BORROW (2), and TRANSFER (6) are permitted.
      * @param action The action to validate.
      */
     function _validateAction(IComptroller.Action action) internal pure {
