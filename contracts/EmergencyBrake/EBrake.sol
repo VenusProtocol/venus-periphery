@@ -44,36 +44,42 @@ contract EBrake is IEBrake, AccessControlledV8 {
             _validateAction(actions[i]);
         }
         IComptroller(address(COMPTROLLER)).setActionsPaused(markets, actions, true);
+        emit ActionsPaused(msg.sender, markets, actions);
     }
 
     /// @inheritdoc IEBrake
     function pauseSupply(address market) external {
         _checkAccessAllowed("pauseSupply(address)");
         _pauseSingleAction(market, IComptroller.Action.MINT);
+        emit ActionPaused(msg.sender, market, IComptroller.Action.MINT);
     }
 
     /// @inheritdoc IEBrake
     function pauseRedeem(address market) external {
         _checkAccessAllowed("pauseRedeem(address)");
         _pauseSingleAction(market, IComptroller.Action.REDEEM);
+        emit ActionPaused(msg.sender, market, IComptroller.Action.REDEEM);
     }
 
     /// @inheritdoc IEBrake
     function pauseBorrow(address market) external {
         _checkAccessAllowed("pauseBorrow(address)");
         _pauseSingleAction(market, IComptroller.Action.BORROW);
+        emit ActionPaused(msg.sender, market, IComptroller.Action.BORROW);
     }
 
     /// @inheritdoc IEBrake
     function pauseTransfer(address market) external {
         _checkAccessAllowed("pauseTransfer(address)");
         _pauseSingleAction(market, IComptroller.Action.TRANSFER);
+        emit ActionPaused(msg.sender, market, IComptroller.Action.TRANSFER);
     }
 
     /// @inheritdoc IEBrake
     function pauseFlashLoan() external {
         _checkAccessAllowed("pauseFlashLoan()");
         COMPTROLLER.setFlashLoanPaused(true);
+        emit FlashLoanPaused(msg.sender);
     }
 
     /// @inheritdoc IEBrake
@@ -84,6 +90,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
         uint256 err = COMPTROLLER.setCollateralFactor(poolId, market, 0, currentLT);
         if (err != 0) revert SetCollateralFactorFailed(err);
+        emit CollateralFactorZeroed(msg.sender, market, poolId);
     }
 
     /// @inheritdoc IEBrake
@@ -93,6 +100,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         if (!m.isListed) revert MarketNotListed(0, market);
 
         IILComptroller(address(COMPTROLLER)).setCollateralFactor(market, 0, m.liquidationThresholdMantissa);
+        emit CollateralFactorZeroed(msg.sender, market, 0);
     }
 
     /// @inheritdoc IEBrake
@@ -113,6 +121,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         }
 
         comptroller.setMarketBorrowCaps(markets, newBorrowCaps);
+        emit BorrowCapsDecreased(msg.sender, markets, newBorrowCaps);
     }
 
     /// @inheritdoc IEBrake
@@ -133,6 +142,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         }
 
         comptroller.setMarketSupplyCaps(markets, newSupplyCaps);
+        emit SupplyCapsDecreased(msg.sender, markets, newSupplyCaps);
     }
 
     /**

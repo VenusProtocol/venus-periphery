@@ -31,7 +31,9 @@ if (FORK_MAINNET) {
       describe("Flash Loan Pausing", () => {
         it("should pause flash loans on comptroller", async () => {
           const { eBrake, comptroller, whitelistedUser } = get();
-          await eBrake.connect(whitelistedUser).pauseFlashLoan();
+          await expect(eBrake.connect(whitelistedUser).pauseFlashLoan())
+            .to.emit(eBrake, "FlashLoanPaused")
+            .withArgs(whitelistedUser.address);
           expect(await comptroller.flashLoanPaused()).to.be.true;
         });
       });
@@ -47,7 +49,9 @@ if (FORK_MAINNET) {
           expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
           expect(marketBefore.liquidationThresholdMantissa).to.be.gt(0);
 
-          await eBrake.connect(whitelistedUser).setCFZero(config.vToken1, CORE_POOL_ID);
+          await expect(eBrake.connect(whitelistedUser).setCFZero(config.vToken1, CORE_POOL_ID))
+            .to.emit(eBrake, "CollateralFactorZeroed")
+            .withArgs(whitelistedUser.address, config.vToken1, CORE_POOL_ID);
 
           const marketAfter = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
           expect(marketAfter.collateralFactorMantissa).to.equal(0);
@@ -76,7 +80,9 @@ if (FORK_MAINNET) {
             expect(marketBefore.isListed).to.be.true;
             expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
 
-            await eBrake.connect(whitelistedUser).setCFZero(emode.vToken, emode.poolId);
+            await expect(eBrake.connect(whitelistedUser).setCFZero(emode.vToken, emode.poolId))
+              .to.emit(eBrake, "CollateralFactorZeroed")
+              .withArgs(whitelistedUser.address, emode.vToken, emode.poolId);
 
             const marketAfter = await comptroller.poolMarkets(emode.poolId, emode.vToken);
             expect(marketAfter.collateralFactorMantissa).to.equal(0);

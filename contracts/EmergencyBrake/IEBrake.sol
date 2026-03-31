@@ -63,6 +63,47 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  */
 interface IEBrake {
     // ═══════════════════════════════════════════════════════════════════════
+    //                              EVENTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Emitted when actions are paused on markets via batch pause.
+    /// @param caller The address that triggered the emergency action.
+    /// @param markets The vToken market addresses that were paused.
+    /// @param actions The actions that were paused.
+    event ActionsPaused(address indexed caller, address[] markets, IComptroller.Action[] actions);
+
+    /// @notice Emitted when a single action is paused on a market.
+    /// @param caller The address that triggered the emergency action.
+    /// @param market The vToken market address that was paused.
+    /// @param action The action that was paused.
+    event ActionPaused(address indexed caller, address indexed market, IComptroller.Action action);
+
+    /// @notice Emitted when flash loans are paused.
+    /// @param caller The address that triggered the emergency action.
+    event FlashLoanPaused(address indexed caller);
+
+    /// @notice Emitted when a collateral factor is set to zero.
+    ///         Used for both core/e-mode pools and IL comptrollers.
+    /// @param caller The address that triggered the emergency action.
+    /// @param market The vToken market address whose CF was zeroed.
+    /// @param poolId The pool ID. On BNB Chain (Diamond comptroller) this identifies the core pool (0)
+    ///        or an e-mode pool (>0). On other networks (IL comptroller) there is no poolId concept;
+    ///        0 is used as a sentinel value to indicate that only the core pool is supported (other pools are deprecated).
+    event CollateralFactorZeroed(address indexed caller, address indexed market, uint96 indexed poolId);
+
+    /// @notice Emitted when borrow caps are decreased.
+    /// @param caller The address that triggered the emergency action.
+    /// @param markets The vToken market addresses whose borrow caps were decreased.
+    /// @param newBorrowCaps The new borrow cap values.
+    event BorrowCapsDecreased(address indexed caller, address[] markets, uint256[] newBorrowCaps);
+
+    /// @notice Emitted when supply caps are decreased.
+    /// @param caller The address that triggered the emergency action.
+    /// @param markets The vToken market addresses whose supply caps were decreased.
+    /// @param newSupplyCaps The new supply cap values.
+    event SupplyCapsDecreased(address indexed caller, address[] markets, uint256[] newSupplyCaps);
+
+    // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -73,7 +114,9 @@ interface IEBrake {
     /// @notice Thrown when a zero address is passed where a valid address is required.
     error ZeroAddress();
 
-    /// @notice Thrown when a market is not listed in the given pool (Diamond comptroller).
+    /// @notice Thrown when a market is not listed in the given pool.
+    ///         On BNB Chain (Diamond comptroller) poolId identifies the core pool (0) or an e-mode pool (>0).
+    ///         On other networks (IL comptroller) there is no poolId concept; 0 is used as a sentinel value to indicate that only the core pool is supported (other pools are deprecated).
     /// @param poolId The pool ID that was queried.
     /// @param market The market address that is not listed.
     error MarketNotListed(uint96 poolId, address market);

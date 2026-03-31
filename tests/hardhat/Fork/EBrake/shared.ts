@@ -185,16 +185,20 @@ export function pauseTests(config: NetworkConfig, get: FixtureGetter): void {
   describe("Batch Pause — pauseActions", () => {
     it("should pause MINT on multiple markets", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
-      await eBrake.connect(whitelistedUser).pauseActions([config.vToken1, config.vToken2], [Action.MINT]);
+      await expect(eBrake.connect(whitelistedUser).pauseActions([config.vToken1, config.vToken2], [Action.MINT]))
+        .to.emit(eBrake, "ActionsPaused")
+        .withArgs(whitelistedUser.address, [config.vToken1, config.vToken2], [Action.MINT]);
       expect(await comptroller.actionPaused(config.vToken1, Action.MINT)).to.be.true;
       expect(await comptroller.actionPaused(config.vToken2, Action.MINT)).to.be.true;
     });
 
     it("should pause multiple actions on a market", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
-      await eBrake
-        .connect(whitelistedUser)
-        .pauseActions([config.vToken1], [Action.MINT, Action.BORROW, Action.TRANSFER]);
+      await expect(
+        eBrake.connect(whitelistedUser).pauseActions([config.vToken1], [Action.MINT, Action.BORROW, Action.TRANSFER]),
+      )
+        .to.emit(eBrake, "ActionsPaused")
+        .withArgs(whitelistedUser.address, [config.vToken1], [Action.MINT, Action.BORROW, Action.TRANSFER]);
       expect(await comptroller.actionPaused(config.vToken1, Action.MINT)).to.be.true;
       expect(await comptroller.actionPaused(config.vToken1, Action.BORROW)).to.be.true;
       expect(await comptroller.actionPaused(config.vToken1, Action.TRANSFER)).to.be.true;
@@ -252,7 +256,9 @@ export function pauseTests(config: NetworkConfig, get: FixtureGetter): void {
     for (const { name, action, fn } of fns) {
       it(`${name} should pause and verify on comptroller`, async () => {
         const { eBrake, comptroller, whitelistedUser } = get();
-        await eBrake.connect(whitelistedUser)[fn](config.vToken1);
+        await expect(eBrake.connect(whitelistedUser)[fn](config.vToken1))
+          .to.emit(eBrake, "ActionPaused")
+          .withArgs(whitelistedUser.address, config.vToken1, action);
         expect(await comptroller.actionPaused(config.vToken1, action)).to.be.true;
       });
     }
@@ -266,13 +272,17 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
       const currentCap = await comptroller.borrowCaps(config.vToken1);
       expect(currentCap).to.be.gt(0);
       const newCap = currentCap.div(2);
-      await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [newCap]);
+      await expect(eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [newCap]))
+        .to.emit(eBrake, "BorrowCapsDecreased")
+        .withArgs(whitelistedUser.address, [config.vToken1], [newCap]);
       expect(await comptroller.borrowCaps(config.vToken1)).to.equal(newCap);
     });
 
     it("should set borrow cap to zero", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
-      await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
+      await expect(eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]))
+        .to.emit(eBrake, "BorrowCapsDecreased")
+        .withArgs(whitelistedUser.address, [config.vToken1], [0]);
       expect(await comptroller.borrowCaps(config.vToken1)).to.equal(0);
     });
 
@@ -329,13 +339,17 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
       const currentCap = await comptroller.supplyCaps(config.vToken1);
       expect(currentCap).to.be.gt(0);
       const newCap = currentCap.div(2);
-      await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [newCap]);
+      await expect(eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [newCap]))
+        .to.emit(eBrake, "SupplyCapsDecreased")
+        .withArgs(whitelistedUser.address, [config.vToken1], [newCap]);
       expect(await comptroller.supplyCaps(config.vToken1)).to.equal(newCap);
     });
 
     it("should set supply cap to zero", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
-      await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [0]);
+      await expect(eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [0]))
+        .to.emit(eBrake, "SupplyCapsDecreased")
+        .withArgs(whitelistedUser.address, [config.vToken1], [0]);
       expect(await comptroller.supplyCaps(config.vToken1)).to.equal(0);
     });
 
@@ -396,7 +410,9 @@ export function setCFZeroIsolatedTests(config: NetworkConfig, get: FixtureGetter
       expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
       expect(marketBefore.liquidationThresholdMantissa).to.be.gt(0);
 
-      await eBrake.connect(whitelistedUser).setCFZeroIsolated(config.vToken1);
+      await expect(eBrake.connect(whitelistedUser).setCFZeroIsolated(config.vToken1))
+        .to.emit(eBrake, "CollateralFactorZeroed")
+        .withArgs(whitelistedUser.address, config.vToken1, 0);
 
       const marketAfter = await comptroller.markets(config.vToken1);
       expect(marketAfter.collateralFactorMantissa).to.equal(0);
