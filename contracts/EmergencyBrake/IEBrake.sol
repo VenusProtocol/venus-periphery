@@ -116,7 +116,8 @@ interface IEBrake {
 
     /// @notice Thrown when a market is not listed in the given pool.
     ///         On BNB Chain (Diamond comptroller) poolId identifies the core pool (0) or an e-mode pool (>0).
-    ///         On other networks (IL comptroller) there is no poolId concept; 0 is used as a sentinel value to indicate that only the core pool is supported (other pools are deprecated).
+    ///         On other networks (IL comptroller) there is no poolId concept;
+    ///         0 is used as a sentinel value (other pools are deprecated).
     /// @param poolId The pool ID that was queried.
     /// @param market The market address that is not listed.
     error MarketNotListed(uint96 poolId, address market);
