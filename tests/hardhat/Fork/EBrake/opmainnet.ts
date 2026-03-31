@@ -1,183 +1,25 @@
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import { expect } from "chai";
-import { Contract } from "ethers";
-import { ethers } from "hardhat";
 
-import { EBrake } from "../../../../typechain";
-import { forking, initMainnetUser } from "../utils";
+import { forking } from "../utils";
+import { opmainnetConfig } from "./configs";
+import { EBrakeFixture, createDeployFixture, runSharedTests, setCFZeroIsolatedTests } from "./shared";
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CONSTANTS — OP Mainnet
-// ═══════════════════════════════════════════════════════════════════════════
+const config = opmainnetConfig;
 
-const COMPTROLLER = "0x5593FF68bE84C966821eEf5F0a988C285D5B7CeC";
-const NORMAL_TIMELOCK = "0x0C6f1E6B4fDa846f63A0d5a8a73EB811E0e0C04b";
-const ACM = "0xD71b1F33f6B0259683f11174EE4Ddc2bb9cE4eD6";
+if (process.env.FORKED_NETWORK === config.networkName) {
+  const deployFixture = createDeployFixture(config);
 
-const vToken = "0x37ac9731B0B02df54975cd0c7240e0977a051721"; // vUSDT_Core
-const vToken2 = "0x1C9406ee95B7af55F005996947b19F91B6D55b15"; // vWETH_Core
+  forking(config.forkBlock, () => {
+    let fixture: EBrakeFixture;
+    const get = () => fixture;
 
-const Action = {
-  MINT: 0,
-  REDEEM: 1,
-  BORROW: 2,
-  REPAY: 3,
-  SEIZE: 4,
-  LIQUIDATE: 5,
-  TRANSFER: 6,
-  ENTER_MARKET: 7,
-  EXIT_MARKET: 8,
-};
-
-const FORK_NETWORK = process.env.FORKED_NETWORK === "opmainnet";
-
-const ACM_ABI = [
-  "function giveCallPermission(address contractAddress, string calldata functionSig, address accountToPermit)",
-];
-
-const IL_COMPTROLLER_ABI = [
-  "function markets(address vToken) view returns (bool isListed, uint256 collateralFactorMantissa, uint256 liquidationThresholdMantissa)",
-  "function actionPaused(address vToken, uint8 action) view returns (bool)",
-  "function borrowCaps(address vToken) view returns (uint256)",
-  "function supplyCaps(address vToken) view returns (uint256)",
-];
-
-type EBrakeFixture = {
-  eBrake: EBrake;
-  comptroller: Contract;
-  whitelistedUser: SignerWithAddress;
-  randomUser: SignerWithAddress;
-};
-
-async function deployEBrakeFixture(): Promise<EBrakeFixture> {
-  const [, randomUser] = await ethers.getSigners();
-  const timelock = await initMainnetUser(NORMAL_TIMELOCK, ethers.utils.parseUnits("10"));
-  const whitelistedUser = await initMainnetUser(
-    "0x0000000000000000000000000000000000001234",
-    ethers.utils.parseUnits("10"),
-  );
-
-  const acm = new ethers.Contract(ACM, ACM_ABI, timelock);
-  const comptroller = new ethers.Contract(COMPTROLLER, IL_COMPTROLLER_ABI, timelock);
-
-  const EBrakeFactory = await ethers.getContractFactory("EBrake");
-  const eBrake = (await EBrakeFactory.deploy(COMPTROLLER, ACM)) as EBrake;
-
-  const eBrakeFunctions = [
-    "pauseActions(address[],uint8[])",
-    "pauseSupply(address)",
-    "pauseRedeem(address)",
-    "pauseBorrow(address)",
-    "pauseTransfer(address)",
-    "setCFZeroIsolated(address)",
-    "setMarketBorrowCaps(address[],uint256[])",
-    "setMarketSupplyCaps(address[],uint256[])",
-  ];
-  for (const sig of eBrakeFunctions) {
-    await acm.giveCallPermission(eBrake.address, sig, whitelistedUser.address);
-  }
-
-  for (const sig of [
-    "setActionsPaused(address[],uint256[],bool)",
-    "setCollateralFactor(address,uint256,uint256)",
-    "setMarketBorrowCaps(address[],uint256[])",
-    "setMarketSupplyCaps(address[],uint256[])",
-  ]) {
-    await acm.giveCallPermission(ethers.constants.AddressZero, sig, eBrake.address);
-  }
-
-  return { eBrake, comptroller, whitelistedUser, randomUser };
-}
-
-if (FORK_NETWORK) {
-  const FORK_BLOCK = 137000000;
-
-  forking(FORK_BLOCK, () => {
-    let eBrake: EBrake;
-    let comptroller: Contract;
-    let whitelistedUser: SignerWithAddress;
-    let randomUser: SignerWithAddress;
-
-    describe("EBrake Fork Tests (OP Mainnet — IL Core Pool)", () => {
+    describe(`EBrake Fork Tests (${config.label} — IL Core Pool)`, () => {
       beforeEach(async () => {
-        ({ eBrake, comptroller, whitelistedUser, randomUser } = await loadFixture(deployEBrakeFixture));
+        fixture = await loadFixture(deployFixture);
       });
 
-      describe("setCFZeroIsolated", () => {
-        it("should set CF to zero while preserving LT", async () => {
-          const marketBefore = await comptroller.markets(vToken);
-          expect(marketBefore.isListed).to.be.true;
-          expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
-
-          await eBrake.connect(whitelistedUser).setCFZeroIsolated(vToken);
-
-          const marketAfter = await comptroller.markets(vToken);
-          expect(marketAfter.collateralFactorMantissa).to.equal(0);
-          expect(marketAfter.liquidationThresholdMantissa).to.equal(marketBefore.liquidationThresholdMantissa);
-        });
-
-        it("should revert for unlisted market", async () => {
-          await expect(
-            eBrake.connect(whitelistedUser).setCFZeroIsolated("0x0000000000000000000000000000000000000001"),
-          ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
-        });
-
-        it("should revert from unauthorized caller", async () => {
-          await expect(eBrake.connect(randomUser).setCFZeroIsolated(vToken)).to.be.revertedWithCustomError(
-            eBrake,
-            "Unauthorized",
-          );
-        });
-      });
-
-      describe("Single Market Pausing", () => {
-        it("pauseSupply should pause MINT", async () => {
-          await eBrake.connect(whitelistedUser).pauseSupply(vToken);
-          expect(await comptroller.actionPaused(vToken, Action.MINT)).to.be.true;
-        });
-
-        it("pauseBorrow should pause BORROW", async () => {
-          await eBrake.connect(whitelistedUser).pauseBorrow(vToken);
-          expect(await comptroller.actionPaused(vToken, Action.BORROW)).to.be.true;
-        });
-      });
-
-      describe("Batch Pause", () => {
-        it("should pause MINT on multiple markets", async () => {
-          await eBrake.connect(whitelistedUser).pauseActions([vToken, vToken2], [Action.MINT]);
-          expect(await comptroller.actionPaused(vToken, Action.MINT)).to.be.true;
-          expect(await comptroller.actionPaused(vToken2, Action.MINT)).to.be.true;
-        });
-      });
-
-      describe("setMarketBorrowCaps", () => {
-        it("should set borrow cap to zero", async () => {
-          await eBrake.connect(whitelistedUser).setMarketBorrowCaps([vToken], [0]);
-          expect(await comptroller.borrowCaps(vToken)).to.equal(0);
-        });
-
-        it("should revert when increasing borrow cap", async () => {
-          const currentCap = await comptroller.borrowCaps(vToken);
-          await expect(
-            eBrake.connect(whitelistedUser).setMarketBorrowCaps([vToken], [currentCap.add(1)]),
-          ).to.be.revertedWithCustomError(eBrake, "CapCanOnlyDecrease");
-        });
-      });
-
-      describe("setMarketSupplyCaps", () => {
-        it("should set supply cap to zero", async () => {
-          await eBrake.connect(whitelistedUser).setMarketSupplyCaps([vToken], [0]);
-          expect(await comptroller.supplyCaps(vToken)).to.equal(0);
-        });
-
-        it("should revert when increasing supply cap", async () => {
-          const currentCap = await comptroller.supplyCaps(vToken);
-          await expect(
-            eBrake.connect(whitelistedUser).setMarketSupplyCaps([vToken], [currentCap.add(1)]),
-          ).to.be.revertedWithCustomError(eBrake, "CapCanOnlyDecrease");
-        });
-      });
+      runSharedTests(config, get);
+      setCFZeroIsolatedTests(config, get);
     });
   });
 }
