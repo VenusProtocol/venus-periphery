@@ -21,6 +21,7 @@ export interface NetworkConfig {
   vToken1: string;
   vToken2: string;
   comptrollerType: ComptrollerType;
+  isIsolatedPool: boolean;
   comptrollerAbi: string[];
   comptrollerPermissions: string[];
   eBrakeFunctions: string[];
@@ -71,8 +72,8 @@ const DIAMOND_EBRAKE_FUNCTIONS = [
   "pauseBorrow(address)",
   "pauseTransfer(address)",
   "pauseFlashLoan()",
+  "setCFZero(address)",
   "setCFZero(address,uint96)",
-  "setCFZeroIsolated(address)",
   "setMarketBorrowCaps(address[],uint256[])",
   "setMarketSupplyCaps(address[],uint256[])",
 ];
@@ -83,7 +84,7 @@ const IL_EBRAKE_FUNCTIONS = [
   "pauseRedeem(address)",
   "pauseBorrow(address)",
   "pauseTransfer(address)",
-  "setCFZeroIsolated(address)",
+  "setCFZero(address)",
   "setMarketBorrowCaps(address[],uint256[])",
   "setMarketSupplyCaps(address[],uint256[])",
 ];
@@ -102,6 +103,7 @@ export const bscmainnetConfig: NetworkConfig = {
   vToken1: "0x882C173bC7Ff3b7786CA16dfeD3DFFfb9Ee7847B", // vBTCB
   vToken2: "0xfD5840Cd36d94D7229439859C0112a4185BC0255", // vUSDT
   comptrollerType: "diamond",
+  isIsolatedPool: false,
   comptrollerAbi: DIAMOND_COMPTROLLER_ABI,
   comptrollerPermissions: DIAMOND_COMPTROLLER_PERMISSIONS,
   eBrakeFunctions: DIAMOND_EBRAKE_FUNCTIONS,
@@ -123,6 +125,7 @@ export const ethereumConfig: NetworkConfig = {
   vToken1: "0x7c8ff7d2A1372433726f879BD945fFb250B94c65", // vWETH_Core
   vToken2: "0x17C07e0c232f2f80DfDbd7a95b942D893A4C5ACb", // vUSDC_Core
   comptrollerType: "il",
+  isIsolatedPool: true,
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
   eBrakeFunctions: IL_EBRAKE_FUNCTIONS,
@@ -138,6 +141,7 @@ export const arbitrumoneConfig: NetworkConfig = {
   vToken1: "0x68a34332983f4Bf866768DD6D6E638b02eF5e1f0", // vWETH_Core
   vToken2: "0x7D8609f8da70fF9027E9bc5229Af4F6727662707", // vUSDC_Core
   comptrollerType: "il",
+  isIsolatedPool: true,
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
   eBrakeFunctions: IL_EBRAKE_FUNCTIONS,
@@ -153,6 +157,7 @@ export const basemainnetConfig: NetworkConfig = {
   vToken1: "0x133d3BCD77158D125B75A17Cb517fFD4B4BE64C5", // vwstETH
   vToken2: "0x3cb752d175740043Ec463673094e06ACDa2F9a2e", // vUSDC_Core
   comptrollerType: "il",
+  isIsolatedPool: true,
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
   eBrakeFunctions: IL_EBRAKE_FUNCTIONS,
@@ -168,6 +173,7 @@ export const opmainnetConfig: NetworkConfig = {
   vToken1: "0x37ac9731B0B02df54975cd0c7240e0977a051721", // vUSDT_Core
   vToken2: "0x66d5AE25731Ce99D46770745385e662C8e0B4025", // vWETH_Core
   comptrollerType: "il",
+  isIsolatedPool: true,
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
   eBrakeFunctions: IL_EBRAKE_FUNCTIONS,
@@ -183,6 +189,7 @@ export const opbnbmainnetConfig: NetworkConfig = {
   vToken1: "0x509e81eF638D489936FA85BC58F52Df01190d26C", // vETH_Core
   vToken2: "0xb7a01Ba126830692238521a1aA7E7A7509410b8e", // vUSDT_Core
   comptrollerType: "il",
+  isIsolatedPool: true,
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
   eBrakeFunctions: IL_EBRAKE_FUNCTIONS,
@@ -198,6 +205,7 @@ export const unichainmainnetConfig: NetworkConfig = {
   vToken1: "0xbEC19Bef402C697a7be315d3e59E5F65b89Fa1BB", // vwstETH
   vToken2: "0xB953f92B9f759d97d2F2Dec10A8A3cf75fcE3A95", // vUSDC_Core
   comptrollerType: "il",
+  isIsolatedPool: true,
   comptrollerAbi: IL_COMPTROLLER_ABI,
   comptrollerPermissions: IL_COMPTROLLER_PERMISSIONS,
   eBrakeFunctions: IL_EBRAKE_FUNCTIONS,

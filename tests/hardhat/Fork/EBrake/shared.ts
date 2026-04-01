@@ -52,7 +52,7 @@ export function createDeployFixture(config: NetworkConfig): () => Promise<EBrake
     const comptroller = new ethers.Contract(config.comptroller, config.comptrollerAbi, timelock);
 
     const EBrakeFactory = await ethers.getContractFactory("EBrake");
-    const eBrake = (await EBrakeFactory.deploy(config.comptroller, config.acm)) as EBrake;
+    const eBrake = (await EBrakeFactory.deploy(config.comptroller, config.acm, config.isIsolatedPool)) as EBrake;
 
     // Grant whitelistedUser per-function ACM permissions on EBrake
     for (const sig of config.eBrakeFunctions) {
@@ -79,22 +79,25 @@ export function deploymentTests(config: NetworkConfig, get: FixtureGetter): void
       expect((await eBrake.COMPTROLLER()).toLowerCase()).to.equal(config.comptroller.toLowerCase());
     });
 
+    it("should set IS_ISOLATED_POOL immutable correctly", async () => {
+      const { eBrake } = get();
+      expect(await eBrake.IS_ISOLATED_POOL()).to.equal(config.isIsolatedPool);
+    });
+
     it("should revert deployment with zero comptroller", async () => {
       const { eBrake } = get();
       const F = await ethers.getContractFactory("EBrake");
-      await expect(F.deploy(ethers.constants.AddressZero, config.acm)).to.be.revertedWithCustomError(
-        eBrake,
-        "ZeroAddress",
-      );
+      await expect(
+        F.deploy(ethers.constants.AddressZero, config.acm, config.isIsolatedPool),
+      ).to.be.revertedWithCustomError(eBrake, "ZeroAddress");
     });
 
     it("should revert deployment with zero ACM", async () => {
       const { eBrake } = get();
       const F = await ethers.getContractFactory("EBrake");
-      await expect(F.deploy(config.comptroller, ethers.constants.AddressZero)).to.be.revertedWithCustomError(
-        eBrake,
-        "ZeroAddress",
-      );
+      await expect(
+        F.deploy(config.comptroller, ethers.constants.AddressZero, config.isIsolatedPool),
+      ).to.be.revertedWithCustomError(eBrake, "ZeroAddress");
     });
   });
 }
@@ -146,21 +149,19 @@ export function accessControlTests(config: NetworkConfig, get: FixtureGetter): v
         await expect(eBrake.connect(randomUser).pauseFlashLoan()).to.be.revertedWithCustomError(eBrake, "Unauthorized");
       });
 
-      it("should revert setCFZero from unauthorized caller", async () => {
+      it("should revert setCFZero(address,uint96) from unauthorized caller", async () => {
         const { eBrake, randomUser } = get();
-        await expect(eBrake.connect(randomUser).setCFZero(config.vToken1, 0)).to.be.revertedWithCustomError(
-          eBrake,
-          "Unauthorized",
-        );
+        await expect(
+          eBrake.connect(randomUser)["setCFZero(address,uint96)"](config.vToken1, 0),
+        ).to.be.revertedWithCustomError(eBrake, "Unauthorized");
       });
     }
 
-    it("should revert setCFZeroIsolated from unauthorized caller", async () => {
+    it("should revert setCFZero(address) from unauthorized caller", async () => {
       const { eBrake, randomUser } = get();
-      await expect(eBrake.connect(randomUser).setCFZeroIsolated(config.vToken1)).to.be.revertedWithCustomError(
-        eBrake,
-        "Unauthorized",
-      );
+      await expect(
+        eBrake.connect(randomUser)["setCFZero(address)"](config.vToken1),
+      ).to.be.revertedWithCustomError(eBrake, "Unauthorized");
     });
 
     it("should revert setMarketBorrowCaps from unauthorized caller", async () => {
@@ -403,30 +404,54 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
   });
 }
 
-export function setCFZeroIsolatedTests(config: NetworkConfig, get: FixtureGetter): void {
-  describe("setCFZeroIsolated", () => {
-    it("should set CF to zero while preserving LT", async () => {
-      const { eBrake, comptroller, whitelistedUser } = get();
-      const marketBefore = await comptroller.markets(config.vToken1);
-      expect(marketBefore.isListed).to.be.true;
-      expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
-      expect(marketBefore.liquidationThresholdMantissa).to.be.gt(0);
+export function setCFZeroTests(config: NetworkConfig, get: FixtureGetter): void {
+  describe("setCFZero(address) — unified batch", () => {
+    if (config.comptrollerType === "il") {
+      it("should set CF to zero while preserving LT (IL comptroller)", async () => {
+        const { eBrake, comptroller, whitelistedUser } = get();
+        const marketBefore = await comptroller.markets(config.vToken1);
+        expect(marketBefore.isListed).to.be.true;
+        expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
+        expect(marketBefore.liquidationThresholdMantissa).to.be.gt(0);
 
-      await expect(eBrake.connect(whitelistedUser).setCFZeroIsolated(config.vToken1))
-        .to.emit(eBrake, "CollateralFactorZeroed")
-        .withArgs(whitelistedUser.address, config.vToken1, 0);
+        await expect(eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1))
+          .to.emit(eBrake, "CollateralFactorZeroed")
+          .withArgs(whitelistedUser.address, config.vToken1, 0);
 
-      const marketAfter = await comptroller.markets(config.vToken1);
-      expect(marketAfter.collateralFactorMantissa).to.equal(0);
-      expect(marketAfter.liquidationThresholdMantissa).to.equal(marketBefore.liquidationThresholdMantissa);
-    });
+        const marketAfter = await comptroller.markets(config.vToken1);
+        expect(marketAfter.collateralFactorMantissa).to.equal(0);
+        expect(marketAfter.liquidationThresholdMantissa).to.equal(marketBefore.liquidationThresholdMantissa);
+      });
 
-    it("should revert for unlisted market", async () => {
-      const { eBrake, whitelistedUser } = get();
-      await expect(
-        eBrake.connect(whitelistedUser).setCFZeroIsolated("0x0000000000000000000000000000000000000001"),
-      ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
-    });
+      it("should revert for unlisted market", async () => {
+        const { eBrake, whitelistedUser } = get();
+        await expect(
+          eBrake.connect(whitelistedUser)["setCFZero(address)"]("0x0000000000000000000000000000000000000001"),
+        ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
+      });
+    } else {
+      it("should set CF to zero while preserving LT (Diamond comptroller)", async () => {
+        const { eBrake, comptroller, whitelistedUser } = get();
+        const CORE_POOL_ID = 0;
+        const marketBefore = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
+        expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
+        expect(marketBefore.liquidationThresholdMantissa).to.be.gt(0);
+
+        await expect(eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1))
+          .to.emit(eBrake, "CollateralFactorZeroed")
+          .withArgs(whitelistedUser.address, config.vToken1, CORE_POOL_ID);
+
+        const marketAfter = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
+        expect(marketAfter.collateralFactorMantissa).to.equal(0);
+        expect(marketAfter.liquidationThresholdMantissa).to.equal(marketBefore.liquidationThresholdMantissa);
+      });
+
+      it("should skip unlisted pools without reverting", async () => {
+        const { eBrake, whitelistedUser } = get();
+        // vToken1 may not be listed in all pools — batch should skip, not revert
+        await expect(eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1)).to.not.be.reverted;
+      });
+    }
   });
 }
 
@@ -437,4 +462,5 @@ export function runSharedTests(config: NetworkConfig, get: FixtureGetter): void 
   accessControlTests(config, get);
   pauseTests(config, get);
   capTests(config, get);
+  setCFZeroTests(config, get);
 }
