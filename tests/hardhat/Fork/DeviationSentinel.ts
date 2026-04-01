@@ -59,7 +59,7 @@ const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 // ═══════════════════════════════════════════════════════════════════════════
 
 const DEVIATION_SENTINEL_ABI = [
-  "function CORE_POOL_COMPTROLLER() view returns (address)",
+  "function EBRAKE() view returns (address)",
   "function RESILIENT_ORACLE() view returns (address)",
   "function SENTINEL_ORACLE() view returns (address)",
   "function owner() view returns (address)",
@@ -75,9 +75,7 @@ const DEVIATION_SENTINEL_ABI = [
   "function setTokenMonitoringEnabled(address token, bool enabled)",
   "function resetMarketState(address vToken)",
   "event SupplyPaused(address indexed vToken)",
-  "event SupplyUnpaused(address indexed vToken)",
   "event BorrowPaused(address indexed vToken)",
-  "event BorrowUnpaused(address indexed vToken)",
   "event MarketStateReset(address indexed vToken)",
   "event TrustedKeeperUpdated(address indexed keeper, bool trusted)",
   "event TokenMonitoringStatusChanged(address indexed token, bool enabled)",
@@ -120,12 +118,56 @@ const COMPTROLLER_ABI = [
   "function markets(address vToken) view returns (bool isListed, uint256 collateralFactorMantissa, bool isVenus)",
   "function actionPaused(address vToken, uint8 action) view returns (bool)",
   "function _setActionsPaused(address[] calldata vTokens, uint8[] calldata actions, bool paused)",
-  "function _setCollateralFactor(address vToken, uint256 newCollateralFactorMantissa) returns (uint256)",
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPER FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Proxy admin address (from DeviationSentinel_Proxy deployment args)
+const PROXY_ADMIN = "0x6beb6D2695B67FEb73ad4f172E8E2975497187e4";
+
+/**
+ * Deploy EBrake and upgrade DeviationSentinel proxy to new implementation.
+ * Grants all required ACM permissions for the new EBrake-integrated flow.
+ */
+async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Promise<{ eBrake: Contract }> {
+  const acm = new ethers.Contract(ACM, ACM_ABI, timelock);
+
+  // Deploy EBrake (BSC = Diamond comptroller, so isIsolatedPool = false)
+  const EBrakeFactory = await ethers.getContractFactory("EBrake");
+  const eBrake = await EBrakeFactory.deploy(COMPTROLLER, ACM, false);
+
+  // Grant EBrake permissions on comptroller
+  await acm.giveCallPermission(ethers.constants.AddressZero, "_setActionsPaused(address[],uint8[],bool)", eBrake.address);
+  await acm.giveCallPermission(
+    ethers.constants.AddressZero,
+    "setCollateralFactor(uint96,address,uint256,uint256)",
+    eBrake.address,
+  );
+
+  // Grant DeviationSentinel permissions on EBrake
+  await acm.giveCallPermission(eBrake.address, "pauseBorrow(address)", DEVIATION_SENTINEL);
+  await acm.giveCallPermission(eBrake.address, "pauseSupply(address)", DEVIATION_SENTINEL);
+  await acm.giveCallPermission(eBrake.address, "setCFZero(address)", DEVIATION_SENTINEL);
+
+  // Deploy new DeviationSentinel implementation with EBrake
+  const SentinelFactory = await ethers.getContractFactory("DeviationSentinel");
+  const newImpl = await SentinelFactory.deploy(eBrake.address, RESILIENT_ORACLE, addresses.SentinelOracle);
+
+  // Upgrade proxy via ProxyAdmin contract (owned by timelock)
+  const proxyAdminContract = new ethers.Contract(
+    PROXY_ADMIN,
+    ["function upgrade(address proxy, address implementation)"],
+    timelock,
+  );
+  await proxyAdminContract.upgrade(DEVIATION_SENTINEL, newImpl.address);
+
+  console.log("EBrake deployed at:", eBrake.address);
+  console.log("DeviationSentinel upgraded to new implementation:", newImpl.address);
+
+  return { eBrake };
+}
 
 /**
  * Execute VIP-900 commands by impersonating the timelock.
@@ -145,7 +187,7 @@ async function executeVip900(timelock: SignerWithAddress): Promise<void> {
     await contract.acceptOwnership();
   }
 
-  // Grant permissions for DeviationSentinel
+  // Grant permissions for DeviationSentinel admin functions
   const permissionAccounts = [GUARDIAN, NORMAL_TIMELOCK, FAST_TRACK_TIMELOCK, CRITICAL_TIMELOCK];
   for (const account of permissionAccounts) {
     await acm.giveCallPermission(DEVIATION_SENTINEL, "setTokenConfig(address,(uint8,bool))", account);
@@ -171,33 +213,6 @@ async function executeVip900(timelock: SignerWithAddress): Promise<void> {
     await acm.giveCallPermission(PANCAKESWAP_ORACLE, "setPoolConfig(address,address)", account);
   }
 
-  // Grant DeviationSentinel permissions on comptrollers
-  await acm.giveCallPermission(
-    ethers.constants.AddressZero,
-    "setActionsPaused(address[],uint8[],bool)",
-    DEVIATION_SENTINEL,
-  );
-  await acm.giveCallPermission(
-    ethers.constants.AddressZero,
-    "_setActionsPaused(address[],uint8[],bool)",
-    DEVIATION_SENTINEL,
-  );
-  await acm.giveCallPermission(
-    ethers.constants.AddressZero,
-    "setCollateralFactor(address,uint256,uint256)",
-    DEVIATION_SENTINEL,
-  );
-  await acm.giveCallPermission(
-    ethers.constants.AddressZero,
-    "setCollateralFactor(uint96,address,uint256,uint256)",
-    DEVIATION_SENTINEL,
-  );
-  await acm.giveCallPermission(
-    ethers.constants.AddressZero,
-    "_setCollateralFactor(address,uint256)",
-    DEVIATION_SENTINEL,
-  );
-
   // Configure CAKE token
   await pancakeSwapOracle.setPoolConfig(CAKE, CAKE_PCS_POOL);
   await deviationSentinel.setTokenConfig(CAKE, { deviation: 20, enabled: true });
@@ -219,13 +234,11 @@ async function setSentinelPriceNoDeviation(sentinelOracle: Contract): Promise<Bi
 
 /**
  * Set sentinel price lower than oracle (triggers supply pause + CF zero)
- * Uses cached oracle price to avoid staleness issues
  */
 async function setSentinelPriceLower(
   sentinelOracle: Contract,
   deviationPercent: number = 50,
 ): Promise<{ oraclePrice: BigNumber; sentinelPrice: BigNumber }> {
-  // Sentinel price = oracle * (100 - deviation) / 100
   const sentinelPrice = CACHED_BTCB_PRICE.mul(100 - deviationPercent).div(100);
   await sentinelOracle.setDirectPrice(BTCB, sentinelPrice);
   return { oraclePrice: CACHED_BTCB_PRICE, sentinelPrice };
@@ -233,34 +246,30 @@ async function setSentinelPriceLower(
 
 /**
  * Set sentinel price higher than oracle (triggers borrow pause)
- * Uses cached oracle price to avoid staleness issues
  */
 async function setSentinelPriceHigher(
   sentinelOracle: Contract,
   deviationPercent: number = 50,
 ): Promise<{ oraclePrice: BigNumber; sentinelPrice: BigNumber }> {
-  // Sentinel price = oracle * (100 + deviation) / 100
   const sentinelPrice = CACHED_BTCB_PRICE.mul(100 + deviationPercent).div(100);
   await sentinelOracle.setDirectPrice(BTCB, sentinelPrice);
   return { oraclePrice: CACHED_BTCB_PRICE, sentinelPrice };
 }
 
 /**
- * Helper to reset test state to a clean baseline
- * Sets sentinel price to match cached oracle price (no deviation)
+ * Helper to reset test state to a clean baseline.
+ * Clears sentinel flags and sets sentinel price to match oracle.
+ * Manually unpauses comptroller actions (since sentinel no longer auto-unpauses).
  */
 async function resetToCleanState(
   deviationSentinel: Contract,
   sentinelOracle: Contract,
   coreComptroller: Contract,
 ): Promise<void> {
-  // Reset sentinel state
   await deviationSentinel.resetMarketState(vBTCB);
-
-  // Set sentinel price to match cached oracle (no deviation)
   await setSentinelPriceNoDeviation(sentinelOracle);
 
-  // Ensure comptroller actions are unpaused
+  // Manually unpause comptroller actions (sentinel can't do this anymore)
   try {
     await coreComptroller._setActionsPaused([vBTCB], [Action.MINT], false);
     await coreComptroller._setActionsPaused([vBTCB], [Action.BORROW], false);
@@ -284,6 +293,7 @@ if (FORK_MAINNET) {
     let _uniswapOracle: Contract;
     let coreComptroller: Contract;
     let resilientOracle: Contract;
+    let eBrake: Contract;
 
     describe("DeviationSentinel Fork Tests (BSC Mainnet)", () => {
       before(async () => {
@@ -291,35 +301,31 @@ if (FORK_MAINNET) {
         timelock = await initMainnetUser(NORMAL_TIMELOCK, ethers.utils.parseUnits("10"));
 
         // Connect to deployed contracts
-        deviationSentinel = new ethers.Contract(DEVIATION_SENTINEL, DEVIATION_SENTINEL_ABI, timelock);
         sentinelOracle = new ethers.Contract(SENTINEL_ORACLE, SENTINEL_ORACLE_ABI, timelock);
         _uniswapOracle = new ethers.Contract(UNISWAP_ORACLE, DEX_ORACLE_ABI, timelock);
         coreComptroller = new ethers.Contract(COMPTROLLER, COMPTROLLER_ABI, timelock);
         resilientOracle = new ethers.Contract(RESILIENT_ORACLE, RESILIENT_ORACLE_ABI, timelock);
 
-        // Execute VIP-900 to set up permissions
+        // Execute VIP-900 (sets up admin permissions, keepers, oracle configs)
         await executeVip900(timelock);
 
-        // Extend ChainlinkOracle staleness period for BTCB to avoid "invalid resilient oracle price" errors
-        // This is necessary because on fork tests, the aggregator timestamp is fixed but block.timestamp advances
+        // Deploy EBrake and upgrade DeviationSentinel proxy to new implementation
+        const deployed = await deployEBrakeAndUpgradeSentinel(timelock);
+        eBrake = deployed.eBrake;
+
+        // Connect to the upgraded DeviationSentinel (same proxy address, new ABI)
+        deviationSentinel = new ethers.Contract(DEVIATION_SENTINEL, DEVIATION_SENTINEL_ABI, timelock);
+
+        // Extend ChainlinkOracle staleness period for BTCB
         const chainlinkOracle = new ethers.Contract(CHAINLINK_ORACLE, CHAINLINK_ORACLE_ABI, timelock);
         const btcbConfig = await chainlinkOracle.tokenConfigs(BTCB);
-        console.log(
-          "BTCB Chainlink config - feed:",
-          btcbConfig.feed,
-          "maxStalePeriod:",
-          btcbConfig.maxStalePeriod.toString(),
-        );
-        // Set very long staleness period (30 days) to avoid staleness issues during fork tests
         await chainlinkOracle.setTokenConfig({
           asset: BTCB,
           feed: btcbConfig.feed,
-          maxStalePeriod: 30 * 24 * 60 * 60, // 30 days in seconds
+          maxStalePeriod: 30 * 24 * 60 * 60,
         });
-        console.log("Extended BTCB Chainlink staleness period to 30 days");
 
-        // Configure BTCB for testing - cache oracle price to avoid staleness issues
-        // Get current oracle price ONCE and cache it for all tests
+        // Configure BTCB for testing
         CACHED_BTCB_PRICE = await resilientOracle.getPrice(BTCB);
         console.log("BTCB ResilientOracle price (cached):", CACHED_BTCB_PRICE.toString());
         await sentinelOracle.setDirectPrice(BTCB, CACHED_BTCB_PRICE);
@@ -332,7 +338,7 @@ if (FORK_MAINNET) {
 
       describe("1. Contract Verification", () => {
         it("should have correct immutable addresses", async () => {
-          expect((await deviationSentinel.CORE_POOL_COMPTROLLER()).toLowerCase()).to.equal(COMPTROLLER.toLowerCase());
+          expect((await deviationSentinel.EBRAKE()).toLowerCase()).to.equal(eBrake.address.toLowerCase());
           expect((await deviationSentinel.RESILIENT_ORACLE()).toLowerCase()).to.equal(RESILIENT_ORACLE.toLowerCase());
           expect((await deviationSentinel.SENTINEL_ORACLE()).toLowerCase()).to.equal(SENTINEL_ORACLE.toLowerCase());
         });
@@ -361,7 +367,6 @@ if (FORK_MAINNET) {
 
       describe("2. checkPriceDeviation", () => {
         before(async () => {
-          // Set sentinel price to match oracle (no deviation)
           await setSentinelPriceNoDeviation(sentinelOracle);
         });
 
@@ -374,23 +379,17 @@ if (FORK_MAINNET) {
 
         it("should return hasDeviation=true when sentinel price is lower", async () => {
           const { oraclePrice } = await setSentinelPriceLower(sentinelOracle, 50);
-
           const result = await deviationSentinel.checkPriceDeviation(vBTCB);
           expect(result.hasDeviation).to.be.true;
           expect(result.sentinelPrice).to.be.lt(result.oraclePrice);
-
-          // Restore
           await sentinelOracle.setDirectPrice(BTCB, oraclePrice);
         });
 
         it("should return hasDeviation=true when sentinel price is higher", async () => {
           const { oraclePrice } = await setSentinelPriceHigher(sentinelOracle, 50);
-
           const result = await deviationSentinel.checkPriceDeviation(vBTCB);
           expect(result.hasDeviation).to.be.true;
           expect(result.sentinelPrice).to.be.gt(result.oraclePrice);
-
-          // Restore
           await sentinelOracle.setDirectPrice(BTCB, oraclePrice);
         });
       });
@@ -400,11 +399,8 @@ if (FORK_MAINNET) {
       // ═════════════════════════════════════════════════════════════════════
 
       describe("3. handleDeviation — Sentinel Lower (Supply Pause)", () => {
-        let _originalCF: BigNumber;
-
         before(async () => {
           await resetToCleanState(deviationSentinel, sentinelOracle, coreComptroller);
-          _originalCF = (await coreComptroller.markets(vBTCB)).collateralFactorMantissa;
         });
 
         it("should pause supply when sentinel price is lower", async () => {
@@ -418,15 +414,16 @@ if (FORK_MAINNET) {
           expect((await deviationSentinel.marketStates(vBTCB)).cfModifiedAndSupplyPaused).to.be.true;
         });
 
-        it("should unpause supply when deviation resolves", async () => {
+        it("should NOT auto-unpause when deviation resolves (pause-only)", async () => {
           await setSentinelPriceNoDeviation(sentinelOracle);
 
-          await expect(deviationSentinel.handleDeviation(vBTCB))
-            .to.emit(deviationSentinel, "SupplyUnpaused")
-            .withArgs(vBTCB);
+          // handleDeviation does nothing — no auto-unpause
+          const tx = deviationSentinel.handleDeviation(vBTCB);
+          await expect(tx).to.not.emit(deviationSentinel, "SupplyPaused");
 
-          expect(await coreComptroller.actionPaused(vBTCB, Action.MINT)).to.be.false;
-          expect((await deviationSentinel.marketStates(vBTCB)).cfModifiedAndSupplyPaused).to.be.false;
+          // Comptroller remains paused — recovery is via governance VIP
+          expect(await coreComptroller.actionPaused(vBTCB, Action.MINT)).to.be.true;
+          expect((await deviationSentinel.marketStates(vBTCB)).cfModifiedAndSupplyPaused).to.be.true;
         });
       });
 
@@ -450,15 +447,15 @@ if (FORK_MAINNET) {
           expect((await deviationSentinel.marketStates(vBTCB)).borrowPaused).to.be.true;
         });
 
-        it("should unpause borrow when deviation resolves", async () => {
+        it("should NOT auto-unpause when deviation resolves (pause-only)", async () => {
           await setSentinelPriceNoDeviation(sentinelOracle);
 
-          await expect(deviationSentinel.handleDeviation(vBTCB))
-            .to.emit(deviationSentinel, "BorrowUnpaused")
-            .withArgs(vBTCB);
+          const tx = deviationSentinel.handleDeviation(vBTCB);
+          await expect(tx).to.not.emit(deviationSentinel, "BorrowPaused");
 
-          expect(await coreComptroller.actionPaused(vBTCB, Action.BORROW)).to.be.false;
-          expect((await deviationSentinel.marketStates(vBTCB)).borrowPaused).to.be.false;
+          // Comptroller remains paused
+          expect(await coreComptroller.actionPaused(vBTCB, Action.BORROW)).to.be.true;
+          expect((await deviationSentinel.marketStates(vBTCB)).borrowPaused).to.be.true;
         });
       });
 
@@ -529,10 +526,7 @@ if (FORK_MAINNET) {
           await deviationSentinel.setTokenMonitoringEnabled(BTCB, false);
           expect((await deviationSentinel.tokenConfigs(BTCB)).enabled).to.be.false;
 
-          // Force deviation
           await setSentinelPriceLower(sentinelOracle, 50);
-
-          // Using string ABI so can't check custom error name, just verify it reverts
           await expect(deviationSentinel.handleDeviation(vBTCB)).to.be.reverted;
         });
 
@@ -544,9 +538,10 @@ if (FORK_MAINNET) {
             .to.emit(deviationSentinel, "SupplyPaused")
             .withArgs(vBTCB);
 
-          // Cleanup
+          // Cleanup — no auto-unpause, so manually reset
           await setSentinelPriceNoDeviation(sentinelOracle);
-          await deviationSentinel.handleDeviation(vBTCB);
+          await deviationSentinel.resetMarketState(vBTCB);
+          await coreComptroller._setActionsPaused([vBTCB], [Action.MINT], false);
         });
 
         it("should emit TokenMonitoringStatusChanged event", async () => {
@@ -559,65 +554,13 @@ if (FORK_MAINNET) {
       });
 
       // ═════════════════════════════════════════════════════════════════════
-      // 7. GOVERNANCE SCENARIO A — Stale CF Restoration
+      // 7. GOVERNANCE PROCEDURE — resetMarketState Without Manual Unpause
       //
-      // PR Description: "If governance changes the collateral factor while
-      // the sentinel has the market paused, the sentinel will restore the
-      // OLD (stale) CF when deviation resolves"
+      // Since sentinel no longer auto-unpauses, governance must manually
+      // unpause the comptroller. If they forget, supply/borrow stays paused.
       // ═════════════════════════════════════════════════════════════════════
 
-      describe("7. Governance Scenario A — Stale CF Restoration", () => {
-        let _originalCF: BigNumber;
-
-        before(async () => {
-          await resetToCleanState(deviationSentinel, sentinelOracle, coreComptroller);
-          _originalCF = (await coreComptroller.markets(vBTCB)).collateralFactorMantissa;
-        });
-
-        it("should demonstrate stale CF restoration problem (sentinel caches original CF)", async () => {
-          // Step 1: Deviation → CF zeroed, sentinel caches originalCF
-          await setSentinelPriceLower(sentinelOracle, 50);
-          await deviationSentinel.handleDeviation(vBTCB);
-
-          // Verify sentinel state shows CF was modified
-          expect((await deviationSentinel.marketStates(vBTCB)).cfModifiedAndSupplyPaused).to.be.true;
-
-          // Step 2: Deviation resolves → sentinel restores cached CF
-          await setSentinelPriceNoDeviation(sentinelOracle);
-          await deviationSentinel.handleDeviation(vBTCB);
-
-          // Sentinel restored the originalCF
-          expect((await deviationSentinel.marketStates(vBTCB)).cfModifiedAndSupplyPaused).to.be.false;
-        });
-
-        it("should preserve governance CF when resetMarketState is called first (correct procedure)", async () => {
-          // Step 1: Deviation → supply paused
-          await setSentinelPriceLower(sentinelOracle, 50);
-          await deviationSentinel.handleDeviation(vBTCB);
-
-          // Step 2: Admin resets sentinel state — clears cached CF
-          await deviationSentinel.resetMarketState(vBTCB);
-
-          // Step 3: Deviation resolves
-          await setSentinelPriceNoDeviation(sentinelOracle);
-
-          // Step 4: handleDeviation — sentinel sees cfModifiedAndSupplyPaused=false, does nothing to CF
-          const tx = deviationSentinel.handleDeviation(vBTCB);
-          await expect(tx).to.not.emit(deviationSentinel, "SupplyUnpaused");
-
-          // Cleanup - manually unpause
-          await coreComptroller._setActionsPaused([vBTCB], [Action.MINT], false);
-        });
-      });
-
-      // ═════════════════════════════════════════════════════════════════════
-      // 8. GOVERNANCE SCENARIO B — resetMarketState Without Manual Unpause
-      //
-      // PR Description: "Supply remains paused with no automated recovery
-      // path via the Sentinel if governance didn't manually unpause"
-      // ═════════════════════════════════════════════════════════════════════
-
-      describe("8. Governance Scenario B — resetMarketState Without Manual Unpause", () => {
+      describe("7. Governance Procedure — Pause Stays Without Manual Unpause", () => {
         before(async () => {
           await resetToCleanState(deviationSentinel, sentinelOracle, coreComptroller);
         });
@@ -631,38 +574,34 @@ if (FORK_MAINNET) {
           // Step 2: Governance calls resetMarketState (clears sentinel state)
           await deviationSentinel.resetMarketState(vBTCB);
 
-          // Step 3: Deviation resolves
+          // Step 3: Deviation resolves — sentinel does nothing (no auto-unpause)
           await setSentinelPriceNoDeviation(sentinelOracle);
-
-          // Step 4: handleDeviation — sentinel sees cfModifiedAndSupplyPaused=false, does nothing
           const tx = deviationSentinel.handleDeviation(vBTCB);
-          await expect(tx).to.not.emit(deviationSentinel, "SupplyUnpaused");
+          await expect(tx).to.not.emit(deviationSentinel, "SupplyPaused");
 
-          // PROBLEM: Supply STILL paused!
+          // Supply STILL paused — governance must manually unpause
           expect(await coreComptroller.actionPaused(vBTCB, Action.MINT)).to.be.true;
 
-          // Cleanup - governance must manually unpause
+          // Cleanup
           await coreComptroller._setActionsPaused([vBTCB], [Action.MINT], false);
         });
       });
 
       // ═════════════════════════════════════════════════════════════════════
-      // 9. REQUIRED GOVERNANCE PROCEDURE (Full Workflow)
+      // 8. REQUIRED GOVERNANCE PROCEDURE (Full Workflow)
       //
       // The correct VIP order:
       // 1. resetMarketState(market)
       // 2. Make all protocol changes (new CF/LT values)
       // 3. Unpause supply/borrow on the comptroller manually
-      // 4. handleDeviation(market)
       // ═════════════════════════════════════════════════════════════════════
 
-      describe("9. Required Governance Procedure (Full Workflow)", () => {
+      describe("8. Required Governance Procedure (Full Workflow)", () => {
         before(async () => {
           await resetToCleanState(deviationSentinel, sentinelOracle, coreComptroller);
         });
 
         it("should correctly handle governance intervention when deviation is resolved", async () => {
-          // SETUP: Trigger deviation
           await setSentinelPriceLower(sentinelOracle, 50);
           await deviationSentinel.handleDeviation(vBTCB);
 
@@ -677,154 +616,64 @@ if (FORK_MAINNET) {
           // STEP 3: Unpause manually
           await coreComptroller._setActionsPaused([vBTCB], [Action.MINT], false);
 
-          // STEP 4: handleDeviation (deviation resolved)
-          await setSentinelPriceNoDeviation(sentinelOracle);
-          const tx = deviationSentinel.handleDeviation(vBTCB);
-          await expect(tx).to.not.emit(deviationSentinel, "SupplyPaused");
-
-          // VERIFY: Market is unpaused
+          // VERIFY: Market is unpaused, sentinel state is clean
           expect(await coreComptroller.actionPaused(vBTCB, Action.MINT)).to.be.false;
+          expect((await deviationSentinel.marketStates(vBTCB)).cfModifiedAndSupplyPaused).to.be.false;
+
+          await setSentinelPriceNoDeviation(sentinelOracle);
         });
 
         it("should correctly handle governance intervention when deviation still exists", async () => {
           await resetToCleanState(deviationSentinel, sentinelOracle, coreComptroller);
 
-          // SETUP: Trigger deviation
           await setSentinelPriceLower(sentinelOracle, 50);
           await deviationSentinel.handleDeviation(vBTCB);
 
           // STEP 1: resetMarketState
           await deviationSentinel.resetMarketState(vBTCB);
 
-          // STEP 3: Unpause manually
+          // STEP 2: Unpause manually
           await coreComptroller._setActionsPaused([vBTCB], [Action.MINT], false);
 
-          // STEP 4: handleDeviation (deviation STILL exists)
-          // Sentinel will re-pause with FRESH state
+          // STEP 3: handleDeviation (deviation STILL exists) → re-pauses with fresh state
           await expect(deviationSentinel.handleDeviation(vBTCB))
             .to.emit(deviationSentinel, "SupplyPaused")
             .withArgs(vBTCB);
 
-          // When deviation resolves later, sentinel can restore
+          // Cleanup
           await setSentinelPriceNoDeviation(sentinelOracle);
-          await deviationSentinel.handleDeviation(vBTCB);
-
-          expect(await coreComptroller.actionPaused(vBTCB, Action.MINT)).to.be.false;
+          await deviationSentinel.resetMarketState(vBTCB);
+          await coreComptroller._setActionsPaused([vBTCB], [Action.MINT], false);
         });
 
         it("should correctly handle borrow pause governance intervention", async () => {
           await resetToCleanState(deviationSentinel, sentinelOracle, coreComptroller);
 
-          // SETUP: Trigger borrow pause
           await setSentinelPriceHigher(sentinelOracle, 50);
           await deviationSentinel.handleDeviation(vBTCB);
 
           expect((await deviationSentinel.marketStates(vBTCB)).borrowPaused).to.be.true;
           expect(await coreComptroller.actionPaused(vBTCB, Action.BORROW)).to.be.true;
 
-          // STEP 1: resetMarketState
+          // resetMarketState + manual unpause
           await deviationSentinel.resetMarketState(vBTCB);
-
-          // Comptroller still has borrow paused!
-          expect(await coreComptroller.actionPaused(vBTCB, Action.BORROW)).to.be.true;
-
-          // STEP 3: Unpause manually
+          expect(await coreComptroller.actionPaused(vBTCB, Action.BORROW)).to.be.true; // still paused on comptroller
           await coreComptroller._setActionsPaused([vBTCB], [Action.BORROW], false);
 
-          // STEP 4: handleDeviation (deviation resolved)
+          // Deviation resolved — no action
           await setSentinelPriceNoDeviation(sentinelOracle);
           const tx = deviationSentinel.handleDeviation(vBTCB);
           await expect(tx).to.not.emit(deviationSentinel, "BorrowPaused");
-          await expect(tx).to.not.emit(deviationSentinel, "BorrowUnpaused");
 
           expect(await coreComptroller.actionPaused(vBTCB, Action.BORROW)).to.be.false;
         });
       });
 
       // ═════════════════════════════════════════════════════════════════════
-      // 10. COMPLEX STATE TRANSITIONS
+      // 9. SENTINEL ORACLE DIRECT PRICE CONTROL
       // ═════════════════════════════════════════════════════════════════════
 
-      describe("10. Complex State Transitions", () => {
-        before(async () => {
-          await resetToCleanState(deviationSentinel, sentinelOracle, coreComptroller);
-        });
-
-        it("should handle: borrow pause → resolve → supply pause (direction flip)", async () => {
-          // Step 1: Sentinel higher → borrow paused
-          await setSentinelPriceHigher(sentinelOracle, 50);
-          await deviationSentinel.handleDeviation(vBTCB);
-
-          let state = await deviationSentinel.marketStates(vBTCB);
-          expect(state.borrowPaused).to.be.true;
-          expect(state.cfModifiedAndSupplyPaused).to.be.false;
-
-          // Step 2: Resolve
-          await setSentinelPriceNoDeviation(sentinelOracle);
-          await deviationSentinel.handleDeviation(vBTCB);
-
-          state = await deviationSentinel.marketStates(vBTCB);
-          expect(state.borrowPaused).to.be.false;
-
-          // Step 3: Sentinel lower → supply paused
-          await setSentinelPriceLower(sentinelOracle, 50);
-          await deviationSentinel.handleDeviation(vBTCB);
-
-          state = await deviationSentinel.marketStates(vBTCB);
-          expect(state.borrowPaused).to.be.false;
-          expect(state.cfModifiedAndSupplyPaused).to.be.true;
-
-          // Cleanup
-          await setSentinelPriceNoDeviation(sentinelOracle);
-          await deviationSentinel.handleDeviation(vBTCB);
-        });
-
-        it("should handle: supply pause → resolve → borrow pause (direction flip)", async () => {
-          await deviationSentinel.resetMarketState(vBTCB);
-
-          // Step 1: Sentinel lower → supply paused
-          await setSentinelPriceLower(sentinelOracle, 50);
-          await deviationSentinel.handleDeviation(vBTCB);
-          expect((await deviationSentinel.marketStates(vBTCB)).cfModifiedAndSupplyPaused).to.be.true;
-
-          // Step 2: Resolve
-          await setSentinelPriceNoDeviation(sentinelOracle);
-          await deviationSentinel.handleDeviation(vBTCB);
-          expect((await deviationSentinel.marketStates(vBTCB)).cfModifiedAndSupplyPaused).to.be.false;
-
-          // Step 3: Sentinel higher → borrow paused
-          await setSentinelPriceHigher(sentinelOracle, 50);
-          await deviationSentinel.handleDeviation(vBTCB);
-
-          const state = await deviationSentinel.marketStates(vBTCB);
-          expect(state.borrowPaused).to.be.true;
-          expect(state.cfModifiedAndSupplyPaused).to.be.false;
-
-          // Cleanup
-          await setSentinelPriceNoDeviation(sentinelOracle);
-          await deviationSentinel.resetMarketState(vBTCB);
-        });
-
-        it("should be a no-op when no deviation and clean state", async () => {
-          await resetToCleanState(deviationSentinel, sentinelOracle, coreComptroller);
-
-          const tx = deviationSentinel.handleDeviation(vBTCB);
-          await expect(tx).to.not.emit(deviationSentinel, "BorrowPaused");
-          await expect(tx).to.not.emit(deviationSentinel, "SupplyPaused");
-          await expect(tx).to.not.emit(deviationSentinel, "BorrowUnpaused");
-          await expect(tx).to.not.emit(deviationSentinel, "SupplyUnpaused");
-
-          const state = await deviationSentinel.marketStates(vBTCB);
-          expect(state.borrowPaused).to.be.false;
-          expect(state.cfModifiedAndSupplyPaused).to.be.false;
-        });
-      });
-
-      // ═════════════════════════════════════════════════════════════════════
-      // 11. SENTINEL ORACLE DIRECT PRICE CONTROL
-      // ═════════════════════════════════════════════════════════════════════
-
-      describe("11. SentinelOracle Direct Price Control", () => {
+      describe("9. SentinelOracle Direct Price Control", () => {
         before(async () => {
           await resetToCleanState(deviationSentinel, sentinelOracle, coreComptroller);
         });
@@ -841,18 +690,11 @@ if (FORK_MAINNET) {
             .withArgs(vBTCB);
         });
 
-        it("should resolve when prices match again", async () => {
-          await setSentinelPriceNoDeviation(sentinelOracle);
-
-          const result = await deviationSentinel.checkPriceDeviation(vBTCB);
-          expect(result.hasDeviation).to.be.false;
-
-          await expect(deviationSentinel.handleDeviation(vBTCB))
-            .to.emit(deviationSentinel, "BorrowUnpaused")
-            .withArgs(vBTCB);
-        });
-
         it("should detect deviation via direct price override (sentinel lower)", async () => {
+          // Reset from previous test
+          await deviationSentinel.resetMarketState(vBTCB);
+          await coreComptroller._setActionsPaused([vBTCB], [Action.BORROW], false);
+
           await setSentinelPriceLower(sentinelOracle, 50);
 
           const result = await deviationSentinel.checkPriceDeviation(vBTCB);
@@ -865,28 +707,26 @@ if (FORK_MAINNET) {
 
           // Cleanup
           await setSentinelPriceNoDeviation(sentinelOracle);
-          await deviationSentinel.handleDeviation(vBTCB);
+          await deviationSentinel.resetMarketState(vBTCB);
+          await coreComptroller._setActionsPaused([vBTCB], [Action.MINT], false);
         });
       });
 
       // ═════════════════════════════════════════════════════════════════════
-      // 12. ACCESS CONTROL TESTS
+      // 10. ACCESS CONTROL TESTS
       // ═════════════════════════════════════════════════════════════════════
 
-      describe("12. Access Control Tests", () => {
+      describe("10. Access Control Tests", () => {
         it("should reject handleDeviation from non-keeper", async () => {
           const [, nonKeeper] = await ethers.getSigners();
           const sentinelAsNonKeeper = deviationSentinel.connect(nonKeeper);
 
-          // Using string ABI so can't check custom error name, just verify it reverts
           await expect(sentinelAsNonKeeper.handleDeviation(vBTCB)).to.be.reverted;
         });
 
         it("should allow handleDeviation from trusted keeper", async () => {
-          // Timelock is a trusted keeper
           await setSentinelPriceNoDeviation(sentinelOracle);
-
-          // This should not revert (may not emit events if no deviation)
+          // This should not revert (no-op if no deviation)
           await deviationSentinel.handleDeviation(vBTCB);
         });
       });
