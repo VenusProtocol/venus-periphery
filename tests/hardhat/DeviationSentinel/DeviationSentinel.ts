@@ -8,7 +8,7 @@ import { ethers, upgrades } from "hardhat";
 import type {
   DeviationSentinel,
   IAccessControlManagerV8,
-  ICorePoolComptroller,
+  IEBrake,
   IVToken,
   OracleInterface,
   ResilientOracleInterface,
@@ -20,7 +20,7 @@ chai.use(smock.matchers);
 describe("DeviationSentinel", () => {
   let deviationSentinel: DeviationSentinel;
   let accessControlManager: FakeContract<IAccessControlManagerV8>;
-  let corePoolComptroller: FakeContract<ICorePoolComptroller>;
+  let eBrake: FakeContract<IEBrake>;
   let resilientOracle: FakeContract<ResilientOracleInterface>;
   let sentinelOracle: FakeContract<OracleInterface>;
   let vToken: FakeContract<IVToken>;
@@ -31,27 +31,16 @@ describe("DeviationSentinel", () => {
   const UNDERLYING_ASSET = "0x0000000000000000000000000000000000000001";
   const ZERO_ADDRESS = ethers.constants.AddressZero;
 
-  // Commonly used collateral-factor / liquidation-threshold values
-  const CF = parseUnits("0.8", 18);
-  const LT = parseUnits("0.85", 18);
-
   /**
    * Deploys the DeviationSentinel behind an upgradeable proxy with all
-   * required mock contracts wired up (ACM, CorePoolComptroller, oracles, vToken).
-   *
-   * Core-pool comptroller defaults:
-   *   - corePoolId = 0, lastPoolId = 0 (single core pool, matching BSC mainnet)
-   *   - poolMarkets returns "not-listed" by default
-   *   - setCollateralFactor(4-arg) returns 0 (success) by default
-   *
-   * Override individual mocks per-test as needed.
+   * required mock contracts wired up (ACM, EBrake, oracles, vToken).
    */
   async function deployFixture() {
     [owner, keeper, user] = await ethers.getSigners();
 
     // ── Mock contracts ──
     accessControlManager = await smock.fake<IAccessControlManagerV8>("IAccessControlManagerV8");
-    corePoolComptroller = await smock.fake<ICorePoolComptroller>("ICorePoolComptroller");
+    eBrake = await smock.fake<IEBrake>("IEBrake");
     resilientOracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
     sentinelOracle = await smock.fake<OracleInterface>("OracleInterface");
     vToken = await smock.fake<IVToken>("IVToken");
@@ -59,27 +48,20 @@ describe("DeviationSentinel", () => {
     // ACM allows all calls by default; override in access-control tests
     accessControlManager.isAllowedToCall.returns(true);
 
-    // vToken points at the core-pool comptroller
+    // vToken setup
     vToken.underlying.returns(UNDERLYING_ASSET);
-    vToken.comptroller.returns(corePoolComptroller.address);
-
-    // Core-pool defaults (single pool at index 0, market not listed)
-    corePoolComptroller.corePoolId.returns(0);
-    corePoolComptroller.lastPoolId.returns(0);
-    corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
-    corePoolComptroller.poolMarkets.returns([false, 0, false, 0, 0, 0, false]);
 
     // ── Deploy proxy ──
     const Factory = await ethers.getContractFactory("DeviationSentinel");
     deviationSentinel = (await upgrades.deployProxy(Factory, [accessControlManager.address], {
-      constructorArgs: [corePoolComptroller.address, resilientOracle.address, sentinelOracle.address],
+      constructorArgs: [eBrake.address, resilientOracle.address, sentinelOracle.address],
       unsafeAllow: ["constructor", "internal-function-storage"],
     })) as DeviationSentinel;
 
     return {
       deviationSentinel,
       accessControlManager,
-      corePoolComptroller,
+      eBrake,
       resilientOracle,
       sentinelOracle,
       vToken,
@@ -93,7 +75,7 @@ describe("DeviationSentinel", () => {
     ({
       deviationSentinel,
       accessControlManager,
-      corePoolComptroller,
+      eBrake,
       resilientOracle,
       sentinelOracle,
       vToken,
@@ -113,16 +95,26 @@ describe("DeviationSentinel", () => {
     });
 
     it("should store immutable addresses correctly", async () => {
-      expect(await deviationSentinel.CORE_POOL_COMPTROLLER()).to.equal(corePoolComptroller.address);
+      expect(await deviationSentinel.EBRAKE()).to.equal(eBrake.address);
       expect(await deviationSentinel.RESILIENT_ORACLE()).to.equal(resilientOracle.address);
       expect(await deviationSentinel.SENTINEL_ORACLE()).to.equal(sentinelOracle.address);
+    });
+
+    it("should revert when eBrake_ is the zero address", async () => {
+      const Factory = await ethers.getContractFactory("DeviationSentinel");
+      await expect(
+        upgrades.deployProxy(Factory, [accessControlManager.address], {
+          constructorArgs: [ZERO_ADDRESS, resilientOracle.address, sentinelOracle.address],
+          unsafeAllow: ["constructor", "internal-function-storage"],
+        }),
+      ).to.be.revertedWithCustomError(deviationSentinel, "ZeroAddress");
     });
 
     it("should revert when resilientOracle_ is the zero address", async () => {
       const Factory = await ethers.getContractFactory("DeviationSentinel");
       await expect(
         upgrades.deployProxy(Factory, [accessControlManager.address], {
-          constructorArgs: [corePoolComptroller.address, ZERO_ADDRESS, sentinelOracle.address],
+          constructorArgs: [eBrake.address, ZERO_ADDRESS, sentinelOracle.address],
           unsafeAllow: ["constructor", "internal-function-storage"],
         }),
       ).to.be.revertedWithCustomError(deviationSentinel, "ZeroAddress");
@@ -132,7 +124,7 @@ describe("DeviationSentinel", () => {
       const Factory = await ethers.getContractFactory("DeviationSentinel");
       await expect(
         upgrades.deployProxy(Factory, [accessControlManager.address], {
-          constructorArgs: [corePoolComptroller.address, resilientOracle.address, ZERO_ADDRESS],
+          constructorArgs: [eBrake.address, resilientOracle.address, ZERO_ADDRESS],
           unsafeAllow: ["constructor", "internal-function-storage"],
         }),
       ).to.be.revertedWithCustomError(deviationSentinel, "ZeroAddress");
@@ -430,7 +422,6 @@ describe("DeviationSentinel", () => {
       it("should revert with MarketNotConfigured when underlying has no config", async () => {
         const unknownVToken = await smock.fake<IVToken>("IVToken");
         unknownVToken.underlying.returns("0x0000000000000000000000000000000000000099");
-        unknownVToken.comptroller.returns(corePoolComptroller.address);
 
         await expect(
           deviationSentinel.connect(keeper).handleDeviation(unknownVToken.address),
@@ -463,13 +454,9 @@ describe("DeviationSentinel", () => {
           .withArgs(vToken.address);
       });
 
-      it("should call setActionsPaused([market], [BORROW], true)", async () => {
+      it("should call eBrake.pauseBorrow(market)", async () => {
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(corePoolComptroller.setActionsPaused).to.have.been.calledWith(
-          [vToken.address],
-          [2], // Action.BORROW
-          true,
-        );
+        expect(eBrake.pauseBorrow).to.have.been.calledWith(vToken.address);
       });
 
       it("should set marketStates.borrowPaused = true", async () => {
@@ -479,10 +466,10 @@ describe("DeviationSentinel", () => {
 
       it("should early-return (no-op) on second call — idempotent borrow pause", async () => {
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        corePoolComptroller.setActionsPaused.reset();
+        eBrake.pauseBorrow.reset();
 
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(corePoolComptroller.setActionsPaused).to.not.have.been.called;
+        expect(eBrake.pauseBorrow).to.not.have.been.called;
       });
 
       it("should NOT emit BorrowPaused on duplicate call", async () => {
@@ -496,13 +483,10 @@ describe("DeviationSentinel", () => {
 
     // ── Sentinel price LOWER → zero CF + pause supply ───────────────
 
-    describe("sentinel price lower → zero CF + pause supply (single core pool)", () => {
+    describe("sentinel price lower → zero CF + pause supply", () => {
       beforeEach(() => {
         resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
         sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
-
-        // Market listed in pool 0 (core pool, matching BSC mainnet where corePoolId = 0)
-        corePoolComptroller.poolMarkets.whenCalledWith(0, vToken.address).returns([true, CF, false, LT, 0, 0, true]);
       });
 
       it("should emit SupplyPaused event", async () => {
@@ -511,29 +495,10 @@ describe("DeviationSentinel", () => {
           .withArgs(vToken.address);
       });
 
-      it("should call setActionsPaused([market], [MINT], true)", async () => {
+      it("should call eBrake.setCFZero(market) and eBrake.pauseSupply(market)", async () => {
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(corePoolComptroller.setActionsPaused).to.have.been.calledWith(
-          [vToken.address],
-          [0], // Action.MINT
-          true,
-        );
-      });
-
-      it("should set CF to zero via the 4-arg overload, keeping LT unchanged", async () => {
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-          0,
-          vToken.address,
-          0,
-          LT,
-        );
-      });
-
-      it("should emit CollateralFactorUpdated(market, poolId=0, oldCF, 0)", async () => {
-        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address))
-          .to.emit(deviationSentinel, "CollateralFactorUpdated")
-          .withArgs(vToken.address, 0, CF, 0);
+        expect(eBrake["setCFZero(address)"]).to.have.been.calledWith(vToken.address);
+        expect(eBrake.pauseSupply).to.have.been.calledWith(vToken.address);
       });
 
       it("should set marketStates.cfModifiedAndSupplyPaused = true", async () => {
@@ -543,187 +508,61 @@ describe("DeviationSentinel", () => {
 
       it("should early-return on duplicate call — idempotent supply pause", async () => {
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        corePoolComptroller.setActionsPaused.reset();
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
+        eBrake["setCFZero(address)"].reset();
+        eBrake.pauseSupply.reset();
 
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(corePoolComptroller.setActionsPaused).to.not.have.been.called;
-        expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.not.have.been.called;
-      });
-
-      it("should revert with ComptrollerError when setCollateralFactor returns non-zero", async () => {
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(1);
-        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.be.revertedWithCustomError(
-          deviationSentinel,
-          "ComptrollerError",
-        );
-        // Restore default success return — smock stores return values in JS memory,
-        // not EVM storage, so loadFixture snapshot restore does NOT reset them.
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
+        expect(eBrake["setCFZero(address)"]).to.not.have.been.called;
+        expect(eBrake.pauseSupply).to.not.have.been.called;
       });
     });
 
-    // ── Multiple emode groups ───────────────────────────────────────
-    //
-    // Venus core pool on BSC uses corePoolId=0. When emode groups are
-    // added, lastPoolId increases (e.g. 0 and 1 for two pools). The
-    // sentinel iterates from corePoolId to lastPoolId inclusive.
+    // ── No deviation → no action (no auto-unpause) ─────────────────
 
-    describe("core pool with multiple emode groups (corePoolId=0, lastPoolId=1)", () => {
-      const CF0 = parseUnits("0.8", 18);
-      const LT0 = parseUnits("0.85", 18);
-      const CF1 = parseUnits("0.7", 18);
-      const LT1 = parseUnits("0.75", 18);
-
-      beforeEach(() => {
-        resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
-
-        corePoolComptroller.corePoolId.returns(0);
-        corePoolComptroller.lastPoolId.returns(1);
-
-        // Pool 0 (core pool)
-        corePoolComptroller.poolMarkets.whenCalledWith(0, vToken.address).returns([true, CF0, false, LT0, 0, 0, true]);
-        // Pool 1 (emode group)
-        corePoolComptroller.poolMarkets.whenCalledWith(1, vToken.address).returns([true, CF1, false, LT1, 0, 1, true]);
-      });
-
-      it("should zero CF for ALL listed emode pools", async () => {
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-          0,
-          vToken.address,
-          0,
-          LT0,
-        );
-        expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-          1,
-          vToken.address,
-          0,
-          LT1,
-        );
-      });
-
-      it("should restore CF for ALL pools when deviation resolves", async () => {
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-        // Resolve deviation
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
-
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-          0,
-          vToken.address,
-          CF0,
-          LT0,
-        );
-        expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-          1,
-          vToken.address,
-          CF1,
-          LT1,
-        );
-      });
-
-      it("should skip unlisted pools", async () => {
-        // Pool 1 is not listed for this market
-        corePoolComptroller.poolMarkets.whenCalledWith(1, vToken.address).returns([false, 0, false, 0, 0, 0, false]);
-
-        // Reset call history so we only count calls from THIS test
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
-
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledOnce;
-        expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-          0,
-          vToken.address,
-          0,
-          LT0,
-        );
-      });
-    });
-
-    // ── Deviation resolved → unpause ────────────────────────────────
-
-    describe("deviation resolved → unpause / restore", () => {
-      it("should emit BorrowUnpaused and call setActionsPaused(false)", async () => {
-        // Cause borrow pause
-        resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("115", 18));
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-        // Resolve
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
-        corePoolComptroller.setActionsPaused.reset();
-
-        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address))
-          .to.emit(deviationSentinel, "BorrowUnpaused")
-          .withArgs(vToken.address);
-
-        expect(corePoolComptroller.setActionsPaused).to.have.been.calledWith([vToken.address], [2], false);
-      });
-
-      it("should clear borrowPaused state after unpausing", async () => {
-        resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("115", 18));
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-        expect((await deviationSentinel.marketStates(vToken.address)).borrowPaused).to.be.false;
-      });
-
-      it("should emit SupplyUnpaused and restore CF when supply was paused", async () => {
-        // Market listed in pool 0
-        corePoolComptroller.poolMarkets.whenCalledWith(0, vToken.address).returns([true, CF, false, LT, 0, 0, true]);
-
-        resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-        corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
-
-        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address))
-          .to.emit(deviationSentinel, "SupplyUnpaused")
-          .withArgs(vToken.address);
-
-        expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-          0,
-          vToken.address,
-          CF,
-          LT,
-        );
-      });
-
-      it("should clear cfModifiedAndSupplyPaused state after unpausing", async () => {
-        corePoolComptroller.poolMarkets.whenCalledWith(0, vToken.address).returns([true, CF, false, LT, 0, 0, true]);
-
-        resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-        expect((await deviationSentinel.marketStates(vToken.address)).cfModifiedAndSupplyPaused).to.be.false;
-      });
-
+    describe("no deviation → no action", () => {
       it("should be a no-op when no deviation and nothing was paused", async () => {
         resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
         sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
 
         const tx = deviationSentinel.connect(keeper).handleDeviation(vToken.address);
         await expect(tx).to.not.emit(deviationSentinel, "BorrowPaused");
-        await expect(tx).to.not.emit(deviationSentinel, "BorrowUnpaused");
         await expect(tx).to.not.emit(deviationSentinel, "SupplyPaused");
-        await expect(tx).to.not.emit(deviationSentinel, "SupplyUnpaused");
+      });
+
+      it("should NOT auto-unpause borrow when deviation resolves (pause-only contract)", async () => {
+        // Step 1: Trigger borrow pause
+        resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
+        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("115", 18));
+        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+        expect((await deviationSentinel.marketStates(vToken.address)).borrowPaused).to.be.true;
+
+        // Step 2: Resolve deviation — sentinel should NOT unpause
+        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
+        eBrake.pauseBorrow.reset();
+
+        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+        expect(eBrake.pauseBorrow).to.not.have.been.called;
+        // State remains paused — recovery is via governance VIP
+        expect((await deviationSentinel.marketStates(vToken.address)).borrowPaused).to.be.true;
+      });
+
+      it("should NOT auto-unpause supply when deviation resolves (pause-only contract)", async () => {
+        // Step 1: Trigger supply pause
+        resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
+        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
+        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+        expect((await deviationSentinel.marketStates(vToken.address)).cfModifiedAndSupplyPaused).to.be.true;
+
+        // Step 2: Resolve deviation — sentinel should NOT unpause
+        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
+        eBrake["setCFZero(address)"].reset();
+        eBrake.pauseSupply.reset();
+
+        await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
+        expect(eBrake["setCFZero(address)"]).to.not.have.been.called;
+        expect(eBrake.pauseSupply).to.not.have.been.called;
+        // State remains paused
+        expect((await deviationSentinel.marketStates(vToken.address)).cfModifiedAndSupplyPaused).to.be.true;
       });
     });
 
@@ -744,9 +583,17 @@ describe("DeviationSentinel", () => {
         resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
         sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(0);
 
-        // Market listed in pool 0
-        corePoolComptroller.poolMarkets.whenCalledWith(0, vToken.address).returns([true, CF, false, LT, 0, 0, true]);
+        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.emit(
+          deviationSentinel,
+          "SupplyPaused",
+        );
+      });
 
+      it("should pause supply when both prices are 0 (sentinelPrice not > oraclePrice)", async () => {
+        resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(0);
+        sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(0);
+
+        // 0 > 0 is false, so it goes to the supply-pause path
         await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.emit(
           deviationSentinel,
           "SupplyPaused",
@@ -790,9 +637,6 @@ describe("DeviationSentinel", () => {
     });
 
     it("should clear cfModifiedAndSupplyPaused flag", async () => {
-      // Market listed in pool 0
-      corePoolComptroller.poolMarkets.whenCalledWith(0, vToken.address).returns([true, CF, false, LT, 0, 0, true]);
-
       resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
       sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
       await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
@@ -811,18 +655,14 @@ describe("DeviationSentinel", () => {
       await deviationSentinel.resetMarketState(vToken.address);
 
       // Same deviation → should re-trigger borrow pause (not early-return)
-      corePoolComptroller.setActionsPaused.reset();
+      eBrake.pauseBorrow.reset();
       await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-      expect(corePoolComptroller.setActionsPaused).to.have.been.called;
+      expect(eBrake.pauseBorrow).to.have.been.called;
     });
   });
 
   // ═══════════════════════════════════════════════════════════════════
   // 8. Access Control (ACM denials)
-  //
-  // NOTE: Each test resets ACM to `returns(true)` after the assertion
-  // because smock fake return values persist across EVM snapshot
-  // restores (they are stored in JS memory, not EVM storage).
   // ═══════════════════════════════════════════════════════════════════
 
   describe("Access Control", () => {
@@ -858,91 +698,15 @@ describe("DeviationSentinel", () => {
   // ═══════════════════════════════════════════════════════════════════
   // 9. Governance Interaction Edge Cases
   //
-  // These tests verify dangerous scenarios where governance modifies
-  // protocol state (CF, pause status) while the sentinel has an active
-  // market state. Without calling resetMarketState first, the sentinel's
-  // cached values become stale and can override governance's intent.
-  //
-  // NOTE: Tests for new emode pool protection and LT=0 skip are
-  // covered in the audit PR's _restoreCollateralFactor protection tests.
+  // These tests verify scenarios where governance modifies protocol
+  // state while the sentinel has an active market state. Without
+  // calling resetMarketState, the sentinel's flags become stale.
   // ═══════════════════════════════════════════════════════════════════
 
   describe("Governance Interaction Edge Cases", () => {
-    const CF_OLD = parseUnits("0.8", 18);
-    const LT_OLD = parseUnits("0.85", 18);
-
     beforeEach(async () => {
       await deviationSentinel.setTokenConfig(UNDERLYING_ASSET, { deviation: 10, enabled: true });
       await deviationSentinel.setTrustedKeeper(keeper.address, true);
-
-      // Market listed in pool 0 (core pool)
-      corePoolComptroller.poolMarkets
-        .whenCalledWith(0, vToken.address)
-        .returns([true, CF_OLD, false, LT_OLD, 0, 0, true]);
-    });
-
-    /**
-     * Scenario: Governance changes CF while sentinel has the market paused.
-     *
-     * 1. Sentinel detects deviation → zeroes CF, stores CF_OLD
-     * 2. Governance directly sets CF to CF_NEW via comptroller
-     * 3. Deviation resolves → sentinel restores CF_OLD (stale!)
-     *
-     * This test proves the sentinel restores the OLD value, NOT the
-     * governance-updated value. The fix is to call resetMarketState()
-     * before re-enabling monitoring after governance intervention.
-     */
-    it("should restore stale CF (old value) when governance changed CF during pause — demonstrates need for resetMarketState", async () => {
-      // Step 1: Deviation detected, CF zeroed. Sentinel stores CF_OLD internally.
-      resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // Step 2: Governance changes CF to CF_NEW directly on the comptroller.
-      //         The sentinel's stored value is now stale — it still has CF_OLD in poolCFs[0].
-
-      // Step 3: Deviation resolves → sentinel restores its cached CF_OLD
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
-
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // The sentinel restores CF_OLD, NOT CF_NEW. This is the stale-value problem.
-      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-        0,
-        vToken.address,
-        CF_OLD,
-        LT_OLD,
-      );
-    });
-
-    /**
-     * Scenario: After governance changes CF during a pause, admin calls
-     * resetMarketState() to wipe the sentinel's cached values, preventing
-     * stale CF restoration.
-     *
-     * After reset, handleDeviation starts fresh and does not attempt to
-     * restore a stale CF.
-     */
-    it("should NOT restore stale CF after resetMarketState — governance CF change is preserved", async () => {
-      // Step 1: Deviation → CF zeroed
-      resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // Step 2: Admin resets the market state (acknowledging governance intervention)
-      await deviationSentinel.resetMarketState(vToken.address);
-
-      // Step 3: Deviation resolves → no restore happens because state was cleared
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
-
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // setCollateralFactor should NOT be called — there's nothing to restore
-      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.not.have.been.called;
     });
 
     /**
@@ -965,11 +729,11 @@ describe("DeviationSentinel", () => {
 
       // Step 3: Keeper calls handleDeviation again with same deviation.
       //         Sentinel sees borrowPaused = true → early-returns.
-      corePoolComptroller.setActionsPaused.reset();
+      eBrake.pauseBorrow.reset();
       await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
 
       // No call — sentinel thinks borrow is already paused (stale state)
-      expect(corePoolComptroller.setActionsPaused).to.not.have.been.called;
+      expect(eBrake.pauseBorrow).to.not.have.been.called;
     });
 
     /**
@@ -986,12 +750,12 @@ describe("DeviationSentinel", () => {
       await deviationSentinel.resetMarketState(vToken.address);
 
       // Same deviation → sentinel should now re-pause (fresh state)
-      corePoolComptroller.setActionsPaused.reset();
+      eBrake.pauseBorrow.reset();
       await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.emit(
         deviationSentinel,
         "BorrowPaused",
       );
-      expect(corePoolComptroller.setActionsPaused).to.have.been.called;
+      expect(eBrake.pauseBorrow).to.have.been.called;
     });
 
     /**
@@ -1013,13 +777,12 @@ describe("DeviationSentinel", () => {
       // Sentinel state is stale: cfModifiedAndSupplyPaused = true.
 
       // New deviation → sentinel early-returns
-      corePoolComptroller.setActionsPaused.reset();
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
+      eBrake["setCFZero(address)"].reset();
+      eBrake.pauseSupply.reset();
       await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
 
-      expect(corePoolComptroller.setActionsPaused).to.not.have.been.called;
-      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.not.have.been.called;
+      expect(eBrake["setCFZero(address)"]).to.not.have.been.called;
+      expect(eBrake.pauseSupply).to.not.have.been.called;
     });
 
     /**
@@ -1036,14 +799,13 @@ describe("DeviationSentinel", () => {
       await deviationSentinel.resetMarketState(vToken.address);
 
       // Same deviation → sentinel re-pauses supply + re-zeros CF
-      corePoolComptroller.setActionsPaused.reset();
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
+      eBrake["setCFZero(address)"].reset();
+      eBrake.pauseSupply.reset();
       await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.emit(
         deviationSentinel,
         "SupplyPaused",
       );
-      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.called;
+      expect(eBrake["setCFZero(address)"]).to.have.been.called;
     });
   });
 
@@ -1055,12 +817,9 @@ describe("DeviationSentinel", () => {
     beforeEach(async () => {
       await deviationSentinel.setTokenConfig(UNDERLYING_ASSET, { deviation: 10, enabled: true });
       await deviationSentinel.setTrustedKeeper(keeper.address, true);
-
-      // Market listed in pool 0 (core pool)
-      corePoolComptroller.poolMarkets.whenCalledWith(0, vToken.address).returns([true, CF, false, LT, 0, 0, true]);
     });
 
-    it("borrow pause → resolve → supply pause (deviation direction flips)", async () => {
+    it("direction flip: borrow paused, then deviation flips → supply pause fires on top (both flags set)", async () => {
       // Step 1: Sentinel higher → borrow paused
       resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
       sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("115", 18));
@@ -1070,39 +829,14 @@ describe("DeviationSentinel", () => {
       expect(state.borrowPaused).to.be.true;
       expect(state.cfModifiedAndSupplyPaused).to.be.false;
 
-      // Step 2: Resolve → borrow unpaused
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-      state = await deviationSentinel.marketStates(vToken.address);
-      expect(state.borrowPaused).to.be.false;
-
-      // Step 3: Sentinel lower → supply paused + CF zeroed
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-      state = await deviationSentinel.marketStates(vToken.address);
-      expect(state.borrowPaused).to.be.false;
-      expect(state.cfModifiedAndSupplyPaused).to.be.true;
-    });
-
-    it("supply pause → resolve → borrow pause (deviation direction flips)", async () => {
-      // Step 1: Sentinel lower → supply paused + CF zeroed
-      resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
+      // Step 2: Deviation flips — sentinel lower (no auto-unpause of borrow)
       sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
       await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
 
-      expect((await deviationSentinel.marketStates(vToken.address)).cfModifiedAndSupplyPaused).to.be.true;
-
-      // Step 2: Resolve
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-      expect((await deviationSentinel.marketStates(vToken.address)).cfModifiedAndSupplyPaused).to.be.false;
-
-      // Step 3: Sentinel higher → borrow paused
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("115", 18));
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-      const state = await deviationSentinel.marketStates(vToken.address);
+      // Both flags set — borrow still paused (no auto-unpause), supply now also paused
+      state = await deviationSentinel.marketStates(vToken.address);
       expect(state.borrowPaused).to.be.true;
-      expect(state.cfModifiedAndSupplyPaused).to.be.false;
+      expect(state.cfModifiedAndSupplyPaused).to.be.true;
     });
 
     it("resetMarketState allows fresh pause after admin intervention", async () => {
@@ -1112,7 +846,7 @@ describe("DeviationSentinel", () => {
 
       await deviationSentinel.resetMarketState(vToken.address);
 
-      corePoolComptroller.setActionsPaused.reset();
+      eBrake.pauseBorrow.reset();
       await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.emit(
         deviationSentinel,
         "BorrowPaused",
@@ -1127,127 +861,6 @@ describe("DeviationSentinel", () => {
       const state = await deviationSentinel.marketStates(vToken.address);
       expect(state.borrowPaused).to.be.false;
       expect(state.cfModifiedAndSupplyPaused).to.be.false;
-    });
-  });
-
-  describe("_restoreCollateralFactor protection against new pools", () => {
-    const NEW_POOL_ID = 2;
-    const ORIGINAL_CF = parseUnits("0.7", 18);
-    const ORIGINAL_LT = parseUnits("0.75", 18);
-    const NEW_POOL_CF = parseUnits("0.6", 18);
-    const NEW_POOL_LT = parseUnits("0.65", 18);
-
-    beforeEach(async () => {
-      await deviationSentinel.setTokenConfig(UNDERLYING_ASSET, {
-        deviation: 10,
-        enabled: true,
-      });
-      await deviationSentinel.setTrustedKeeper(keeper.address, true);
-
-      // Setup core pool comptroller
-      corePoolComptroller.corePoolId.returns(0);
-      corePoolComptroller.lastPoolId.returns(1); // Initially only pools 0 and 1
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].returns(0);
-
-      // Setup existing pool (pool 1) with original CF and LT
-      corePoolComptroller.poolMarkets
-        .whenCalledWith(1, vToken.address)
-        .returns([true, ORIGINAL_CF, 0, ORIGINAL_LT, 0, 0, 0]);
-
-      corePoolComptroller.actionPaused.returns(false);
-    });
-
-    it("should skip restoring CF for new pools added after _setCollateralFactorToZero", async () => {
-      // Trigger deviation to store original CF for pool 1
-      resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18)); // Lower price triggers supply pause
-
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // Simulate adding a new pool (pool 2) after deviation was triggered
-      corePoolComptroller.lastPoolId.returns(2); // Now includes pool 2
-      corePoolComptroller.poolMarkets
-        .whenCalledWith(NEW_POOL_ID, vToken.address)
-        .returns([true, NEW_POOL_CF, 0, NEW_POOL_LT, 0, 0, 0]);
-
-      // Resolve deviation - should restore pool 1 but skip pool 2
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
-      corePoolComptroller.actionPaused.returns(true);
-
-      // Reset call count before resolution
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // Verify setCollateralFactor was called for pool 1 restoration
-      // Should restore the original CF (0.7) that was stored during deviation
-      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-        1,
-        vToken.address,
-        ORIGINAL_CF, // Restored original CF
-        ORIGINAL_LT,
-      );
-
-      // Verify setCollateralFactor was NOT called for new pool 2
-      // Check that it wasn't called with NEW_POOL_ID
-      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.not.have.been.calledWith(
-        NEW_POOL_ID,
-        vToken.address,
-      );
-    });
-
-    it("should skip restoring when stored LT is 0 to prevent immediate liquidation", async () => {
-      // Ensure pool 0 is not listed so only pool 1 is tested
-      corePoolComptroller.poolMarkets.whenCalledWith(0, vToken.address).returns([false, 0, 0, 0, 0, 0, 0]);
-      // Setup a pool with CF = 0 and LT = 0 (edge case)
-      corePoolComptroller.poolMarkets.whenCalledWith(1, vToken.address).returns([true, 0, 0, 0, 0, 0, 0]);
-
-      // Trigger deviation
-      resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
-
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // Reset the mock to clear previous calls during deviation trigger
-      corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"].reset();
-
-      // Resolve deviation
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
-      corePoolComptroller.actionPaused.returns(true);
-
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // Should not attempt to restore LT = 0
-      // When stored LT is 0, setCollateralFactor should not be called to prevent liquidation risk
-      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.not.have.been.called;
-    });
-
-    it("should properly restore original CF when pool had CF=0 originally", async () => {
-      // Setup a pool that originally had CF = 0 but LT > 0
-      const ZERO_CF = ethers.constants.Zero;
-      const VALID_LT = parseUnits("0.75", 18);
-
-      corePoolComptroller.poolMarkets.whenCalledWith(1, vToken.address).returns([true, ZERO_CF, 0, VALID_LT, 0, 0, 0]);
-
-      // Trigger deviation
-      resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
-
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // Resolve deviation
-      sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("105", 18));
-      corePoolComptroller.actionPaused.returns(true);
-
-      await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-
-      // Should restore CF = 0 (original value) because LT > 0
-      expect(corePoolComptroller["setCollateralFactor(uint96,address,uint256,uint256)"]).to.have.been.calledWith(
-        1,
-        vToken.address,
-        ZERO_CF,
-        VALID_LT,
-      );
     });
   });
 });
