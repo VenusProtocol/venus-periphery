@@ -18,19 +18,26 @@ contract EBrake is IEBrake, AccessControlledV8 {
     /**
      * @notice Venus Core Pool Comptroller
      * @dev All emergency functions operate directly on this comptroller.
-     *      Supports both core pool (poolId=0) and e-mode pools (poolId>0)
-     *      for setCFZero via the poolId-aware setCollateralFactor overload.
+     *      On BSC this is a Diamond proxy; on non-BSC chains it is an IL comptroller
      */
     ICorePoolComptroller public immutable COMPTROLLER;
 
-    /// @notice Deploy EBrake with the core pool comptroller and ACM.
-    /// @param corePoolComptroller_ Address of the Venus Core Pool Comptroller.
+    /**
+     * @notice True for IL comptroller (isolated-pools repo), false for Diamond comptroller (venus-protocol repo).
+     * @dev Determines which ABI path setCFZero(address) uses internally.
+     */
+    bool public immutable IS_ISOLATED_POOL;
+
+    /// @notice Deploy EBrake with the comptroller, ACM, and comptroller type flag.
+    /// @param corePoolComptroller_ Address of the Venus Comptroller.
     /// @param accessControlManager_ Address of the Venus Access Control Manager.
-    constructor(ICorePoolComptroller corePoolComptroller_, address accessControlManager_) initializer {
+    /// @param isIsolatedPool_ True for IL comptroller (isolated-pools), false for Diamond comptroller (venus-protocol).
+    constructor(ICorePoolComptroller corePoolComptroller_, address accessControlManager_, bool isIsolatedPool_) initializer {
         if (address(corePoolComptroller_) == address(0)) revert ZeroAddress();
         if (accessControlManager_ == address(0)) revert ZeroAddress();
 
         COMPTROLLER = corePoolComptroller_;
+        IS_ISOLATED_POOL = isIsolatedPool_;
         __AccessControlled_init(accessControlManager_);
     }
 
@@ -83,6 +90,27 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
+    function setCFZero(address market) external {
+        _checkAccessAllowed("setCFZero(address)");
+        if (IS_ISOLATED_POOL) {
+            IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
+            if (!m.isListed) revert MarketNotListed(0, market);
+            IILComptroller(address(COMPTROLLER)).setCollateralFactor(market, 0, m.liquidationThresholdMantissa);
+            emit CollateralFactorZeroed(msg.sender, market, 0);
+        } else {
+            uint96 corePoolId = COMPTROLLER.corePoolId();
+            uint96 lastPoolId = COMPTROLLER.lastPoolId();
+            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
+                (bool isListed, , , uint256 currentLT, , , ) = COMPTROLLER.poolMarkets(i, market);
+                if (!isListed) continue;
+                uint256 err = COMPTROLLER.setCollateralFactor(i, market, 0, currentLT);
+                if (err != 0) revert SetCollateralFactorFailed(err);
+                emit CollateralFactorZeroed(msg.sender, market, i);
+            }
+        }
+    }
+
+    /// @inheritdoc IEBrake
     function setCFZero(address market, uint96 poolId) external {
         _checkAccessAllowed("setCFZero(address,uint96)");
         (bool isListed, , , uint256 currentLT, , , ) = COMPTROLLER.poolMarkets(poolId, market);
@@ -91,16 +119,6 @@ contract EBrake is IEBrake, AccessControlledV8 {
         uint256 err = COMPTROLLER.setCollateralFactor(poolId, market, 0, currentLT);
         if (err != 0) revert SetCollateralFactorFailed(err);
         emit CollateralFactorZeroed(msg.sender, market, poolId);
-    }
-
-    /// @inheritdoc IEBrake
-    function setCFZeroIsolated(address market) external {
-        _checkAccessAllowed("setCFZeroIsolated(address)");
-        IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
-        if (!m.isListed) revert MarketNotListed(0, market);
-
-        IILComptroller(address(COMPTROLLER)).setCollateralFactor(market, 0, m.liquidationThresholdMantissa);
-        emit CollateralFactorZeroed(msg.sender, market, 0);
     }
 
     /// @inheritdoc IEBrake

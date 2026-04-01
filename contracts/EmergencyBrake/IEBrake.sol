@@ -6,7 +6,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
 /**
  * @title IEBrake
  * @author Venus Protocol
- * @notice Interface for the EBrake (Emergency Brake) contract on BNB Chain.
+ * @notice Interface for the EBrake (Emergency Brake) contract.
  *         EBrake is a stateless emergency action router that can only TIGHTEN restrictions,
  *         never loosen them.
  *
@@ -63,18 +63,24 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *
  *   BSC vs NON-BSC DIFFERENCES:
  *
- *      BSC (BNB Chain) — Diamond Comptroller (venus-protocol repo):
- *        - setCFZero(market, poolId) — uses poolMarkets() (7-value return) to read LT,
+ *      The IS_ISOLATED_POOL immutable determines which comptroller ABI is used.
+ *      It is set at deployment and cannot be changed.
+ *
+ *      BSC (BNB Chain) — Diamond Comptroller (IS_ISOLATED_POOL = false):
+ *        - setCFZero(market) — iterates corePoolId to lastPoolId, zeros CF for all listed pools
+ *        - setCFZero(market, poolId) — targets a single pool (e.g. multisig use)
+ *        - Uses poolMarkets() (7-value return) to read LT,
  *          calls setCollateralFactor(poolId, market, 0, LT) which returns uint256 error code
  *        - Supports e-mode pools via poolId > 0
  *        - pauseFlashLoan() — flash loans only exist on Diamond
  *        - ACM permission strings use underscore prefix:
  *          _setActionsPaused, _setMarketBorrowCaps, _setMarketSupplyCaps
  *
- *      Non-BSC chains — IL Comptroller (isolated-pools repo):
- *        - setCFZeroIsolated(market) — uses markets() (3-value return) to read LT,
+ *      Non-BSC chains — IL Comptroller (IS_ISOLATED_POOL = true):
+ *        - setCFZero(market) — uses markets() (3-value return) to read LT,
  *          calls setCollateralFactor(market, 0, LT) which returns void (no error code)
  *        - No poolId concept — only the core pool exists (other pools are deprecated)
+ *        - setCFZero(market, poolId) not granted ACM permission (no pool concept on IL)
  *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)
  *        - ACM permission strings have no underscore:
  *          setActionsPaused, setMarketBorrowCaps, setMarketSupplyCaps
@@ -211,22 +217,26 @@ interface IEBrake {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Set collateral factor to zero for a market. Liquidation threshold is left unchanged.
+     * @notice Set collateral factor to zero for a market across all relevant pools.
+     *         Liquidation threshold is left unchanged.
      *         Blocks new borrows against the asset. Does NOT make existing positions liquidatable —
      *         that would require lowering LT, which this contract cannot do.
+     * @dev On Diamond comptroller (IS_ISOLATED_POOL=false): iterates corePoolId to lastPoolId,
+     *      zeros CF for every pool where the market is listed, skips unlisted pools.
+     *      On IL comptroller (IS_ISOLATED_POOL=true): zeros CF for the single market entry.
+     * @param market The vToken market address whose CF should be zeroed.
+     */
+    function setCFZero(address market) external;
+
+    /**
+     * @notice Set collateral factor to zero for a market in a specific pool.
+     *         Same safety guarantees as setCFZero(address) — LT is left unchanged.
+     * @dev Only meaningful on Diamond comptroller (BSC) where multiple pools exist.
+     *      On non-BSC chains, ACM should not grant permission for this function.
      * @param market The vToken market address whose CF should be zeroed.
      * @param poolId The pool ID (0 for core pool, >0 for e-mode pools).
      */
     function setCFZero(address market, uint96 poolId) external;
-
-    /**
-     * @notice Set collateral factor to zero for a market on an IL comptroller.
-     *         Same safety guarantees as setCFZero — LT is left unchanged.
-     * @dev Separate function because IL comptrollers have a different ABI: markets() returns
-     *      a 3-value tuple (vs 7 on Diamond) and setCollateralFactor returns void (vs uint256).
-     * @param market The vToken market address whose CF should be zeroed.
-     */
-    function setCFZeroIsolated(address market) external;
 
     /**
      * @notice Decrease borrow caps on markets. Can only set caps LOWER than or equal to current values.
