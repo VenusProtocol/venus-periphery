@@ -159,9 +159,10 @@ export function accessControlTests(config: NetworkConfig, get: FixtureGetter): v
 
     it("should revert setCFZero(address) from unauthorized caller", async () => {
       const { eBrake, randomUser } = get();
-      await expect(
-        eBrake.connect(randomUser)["setCFZero(address)"](config.vToken1),
-      ).to.be.revertedWithCustomError(eBrake, "Unauthorized");
+      await expect(eBrake.connect(randomUser)["setCFZero(address)"](config.vToken1)).to.be.revertedWithCustomError(
+        eBrake,
+        "Unauthorized",
+      );
     });
 
     it("should revert setMarketBorrowCaps from unauthorized caller", async () => {

@@ -32,7 +32,11 @@ contract EBrake is IEBrake, AccessControlledV8 {
     /// @param corePoolComptroller_ Address of the Venus Comptroller.
     /// @param accessControlManager_ Address of the Venus Access Control Manager.
     /// @param isIsolatedPool_ True for IL comptroller (isolated-pools), false for Diamond comptroller (venus-protocol).
-    constructor(ICorePoolComptroller corePoolComptroller_, address accessControlManager_, bool isIsolatedPool_) initializer {
+    constructor(
+        ICorePoolComptroller corePoolComptroller_,
+        address accessControlManager_,
+        bool isIsolatedPool_
+    ) initializer {
         if (address(corePoolComptroller_) == address(0)) revert ZeroAddress();
         if (accessControlManager_ == address(0)) revert ZeroAddress();
 

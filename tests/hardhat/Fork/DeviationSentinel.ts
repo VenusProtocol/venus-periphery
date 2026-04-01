@@ -139,7 +139,11 @@ async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Prom
   const eBrake = await EBrakeFactory.deploy(COMPTROLLER, ACM, false);
 
   // Grant EBrake permissions on comptroller
-  await acm.giveCallPermission(ethers.constants.AddressZero, "_setActionsPaused(address[],uint8[],bool)", eBrake.address);
+  await acm.giveCallPermission(
+    ethers.constants.AddressZero,
+    "_setActionsPaused(address[],uint8[],bool)",
+    eBrake.address,
+  );
   await acm.giveCallPermission(
     ethers.constants.AddressZero,
     "setCollateralFactor(uint96,address,uint256,uint256)",

@@ -107,13 +107,16 @@ if (FORK_MAINNET) {
         it("should revert for unlisted market", async () => {
           const { eBrake, whitelistedUser } = get();
           await expect(
-            eBrake.connect(whitelistedUser)["setCFZero(address,uint96)"]("0x0000000000000000000000000000000000000001", CORE_POOL_ID),
+            eBrake
+              .connect(whitelistedUser)
+              ["setCFZero(address,uint96)"]("0x0000000000000000000000000000000000000001", CORE_POOL_ID),
           ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
         });
 
         it("should revert for invalid pool ID", async () => {
           const { eBrake, whitelistedUser } = get();
-          await expect(eBrake.connect(whitelistedUser)["setCFZero(address,uint96)"](config.vToken1, 999)).to.be.reverted;
+          await expect(eBrake.connect(whitelistedUser)["setCFZero(address,uint96)"](config.vToken1, 999)).to.be
+            .reverted;
         });
 
         // E-mode pool tests

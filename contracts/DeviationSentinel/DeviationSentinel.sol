@@ -116,11 +116,7 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param resilientOracle_ Address of the resilient oracle
     /// @param sentinelOracle_ Address of the sentinel oracle
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(
-        IEBrake eBrake_,
-        ResilientOracleInterface resilientOracle_,
-        OracleInterface sentinelOracle_
-    ) {
+    constructor(IEBrake eBrake_, ResilientOracleInterface resilientOracle_, OracleInterface sentinelOracle_) {
         if (address(eBrake_) == address(0)) revert ZeroAddress();
         if (address(resilientOracle_) == address(0)) revert ZeroAddress();
         if (address(sentinelOracle_) == address(0)) revert ZeroAddress();

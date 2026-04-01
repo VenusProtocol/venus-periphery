@@ -72,17 +72,8 @@ describe("DeviationSentinel", () => {
   }
 
   beforeEach(async () => {
-    ({
-      deviationSentinel,
-      accessControlManager,
-      eBrake,
-      resilientOracle,
-      sentinelOracle,
-      vToken,
-      owner,
-      keeper,
-      user,
-    } = await loadFixture(deployFixture));
+    ({ deviationSentinel, accessControlManager, eBrake, resilientOracle, sentinelOracle, vToken, owner, keeper, user } =
+      await loadFixture(deployFixture));
   });
 
   // ═══════════════════════════════════════════════════════════════════
