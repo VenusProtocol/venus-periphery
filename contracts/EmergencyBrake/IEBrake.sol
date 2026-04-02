@@ -7,8 +7,9 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  * @title IEBrake
  * @author Venus Protocol
  * @notice Interface for the EBrake (Emergency Brake) contract.
- *         EBrake is a stateless emergency action router that can only TIGHTEN restrictions,
- *         never loosen them.
+ *         EBrake is an emergency action router that can only TIGHTEN restrictions,
+ *         never loosen them. It also snapshots pre-incident values (CF, caps) so that
+ *         governance can read and restore them via VIP. See resetMarketState().
  *
  * @dev Design goals and integration patterns:
  *
@@ -130,6 +131,10 @@ interface IEBrake {
     /// @param markets The vToken market addresses whose supply caps were decreased.
     /// @param newSupplyCaps The new supply cap values.
     event SupplyCapsDecreased(address indexed caller, address[] markets, uint256[] newSupplyCaps);
+
+    /// @notice Emitted when a market's snapshot state is reset after governance recovery.
+    /// @param market The market address whose snapshot was cleared.
+    event MarketStateReset(address indexed market);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
@@ -253,4 +258,26 @@ interface IEBrake {
      * @param newSupplyCaps The new supply cap values. Each must be <= current cap.
      */
     function setMarketSupplyCaps(address[] calldata markets, uint256[] calldata newSupplyCaps) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     MARKET STATE SNAPSHOT — RESET & VIEW
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Reset the stored market state snapshot for a market.
+     * @dev Called by governance as part of a recovery VIP after restoring market parameters.
+     *      Clears stored CF/LT per pool and borrow/supply cap snapshots so that
+     *      future EBrake actions can capture fresh pre-incident values.
+     * @param market The vToken market address whose snapshot should be cleared.
+     */
+    function resetMarketState(address market) external;
+
+    /**
+     * @notice Read the stored collateral factor and liquidation threshold snapshot for a market in a specific pool.
+     * @param market The vToken market address.
+     * @param poolId The pool ID (0 for IL chains or core pool on Diamond).
+     * @return cf The collateral factor that was stored before EBrake zeroed it. 0 if no snapshot exists.
+     * @return lt The liquidation threshold at the time of the snapshot. 0 if no snapshot exists.
+     */
+    function getMarketCFSnapshot(address market, uint96 poolId) external view returns (uint256 cf, uint256 lt);
 }

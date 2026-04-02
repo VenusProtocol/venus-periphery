@@ -76,6 +76,7 @@ const DIAMOND_EBRAKE_FUNCTIONS = [
   "setCFZero(address,uint96)",
   "setMarketBorrowCaps(address[],uint256[])",
   "setMarketSupplyCaps(address[],uint256[])",
+  "resetMarketState(address)",
 ];
 
 const IL_EBRAKE_FUNCTIONS = [
@@ -87,6 +88,7 @@ const IL_EBRAKE_FUNCTIONS = [
   "setCFZero(address)",
   "setMarketBorrowCaps(address[],uint256[])",
   "setMarketSupplyCaps(address[],uint256[])",
+  "resetMarketState(address)",
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
