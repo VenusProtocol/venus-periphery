@@ -17,8 +17,7 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  *         large deviations are detected. All emergency actions are routed through the EBrake contract.
  * @dev This contract can only TIGHTEN restrictions (pause, zero CF), never loosen them.
  *      Recovery (unpausing, restoring CF) is handled via governance VIP.
- *      After governance restores a market, call resetMarketState() to clear the sentinel's
- *      tracked flags so it can re-detect and re-pause on future deviations.
+ *      Idempotency is handled by EBrake — duplicate calls are no-ops.
  */
 contract DeviationSentinel is AccessControlledV8 {
     /// @notice Configuration for price deviation monitoring
@@ -27,14 +26,6 @@ contract DeviationSentinel is AccessControlledV8 {
     struct DeviationConfig {
         uint8 deviation;
         bool enabled;
-    }
-
-    /// @notice State tracking for market modifications by this contract
-    /// @param borrowPaused True if borrow is paused for this market by this contract
-    /// @param cfModifiedAndSupplyPaused True if collateral factor was modified and supply is paused by this contract
-    struct MarketState {
-        bool borrowPaused;
-        bool cfModifiedAndSupplyPaused;
     }
 
     /// @notice Maximum allowed price deviation in percentage (e.g., 10 = 10%)
@@ -58,9 +49,6 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Mapping of trusted keeper addresses
     mapping(address => bool) public trustedKeepers;
 
-    /// @notice Mapping to track market state changes made by this contract
-    mapping(address => MarketState) public marketStates;
-
     /// @notice Emitted when a token's deviation configuration is updated
     /// @param token The token address
     /// @param config The new deviation configuration
@@ -75,10 +63,6 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param keeper The keeper address
     /// @param isTrusted Whether the keeper is trusted
     event TrustedKeeperUpdated(address indexed keeper, bool isTrusted);
-
-    /// @notice Emitted when a market's state is reset
-    /// @param market The market address
-    event MarketStateReset(address indexed market);
 
     /// @notice Emitted when borrow is paused for a market
     /// @param market The market address
@@ -186,25 +170,6 @@ contract DeviationSentinel is AccessControlledV8 {
         emit TokenMonitoringStatusChanged(token, enabled);
     }
 
-    /// @notice Reset the market state for a specific market
-    /// @dev This should be called as part of a governance VIP after manually restoring a paused market
-    ///      (unpausing, restoring CF). It clears the sentinel's tracked flags so it can re-detect
-    ///      and re-pause on future deviations.
-    /// @param market The vToken market to reset
-    /// @custom:event Emits MarketStateReset event
-    /// @custom:error ZeroAddress is thrown when market address is zero
-    function resetMarketState(IVToken market) external {
-        _checkAccessAllowed("resetMarketState(address)");
-
-        if (address(market) == address(0)) revert ZeroAddress();
-
-        MarketState storage state = marketStates[address(market)];
-        state.borrowPaused = false;
-        state.cfModifiedAndSupplyPaused = false;
-
-        emit MarketStateReset(address(market));
-    }
-
     /// @notice Handle price deviation for a market by pausing borrow or zeroing CF and pausing supply
     /// @dev This contract can only tighten restrictions. Recovery (unpausing, restoring CF) is via governance VIP.
     /// @param market The vToken market to handle
@@ -224,22 +189,12 @@ contract DeviationSentinel is AccessControlledV8 {
 
         if (!hasDeviation) return;
 
-        MarketState storage state = marketStates[address(market)];
-
         if (sentinelPrice > oraclePrice) {
-            // Early return if borrow is already paused
-            if (state.borrowPaused) return;
-
             EBRAKE.pauseBorrow(address(market));
-            state.borrowPaused = true;
             emit BorrowPaused(address(market));
         } else {
-            // Early return if CF is already modified and supply is already paused
-            if (state.cfModifiedAndSupplyPaused) return;
-
             EBRAKE.setCFZero(address(market));
             EBRAKE.pauseSupply(address(market));
-            state.cfModifiedAndSupplyPaused = true;
             emit SupplyPaused(address(market));
         }
     }
