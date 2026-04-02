@@ -131,9 +131,16 @@ const PROXY_ADMIN = "0x6beb6D2695B67FEb73ad4f172E8E2975497187e4";
 async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Promise<{ eBrake: Contract }> {
   const acm = new ethers.Contract(ACM, ACM_ABI, timelock);
 
-  // Deploy EBrake (BSC = Diamond comptroller, so isIsolatedPool = false)
+  // Deploy EBrake behind proxy (BSC = Diamond comptroller, so isIsolatedPool = false)
   const EBrakeFactory = await ethers.getContractFactory("EBrake");
-  const eBrake = await EBrakeFactory.deploy(COMPTROLLER, ACM, false);
+  const eBrakeImpl = await EBrakeFactory.deploy(COMPTROLLER, false);
+
+  const ProxyFactory = await ethers.getContractFactory(
+    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy",
+  );
+  const initData = eBrakeImpl.interface.encodeFunctionData("initialize", [ACM]);
+  const proxy = await ProxyFactory.deploy(eBrakeImpl.address, timelock.address, initData);
+  const eBrake = EBrakeFactory.attach(proxy.address);
 
   // Grant EBrake permissions on comptroller
   await acm.giveCallPermission(

@@ -10,7 +10,7 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
 /**
  * @title EBrake — Emergency Brake Contract
  * @author Venus Protocol
- * @notice A standalone emergency action router for Venus Protocol.
+ * @notice Emergency action router for Venus Protocol (deployed behind a TransparentUpgradeableProxy).
  *         This contract holds NO detection logic — it only exposes Comptroller emergency
  *         functions behind ACM permissions. See IEBrake for full design documentation.
  */
@@ -51,20 +51,24 @@ contract EBrake is IEBrake, AccessControlledV8 {
     /// @dev Values are captured at tightening time (first-write-wins) and cleared via resetMarketState().
     mapping(address => MarketState) public marketStates;
 
-    /// @notice Deploy EBrake with the comptroller, ACM, and comptroller type flag.
+    /// @dev Storage gap for future upgrades.
+    uint256[49] private __gap;
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
     /// @param corePoolComptroller_ Address of the Venus Comptroller.
-    /// @param accessControlManager_ Address of the Venus Access Control Manager.
     /// @param isIsolatedPool_ True for IL comptroller (isolated-pools), false for Diamond comptroller (venus-protocol).
-    constructor(
-        ICorePoolComptroller corePoolComptroller_,
-        address accessControlManager_,
-        bool isIsolatedPool_
-    ) initializer {
+    constructor(ICorePoolComptroller corePoolComptroller_, bool isIsolatedPool_) {
         if (address(corePoolComptroller_) == address(0)) revert ZeroAddress();
-        if (accessControlManager_ == address(0)) revert ZeroAddress();
 
         COMPTROLLER = corePoolComptroller_;
         IS_ISOLATED_POOL = isIsolatedPool_;
+        _disableInitializers();
+    }
+
+    /// @notice Initialize the EBrake proxy with the Access Control Manager.
+    /// @param accessControlManager_ Address of the Venus Access Control Manager.
+    function initialize(address accessControlManager_) external initializer {
+        if (accessControlManager_ == address(0)) revert ZeroAddress();
         __AccessControlled_init(accessControlManager_);
     }
 

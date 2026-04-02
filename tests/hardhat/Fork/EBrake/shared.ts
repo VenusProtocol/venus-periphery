@@ -52,7 +52,14 @@ export function createDeployFixture(config: NetworkConfig): () => Promise<EBrake
     const comptroller = new ethers.Contract(config.comptroller, config.comptrollerAbi, timelock);
 
     const EBrakeFactory = await ethers.getContractFactory("EBrake");
-    const eBrake = (await EBrakeFactory.deploy(config.comptroller, config.acm, config.isIsolatedPool)) as EBrake;
+    const eBrakeImpl = await EBrakeFactory.deploy(config.comptroller, config.isIsolatedPool);
+
+    const ProxyFactory = await ethers.getContractFactory(
+      "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy",
+    );
+    const initData = eBrakeImpl.interface.encodeFunctionData("initialize", [config.acm]);
+    const proxy = await ProxyFactory.deploy(eBrakeImpl.address, timelock.address, initData);
+    const eBrake = EBrakeFactory.attach(proxy.address) as EBrake;
 
     // Grant whitelistedUser per-function ACM permissions on EBrake
     for (const sig of config.eBrakeFunctions) {
@@ -87,17 +94,15 @@ export function deploymentTests(config: NetworkConfig, get: FixtureGetter): void
     it("should revert deployment with zero comptroller", async () => {
       const { eBrake } = get();
       const F = await ethers.getContractFactory("EBrake");
-      await expect(
-        F.deploy(ethers.constants.AddressZero, config.acm, config.isIsolatedPool),
-      ).to.be.revertedWithCustomError(eBrake, "ZeroAddress");
+      await expect(F.deploy(ethers.constants.AddressZero, config.isIsolatedPool)).to.be.revertedWithCustomError(
+        eBrake,
+        "ZeroAddress",
+      );
     });
 
-    it("should revert deployment with zero ACM", async () => {
+    it("should revert on double initialization", async () => {
       const { eBrake } = get();
-      const F = await ethers.getContractFactory("EBrake");
-      await expect(
-        F.deploy(config.comptroller, ethers.constants.AddressZero, config.isIsolatedPool),
-      ).to.be.revertedWithCustomError(eBrake, "ZeroAddress");
+      await expect(eBrake.initialize(config.acm)).to.be.revertedWith("Initializable: contract is already initialized");
     });
   });
 }

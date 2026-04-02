@@ -13,6 +13,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
 
   const comptroller = await getContractAddressOrNullAddress(deployments, "Unitroller");
   const accessControlManager = ADDRESSES.preconfiguredAddresses.AccessControlManager;
+  const timelock = await getContractAddressOrNullAddress(deployments, "NormalTimelock");
 
   if (comptroller === ethers.constants.AddressZero) {
     console.log("Unitroller not deployed, skipping EBrake deployment");
@@ -23,20 +24,36 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   // All other chains use IL comptroller → isIsolatedPool = true
   const isIsolatedPool = !network.name.startsWith("bsc") && network.name !== "hardhat";
 
+  const defaultProxyAdmin = await hre.artifacts.readArtifact(
+    "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
+  );
+
   const result = await deploy("EBrake", {
     contract: "EBrake",
     from: deployer,
     log: true,
     deterministicDeployment: false,
-    args: [comptroller, accessControlManager, isIsolatedPool],
+    args: [comptroller, isIsolatedPool],
+    proxy: {
+      owner: network.live ? timelock : deployer,
+      proxyContract: "OptimizedTransparentUpgradeableProxy",
+      execute: {
+        methodName: "initialize",
+        args: [accessControlManager],
+      },
+      viaAdminContract: {
+        name: "DefaultProxyAdmin",
+        artifact: defaultProxyAdmin,
+      },
+    },
   });
 
   if (result.newlyDeployed) {
-    console.log(`EBrake deployed at: ${result.address}`);
-    console.log("Verifying EBrake on explorer...");
+    console.log(`EBrake proxy deployed at: ${result.address}`);
+    console.log("Verifying EBrake implementation on explorer...");
     await hre.run("verify:verify", {
-      address: result.address,
-      constructorArguments: [comptroller, accessControlManager, isIsolatedPool],
+      address: result.implementation,
+      constructorArguments: [comptroller, isIsolatedPool],
     });
   }
 };
