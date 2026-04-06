@@ -214,6 +214,8 @@ contract DeviationSentinel is AccessControlledV8 {
         address underlyingToken = market.underlying();
         DeviationConfig memory config = tokenConfigs[underlyingToken];
 
+        if (config.deviation == 0 || !config.enabled) return (false, 0, 0, 0);
+
         oraclePrice = RESILIENT_ORACLE.getPrice(underlyingToken);
         sentinelPrice = SENTINEL_ORACLE.getPrice(underlyingToken);
 

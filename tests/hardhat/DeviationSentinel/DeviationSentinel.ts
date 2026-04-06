@@ -339,13 +339,37 @@ describe("DeviationSentinel", () => {
       expect(r.deviationPercent).to.equal(ethers.constants.MaxUint256);
     });
 
-    it("should still calculate deviation when monitoring is disabled (view-only)", async () => {
+    it("should return hasDeviation=false when monitoring is disabled", async () => {
       await deviationSentinel.setTokenMonitoringEnabled(UNDERLYING_ASSET, false);
       resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
       sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("200", 18));
 
       const r = await deviationSentinel.checkPriceDeviation(vToken.address);
-      expect(r.hasDeviation).to.be.true;
+      expect(r.hasDeviation).to.be.false;
+      expect(r.oraclePrice).to.equal(0);
+      expect(r.sentinelPrice).to.equal(0);
+      expect(r.deviationPercent).to.equal(0);
+    });
+
+    it("should return (false, 0, 0, 0) for unconfigured market", async () => {
+      const unknownVToken = await smock.fake<IVToken>("IVToken");
+      unknownVToken.underlying.returns("0x0000000000000000000000000000000000000099");
+
+      const r = await deviationSentinel.checkPriceDeviation(unknownVToken.address);
+      expect(r.hasDeviation).to.be.false;
+      expect(r.oraclePrice).to.equal(0);
+      expect(r.sentinelPrice).to.equal(0);
+      expect(r.deviationPercent).to.equal(0);
+    });
+
+    it("should return (false, 0, 0, 0) for configured but disabled market", async () => {
+      await deviationSentinel.setTokenMonitoringEnabled(UNDERLYING_ASSET, false);
+
+      const r = await deviationSentinel.checkPriceDeviation(vToken.address);
+      expect(r.hasDeviation).to.be.false;
+      expect(r.oraclePrice).to.equal(0);
+      expect(r.sentinelPrice).to.equal(0);
+      expect(r.deviationPercent).to.equal(0);
     });
 
     it("should round down deviationPercent due to integer division (9.5% → 9)", async () => {
