@@ -452,10 +452,17 @@ export function setCFZeroTests(config: NetworkConfig, get: FixtureGetter): void 
         expect(marketAfter.liquidationThresholdMantissa).to.equal(marketBefore.liquidationThresholdMantissa);
       });
 
-      it("should skip unlisted pools without reverting", async () => {
+      it("should skip e-mode pools where market is not listed", async () => {
         const { eBrake, whitelistedUser } = get();
-        // vToken1 may not be listed in all pools — batch should skip, not revert
+        // vToken1 is listed in core pool; e-mode pools where it is absent are silently skipped
         await expect(eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1)).to.not.be.reverted;
+      });
+
+      it("should revert for unlisted market", async () => {
+        const { eBrake, whitelistedUser } = get();
+        await expect(
+          eBrake.connect(whitelistedUser)["setCFZero(address)"]("0x0000000000000000000000000000000000000001"),
+        ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
       });
     }
   });

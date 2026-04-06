@@ -133,6 +133,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
         } else {
             uint96 corePoolId = COMPTROLLER.corePoolId();
             uint96 lastPoolId = COMPTROLLER.lastPoolId();
+            (bool isCorePoolListed, , , , , , ) = COMPTROLLER.poolMarkets(corePoolId, market);
+            if (!isCorePoolListed) revert MarketNotListed(corePoolId, market);
             for (uint96 i = corePoolId; i <= lastPoolId; i++) {
                 (bool isListed, uint256 currentCF, , uint256 currentLT, , , ) = COMPTROLLER.poolMarkets(i, market);
                 if (!isListed) continue;
