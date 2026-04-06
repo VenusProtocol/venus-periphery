@@ -49,6 +49,9 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Mapping of trusted keeper addresses
     mapping(address => bool) public trustedKeepers;
 
+    /// @dev Storage gap for future upgrades.
+    uint256[48] private __gap;
+
     /// @notice Emitted when a token's deviation configuration is updated
     /// @param token The token address
     /// @param config The new deviation configuration
