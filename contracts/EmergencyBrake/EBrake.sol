@@ -241,6 +241,14 @@ contract EBrake is IEBrake, AccessControlledV8 {
             for (uint96 i = corePoolId; i <= lastPoolId; ++i) {
                 (bool isListed, uint256 currentCF, , uint256 currentLT, , , ) = COMPTROLLER.poolMarkets(i, market);
                 if (!isListed) continue;
+
+                // Skip pools where the market is borrow-only (LT == 0). The Diamond comptroller
+                // requires newLT >= newCF in __setCollateralFactor; passing currentLT=0 with a
+                // non-zero newCF reverts with INVALID_LIQUIDATION_THRESHOLD. A borrow-only
+                // listing has no collateral exposure to tighten anyway, so it is safe to skip.
+                // setCFZero is unaffected because it always passes newCF=0, which trivially
+                // satisfies newLT >= newCF for any currentLT.
+                if (currentLT == 0) continue;
                 uint256 err = COMPTROLLER.setCollateralFactor(i, market, newCF, currentLT);
                 if (err != 0) revert SetCollateralFactorFailed(err);
                 emit CollateralFactorAdjusted(msg.sender, market, i, currentCF, newCF);
