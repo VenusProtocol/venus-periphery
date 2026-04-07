@@ -85,6 +85,16 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  */
 interface IEBrake {
     // ═══════════════════════════════════════════════════════════════════════
+    //                              ENUMS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Type of cap to adjust.
+    enum CapType {
+        BORROW,
+        SUPPLY
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //                              EVENTS
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -125,6 +135,34 @@ interface IEBrake {
     /// @param newSupplyCaps The new supply cap values.
     event SupplyCapsDecreased(address indexed caller, address[] markets, uint256[] newSupplyCaps);
 
+    /// @notice Emitted when a collateral factor is adjusted to a new value.
+    ///         Unlike CollateralFactorZeroed, this allows setting CF to any value (not just zero).
+    /// @param caller The address that triggered the adjustment.
+    /// @param market The vToken market address whose CF was adjusted.
+    /// @param poolId The pool ID. On BNB Chain (Diamond comptroller) this identifies the core pool (0)
+    ///        or an e-mode pool (>0). On other networks (IL comptroller) 0 is used as a sentinel value.
+    /// @param oldCF The previous collateral factor mantissa.
+    /// @param newCF The new collateral factor mantissa.
+    event CollateralFactorAdjusted(
+        address indexed caller,
+        address indexed market,
+        uint96 indexed poolId,
+        uint256 oldCF,
+        uint256 newCF
+    );
+
+    /// @notice Emitted when a borrow or supply cap is adjusted.
+    /// @param caller The address that triggered the adjustment.
+    /// @param market The vToken market address whose cap was adjusted.
+    /// @param capType Whether the borrow cap or supply cap was adjusted.
+    /// @param oldCap The previous cap value.
+    /// @param newCap The new cap value.
+    event CapAdjusted(address indexed caller, address indexed market, CapType capType, uint256 oldCap, uint256 newCap);
+
+    /// @notice Emitted when a market's pre-incident state snapshot is cleared via resetMarketState.
+    /// @param market The vToken market address whose state was reset.
+    event MarketStateReset(address indexed market);
+
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════
@@ -161,6 +199,13 @@ interface IEBrake {
     /// @param currentCap The current cap value on the comptroller.
     /// @param requestedCap The new cap value that was rejected.
     error CapExceedsCurrent(address market, uint256 currentCap, uint256 requestedCap);
+
+    /// @notice Thrown when an invalid CapType is provided.
+    error InvalidCapType();
+
+    /// @notice Thrown when a pool-specific function is called on an IL (isolated-pool) deployment.
+    ///         IL comptrollers have no poolId concept — use the non-poolId variant instead.
+    error NotSupportedOnIsolatedPool();
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — BATCH OPERATIONS
@@ -211,22 +256,25 @@ interface IEBrake {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Set collateral factor to zero for a market. Liquidation threshold is left unchanged.
+     * @notice Set collateral factor to zero for a market across all applicable pools.
+     *         Liquidation threshold is left unchanged.
      *         Blocks new borrows against the asset. Does NOT make existing positions liquidatable —
      *         that would require lowering LT, which this contract cannot do.
+     * @dev On BSC (Diamond): loops all pool IDs (core + e-mode) and zeros CF where market is listed.
+     *      On non-BSC (IL): single call — no poolId concept.
+     *      Internally routes based on IS_ISOLATED_POOL. Snapshots pre-incident CF for recovery.
+     * @param market The vToken market address whose CF should be zeroed.
+     */
+    function setCFZero(address market) external;
+
+    /**
+     * @notice Set collateral factor to zero for a market in a specific pool (Diamond comptroller only).
+     *         Liquidation threshold is left unchanged.
+     * @dev Use when targeting a single e-mode pool rather than all pools at once.
      * @param market The vToken market address whose CF should be zeroed.
      * @param poolId The pool ID (0 for core pool, >0 for e-mode pools).
      */
     function setCFZero(address market, uint96 poolId) external;
-
-    /**
-     * @notice Set collateral factor to zero for a market on an IL comptroller.
-     *         Same safety guarantees as setCFZero — LT is left unchanged.
-     * @dev Separate function because IL comptrollers have a different ABI: markets() returns
-     *      a 3-value tuple (vs 7 on Diamond) and setCollateralFactor returns void (vs uint256).
-     * @param market The vToken market address whose CF should be zeroed.
-     */
-    function setCFZeroIsolated(address market) external;
 
     /**
      * @notice Decrease borrow caps on markets. Can only set caps LOWER than or equal to current values.
@@ -243,4 +291,60 @@ interface IEBrake {
      * @param newSupplyCaps The new supply cap values. Each must be <= current cap.
      */
     function setMarketSupplyCaps(address[] calldata markets, uint256[] calldata newSupplyCaps) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     EXECUTOR-GATED ACTIONS — RISK PARAMETER ADJUSTMENTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Adjust collateral factor for a market to a new value. Liquidation threshold is left unchanged.
+     *         Unlike setCFZero, this allows setting CF to any value — both increases and decreases.
+     *
+     * @dev    This function can LOOSEN restrictions (increase CF). Safety is enforced upstream by the
+     *         Executor contract, which bounds adjustments to governance-approved original values and
+     *         enforces cooldown periods for increases. Only the Executor should be whitelisted via ACM
+     *         to call this function.
+     *
+     *         On BSC (Diamond): loops all pool IDs (core + e-mode) and adjusts CF for every pool where
+     *         the market is listed. On non-BSC (IL): single call — no poolId concept.
+     *         Internally routes based on IS_ISOLATED_POOL.
+     *
+     * @param market The vToken market address whose CF should be adjusted.
+     * @param newCF The new collateral factor mantissa (1e18 scale).
+     */
+    function adjustCollateralFactor(address market, uint256 newCF) external;
+
+    /**
+     * @notice Adjust a borrow or supply cap for a single market. Allows both increases and decreases.
+     *
+     * @dev    This function can LOOSEN restrictions (increase caps). Safety is enforced upstream by the
+     *         Executor contract, which bounds adjustments within [minCap, originalCap] and enforces
+     *         cooldown periods for increases. Only the Executor should be whitelisted via ACM
+     *         to call this function.
+     *
+     * @param market The vToken market address whose cap should be adjusted.
+     * @param capType Whether to adjust the borrow cap or supply cap.
+     * @param newCap The new cap value.
+     */
+    function adjustCap(address market, CapType capType, uint256 newCap) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     MARKET STATE SNAPSHOT — RESET & VIEW
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Clear the pre-incident state snapshot for a market.
+     *         Call this after governance has restored parameters via VIP to re-arm EBrake.
+     * @param market The vToken market address to reset.
+     */
+    function resetMarketState(address market) external;
+
+    /**
+     * @notice Read the snapshotted collateral factor and liquidation threshold for a market in a pool.
+     * @param market The vToken market address.
+     * @param poolId The pool ID (0 for IL comptrollers or Diamond core pool, >0 for e-mode pools).
+     * @return cf The collateral factor mantissa at snapshot time (0 if not snapshotted).
+     * @return lt The liquidation threshold mantissa at snapshot time (0 if not snapshotted).
+     */
+    function getMarketCFSnapshot(address market, uint96 poolId) external view returns (uint256 cf, uint256 lt);
 }
