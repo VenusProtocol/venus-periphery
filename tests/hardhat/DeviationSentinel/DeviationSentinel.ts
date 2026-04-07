@@ -430,10 +430,10 @@ describe("DeviationSentinel", () => {
         sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("115", 18));
       });
 
-      it("should emit BorrowPaused event", async () => {
+      it("should emit DeviationHandled(market, oraclePrice, sentinelPrice, true) when sentinel price is higher", async () => {
         await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address))
-          .to.emit(deviationSentinel, "BorrowPaused")
-          .withArgs(vToken.address);
+          .to.emit(deviationSentinel, "DeviationHandled")
+          .withArgs(vToken.address, parseUnits("100", 18), parseUnits("115", 18), true);
       });
 
       it("should call eBrake.pauseBorrow(market)", async () => {
@@ -456,10 +456,10 @@ describe("DeviationSentinel", () => {
         sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
       });
 
-      it("should emit SupplyPaused event", async () => {
+      it("should emit DeviationHandled(market, oraclePrice, sentinelPrice, false) when sentinel price is lower", async () => {
         await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address))
-          .to.emit(deviationSentinel, "SupplyPaused")
-          .withArgs(vToken.address);
+          .to.emit(deviationSentinel, "DeviationHandled")
+          .withArgs(vToken.address, parseUnits("100", 18), parseUnits("85", 18), false);
       });
 
       it("should call eBrake.setCFZero(market) and eBrake.pauseSupply(market)", async () => {
@@ -490,8 +490,7 @@ describe("DeviationSentinel", () => {
         eBrake["setCFZero(address)"].reset();
 
         const tx = deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        await expect(tx).to.not.emit(deviationSentinel, "BorrowPaused");
-        await expect(tx).to.not.emit(deviationSentinel, "SupplyPaused");
+        await expect(tx).to.not.emit(deviationSentinel, "DeviationHandled");
         expect(eBrake.pauseBorrow).to.not.have.been.called;
         expect(eBrake.pauseSupply).to.not.have.been.called;
         expect(eBrake["setCFZero(address)"]).to.not.have.been.called;
@@ -513,34 +512,31 @@ describe("DeviationSentinel", () => {
     });
 
     describe("zero-price edge cases", () => {
-      it("should pause borrow when oracle price = 0 (sentinel > oracle)", async () => {
+      it("should emit DeviationHandled(borrowPaused=true) when oracle price = 0 (sentinel > oracle)", async () => {
         resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(0);
         sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
 
-        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.emit(
-          deviationSentinel,
-          "BorrowPaused",
-        );
+        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address))
+          .to.emit(deviationSentinel, "DeviationHandled")
+          .withArgs(vToken.address, 0, parseUnits("100", 18), true);
       });
 
-      it("should pause supply when sentinel price = 0", async () => {
+      it("should emit DeviationHandled(borrowPaused=false) when sentinel price = 0", async () => {
         resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("100", 18));
         sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(0);
 
-        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.emit(
-          deviationSentinel,
-          "SupplyPaused",
-        );
+        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address))
+          .to.emit(deviationSentinel, "DeviationHandled")
+          .withArgs(vToken.address, parseUnits("100", 18), 0, false);
       });
 
-      it("should pause supply when both prices are 0", async () => {
+      it("should emit DeviationHandled(borrowPaused=false) when both prices are 0", async () => {
         resilientOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(0);
         sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(0);
 
-        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.emit(
-          deviationSentinel,
-          "SupplyPaused",
-        );
+        await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address))
+          .to.emit(deviationSentinel, "DeviationHandled")
+          .withArgs(vToken.address, 0, 0, false);
       });
     });
   });

@@ -67,13 +67,12 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param isTrusted Whether the keeper is trusted
     event TrustedKeeperUpdated(address indexed keeper, bool isTrusted);
 
-    /// @notice Emitted when borrow is paused for a market
+    /// @notice Emitted when a price deviation is detected and handled for a market
     /// @param market The market address
-    event BorrowPaused(address indexed market);
-
-    /// @notice Emitted when supply is paused for a market
-    /// @param market The market address
-    event SupplyPaused(address indexed market);
+    /// @param oraclePrice The price from the resilient oracle at the time of detection
+    /// @param sentinelPrice The price from the sentinel oracle at the time of detection
+    /// @param borrowPaused True if borrow was paused (sentinel > oracle); false if CF was zeroed and supply was paused (sentinel <= oracle)
+    event DeviationHandled(address indexed market, uint256 oraclePrice, uint256 sentinelPrice, bool borrowPaused);
 
     /// @notice Thrown when deviation is set to zero
     error ZeroDeviation();
@@ -176,8 +175,7 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Handle price deviation for a market by pausing borrow or zeroing CF and pausing supply
     /// @dev This contract can only tighten restrictions. Recovery (unpausing, restoring CF) is via governance VIP.
     /// @param market The vToken market to handle
-    /// @custom:event Emits BorrowPaused when borrow is paused due to high sentinel price
-    /// @custom:event Emits SupplyPaused when supply is paused due to low sentinel price
+    /// @custom:event Emits DeviationHandled with price context and the action taken
     /// @custom:error UnauthorizedKeeper is thrown when caller is not a trusted keeper
     /// @custom:error MarketNotConfigured is thrown when market's underlying token has no deviation config
     /// @custom:error TokenMonitoringDisabled is thrown when monitoring is disabled for the token
@@ -194,12 +192,11 @@ contract DeviationSentinel is AccessControlledV8 {
 
         if (sentinelPrice > oraclePrice) {
             EBRAKE.pauseBorrow(address(market));
-            emit BorrowPaused(address(market));
         } else {
             EBRAKE.setCFZero(address(market));
             EBRAKE.pauseSupply(address(market));
-            emit SupplyPaused(address(market));
         }
+        emit DeviationHandled(address(market), oraclePrice, sentinelPrice, sentinelPrice > oraclePrice);
     }
 
     /// @notice Check if there is a price deviation between resilient oracle and sentinel oracle for a market
