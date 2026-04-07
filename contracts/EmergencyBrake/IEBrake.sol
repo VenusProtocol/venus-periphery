@@ -74,6 +74,9 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          calls setCollateralFactor(poolId, market, 0, LT) which returns uint256 error code
  *        - Supports e-mode pools via poolId > 0
  *        - pauseFlashLoan() — flash loans only exist on Diamond
+ *        - disablePoolBorrow(poolId, market) — per-pool granular borrow disable, only on Diamond
+ *        - revokeFlashLoanAccess(account) — remove a single account from the flash loan
+ *          whitelist; flash loan whitelist only exists on Diamond
  *        - ACM permission strings use underscore prefix:
  *          _setActionsPaused, _setMarketBorrowCaps, _setMarketSupplyCaps
  *
@@ -110,6 +113,17 @@ interface IEBrake {
     /// @notice Emitted when flash loans are paused.
     /// @param caller The address that triggered the emergency action.
     event FlashLoanPaused(address indexed caller);
+
+    /// @notice Emitted when borrowing is disabled for a market in a specific pool.
+    /// @param caller The address that triggered the emergency action.
+    /// @param poolId The pool identifier (0 = core pool, >0 = e-mode pools).
+    /// @param market The vToken market address whose pool-borrow flag was disabled.
+    event PoolBorrowDisabled(address indexed caller, uint96 indexed poolId, address indexed market);
+
+    /// @notice Emitted when an account is removed from the flash loan whitelist.
+    /// @param caller The address that triggered the emergency action.
+    /// @param account The account whose flash loan access was revoked.
+    event FlashLoanAccessRevoked(address indexed caller, address indexed account);
 
     /// @notice Emitted when a collateral factor is set to zero.
     ///         Used for both core/e-mode pools and IL comptrollers.
@@ -216,6 +230,37 @@ interface IEBrake {
 
     /// @notice Pause flash loans across the core pool.
     function pauseFlashLoan() external;
+
+    /**
+     * @notice Disable borrowing for a market in a specific pool, leaving other pools unaffected.
+     * @dev Only meaningful on Diamond comptroller (BSC) where the per-pool `isBorrowAllowed` flag exists.
+     *      On non-BSC chains the underlying call will revert (selector mismatch on IL comptroller).
+     *
+     *      This is independent of `pauseBorrow(market)` which flips the global
+     *      `_actionPaused[market][BORROW]` flag across every pool. Both flags must allow borrowing
+     *      for borrows to actually proceed in a given pool/market — recovery from a combined
+     *      tightening therefore requires governance to clear both flags.
+     *
+     *      The boolean argument is hardcoded to `false` inside the implementation to preserve
+     *      the EBrake "tighten only, never loosen" invariant. Re-enabling borrow is governance-only.
+     * @param poolId The pool identifier (0 = core pool, >0 = e-mode pools).
+     * @param market The vToken market address.
+     */
+    function disablePoolBorrow(uint96 poolId, address market) external;
+
+    /**
+     * @notice Remove a single account from the flash loan whitelist.
+     * @dev Only meaningful on Diamond comptroller (BSC) where the flash loan whitelist exists.
+     *      On non-BSC chains the underlying call will revert (selector mismatch on IL comptroller).
+     *
+     *      This is the surgical alternative to `pauseFlashLoan()`, which kills flash loans for
+     *      every whitelisted account. Use it when a single whitelisted integrator is compromised.
+     *
+     *      The boolean argument is hardcoded to `false` inside the implementation to preserve
+     *      the EBrake "tighten only, never loosen" invariant. Re-granting access is governance-only.
+     * @param account The account whose flash loan access should be revoked.
+     */
+    function revokeFlashLoanAccess(address account) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — RISK PARAMETER ADJUSTMENTS

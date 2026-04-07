@@ -160,6 +160,21 @@ export function accessControlTests(config: NetworkConfig, get: FixtureGetter): v
           eBrake.connect(randomUser)["setCFZero(address,uint96)"](config.vToken1, 0),
         ).to.be.revertedWithCustomError(eBrake, "Unauthorized");
       });
+
+      it("should revert disablePoolBorrow from unauthorized caller", async () => {
+        const { eBrake, randomUser } = get();
+        await expect(eBrake.connect(randomUser).disablePoolBorrow(0, config.vToken1)).to.be.revertedWithCustomError(
+          eBrake,
+          "Unauthorized",
+        );
+      });
+
+      it("should revert revokeFlashLoanAccess from unauthorized caller", async () => {
+        const { eBrake, randomUser } = get();
+        await expect(
+          eBrake.connect(randomUser).revokeFlashLoanAccess("0x0000000000000000000000000000000000001234"),
+        ).to.be.revertedWithCustomError(eBrake, "Unauthorized");
+      });
     }
 
     it("should revert setCFZero(address) from unauthorized caller", async () => {

@@ -38,6 +38,9 @@ const DIAMOND_COMPTROLLER_ABI = [
   "function setActionsPaused(address[] calldata markets, uint8[] calldata actions, bool paused)",
   "function setFlashLoanPaused(bool paused)",
   "function flashLoanPaused() view returns (bool)",
+  "function setIsBorrowAllowed(uint96 poolId, address vToken, bool borrowAllowed)",
+  "function setWhiteListFlashLoanAccount(address account, bool isWhiteListed)",
+  "function authorizedFlashLoan(address account) view returns (bool)",
   "function lastPoolId() view returns (uint96)",
 ];
 
@@ -56,6 +59,8 @@ const DIAMOND_COMPTROLLER_PERMISSIONS = [
   "_setMarketBorrowCaps(address[],uint256[])",
   "_setMarketSupplyCaps(address[],uint256[])",
   "setFlashLoanPaused(bool)",
+  "setIsBorrowAllowed(uint96,address,bool)",
+  "setWhiteListFlashLoanAccount(address,bool)",
 ];
 
 const IL_COMPTROLLER_PERMISSIONS = [
@@ -72,6 +77,8 @@ const DIAMOND_EBRAKE_FUNCTIONS = [
   "pauseBorrow(address)",
   "pauseTransfer(address)",
   "pauseFlashLoan()",
+  "disablePoolBorrow(uint96,address)",
+  "revokeFlashLoanAccess(address)",
   "setCFZero(address)",
   "setCFZero(address,uint96)",
   "setMarketBorrowCaps(address[],uint256[])",

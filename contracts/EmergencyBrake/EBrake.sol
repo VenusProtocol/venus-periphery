@@ -121,6 +121,23 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
+    function disablePoolBorrow(uint96 poolId, address market) external {
+        _checkAccessAllowed("disablePoolBorrow(uint96,address)");
+        // `false` is hardcoded — EBrake can only tighten, never loosen.
+        COMPTROLLER.setIsBorrowAllowed(poolId, market, false);
+        emit PoolBorrowDisabled(msg.sender, poolId, market);
+    }
+
+    /// @inheritdoc IEBrake
+    function revokeFlashLoanAccess(address account) external {
+        _checkAccessAllowed("revokeFlashLoanAccess(address)");
+        if (account == address(0)) revert ZeroAddress();
+        // `false` is hardcoded — EBrake can only revoke, never grant.
+        COMPTROLLER.setWhiteListFlashLoanAccount(account, false);
+        emit FlashLoanAccessRevoked(msg.sender, account);
+    }
+
+    /// @inheritdoc IEBrake
     function setCFZero(address market) external {
         _checkAccessAllowed("setCFZero(address)");
         MarketState storage state = marketStates[market];

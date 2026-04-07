@@ -40,6 +40,19 @@ interface ICorePoolComptroller is IComptroller {
     /// @param paused True to pause, false to unpause.
     function setFlashLoanPaused(bool paused) external;
 
+    /// @notice Enable or disable borrowing for a specific market in a specific pool.
+    /// @dev Independent from the global `_actionPaused[market][BORROW]` flag — both must
+    ///      allow borrowing for borrows to actually proceed in a given pool/market.
+    /// @param poolId The pool identifier (0 = core pool, >0 = e-mode pools).
+    /// @param vToken The vToken market address.
+    /// @param borrowAllowed True to allow borrowing, false to disable it.
+    function setIsBorrowAllowed(uint96 poolId, address vToken, bool borrowAllowed) external;
+
+    /// @notice Add or remove an account from the flash loan whitelist.
+    /// @param account The account address.
+    /// @param isWhiteListed True to whitelist, false to revoke.
+    function setWhiteListFlashLoanAccount(address account, bool isWhiteListed) external;
+
     /// @notice Get the core pool identifier.
     /// @return uint96 The core pool ID.
     function corePoolId() external view returns (uint96);
