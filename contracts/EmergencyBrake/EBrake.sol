@@ -183,21 +183,31 @@ contract EBrake is IEBrake, AccessControlledV8 {
         if (marketsLen != newBorrowCaps.length) revert ArrayLengthMismatch(marketsLen, newBorrowCaps.length);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
+        bool anyDecreased;
 
         for (uint256 i; i < marketsLen; ++i) {
             uint256 currentCap = comptroller.borrowCaps(markets[i]);
             if (newBorrowCaps[i] > currentCap) {
                 revert CapExceedsCurrent(markets[i], currentCap, newBorrowCaps[i]);
             }
-            MarketState storage state = marketStates[markets[i]];
-            if (!state.borrowCapSnapshotted) {
-                state.borrowCap = currentCap;
-                state.borrowCapSnapshotted = true;
+            // Only snapshot when this element actually tightens. Equality is allowed
+            // (preserves batch ergonomics for already-zero caps) but must not pollute
+            // the snapshot — otherwise a no-op call could lock the first-write-wins
+            // sentinel and cause a later real tightening to record nothing.
+            if (newBorrowCaps[i] < currentCap) {
+                anyDecreased = true;
+                MarketState storage state = marketStates[markets[i]];
+                if (!state.borrowCapSnapshotted) {
+                    state.borrowCap = currentCap;
+                    state.borrowCapSnapshotted = true;
+                }
             }
         }
 
         comptroller.setMarketBorrowCaps(markets, newBorrowCaps);
-        emit BorrowCapsDecreased(msg.sender, markets, newBorrowCaps);
+        if (anyDecreased) {
+            emit BorrowCapsDecreased(msg.sender, markets, newBorrowCaps);
+        }
     }
 
     /// @inheritdoc IEBrake
@@ -208,21 +218,31 @@ contract EBrake is IEBrake, AccessControlledV8 {
         if (marketsLen != newSupplyCaps.length) revert ArrayLengthMismatch(marketsLen, newSupplyCaps.length);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
+        bool anyDecreased;
 
         for (uint256 i; i < marketsLen; ++i) {
             uint256 currentCap = comptroller.supplyCaps(markets[i]);
             if (newSupplyCaps[i] > currentCap) {
                 revert CapExceedsCurrent(markets[i], currentCap, newSupplyCaps[i]);
             }
-            MarketState storage state = marketStates[markets[i]];
-            if (!state.supplyCapSnapshotted) {
-                state.supplyCap = currentCap;
-                state.supplyCapSnapshotted = true;
+            // Only snapshot when this element actually tightens. Equality is allowed
+            // (preserves batch ergonomics for already-zero caps) but must not pollute
+            // the snapshot — otherwise a no-op call could lock the first-write-wins
+            // sentinel and cause a later real tightening to record nothing.
+            if (newSupplyCaps[i] < currentCap) {
+                anyDecreased = true;
+                MarketState storage state = marketStates[markets[i]];
+                if (!state.supplyCapSnapshotted) {
+                    state.supplyCap = currentCap;
+                    state.supplyCapSnapshotted = true;
+                }
             }
         }
 
         comptroller.setMarketSupplyCaps(markets, newSupplyCaps);
-        emit SupplyCapsDecreased(msg.sender, markets, newSupplyCaps);
+        if (anyDecreased) {
+            emit SupplyCapsDecreased(msg.sender, markets, newSupplyCaps);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════

@@ -316,11 +316,41 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
       ).to.be.revertedWithCustomError(eBrake, "CapExceedsCurrent");
     });
 
-    it("should allow setting same borrow cap (no-op)", async () => {
+    it("should allow setting same borrow cap (no-op) without snapshot or event [I04]", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
       const currentCap = await comptroller.borrowCaps(config.vToken1);
-      await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [currentCap]);
+      expect(currentCap).to.be.gt(0);
+
+      // No-op call must not emit (entire-batch-no-op suppression)
+      await expect(eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [currentCap])).to.not.emit(
+        eBrake,
+        "BorrowCapsDecreased",
+      );
+
+      // Comptroller cap unchanged
       expect(await comptroller.borrowCaps(config.vToken1)).to.equal(currentCap);
+
+      // Snapshot must NOT be polluted by the no-op call
+      const snapshot = await eBrake.marketStates(config.vToken1);
+      expect(snapshot.borrowCapSnapshotted).to.be.false;
+      expect(snapshot.borrowCap).to.equal(0);
+    });
+
+    it("should preserve correct borrow cap snapshot across no-op then real tightening [I04]", async () => {
+      const { eBrake, comptroller, whitelistedUser } = get();
+      const originalCap = await comptroller.borrowCaps(config.vToken1);
+      expect(originalCap).to.be.gt(1);
+
+      // Step 1: no-op (current == new). Must not snapshot or set the sentinel.
+      await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [originalCap]);
+      const afterNoop = await eBrake.marketStates(config.vToken1);
+      expect(afterNoop.borrowCapSnapshotted).to.be.false;
+
+      // Step 2: real tightening. Snapshot must record `originalCap` (not stale, not 0).
+      await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
+      const afterTighten = await eBrake.marketStates(config.vToken1);
+      expect(afterTighten.borrowCapSnapshotted).to.be.true;
+      expect(afterTighten.borrowCap).to.equal(originalCap);
     });
 
     it("should handle multiple markets", async () => {
@@ -384,11 +414,41 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
       ).to.be.revertedWithCustomError(eBrake, "CapExceedsCurrent");
     });
 
-    it("should allow setting same supply cap (no-op)", async () => {
+    it("should allow setting same supply cap (no-op) without snapshot or event [I04]", async () => {
       const { eBrake, comptroller, whitelistedUser } = get();
       const currentCap = await comptroller.supplyCaps(config.vToken1);
-      await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [currentCap]);
+      expect(currentCap).to.be.gt(0);
+
+      // No-op call must not emit (entire-batch-no-op suppression)
+      await expect(eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [currentCap])).to.not.emit(
+        eBrake,
+        "SupplyCapsDecreased",
+      );
+
+      // Comptroller cap unchanged
       expect(await comptroller.supplyCaps(config.vToken1)).to.equal(currentCap);
+
+      // Snapshot must NOT be polluted by the no-op call
+      const snapshot = await eBrake.marketStates(config.vToken1);
+      expect(snapshot.supplyCapSnapshotted).to.be.false;
+      expect(snapshot.supplyCap).to.equal(0);
+    });
+
+    it("should preserve correct supply cap snapshot across no-op then real tightening [I04]", async () => {
+      const { eBrake, comptroller, whitelistedUser } = get();
+      const originalCap = await comptroller.supplyCaps(config.vToken1);
+      expect(originalCap).to.be.gt(1);
+
+      // Step 1: no-op (current == new). Must not snapshot or set the sentinel.
+      await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [originalCap]);
+      const afterNoop = await eBrake.marketStates(config.vToken1);
+      expect(afterNoop.supplyCapSnapshotted).to.be.false;
+
+      // Step 2: real tightening. Snapshot must record `originalCap` (not stale, not 0).
+      await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [0]);
+      const afterTighten = await eBrake.marketStates(config.vToken1);
+      expect(afterTighten.supplyCapSnapshotted).to.be.true;
+      expect(afterTighten.supplyCap).to.equal(originalCap);
     });
 
     it("should handle multiple markets", async () => {
@@ -661,20 +721,29 @@ export function marketStateTests(config: NetworkConfig, get: FixtureGetter): voi
       it("should allow fresh snapshot after reset", async () => {
         const { eBrake, comptroller, whitelistedUser } = get();
 
-        // First incident: snapshot original cap
-        const originalCap = await comptroller.borrowCaps(config.vToken1);
-        await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
-        const snapshot1 = await eBrake.marketStates(config.vToken1);
+        // First incident: snapshot original cap, partial-tighten so a real
+        // second tightening is still possible after reset.
+        const originalCap = await comptroller.borrowCaps(config.vToken2);
+        expect(originalCap).to.be.gt(1);
+        const halfCap = originalCap.div(2);
+
+        await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken2], [halfCap]);
+        const snapshot1 = await eBrake.marketStates(config.vToken2);
         expect(snapshot1.borrowCap).to.equal(originalCap);
+        expect(snapshot1.borrowCapSnapshotted).to.be.true;
 
-        // Reset after recovery
-        await eBrake.connect(whitelistedUser).resetMarketState(config.vToken1);
+        // Reset after governance recovery
+        await eBrake.connect(whitelistedUser).resetMarketState(config.vToken2);
+        const reset = await eBrake.marketStates(config.vToken2);
+        expect(reset.borrowCapSnapshotted).to.be.false;
+        expect(reset.borrowCap).to.equal(0);
 
-        // Cap is still 0 on comptroller — new snapshot should capture 0
-        await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
-        const snapshot2 = await eBrake.marketStates(config.vToken1);
-        // borrowCap is 0 so it's snapshotted as 0
-        expect(snapshot2.borrowCap).to.equal(0);
+        // Second real tightening — comptroller cap is now halfCap, so the fresh
+        // snapshot must capture halfCap (proves reset cleared the sentinel and
+        // a subsequent real decrease re-snapshots correctly).
+        await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken2], [0]);
+        const snapshot2 = await eBrake.marketStates(config.vToken2);
+        expect(snapshot2.borrowCap).to.equal(halfCap);
         expect(snapshot2.borrowCapSnapshotted).to.be.true;
       });
 
