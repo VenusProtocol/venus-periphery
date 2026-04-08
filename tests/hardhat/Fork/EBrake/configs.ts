@@ -83,7 +83,9 @@ const DIAMOND_EBRAKE_FUNCTIONS = [
   "decreaseCF(address,uint96,uint256)",
   "setMarketBorrowCaps(address[],uint256[])",
   "setMarketSupplyCaps(address[],uint256[])",
-  "resetMarketState(address)",
+  "resetCFSnapshot(address)",
+  "resetBorrowCapSnapshot(address)",
+  "resetSupplyCapSnapshot(address)",
 ];
 
 const IL_EBRAKE_FUNCTIONS = [
@@ -95,7 +97,9 @@ const IL_EBRAKE_FUNCTIONS = [
   "decreaseCF(address,uint256)",
   "setMarketBorrowCaps(address[],uint256[])",
   "setMarketSupplyCaps(address[],uint256[])",
-  "resetMarketState(address)",
+  "resetCFSnapshot(address)",
+  "resetBorrowCapSnapshot(address)",
+  "resetSupplyCapSnapshot(address)",
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════

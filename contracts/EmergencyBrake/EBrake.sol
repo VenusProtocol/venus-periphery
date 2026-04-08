@@ -48,7 +48,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
     bool public immutable IS_ISOLATED_POOL;
 
     /// @notice Stored pre-incident market state snapshots, keyed by vToken market address.
-    /// @dev Values are captured at tightening time (first-write-wins) and cleared via resetMarketState().
+    /// @dev Values are captured at tightening time (first-write-wins) and cleared via resetCFSnapshot() / resetCapSnapshot().
     mapping(address => MarketState) public marketStates;
 
     /// @dev Storage gap for future upgrades.
@@ -266,15 +266,10 @@ contract EBrake is IEBrake, AccessControlledV8 {
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IEBrake
-    function resetMarketState(address market) external {
-        _checkAccessAllowed("resetMarketState(address)");
+    function resetCFSnapshot(address market) external {
+        _checkAccessAllowed("resetCFSnapshot(address)");
 
         MarketState storage state = marketStates[market];
-        state.borrowCap = 0;
-        state.supplyCap = 0;
-        state.borrowCapSnapshotted = false;
-        state.supplyCapSnapshotted = false;
-
         if (IS_ISOLATED_POOL) {
             delete state.poolCFs[0];
             delete state.poolLTs[0];
@@ -287,7 +282,29 @@ contract EBrake is IEBrake, AccessControlledV8 {
             }
         }
 
-        emit MarketStateReset(market);
+        emit CFSnapshotReset(market);
+    }
+
+    /// @inheritdoc IEBrake
+    function resetBorrowCapSnapshot(address market) external {
+        _checkAccessAllowed("resetBorrowCapSnapshot(address)");
+
+        MarketState storage state = marketStates[market];
+        state.borrowCap = 0;
+        state.borrowCapSnapshotted = false;
+
+        emit BorrowCapSnapshotReset(market);
+    }
+
+    /// @inheritdoc IEBrake
+    function resetSupplyCapSnapshot(address market) external {
+        _checkAccessAllowed("resetSupplyCapSnapshot(address)");
+
+        MarketState storage state = marketStates[market];
+        state.supplyCap = 0;
+        state.supplyCapSnapshotted = false;
+
+        emit SupplyCapSnapshotReset(market);
     }
 
     /// @inheritdoc IEBrake

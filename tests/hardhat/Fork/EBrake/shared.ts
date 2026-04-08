@@ -732,75 +732,152 @@ export function marketStateTests(config: NetworkConfig, get: FixtureGetter): voi
       });
     });
 
-    describe("resetMarketState", () => {
-      it("should clear CF snapshot after reset", async () => {
+    describe("resetCFSnapshot", () => {
+      it("should clear CF snapshot", async () => {
         const { eBrake, whitelistedUser } = get();
-        const poolId = config.comptrollerType === "il" ? 0 : 0;
 
         await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
-        const snapshotBefore = await eBrake.getMarketCFSnapshot(config.vToken1, poolId);
+        const snapshotBefore = await eBrake.getMarketCFSnapshot(config.vToken1, 0);
         expect(snapshotBefore.cf).to.be.gt(0);
 
-        await expect(eBrake.connect(whitelistedUser).resetMarketState(config.vToken1))
-          .to.emit(eBrake, "MarketStateReset")
+        await expect(eBrake.connect(whitelistedUser).resetCFSnapshot(config.vToken1))
+          .to.emit(eBrake, "CFSnapshotReset")
           .withArgs(config.vToken1);
 
-        const snapshotAfter = await eBrake.getMarketCFSnapshot(config.vToken1, poolId);
+        const snapshotAfter = await eBrake.getMarketCFSnapshot(config.vToken1, 0);
         expect(snapshotAfter.cf).to.equal(0);
         expect(snapshotAfter.lt).to.equal(0);
       });
 
-      it("should clear cap snapshots after reset", async () => {
+      it("should not touch cap snapshots", async () => {
         const { eBrake, whitelistedUser } = get();
 
         await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
-        await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [0]);
+        await eBrake.connect(whitelistedUser).resetCFSnapshot(config.vToken1);
 
+        const after = await eBrake.marketStates(config.vToken1);
+        expect(after.borrowCapSnapshotted).to.be.true;
+      });
+
+      it("should revert from unauthorized caller", async () => {
+        const { eBrake, randomUser } = get();
+        await expect(eBrake.connect(randomUser).resetCFSnapshot(config.vToken1)).to.be.revertedWithCustomError(
+          eBrake,
+          "Unauthorized",
+        );
+      });
+    });
+
+    describe("resetBorrowCapSnapshot", () => {
+      it("should clear borrow cap snapshot", async () => {
+        const { eBrake, whitelistedUser } = get();
+
+        await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
         const before = await eBrake.marketStates(config.vToken1);
         expect(before.borrowCapSnapshotted).to.be.true;
-        expect(before.supplyCapSnapshotted).to.be.true;
 
-        await eBrake.connect(whitelistedUser).resetMarketState(config.vToken1);
+        await expect(eBrake.connect(whitelistedUser).resetBorrowCapSnapshot(config.vToken1))
+          .to.emit(eBrake, "BorrowCapSnapshotReset")
+          .withArgs(config.vToken1);
 
         const after = await eBrake.marketStates(config.vToken1);
         expect(after.borrowCap).to.equal(0);
-        expect(after.supplyCap).to.equal(0);
         expect(after.borrowCapSnapshotted).to.be.false;
-        expect(after.supplyCapSnapshotted).to.be.false;
       });
 
-      it("should allow fresh snapshot after reset", async () => {
+      it("should not touch supply cap or CF snapshots", async () => {
+        const { eBrake, whitelistedUser } = get();
+
+        await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [0]);
+        await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
+        await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
+
+        await eBrake.connect(whitelistedUser).resetBorrowCapSnapshot(config.vToken1);
+
+        const after = await eBrake.marketStates(config.vToken1);
+        expect(after.supplyCapSnapshotted).to.be.true;
+        const cfSnapshot = await eBrake.getMarketCFSnapshot(config.vToken1, 0);
+        expect(cfSnapshot.cf).to.be.gt(0);
+      });
+
+      it("should allow fresh borrow cap snapshot after reset", async () => {
         const { eBrake, comptroller, whitelistedUser } = get();
 
-        // First incident: snapshot original cap, partial-tighten so a real
-        // second tightening is still possible after reset.
         const originalCap = await comptroller.borrowCaps(config.vToken2);
         expect(originalCap).to.be.gt(1);
         const halfCap = originalCap.div(2);
 
         await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken2], [halfCap]);
-        const snapshot1 = await eBrake.marketStates(config.vToken2);
-        expect(snapshot1.borrowCap).to.equal(originalCap);
-        expect(snapshot1.borrowCapSnapshotted).to.be.true;
+        expect((await eBrake.marketStates(config.vToken2)).borrowCap).to.equal(originalCap);
 
-        // Reset after governance recovery
-        await eBrake.connect(whitelistedUser).resetMarketState(config.vToken2);
-        const reset = await eBrake.marketStates(config.vToken2);
-        expect(reset.borrowCapSnapshotted).to.be.false;
-        expect(reset.borrowCap).to.equal(0);
+        await eBrake.connect(whitelistedUser).resetBorrowCapSnapshot(config.vToken2);
+        expect((await eBrake.marketStates(config.vToken2)).borrowCapSnapshotted).to.be.false;
 
-        // Second real tightening — comptroller cap is now halfCap, so the fresh
-        // snapshot must capture halfCap (proves reset cleared the sentinel and
-        // a subsequent real decrease re-snapshots correctly).
         await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken2], [0]);
-        const snapshot2 = await eBrake.marketStates(config.vToken2);
-        expect(snapshot2.borrowCap).to.equal(halfCap);
-        expect(snapshot2.borrowCapSnapshotted).to.be.true;
+        expect((await eBrake.marketStates(config.vToken2)).borrowCap).to.equal(halfCap);
       });
 
-      it("should revert resetMarketState from unauthorized caller", async () => {
+      it("should revert from unauthorized caller", async () => {
         const { eBrake, randomUser } = get();
-        await expect(eBrake.connect(randomUser).resetMarketState(config.vToken1)).to.be.revertedWithCustomError(
+        await expect(eBrake.connect(randomUser).resetBorrowCapSnapshot(config.vToken1)).to.be.revertedWithCustomError(
+          eBrake,
+          "Unauthorized",
+        );
+      });
+    });
+
+    describe("resetSupplyCapSnapshot", () => {
+      it("should clear supply cap snapshot", async () => {
+        const { eBrake, whitelistedUser } = get();
+
+        await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [0]);
+        const before = await eBrake.marketStates(config.vToken1);
+        expect(before.supplyCapSnapshotted).to.be.true;
+
+        await expect(eBrake.connect(whitelistedUser).resetSupplyCapSnapshot(config.vToken1))
+          .to.emit(eBrake, "SupplyCapSnapshotReset")
+          .withArgs(config.vToken1);
+
+        const after = await eBrake.marketStates(config.vToken1);
+        expect(after.supplyCap).to.equal(0);
+        expect(after.supplyCapSnapshotted).to.be.false;
+      });
+
+      it("should not touch borrow cap or CF snapshots", async () => {
+        const { eBrake, whitelistedUser } = get();
+
+        await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
+        await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
+        await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken1], [0]);
+
+        await eBrake.connect(whitelistedUser).resetSupplyCapSnapshot(config.vToken1);
+
+        const after = await eBrake.marketStates(config.vToken1);
+        expect(after.borrowCapSnapshotted).to.be.true;
+        const cfSnapshot = await eBrake.getMarketCFSnapshot(config.vToken1, 0);
+        expect(cfSnapshot.cf).to.be.gt(0);
+      });
+
+      it("should allow fresh supply cap snapshot after reset", async () => {
+        const { eBrake, comptroller, whitelistedUser } = get();
+
+        const originalCap = await comptroller.supplyCaps(config.vToken2);
+        expect(originalCap).to.be.gt(1);
+        const halfCap = originalCap.div(2);
+
+        await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken2], [halfCap]);
+        expect((await eBrake.marketStates(config.vToken2)).supplyCap).to.equal(originalCap);
+
+        await eBrake.connect(whitelistedUser).resetSupplyCapSnapshot(config.vToken2);
+        expect((await eBrake.marketStates(config.vToken2)).supplyCapSnapshotted).to.be.false;
+
+        await eBrake.connect(whitelistedUser).setMarketSupplyCaps([config.vToken2], [0]);
+        expect((await eBrake.marketStates(config.vToken2)).supplyCap).to.equal(halfCap);
+      });
+
+      it("should revert from unauthorized caller", async () => {
+        const { eBrake, randomUser } = get();
+        await expect(eBrake.connect(randomUser).resetSupplyCapSnapshot(config.vToken1)).to.be.revertedWithCustomError(
           eBrake,
           "Unauthorized",
         );

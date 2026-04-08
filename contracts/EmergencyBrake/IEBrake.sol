@@ -9,7 +9,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  * @notice Interface for the EBrake (Emergency Brake) contract.
  *         EBrake is an emergency action router that can only TIGHTEN restrictions,
  *         never loosen them. It also snapshots pre-incident values (CF, caps) so that
- *         governance can read and restore them via VIP. See resetMarketState().
+ *         governance can read and restore them via VIP. See resetCFSnapshot() / resetCapSnapshot().
  *
  * @dev Design goals and integration patterns:
  *
@@ -154,9 +154,17 @@ interface IEBrake {
     /// @param newSupplyCaps The new supply cap values.
     event SupplyCapsDecreased(address indexed caller, address[] markets, uint256[] newSupplyCaps);
 
-    /// @notice Emitted when a market's snapshot state is reset after governance recovery.
-    /// @param market The market address whose snapshot was cleared.
-    event MarketStateReset(address indexed market);
+    /// @notice Emitted when a market's CF/LT snapshot is reset after governance recovery.
+    /// @param market The market address whose CF snapshot was cleared.
+    event CFSnapshotReset(address indexed market);
+
+    /// @notice Emitted when a market's borrow cap snapshot is reset after governance recovery.
+    /// @param market The market address whose borrow cap snapshot was cleared.
+    event BorrowCapSnapshotReset(address indexed market);
+
+    /// @notice Emitted when a market's supply cap snapshot is reset after governance recovery.
+    /// @param market The market address whose supply cap snapshot was cleared.
+    event SupplyCapSnapshotReset(address indexed market);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
@@ -336,13 +344,31 @@ interface IEBrake {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Reset the stored market state snapshot for a market.
-     * @dev Called by governance as part of a recovery VIP after restoring market parameters.
-     *      Clears stored CF/LT per pool and borrow/supply cap snapshots so that
-     *      future EBrake actions can capture fresh pre-incident values.
-     * @param market The vToken market address whose snapshot should be cleared.
+     * @notice Reset only the stored CF/LT snapshot for a market.
+     * @dev Called by governance as part of a recovery VIP after restoring collateral factors.
+     *      Clears per-pool CF/LT values so that future EBrake actions can capture fresh
+     *      pre-incident values. Does not touch cap snapshots.
+     * @param market The vToken market address whose CF snapshot should be cleared.
      */
-    function resetMarketState(address market) external;
+    function resetCFSnapshot(address market) external;
+
+    /**
+     * @notice Reset only the stored borrow cap snapshot for a market.
+     * @dev Called by governance as part of a recovery VIP after restoring the borrow cap.
+     *      Clears borrowCap and borrowCapSnapshotted so that future EBrake actions can capture
+     *      a fresh pre-incident value. Does not touch the supply cap or CF snapshots.
+     * @param market The vToken market address whose borrow cap snapshot should be cleared.
+     */
+    function resetBorrowCapSnapshot(address market) external;
+
+    /**
+     * @notice Reset only the stored supply cap snapshot for a market.
+     * @dev Called by governance as part of a recovery VIP after restoring the supply cap.
+     *      Clears supplyCap and supplyCapSnapshotted so that future EBrake actions can capture
+     *      a fresh pre-incident value. Does not touch the borrow cap or CF snapshots.
+     * @param market The vToken market address whose supply cap snapshot should be cleared.
+     */
+    function resetSupplyCapSnapshot(address market) external;
 
     /**
      * @notice Read the stored collateral factor and liquidation threshold snapshot for a market in a specific pool.
