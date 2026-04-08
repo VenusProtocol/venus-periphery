@@ -473,19 +473,19 @@ describe("DeviationSentinel", () => {
           );
       });
 
-      it("should call eBrake.setCFZero(market) and eBrake.pauseSupply(market)", async () => {
+      it("should call eBrake.decreaseCF(market, 0) and eBrake.pauseSupply(market)", async () => {
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(eBrake["setCFZero(address)"]).to.have.been.calledWith(vToken.address);
+        expect(eBrake["decreaseCF(address,uint256)"]).to.have.been.calledWith(vToken.address, 0);
         expect(eBrake.pauseSupply).to.have.been.calledWith(vToken.address);
       });
 
       it("should delegate to EBrake on repeat calls (EBrake handles idempotency)", async () => {
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        eBrake["setCFZero(address)"].reset();
+        eBrake["decreaseCF(address,uint256)"].reset();
         eBrake.pauseSupply.reset();
 
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(eBrake["setCFZero(address)"]).to.have.been.calledWith(vToken.address);
+        expect(eBrake["decreaseCF(address,uint256)"]).to.have.been.calledWith(vToken.address, 0);
         expect(eBrake.pauseSupply).to.have.been.calledWith(vToken.address);
       });
     });
@@ -498,13 +498,13 @@ describe("DeviationSentinel", () => {
         // Reset call tracking before this specific test
         eBrake.pauseBorrow.reset();
         eBrake.pauseSupply.reset();
-        eBrake["setCFZero(address)"].reset();
+        eBrake["decreaseCF(address,uint256)"].reset();
 
         const tx = deviationSentinel.connect(keeper).handleDeviation(vToken.address);
         await expect(tx).to.not.emit(deviationSentinel, "DeviationHandled");
         expect(eBrake.pauseBorrow).to.not.have.been.called;
         expect(eBrake.pauseSupply).to.not.have.been.called;
-        expect(eBrake["setCFZero(address)"]).to.not.have.been.called;
+        expect(eBrake["decreaseCF(address,uint256)"]).to.not.have.been.called;
       });
     });
 
@@ -517,7 +517,7 @@ describe("DeviationSentinel", () => {
 
         sentinelOracle.getPrice.whenCalledWith(UNDERLYING_ASSET).returns(parseUnits("85", 18));
         await deviationSentinel.connect(keeper).handleDeviation(vToken.address);
-        expect(eBrake["setCFZero(address)"]).to.have.been.calledWith(vToken.address);
+        expect(eBrake["decreaseCF(address,uint256)"]).to.have.been.calledWith(vToken.address, 0);
         expect(eBrake.pauseSupply).to.have.been.calledWith(vToken.address);
       });
     });

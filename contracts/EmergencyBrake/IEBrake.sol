@@ -21,7 +21,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *      Contracts like DeviationSentinel or any Venus monitoring contract are also whitelisted.
  *      They contain their own detection logic (e.g. price deviation checks) and call into EBrake
  *      when a threat is detected. Example: DeviationSentinel detects a price anomaly → calls
- *      EBrake.pauseSupply() or EBrake.setCFZero(). The detection logic stays isolated in
+ *      EBrake.pauseSupply() or EBrake.decreaseCF(). The detection logic stays isolated in
  *      the monitor; EBrake only handles execution.
  *
  *   3. THIRD-PARTY MONITORS VIA SAFE MODULES
@@ -57,7 +57,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *      Worst-case if EBrake is compromised:
  *        - Pauses minting/borrowing/redeeming/transfers (inconvenient, no fund loss)
  *        - Zeros supply/borrow caps (blocks new positions, existing ones unaffected)
- *        - Zeros collateral factor (blocks new borrows against asset, does NOT liquidate
+ *        - Decreases collateral factor (blocks new borrows against asset, does NOT liquidate
  *          existing positions — that requires LT change, which EBrake cannot do)
  *        - Pauses flash loans (blocks flash loan attack vector, no user impact)
  *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.
@@ -68,10 +68,11 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *      It is set at deployment and cannot be changed.
  *
  *      BSC (BNB Chain) — Diamond Comptroller (IS_ISOLATED_POOL = false):
- *        - setCFZero(market) — iterates corePoolId to lastPoolId, zeros CF for all listed pools
- *        - setCFZero(market, poolId) — targets a single pool (e.g. multisig use)
+ *        - decreaseCF(market, newCF) — iterates corePoolId to lastPoolId, applies newCF only to
+ *          pools where currentCF > newCF; silently skips pools already at or below newCF.
+ *        - decreaseCF(market, poolId, newCF) — targets a single pool (e.g. multisig use)
  *        - Uses poolMarkets() (7-value return) to read LT,
- *          calls setCollateralFactor(poolId, market, 0, LT) which returns uint256 error code
+ *          calls setCollateralFactor(poolId, market, newCF, LT) which returns uint256 error code
  *        - Supports e-mode pools via poolId > 0
  *        - pauseFlashLoan() — flash loans only exist on Diamond
  *        - disablePoolBorrow(poolId, market) — per-pool granular borrow disable, only on Diamond
@@ -81,10 +82,11 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          _setActionsPaused, _setMarketBorrowCaps, _setMarketSupplyCaps
  *
  *      Non-BSC chains — IL Comptroller (IS_ISOLATED_POOL = true):
- *        - setCFZero(market) — uses markets() (3-value return) to read LT,
- *          calls setCollateralFactor(market, 0, LT) which returns void (no error code)
+ *        - decreaseCF(market, newCF) — uses markets() (3-value return) to read LT,
+ *          calls setCollateralFactor(market, newCF, LT) which returns void (no error code).
+ *          Reverts if newCF > currentCF.
  *        - No poolId concept — only the core pool exists (other pools are deprecated)
- *        - setCFZero(market, poolId) not granted ACM permission (no pool concept on IL)
+ *        - decreaseCF(market, poolId, newCF) not granted ACM permission (no pool concept on IL)
  *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)
  *        - ACM permission strings have no underscore:
  *          setActionsPaused, setMarketBorrowCaps, setMarketSupplyCaps
@@ -125,14 +127,20 @@ interface IEBrake {
     /// @param account The account whose flash loan access was revoked.
     event FlashLoanAccessRevoked(address indexed caller, address indexed account);
 
-    /// @notice Emitted when a collateral factor is set to zero.
+    /// @notice Emitted when a collateral factor is decreased.
     ///         Used for both core/e-mode pools and IL comptrollers.
     /// @param caller The address that triggered the emergency action.
-    /// @param market The vToken market address whose CF was zeroed.
+    /// @param market The vToken market address whose CF was decreased.
     /// @param poolId The pool ID. On BNB Chain (Diamond comptroller) this identifies the core pool (0)
     ///        or an e-mode pool (>0). On other networks (IL comptroller) there is no poolId concept;
     ///        0 is used as a sentinel value to indicate that only the core pool is supported (other pools are deprecated).
-    event CollateralFactorZeroed(address indexed caller, address indexed market, uint96 indexed poolId);
+    /// @param newCF The new collateral factor value that the market was set to.
+    event CollateralFactorDecreased(
+        address indexed caller,
+        address indexed market,
+        uint96 indexed poolId,
+        uint256 newCF
+    );
 
     /// @notice Emitted when borrow caps are decreased.
     /// @param caller The address that triggered the emergency action.
@@ -186,6 +194,18 @@ interface IEBrake {
     /// @param currentCap The current cap value on the comptroller.
     /// @param requestedCap The new cap value that was rejected.
     error CapExceedsCurrent(address market, uint256 currentCap, uint256 requestedCap);
+
+    /// @notice Thrown when a function is called that is not supported on IL (isolated-pool) comptrollers.
+    ///         Pool ID is a Diamond-only concept — this function should never be ACM-granted on IL chains.
+    error NotSupportedOnIsolatedPool();
+
+    /// @notice Thrown when the requested collateral factor exceeds the current CF on the comptroller.
+    ///         EBrake can only tighten CF — newCF must be <= currentCF.
+    /// @param market The market whose CF was attempted to be increased.
+    /// @param poolId The pool ID where the violation was detected (0 on IL comptroller).
+    /// @param currentCF The current collateral factor on the comptroller.
+    /// @param requestedCF The new CF value that was rejected.
+    error CFExceedsCurrent(address market, uint96 poolId, uint256 currentCF, uint256 requestedCF);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — BATCH OPERATIONS
@@ -267,26 +287,33 @@ interface IEBrake {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Set collateral factor to zero for a market across all relevant pools.
+     * @notice Decrease collateral factor to `newCF` for a market across all relevant pools.
      *         Liquidation threshold is left unchanged.
-     *         Blocks new borrows against the asset. Does NOT make existing positions liquidatable —
+     *         Blocks/limits new borrows against the asset. Does NOT make existing positions liquidatable —
      *         that would require lowering LT, which this contract cannot do.
-     * @dev On Diamond comptroller (IS_ISOLATED_POOL=false): iterates corePoolId to lastPoolId,
-     *      zeros CF for every pool where the market is listed, skips unlisted pools.
-     *      On IL comptroller (IS_ISOLATED_POOL=true): zeros CF for the single market entry.
-     * @param market The vToken market address whose CF should be zeroed.
+     * @dev On Diamond comptroller (IS_ISOLATED_POOL=false): iterates corePoolId to lastPoolId;
+     *      applies `newCF` only to pools where currentCF > newCF (silently skips pools already
+     *      at or below newCF and unlisted pools). Never reverts due to CF comparison — use the
+     *      per-pool overload if you need strict enforcement on a specific pool.
+     *      On IL comptroller (IS_ISOLATED_POOL=true): applies to the single market entry and
+     *      reverts with CFExceedsCurrent if newCF > currentCF.
+     * @param market The vToken market address whose CF should be decreased.
+     * @param newCF The new collateral factor value. On Diamond, pools already at or below this
+     *              value are silently skipped. On IL, must be <= current CF.
      */
-    function setCFZero(address market) external;
+    function decreaseCF(address market, uint256 newCF) external;
 
     /**
-     * @notice Set collateral factor to zero for a market in a specific pool.
-     *         Same safety guarantees as setCFZero(address) — LT is left unchanged.
+     * @notice Decrease collateral factor to `newCF` for a market in a specific pool.
+     *         Same safety guarantees as decreaseCF(address,uint256) — LT is left unchanged.
      * @dev Only meaningful on Diamond comptroller (BSC) where multiple pools exist.
-     *      On non-BSC chains, ACM should not grant permission for this function.
-     * @param market The vToken market address whose CF should be zeroed.
+     *      Reverts with NotSupportedOnIsolatedPool on IL chains — ACM must not grant this permission there.
+     *      Reverts with CFExceedsCurrent if newCF > current CF in the targeted pool.
+     * @param market The vToken market address whose CF should be decreased.
      * @param poolId The pool ID (0 for core pool, >0 for e-mode pools).
+     * @param newCF The new collateral factor value. Must be <= current CF in the targeted pool.
      */
-    function setCFZero(address market, uint96 poolId) external;
+    function decreaseCF(address market, uint96 poolId, uint256 newCF) external;
 
     /**
      * @notice Decrease borrow caps on markets. Can only set caps LOWER than or equal to current values.

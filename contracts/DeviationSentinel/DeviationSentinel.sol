@@ -17,6 +17,8 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  *         large deviations are detected. All emergency actions are routed through the EBrake contract.
  * @dev This contract can only TIGHTEN restrictions (pause, zero CF), never loosen them.
  *      Recovery (unpausing, restoring CF) is handled via governance VIP.
+ *      CF tightening is performed by calling EBrake.decreaseCF(market, 0) — the most aggressive
+ *      sentinel response — which zeros the collateral factor.
  *      Idempotency is handled by EBrake — duplicate calls are no-ops.
  */
 contract DeviationSentinel is AccessControlledV8 {
@@ -203,7 +205,7 @@ contract DeviationSentinel is AccessControlledV8 {
             EBRAKE.pauseBorrow(address(market));
             action = DeviationAction.BorrowPaused;
         } else {
-            EBRAKE.setCFZero(address(market));
+            EBRAKE.decreaseCF(address(market), 0);
             EBRAKE.pauseSupply(address(market));
             action = DeviationAction.SupplyPausedAndCFZeroed;
         }

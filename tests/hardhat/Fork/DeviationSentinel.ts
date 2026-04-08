@@ -116,7 +116,7 @@ async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Prom
   // Grant DeviationSentinel permissions on EBrake
   await acm.giveCallPermission(eBrake.address, "pauseBorrow(address)", DEVIATION_SENTINEL);
   await acm.giveCallPermission(eBrake.address, "pauseSupply(address)", DEVIATION_SENTINEL);
-  await acm.giveCallPermission(eBrake.address, "setCFZero(address)", DEVIATION_SENTINEL);
+  await acm.giveCallPermission(eBrake.address, "decreaseCF(address,uint256)", DEVIATION_SENTINEL);
 
   // Deploy new DeviationSentinel implementation with EBrake
   const SentinelFactory = await ethers.getContractFactory("DeviationSentinel");

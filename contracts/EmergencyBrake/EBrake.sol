@@ -23,7 +23,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
     /// @param supplyCap The supply cap value before EBrake decreased it.
     /// @param borrowCapSnapshotted True if a borrow cap snapshot has been recorded.
     /// @param supplyCapSnapshotted True if a supply cap snapshot has been recorded.
-    /// @param poolCFs Mapping of poolId to the collateral factor before EBrake zeroed it.
+    /// @param poolCFs Mapping of poolId to the collateral factor before EBrake decreased it.
     /// @param poolLTs Mapping of poolId to the liquidation threshold at snapshot time.
     struct MarketState {
         uint256 borrowCap;
@@ -43,7 +43,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
     /**
      * @notice True for IL comptroller (isolated-pools repo), false for Diamond comptroller (venus-protocol repo).
-     * @dev Determines which ABI path setCFZero(address) uses internally.
+     * @dev Determines which ABI path decreaseCF(address,uint256) uses internally.
      */
     bool public immutable IS_ISOLATED_POOL;
 
@@ -144,15 +144,19 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
-    function setCFZero(address market) external {
-        _checkAccessAllowed("setCFZero(address)");
+    function decreaseCF(address market, uint256 newCF) external {
+        _checkAccessAllowed("decreaseCF(address,uint256)");
         MarketState storage state = marketStates[market];
         if (IS_ISOLATED_POOL) {
             IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
             if (!m.isListed) revert MarketNotListed(0, market);
+            if (newCF > m.collateralFactorMantissa) {
+                revert CFExceedsCurrent(market, 0, m.collateralFactorMantissa, newCF);
+            }
+            if (newCF == m.collateralFactorMantissa) return;
             _snapshotCF(state, 0, m.collateralFactorMantissa, m.liquidationThresholdMantissa);
-            IILComptroller(address(COMPTROLLER)).setCollateralFactor(market, 0, m.liquidationThresholdMantissa);
-            emit CollateralFactorZeroed(msg.sender, market, 0);
+            IILComptroller(address(COMPTROLLER)).setCollateralFactor(market, newCF, m.liquidationThresholdMantissa);
+            emit CollateralFactorDecreased(msg.sender, market, 0, newCF);
         } else {
             uint96 corePoolId = COMPTROLLER.corePoolId();
             uint96 lastPoolId = COMPTROLLER.lastPoolId();
@@ -161,24 +165,30 @@ contract EBrake is IEBrake, AccessControlledV8 {
             for (uint96 i = corePoolId; i <= lastPoolId; ++i) {
                 (bool isListed, uint256 currentCF, , uint256 currentLT, , , ) = COMPTROLLER.poolMarkets(i, market);
                 if (!isListed) continue;
+                // Skip pools already at or below newCF — can't tighten further, and no point
+                // calling setCollateralFactor with a value higher than the current one.
+                if (newCF >= currentCF) continue;
                 _snapshotCF(state, i, currentCF, currentLT);
-                uint256 err = COMPTROLLER.setCollateralFactor(i, market, 0, currentLT);
+                uint256 err = COMPTROLLER.setCollateralFactor(i, market, newCF, currentLT);
                 if (err != 0) revert SetCollateralFactorFailed(err);
-                emit CollateralFactorZeroed(msg.sender, market, i);
+                emit CollateralFactorDecreased(msg.sender, market, i, newCF);
             }
         }
     }
 
     /// @inheritdoc IEBrake
-    function setCFZero(address market, uint96 poolId) external {
-        _checkAccessAllowed("setCFZero(address,uint96)");
+    function decreaseCF(address market, uint96 poolId, uint256 newCF) external {
+        _checkAccessAllowed("decreaseCF(address,uint96,uint256)");
+        if (IS_ISOLATED_POOL) revert NotSupportedOnIsolatedPool();
         (bool isListed, uint256 currentCF, , uint256 currentLT, , , ) = COMPTROLLER.poolMarkets(poolId, market);
         if (!isListed) revert MarketNotListed(poolId, market);
+        if (newCF > currentCF) revert CFExceedsCurrent(market, poolId, currentCF, newCF);
+        if (newCF == currentCF) return;
 
         _snapshotCF(marketStates[market], poolId, currentCF, currentLT);
-        uint256 err = COMPTROLLER.setCollateralFactor(poolId, market, 0, currentLT);
+        uint256 err = COMPTROLLER.setCollateralFactor(poolId, market, newCF, currentLT);
         if (err != 0) revert SetCollateralFactorFailed(err);
-        emit CollateralFactorZeroed(msg.sender, market, poolId);
+        emit CollateralFactorDecreased(msg.sender, market, poolId, newCF);
     }
 
     /// @inheritdoc IEBrake
@@ -297,7 +307,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
      *      If CF was already 0 before EBrake acted, there is nothing to restore.
      * @param state The MarketState storage reference for this market.
      * @param poolId The pool ID.
-     * @param currentCF The current collateral factor before zeroing.
+     * @param currentCF The current collateral factor before decreasing.
      * @param currentLT The current liquidation threshold.
      */
     function _snapshotCF(MarketState storage state, uint96 poolId, uint256 currentCF, uint256 currentLT) internal {

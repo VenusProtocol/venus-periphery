@@ -154,10 +154,10 @@ export function accessControlTests(config: NetworkConfig, get: FixtureGetter): v
         await expect(eBrake.connect(randomUser).pauseFlashLoan()).to.be.revertedWithCustomError(eBrake, "Unauthorized");
       });
 
-      it("should revert setCFZero(address,uint96) from unauthorized caller", async () => {
+      it("should revert decreaseCF(address,uint96,uint256) from unauthorized caller", async () => {
         const { eBrake, randomUser } = get();
         await expect(
-          eBrake.connect(randomUser)["setCFZero(address,uint96)"](config.vToken1, 0),
+          eBrake.connect(randomUser)["decreaseCF(address,uint96,uint256)"](config.vToken1, 0, 0),
         ).to.be.revertedWithCustomError(eBrake, "Unauthorized");
       });
 
@@ -177,12 +177,11 @@ export function accessControlTests(config: NetworkConfig, get: FixtureGetter): v
       });
     }
 
-    it("should revert setCFZero(address) from unauthorized caller", async () => {
+    it("should revert decreaseCF(address,uint256) from unauthorized caller", async () => {
       const { eBrake, randomUser } = get();
-      await expect(eBrake.connect(randomUser)["setCFZero(address)"](config.vToken1)).to.be.revertedWithCustomError(
-        eBrake,
-        "Unauthorized",
-      );
+      await expect(
+        eBrake.connect(randomUser)["decreaseCF(address,uint256)"](config.vToken1, 0),
+      ).to.be.revertedWithCustomError(eBrake, "Unauthorized");
     });
 
     it("should revert setMarketBorrowCaps from unauthorized caller", async () => {
@@ -485,8 +484,8 @@ export function capTests(config: NetworkConfig, get: FixtureGetter): void {
   });
 }
 
-export function setCFZeroTests(config: NetworkConfig, get: FixtureGetter): void {
-  describe("setCFZero(address) — unified batch", () => {
+export function decreaseCFTests(config: NetworkConfig, get: FixtureGetter): void {
+  describe("decreaseCF(address, uint256) — unified batch", () => {
     if (config.comptrollerType === "il") {
       it("should set CF to zero while preserving LT (IL comptroller)", async () => {
         const { eBrake, comptroller, whitelistedUser } = get();
@@ -495,19 +494,53 @@ export function setCFZeroTests(config: NetworkConfig, get: FixtureGetter): void 
         expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
         expect(marketBefore.liquidationThresholdMantissa).to.be.gt(0);
 
-        await expect(eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1))
-          .to.emit(eBrake, "CollateralFactorZeroed")
-          .withArgs(whitelistedUser.address, config.vToken1, 0);
+        await expect(eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0))
+          .to.emit(eBrake, "CollateralFactorDecreased")
+          .withArgs(whitelistedUser.address, config.vToken1, 0, 0);
 
         const marketAfter = await comptroller.markets(config.vToken1);
         expect(marketAfter.collateralFactorMantissa).to.equal(0);
         expect(marketAfter.liquidationThresholdMantissa).to.equal(marketBefore.liquidationThresholdMantissa);
       });
 
+      it("should partially decrease CF while preserving LT (IL comptroller)", async () => {
+        const { eBrake, comptroller, whitelistedUser } = get();
+        const marketBefore = await comptroller.markets(config.vToken1);
+        expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
+        const halfCF = marketBefore.collateralFactorMantissa.div(2);
+
+        await expect(eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, halfCF))
+          .to.emit(eBrake, "CollateralFactorDecreased")
+          .withArgs(whitelistedUser.address, config.vToken1, 0, halfCF);
+
+        const marketAfter = await comptroller.markets(config.vToken1);
+        expect(marketAfter.collateralFactorMantissa).to.equal(halfCF);
+        expect(marketAfter.liquidationThresholdMantissa).to.equal(marketBefore.liquidationThresholdMantissa);
+      });
+
+      it("should revert with CFExceedsCurrent when newCF > currentCF", async () => {
+        const { eBrake, comptroller, whitelistedUser } = get();
+        const marketBefore = await comptroller.markets(config.vToken1);
+        await expect(
+          eBrake
+            .connect(whitelistedUser)
+            ["decreaseCF(address,uint256)"](config.vToken1, marketBefore.collateralFactorMantissa.add(1)),
+        ).to.be.revertedWithCustomError(eBrake, "CFExceedsCurrent");
+      });
+
+      it("should revert with NotSupportedOnIsolatedPool for decreaseCF(address,uint96,uint256)", async () => {
+        const { eBrake, whitelistedUser } = get();
+        await expect(
+          eBrake.connect(whitelistedUser)["decreaseCF(address,uint96,uint256)"](config.vToken1, 0, 0),
+        ).to.be.revertedWithCustomError(eBrake, "NotSupportedOnIsolatedPool");
+      });
+
       it("should revert for unlisted market", async () => {
         const { eBrake, whitelistedUser } = get();
         await expect(
-          eBrake.connect(whitelistedUser)["setCFZero(address)"]("0x0000000000000000000000000000000000000001"),
+          eBrake
+            .connect(whitelistedUser)
+            ["decreaseCF(address,uint256)"]("0x0000000000000000000000000000000000000001", 0),
         ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
       });
     } else {
@@ -518,9 +551,9 @@ export function setCFZeroTests(config: NetworkConfig, get: FixtureGetter): void 
         expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
         expect(marketBefore.liquidationThresholdMantissa).to.be.gt(0);
 
-        await expect(eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1))
-          .to.emit(eBrake, "CollateralFactorZeroed")
-          .withArgs(whitelistedUser.address, config.vToken1, CORE_POOL_ID);
+        await expect(eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0))
+          .to.emit(eBrake, "CollateralFactorDecreased")
+          .withArgs(whitelistedUser.address, config.vToken1, CORE_POOL_ID, 0);
 
         const marketAfter = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
         expect(marketAfter.collateralFactorMantissa).to.equal(0);
@@ -530,13 +563,31 @@ export function setCFZeroTests(config: NetworkConfig, get: FixtureGetter): void 
       it("should skip e-mode pools where market is not listed", async () => {
         const { eBrake, whitelistedUser } = get();
         // vToken1 is listed in core pool; e-mode pools where it is absent are silently skipped
-        await expect(eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1)).to.not.be.reverted;
+        await expect(eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0)).to.not.be
+          .reverted;
+      });
+
+      it("should silently skip pools where currentCF is already <= newCF (no revert)", async () => {
+        const { eBrake, comptroller, whitelistedUser } = get();
+        const CORE_POOL_ID = 0;
+        const marketBefore = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
+        // Passing newCF > currentCF must not revert — those pools are simply skipped
+        await expect(
+          eBrake
+            .connect(whitelistedUser)
+            ["decreaseCF(address,uint256)"](config.vToken1, marketBefore.collateralFactorMantissa.add(1)),
+        ).to.not.be.reverted;
+        // Core pool CF is unchanged (was already <= newCF so skipped)
+        const marketAfter = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
+        expect(marketAfter.collateralFactorMantissa).to.equal(marketBefore.collateralFactorMantissa);
       });
 
       it("should revert for unlisted market", async () => {
         const { eBrake, whitelistedUser } = get();
         await expect(
-          eBrake.connect(whitelistedUser)["setCFZero(address)"]("0x0000000000000000000000000000000000000001"),
+          eBrake
+            .connect(whitelistedUser)
+            ["decreaseCF(address,uint256)"]("0x0000000000000000000000000000000000000001", 0),
         ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
       });
     }
@@ -547,12 +598,12 @@ export function marketStateTests(config: NetworkConfig, get: FixtureGetter): voi
   describe("MarketState Snapshots", () => {
     describe("CF Snapshot", () => {
       if (config.comptrollerType === "il") {
-        it("should snapshot CF and LT when setCFZero is called (IL)", async () => {
+        it("should snapshot CF and LT when decreaseCF is called (IL)", async () => {
           const { eBrake, comptroller, whitelistedUser } = get();
           const marketBefore = await comptroller.markets(config.vToken1);
           expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
 
-          await eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1);
+          await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
 
           const snapshot = await eBrake.getMarketCFSnapshot(config.vToken1, 0);
           expect(snapshot.cf).to.equal(marketBefore.collateralFactorMantissa);
@@ -563,35 +614,35 @@ export function marketStateTests(config: NetworkConfig, get: FixtureGetter): voi
           const { eBrake, comptroller, whitelistedUser } = get();
           const marketBefore = await comptroller.markets(config.vToken1);
 
-          await eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1);
+          await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
           // Second call — CF is now 0, snapshot should NOT be overwritten
-          await eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1);
+          await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
 
           const snapshot = await eBrake.getMarketCFSnapshot(config.vToken1, 0);
           expect(snapshot.cf).to.equal(marketBefore.collateralFactorMantissa);
           expect(snapshot.lt).to.equal(marketBefore.liquidationThresholdMantissa);
         });
       } else {
-        it("should snapshot CF and LT per pool when setCFZero(address) is called (Diamond)", async () => {
+        it("should snapshot CF and LT per pool when decreaseCF(address,uint256) is called (Diamond)", async () => {
           const { eBrake, comptroller, whitelistedUser } = get();
           const CORE_POOL_ID = 0;
           const marketBefore = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
           expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
 
-          await eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1);
+          await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
 
           const snapshot = await eBrake.getMarketCFSnapshot(config.vToken1, CORE_POOL_ID);
           expect(snapshot.cf).to.equal(marketBefore.collateralFactorMantissa);
           expect(snapshot.lt).to.equal(marketBefore.liquidationThresholdMantissa);
         });
 
-        it("should snapshot CF when setCFZero(address,uint96) is called for a specific pool", async () => {
+        it("should snapshot CF when decreaseCF(address,uint96,uint256) is called for a specific pool", async () => {
           const { eBrake, comptroller, whitelistedUser } = get();
           const CORE_POOL_ID = 0;
           const marketBefore = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
           expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
 
-          await eBrake.connect(whitelistedUser)["setCFZero(address,uint96)"](config.vToken1, CORE_POOL_ID);
+          await eBrake.connect(whitelistedUser)["decreaseCF(address,uint96,uint256)"](config.vToken1, CORE_POOL_ID, 0);
 
           const snapshot = await eBrake.getMarketCFSnapshot(config.vToken1, CORE_POOL_ID);
           expect(snapshot.cf).to.equal(marketBefore.collateralFactorMantissa);
@@ -603,8 +654,8 @@ export function marketStateTests(config: NetworkConfig, get: FixtureGetter): voi
           const CORE_POOL_ID = 0;
           const marketBefore = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
 
-          await eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1);
-          await eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1);
+          await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
+          await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
 
           const snapshot = await eBrake.getMarketCFSnapshot(config.vToken1, CORE_POOL_ID);
           expect(snapshot.cf).to.equal(marketBefore.collateralFactorMantissa);
@@ -686,7 +737,7 @@ export function marketStateTests(config: NetworkConfig, get: FixtureGetter): voi
         const { eBrake, whitelistedUser } = get();
         const poolId = config.comptrollerType === "il" ? 0 : 0;
 
-        await eBrake.connect(whitelistedUser)["setCFZero(address)"](config.vToken1);
+        await eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, 0);
         const snapshotBefore = await eBrake.getMarketCFSnapshot(config.vToken1, poolId);
         expect(snapshotBefore.cf).to.be.gt(0);
 
@@ -783,6 +834,6 @@ export function runSharedTests(config: NetworkConfig, get: FixtureGetter): void 
   accessControlTests(config, get);
   pauseTests(config, get);
   capTests(config, get);
-  setCFZeroTests(config, get);
+  decreaseCFTests(config, get);
   marketStateTests(config, get);
 }
