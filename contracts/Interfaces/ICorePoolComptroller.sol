@@ -40,6 +40,9 @@ interface ICorePoolComptroller is IComptroller {
     /// @param paused True to pause, false to unpause.
     function setFlashLoanPaused(bool paused) external;
 
+    /// @notice Returns whether flash loans are currently paused globally.
+    function flashLoanPaused() external view returns (bool);
+
     /// @notice Enable or disable borrowing for a specific market in a specific pool.
     /// @dev Independent from the global `_actionPaused[market][BORROW]` flag — both must
     ///      allow borrowing for borrows to actually proceed in a given pool/market.

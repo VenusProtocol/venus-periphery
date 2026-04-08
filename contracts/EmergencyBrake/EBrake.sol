@@ -116,6 +116,12 @@ contract EBrake is IEBrake, AccessControlledV8 {
     /// @inheritdoc IEBrake
     function pauseFlashLoan() external {
         _checkAccessAllowed("pauseFlashLoan()");
+
+        // Idempotent: skip the external call AND the event when already paused.
+        // Keeps FlashLoanPaused a true state-change signal for off-chain consumers
+        // and matches the "EBrake duplicate calls are no-ops" contract callers rely on.
+        if (COMPTROLLER.flashLoanPaused()) return;
+
         COMPTROLLER.setFlashLoanPaused(true);
         emit FlashLoanPaused(msg.sender);
     }

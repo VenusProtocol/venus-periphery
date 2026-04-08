@@ -38,6 +38,18 @@ if (FORK_MAINNET) {
             .withArgs(whitelistedUser.address);
           expect(await comptroller.flashLoanPaused()).to.be.true;
         });
+
+        it("should be a silent no-op when flash loans are already paused", async () => {
+          const { eBrake, comptroller, whitelistedUser } = get();
+          // First call: pauses and emits
+          await eBrake.connect(whitelistedUser).pauseFlashLoan();
+          expect(await comptroller.flashLoanPaused()).to.be.true;
+
+          // Second call: must NOT emit (state unchanged), and must not revert
+          const tx = eBrake.connect(whitelistedUser).pauseFlashLoan();
+          await expect(tx).to.not.emit(eBrake, "FlashLoanPaused");
+          expect(await comptroller.flashLoanPaused()).to.be.true;
+        });
       });
 
       // ═════════════════════════════════════════════════════════════════════
