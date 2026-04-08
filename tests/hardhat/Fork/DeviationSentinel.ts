@@ -4,15 +4,7 @@ import { BigNumber, Contract } from "ethers";
 import { ethers } from "hardhat";
 
 import bscmainnetAddresses from "../../../deployments/bscmainnet_addresses.json";
-import {
-  ChainlinkOracle,
-  DeviationSentinel,
-  IAccessControlManagerV8,
-  PancakeSwapOracle,
-  ResilientOracle,
-  SentinelOracle,
-  UniswapOracle,
-} from "../../../typechain";
+import { DeviationSentinel, ResilientOracle, SentinelOracle, UniswapOracle } from "../../../typechain";
 import { ChainlinkOracle__factory } from "../../../typechain/factories/ChainlinkOracle__factory";
 import { DeviationSentinel__factory } from "../../../typechain/factories/DeviationSentinel__factory";
 import { IAccessControlManagerV8__factory } from "../../../typechain/factories/IAccessControlManagerV8__factory";

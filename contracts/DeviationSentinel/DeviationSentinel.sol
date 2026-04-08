@@ -28,6 +28,14 @@ contract DeviationSentinel is AccessControlledV8 {
         bool enabled;
     }
 
+    /// @notice Action taken by the sentinel when handling a deviation
+    /// @param BorrowPaused Borrow was paused (sentinel price > oracle price)
+    /// @param SupplyPausedAndCFZeroed CF was zeroed and supply was paused (sentinel price <= oracle price)
+    enum DeviationAction {
+        BorrowPaused,
+        SupplyPausedAndCFZeroed
+    }
+
     /// @notice Maximum allowed price deviation in percentage (e.g., 10 = 10%)
     uint8 public constant MAX_DEVIATION = 100;
 
@@ -71,8 +79,8 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param market The market address
     /// @param oraclePrice The price from the resilient oracle at the time of detection
     /// @param sentinelPrice The price from the sentinel oracle at the time of detection
-    /// @param borrowPaused True if borrow was paused (sentinel > oracle); false if CF was zeroed and supply was paused (sentinel <= oracle)
-    event DeviationHandled(address indexed market, uint256 oraclePrice, uint256 sentinelPrice, bool borrowPaused);
+    /// @param action The action taken in response to the deviation
+    event DeviationHandled(address indexed market, uint256 oraclePrice, uint256 sentinelPrice, DeviationAction action);
 
     /// @notice Thrown when deviation is set to zero
     error ZeroDeviation();
@@ -190,13 +198,16 @@ contract DeviationSentinel is AccessControlledV8 {
 
         if (!hasDeviation) return;
 
+        DeviationAction action;
         if (sentinelPrice > oraclePrice) {
             EBRAKE.pauseBorrow(address(market));
+            action = DeviationAction.BorrowPaused;
         } else {
             EBRAKE.setCFZero(address(market));
             EBRAKE.pauseSupply(address(market));
+            action = DeviationAction.SupplyPausedAndCFZeroed;
         }
-        emit DeviationHandled(address(market), oraclePrice, sentinelPrice, sentinelPrice > oraclePrice);
+        emit DeviationHandled(address(market), oraclePrice, sentinelPrice, action);
     }
 
     /// @notice Check if there is a price deviation between resilient oracle and sentinel oracle for a market
