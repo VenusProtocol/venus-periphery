@@ -324,18 +324,20 @@ interface IEBrake {
     function decreaseCF(address market, uint96 poolId, uint256 newCF) external;
 
     /**
-     * @notice Decrease borrow caps on markets. Can only set caps LOWER than or equal to current values.
-     *         Setting to 0 blocks all new borrows. Existing borrows are never affected by caps.
+     * @notice Decrease borrow caps on markets. Each new cap must be strictly LOWER than the current value.
+     *         Elements equal to the current cap are silently skipped. Setting to 0 blocks all new borrows.
+     *         Existing borrows are never affected by caps.
      * @param markets The vToken market addresses to adjust borrow caps on.
-     * @param newBorrowCaps The new borrow cap values. Each must be <= current cap.
+     * @param newBorrowCaps The new borrow cap values. Each must be < current cap (equality is a no-op, > reverts).
      */
     function setMarketBorrowCaps(address[] calldata markets, uint256[] calldata newBorrowCaps) external;
 
     /**
-     * @notice Decrease supply caps on markets. Can only set caps LOWER than or equal to current values.
-     *         Setting to 0 blocks all new deposits. Existing deposits are never affected by caps.
+     * @notice Decrease supply caps on markets. Each new cap must be strictly LOWER than the current value.
+     *         Elements equal to the current cap are silently skipped. Setting to 0 blocks all new deposits.
+     *         Existing deposits are never affected by caps.
      * @param markets The vToken market addresses to adjust supply caps on.
-     * @param newSupplyCaps The new supply cap values. Each must be <= current cap.
+     * @param newSupplyCaps The new supply cap values. Each must be < current cap (equality is a no-op, > reverts).
      */
     function setMarketSupplyCaps(address[] calldata markets, uint256[] calldata newSupplyCaps) external;
 

@@ -206,10 +206,9 @@ contract EBrake is IEBrake, AccessControlledV8 {
             if (newBorrowCaps[i] > currentCap) {
                 revert CapExceedsCurrent(markets[i], currentCap, newBorrowCaps[i]);
             }
-            // Only snapshot when this element actually tightens. Equality is allowed
-            // (preserves batch ergonomics for already-zero caps) but must not pollute
-            // the snapshot — otherwise a no-op call could lock the first-write-wins
-            // sentinel and cause a later real tightening to record nothing.
+            // Only act when this element actually tightens. Equality is a no-op —
+            // neither the comptroller call nor the snapshot should fire, so that the
+            // first-write-wins sentinel is not polluted by a redundant call.
             if (newBorrowCaps[i] < currentCap) {
                 anyDecreased = true;
                 MarketState storage state = marketStates[markets[i]];
@@ -220,8 +219,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
             }
         }
 
-        comptroller.setMarketBorrowCaps(markets, newBorrowCaps);
         if (anyDecreased) {
+            comptroller.setMarketBorrowCaps(markets, newBorrowCaps);
             emit BorrowCapsDecreased(msg.sender, markets, newBorrowCaps);
         }
     }
@@ -241,10 +240,9 @@ contract EBrake is IEBrake, AccessControlledV8 {
             if (newSupplyCaps[i] > currentCap) {
                 revert CapExceedsCurrent(markets[i], currentCap, newSupplyCaps[i]);
             }
-            // Only snapshot when this element actually tightens. Equality is allowed
-            // (preserves batch ergonomics for already-zero caps) but must not pollute
-            // the snapshot — otherwise a no-op call could lock the first-write-wins
-            // sentinel and cause a later real tightening to record nothing.
+            // Only act when this element actually tightens. Equality is a no-op —
+            // neither the comptroller call nor the snapshot should fire, so that the
+            // first-write-wins sentinel is not polluted by a redundant call.
             if (newSupplyCaps[i] < currentCap) {
                 anyDecreased = true;
                 MarketState storage state = marketStates[markets[i]];
@@ -255,8 +253,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
             }
         }
 
-        comptroller.setMarketSupplyCaps(markets, newSupplyCaps);
         if (anyDecreased) {
+            comptroller.setMarketSupplyCaps(markets, newSupplyCaps);
             emit SupplyCapsDecreased(msg.sender, markets, newSupplyCaps);
         }
     }
