@@ -206,10 +206,9 @@ contract EBrake is IEBrake, AccessControlledV8 {
             if (newBorrowCaps[i] > currentCap) {
                 revert CapExceedsCurrent(markets[i], currentCap, newBorrowCaps[i]);
             }
-            // Only snapshot when this element actually tightens. Equality is allowed
-            // (preserves batch ergonomics for already-zero caps) but must not pollute
-            // the snapshot — otherwise a no-op call could lock the first-write-wins
-            // sentinel and cause a later real tightening to record nothing.
+            // Only act when this element actually tightens. Equality is a no-op —
+            // neither the comptroller call nor the snapshot should fire, so that the
+            // first-write-wins sentinel is not polluted by a redundant call.
             if (newBorrowCaps[i] < currentCap) {
                 anyDecreased = true;
                 MarketState storage state = marketStates[markets[i]];
@@ -220,8 +219,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
             }
         }
 
-        comptroller.setMarketBorrowCaps(markets, newBorrowCaps);
         if (anyDecreased) {
+            comptroller.setMarketBorrowCaps(markets, newBorrowCaps);
             emit BorrowCapsDecreased(msg.sender, markets, newBorrowCaps);
         }
     }
@@ -241,10 +240,9 @@ contract EBrake is IEBrake, AccessControlledV8 {
             if (newSupplyCaps[i] > currentCap) {
                 revert CapExceedsCurrent(markets[i], currentCap, newSupplyCaps[i]);
             }
-            // Only snapshot when this element actually tightens. Equality is allowed
-            // (preserves batch ergonomics for already-zero caps) but must not pollute
-            // the snapshot — otherwise a no-op call could lock the first-write-wins
-            // sentinel and cause a later real tightening to record nothing.
+            // Only act when this element actually tightens. Equality is a no-op —
+            // neither the comptroller call nor the snapshot should fire, so that the
+            // first-write-wins sentinel is not polluted by a redundant call.
             if (newSupplyCaps[i] < currentCap) {
                 anyDecreased = true;
                 MarketState storage state = marketStates[markets[i]];
@@ -255,8 +253,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
             }
         }
 
-        comptroller.setMarketSupplyCaps(markets, newSupplyCaps);
         if (anyDecreased) {
+            comptroller.setMarketSupplyCaps(markets, newSupplyCaps);
             emit SupplyCapsDecreased(msg.sender, markets, newSupplyCaps);
         }
     }
@@ -325,128 +323,6 @@ contract EBrake is IEBrake, AccessControlledV8 {
      * @param state The MarketState storage reference for this market.
      * @param poolId The pool ID.
      * @param currentCF The current collateral factor before decreasing.
-     * @param currentLT The current liquidation threshold.
-     */
-    function _snapshotCF(MarketState storage state, uint96 poolId, uint256 currentCF, uint256 currentLT) internal {
-        if (state.poolCFs[poolId] == 0 && currentCF > 0) {
-            state.poolCFs[poolId] = currentCF;
-            state.poolLTs[poolId] = currentLT;
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                     EXECUTOR-GATED ACTIONS — RISK PARAMETER ADJUSTMENTS
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /// @inheritdoc IEBrake
-    function adjustCollateralFactor(address market, uint256 newCF) external {
-        _checkAccessAllowed("adjustCollateralFactor(address,uint256)");
-
-        if (IS_ISOLATED_POOL) {
-            IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
-            if (!m.isListed) revert MarketNotListed(0, market);
-
-            uint256 currentCF = m.collateralFactorMantissa;
-            IILComptroller(address(COMPTROLLER)).setCollateralFactor(market, newCF, m.liquidationThresholdMantissa);
-
-            emit CollateralFactorAdjusted(msg.sender, market, 0, currentCF, newCF);
-        } else {
-            uint96 corePoolId = COMPTROLLER.corePoolId();
-            uint96 lastPoolId = COMPTROLLER.lastPoolId();
-
-            (bool isCorePoolListed, , , , , , ) = COMPTROLLER.poolMarkets(corePoolId, market);
-            if (!isCorePoolListed) revert MarketNotListed(corePoolId, market);
-
-            for (uint96 i = corePoolId; i <= lastPoolId; ++i) {
-                (bool isListed, uint256 currentCF, , uint256 currentLT, , , ) = COMPTROLLER.poolMarkets(i, market);
-                if (!isListed) continue;
-
-                // Skip pools where the market is borrow-only (LT == 0). The Diamond comptroller
-                // requires newLT >= newCF in __setCollateralFactor; passing currentLT=0 with a
-                // non-zero newCF reverts with INVALID_LIQUIDATION_THRESHOLD. A borrow-only
-                // listing has no collateral exposure to tighten anyway, so it is safe to skip.
-                // setCFZero is unaffected because it always passes newCF=0, which trivially
-                // satisfies newLT >= newCF for any currentLT.
-                if (currentLT == 0) continue;
-                uint256 err = COMPTROLLER.setCollateralFactor(i, market, newCF, currentLT);
-                if (err != 0) revert SetCollateralFactorFailed(err);
-                emit CollateralFactorAdjusted(msg.sender, market, i, currentCF, newCF);
-            }
-        }
-    }
-
-    /// @inheritdoc IEBrake
-    /// @dev Unlike setMarketBorrowCaps/setMarketSupplyCaps, this function allows both increases
-    ///      and decreases — the decrease-only invariant is enforced upstream by the Executor.
-    function adjustCap(address market, CapType capType, uint256 newCap) external {
-        _checkAccessAllowed("adjustCap(address,uint8,uint256)");
-
-        IComptroller comptroller = IComptroller(address(COMPTROLLER));
-        address[] memory markets = new address[](1);
-        markets[0] = market;
-        uint256[] memory caps = new uint256[](1);
-        caps[0] = newCap;
-
-        if (capType == CapType.BORROW) {
-            uint256 oldCap = comptroller.borrowCaps(market);
-            comptroller.setMarketBorrowCaps(markets, caps);
-            emit CapAdjusted(msg.sender, market, capType, oldCap, newCap);
-        } else if (capType == CapType.SUPPLY) {
-            uint256 oldCap = comptroller.supplyCaps(market);
-            comptroller.setMarketSupplyCaps(markets, caps);
-            emit CapAdjusted(msg.sender, market, capType, oldCap, newCap);
-        } else {
-            revert InvalidCapType();
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                     MARKET STATE SNAPSHOT — RESET & VIEW
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /// @inheritdoc IEBrake
-    function resetMarketState(address market) external {
-        _checkAccessAllowed("resetMarketState(address)");
-
-        MarketState storage state = marketStates[market];
-        state.borrowCap = 0;
-        state.supplyCap = 0;
-        state.borrowCapSnapshotted = false;
-        state.supplyCapSnapshotted = false;
-
-        if (IS_ISOLATED_POOL) {
-            delete state.poolCFs[0];
-            delete state.poolLTs[0];
-        } else {
-            uint96 corePoolId = COMPTROLLER.corePoolId();
-            uint96 lastPoolId = COMPTROLLER.lastPoolId();
-            for (uint96 i = corePoolId; i <= lastPoolId; ++i) {
-                delete state.poolCFs[i];
-                delete state.poolLTs[i];
-            }
-        }
-
-        emit MarketStateReset(market);
-    }
-
-    /// @inheritdoc IEBrake
-    function getMarketCFSnapshot(address market, uint96 poolId) external view returns (uint256 cf, uint256 lt) {
-        MarketState storage state = marketStates[market];
-        cf = state.poolCFs[poolId];
-        lt = state.poolLTs[poolId];
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                              INTERNALS
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice Snapshot collateral factor and liquidation threshold for a market in a specific pool.
-     * @dev First-write-wins: only records if poolCFs[poolId] == 0 (no prior snapshot).
-     *      If CF was already 0 before EBrake acted, there is nothing to restore.
-     * @param state The MarketState storage reference for this market.
-     * @param poolId The pool ID.
-     * @param currentCF The current collateral factor before zeroing.
      * @param currentLT The current liquidation threshold.
      */
     function _snapshotCF(MarketState storage state, uint96 poolId, uint256 currentCF, uint256 currentLT) internal {
