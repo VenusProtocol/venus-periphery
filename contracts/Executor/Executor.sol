@@ -12,19 +12,19 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
 /**
  * @title Executor — Signal-Driven Condition Handler for E-brake V2
  * @author Venus Protocol
- * @notice Validates signal-driven conditions on-chain, enforces bounds and cooldowns,
- *         and routes validated actions to EBrake for execution.
+ * @notice Validates signal-driven conditions on-chain, enforces bounds, and routes
+ *         validated tightening actions to EBrake for execution.
  *
  * @dev    Example Flow: Hypernative (off-chain signal S1-S8) → Executor (validate) → EBrake (execute) → Comptroller
  *
  *         The Executor is the validation layer. It ensures:
- *         - LTV adjustments stay within [0, originalLTV]
- *         - Cap adjustments stay within [minCap, originalCap]
- *         - Increases (loosening) require a cooldown period
+ *         - LTV adjustments stay within [0, originalLTV] and are tighten-only (decrease only)
+ *         - Cap adjustments stay within [minCap, originalCap] and are tighten-only (decrease only)
  *         - Supply and borrow halts only fire when caps are actually breached on-chain
  *
  *         The Executor does NOT hold detection logic — that lives off-chain in the signal pipeline.
  *         The Executor does NOT call the comptroller directly — all mutations go through EBrake.
+ *         Recovery from any tightening action always requires a governance VIP.
  */
 contract Executor is IExecutor, AccessControlledV8 {
     /// @notice The EBrake contract that executes emergency actions on the comptroller.
@@ -37,24 +37,11 @@ contract Executor is IExecutor, AccessControlledV8 {
     /// @dev    Used by _getCurrentCF to read from the correct comptroller ABI:
     ///         - BSC (Diamond): poolMarkets(corePoolId, market) — 7-value return
     ///         - Non-BSC (IL): markets(market) — 3-value return
-    ///         EBrake functions (adjustCollateralFactor, setCFZero) handle both paths internally
-    ///         via their own IS_ISOLATED_POOL flag — no routing needed here.
+    ///         EBrake handles both paths internally via its own IS_ISOLATED_POOL flag.
     bool public immutable IS_CORE_POOL;
 
     /// @notice Per-market configuration for automated risk parameter adjustments.
     mapping(address => MarketConfig) public marketConfigs;
-
-    /// @notice Cooldown period in seconds for increase (loosening) operations.
-    uint256 public cooldownPeriod;
-
-    /// @notice Timestamp of the last LTV increase per market.
-    mapping(address => uint256) public lastLTVIncreaseTime;
-
-    /// @notice Timestamp of the last borrow cap increase per market.
-    mapping(address => uint256) public lastBorrowCapIncreaseTime;
-
-    /// @notice Timestamp of the last supply cap increase per market.
-    mapping(address => uint256) public lastSupplyCapIncreaseTime;
 
     /// @notice Deploy Executor with the EBrake contract and comptroller type.
     /// @param eBrake_ The EBrake contract address.
@@ -72,14 +59,10 @@ contract Executor is IExecutor, AccessControlledV8 {
         _disableInitializers();
     }
 
-    /// @notice Initialize the Executor with ACM and cooldown period.
+    /// @notice Initialize the Executor with ACM.
     /// @param accessControlManager_ Address of the Venus Access Control Manager.
-    /// @param cooldownPeriod_ Initial cooldown period in seconds (e.g. 1800 for 30 minutes).
-    function initialize(address accessControlManager_, uint256 cooldownPeriod_) external initializer {
-        if (cooldownPeriod_ == 0) revert ZeroValue();
-
+    function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
-        cooldownPeriod = cooldownPeriod_;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -98,32 +81,31 @@ contract Executor is IExecutor, AccessControlledV8 {
 
         uint256 currentCF = _getCurrentCF(market);
 
-        if (adjustedLTV > currentCF) {
-            // Increase relative to core pool CF — apply cooldown.
-            // On BSC, e-mode pools have CF >= core pool CF, so if core pool CF is increasing,
-            // at least one pool is being loosened. On non-BSC there is only one pool.
-            _enforceCooldown(lastLTVIncreaseTime[market]);
-            lastLTVIncreaseTime[market] = block.timestamp;
-        } else if (adjustedLTV == currentCF && !IS_CORE_POOL) {
+        if (adjustedLTV == currentCF && !IS_CORE_POOL) {
             // IL path: single pool, truly a no-op.
             return;
         }
         // Note: for IS_CORE_POOL, we do NOT early-exit when adjustedLTV == corePoolCF because
         // e-mode pools may have a higher CF that still needs to be brought down to adjustedLTV.
 
-        EBRAKE.adjustCollateralFactor(market, adjustedLTV);
+        EBRAKE.decreaseCF(market, adjustedLTV);
         emit LTVAdjusted(msg.sender, market, currentCF, adjustedLTV);
     }
 
     /// @inheritdoc IExecutor
-    function handleCapAdjust(address market, IEBrake.CapType capType, uint256 adjustedCap) external {
+    function handleCapAdjust(address market, IExecutor.CapType capType, uint256 adjustedCap) external {
         _checkAccessAllowed("handleCapAdjust(address,uint8,uint256)");
 
         MarketConfig memory config = _getEnabledConfig(market);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
 
-        if (capType == IEBrake.CapType.BORROW) {
+        address[] memory markets = new address[](1);
+        markets[0] = market;
+        uint256[] memory caps = new uint256[](1);
+        caps[0] = adjustedCap;
+
+        if (capType == IExecutor.CapType.BORROW) {
             if (adjustedCap < config.minBorrowCap) revert CapBelowMinimum(adjustedCap, config.minBorrowCap);
             if (adjustedCap > config.originalBorrowCap)
                 revert CapExceedsOriginal(adjustedCap, config.originalBorrowCap);
@@ -131,12 +113,7 @@ contract Executor is IExecutor, AccessControlledV8 {
             uint256 currentCap = comptroller.borrowCaps(market);
             if (adjustedCap == currentCap) return;
 
-            if (adjustedCap > currentCap) {
-                _enforceCooldown(lastBorrowCapIncreaseTime[market]);
-                lastBorrowCapIncreaseTime[market] = block.timestamp;
-            }
-
-            EBRAKE.adjustCap(market, capType, adjustedCap);
+            EBRAKE.setMarketBorrowCaps(markets, caps);
             emit CapAdjusted(msg.sender, market, capType, currentCap, adjustedCap);
         } else {
             if (adjustedCap < config.minSupplyCap) revert CapBelowMinimum(adjustedCap, config.minSupplyCap);
@@ -146,12 +123,7 @@ contract Executor is IExecutor, AccessControlledV8 {
             uint256 currentCap = comptroller.supplyCaps(market);
             if (adjustedCap == currentCap) return;
 
-            if (adjustedCap > currentCap) {
-                _enforceCooldown(lastSupplyCapIncreaseTime[market]);
-                lastSupplyCapIncreaseTime[market] = block.timestamp;
-            }
-
-            EBRAKE.adjustCap(market, capType, adjustedCap);
+            EBRAKE.setMarketSupplyCaps(markets, caps);
             emit CapAdjusted(msg.sender, market, capType, currentCap, adjustedCap);
         }
     }
@@ -167,7 +139,7 @@ contract Executor is IExecutor, AccessControlledV8 {
         if (supplyUnderlying < supplyCap) revert CapNotBreached();
 
         EBRAKE.pauseSupply(market);
-        EBRAKE.setCFZero(market);
+        EBRAKE.decreaseCF(market, 0);
         emit SupplyHalted(msg.sender, market);
     }
 
@@ -202,16 +174,6 @@ contract Executor is IExecutor, AccessControlledV8 {
         emit MarketConfigSet(market, config);
     }
 
-    /// @inheritdoc IExecutor
-    function setCooldownPeriod(uint256 newPeriod) external {
-        _checkAccessAllowed("setCooldownPeriod(uint256)");
-        if (newPeriod == 0) revert ZeroValue();
-        if (newPeriod == cooldownPeriod) revert NoChange();
-
-        emit CooldownPeriodUpdated(cooldownPeriod, newPeriod);
-        cooldownPeriod = newPeriod;
-    }
-
     // ═══════════════════════════════════════════════════════════════════════
     //                     INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════════
@@ -239,20 +201,6 @@ contract Executor is IExecutor, AccessControlledV8 {
         } else {
             IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
             currentCF = m.collateralFactorMantissa;
-        }
-    }
-
-    /**
-     * @notice Enforce cooldown period for increase (loosening) operations.
-     * @dev    Reverts with CooldownNotExpired if the cooldown has not elapsed since the last increase.
-     * @param lastIncreaseTime The timestamp of the last increase for this market/parameter.
-     */
-    function _enforceCooldown(uint256 lastIncreaseTime) internal view {
-        if (lastIncreaseTime != 0) {
-            uint256 cooldownEnd = lastIncreaseTime + cooldownPeriod;
-            if (block.timestamp < cooldownEnd) {
-                revert CooldownNotExpired(cooldownEnd - block.timestamp);
-            }
         }
     }
 }
