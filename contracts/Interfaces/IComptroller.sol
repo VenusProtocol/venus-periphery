@@ -55,4 +55,8 @@ interface IComptroller {
     function enterMarket(address user, address vToken) external returns (uint256);
 
     function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);
+
+    function exitMarket(address vToken) external returns (uint256);
+
+    function updateDelegate(address delegate, bool approved) external;
 }
