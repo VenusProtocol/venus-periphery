@@ -3,8 +3,11 @@
   "chainId": "97",
   "addresses": {
     "DeviationSentinel": "0x9245d72712548707809D66848e63B8E2B169F3c1",
-    "DeviationSentinel_Implementation": "0x4f84B6Bbd8f8cD4702Ec79A41715dAcC4Ce8188c",
+    "DeviationSentinel_Implementation": "0x455C09D6BA46e7C9f80f29506DcC8E5F8378832a",
     "DeviationSentinel_Proxy": "0x9245d72712548707809D66848e63B8E2B169F3c1",
+    "EBrake": "0x957c09e3Ac3d9e689244DC74307c94111FBa8B42",
+    "EBrake_Implementation": "0x9cA0f0C412d2E8a2c4323c04214D811375c17B24",
+    "EBrake_Proxy": "0x957c09e3Ac3d9e689244DC74307c94111FBa8B42",
     "LeverageStrategiesManager": "0x5187226337C95c4BE683D37Ffc66D41f5b6cE38f",
     "LeverageStrategiesManager_Implementation": "0xE3e98EB0D06bBfA38B14690F0f218bcAa1485a1D",
     "LeverageStrategiesManager_Proxy": "0x5187226337C95c4BE683D37Ffc66D41f5b6cE38f",
