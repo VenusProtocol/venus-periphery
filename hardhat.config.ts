@@ -97,10 +97,8 @@ const config: HardhatUserConfig = {
         settings: {
           optimizer: {
             enabled: true,
-            details: {
-              yul: !process.env.CI,
-            },
           },
+          viaIR: true,
           evmVersion: "cancun",
           outputSelection: {
             "*": {

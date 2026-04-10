@@ -3275,7 +3275,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@venusprotocol/governance-contracts@npm:^2.12.0, @venusprotocol/governance-contracts@npm:^2.13.0, @venusprotocol/governance-contracts@npm:^2.9.0":
+"@venusprotocol/governance-contracts@npm:^2.13.0, @venusprotocol/governance-contracts@npm:^2.9.0":
   version: 2.13.0
   resolution: "@venusprotocol/governance-contracts@npm:2.13.0"
   dependencies:
@@ -3283,6 +3283,18 @@ __metadata:
     hardhat-deploy-ethers: ^0.3.0-beta.13
     module-alias: ^2.2.2
   checksum: 329b35ac75ce18a1f7aa785b321f8f124f75a82cfe06cb1b9fb65ecbe19771cae2760bdc37ffd3208e6f56c431358d76c95b4a0b7766eb669df7adca0a017342
+  languageName: node
+  linkType: hard
+
+"@venusprotocol/governance-contracts@npm:^2.14.0":
+  version: 2.14.0
+  resolution: "@venusprotocol/governance-contracts@npm:2.14.0"
+  dependencies:
+    "@venusprotocol/solidity-utilities": 2.0.0
+    hardhat-deploy-ethers: ^0.3.0-beta.13
+    module-alias: ^2.2.2
+    patch-package: ^8.0.0
+  checksum: 13e14bb68d392d8a8bd531bb115fdafdf6ab26b520211c23b581ee263abd759324d10c54d9f35eb1c87612c6e32be2349e94997200388e293f5fd1c1251b22f7
   languageName: node
   linkType: hard
 
@@ -3395,7 +3407,7 @@ __metadata:
     "@types/node": ^12.20.50
     "@typescript-eslint/eslint-plugin": ^5.27.1
     "@typescript-eslint/parser": ^5.27.1
-    "@venusprotocol/governance-contracts": ^2.12.0
+    "@venusprotocol/governance-contracts": ^2.14.0
     "@venusprotocol/isolated-pools": ^4.3.0
     "@venusprotocol/oracle": ^2.13.0
     "@venusprotocol/protocol-reserve": ^3.3.0
