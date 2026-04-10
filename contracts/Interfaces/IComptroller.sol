@@ -126,12 +126,9 @@ interface IComptroller {
     /// @return bool True if the delegate is approved.
     function approvedDelegates(address borrower, address delegate) external view returns (bool);
 
-    /// @notice Get account liquidity information.
-    /// @param account The account address.
-    /// @return error Error code (0 = success).
-    /// @return liquidity The account's excess liquidity.
-    /// @return shortfall The account's shortfall.
-    function getAccountLiquidity(
-        address account
-    ) external view returns (uint256 error, uint256 liquidity, uint256 shortfall);
+    function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);
+
+    function exitMarket(address vToken) external returns (uint256);
+
+    function updateDelegate(address delegate, bool approved) external;
 }
