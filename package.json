@@ -1,6 +1,6 @@
 {
   "name": "@venusprotocol/venus-periphery",
-  "version": "1.2.0-dev.3",
+  "version": "1.2.0-dev.4",
   "description": "",
   "files": [
     "artifacts",
@@ -48,6 +48,7 @@
     "@openzeppelin/contracts": "^4.8.3",
     "@openzeppelin/contracts-upgradeable": "^4.8.3",
     "@openzeppelin/hardhat-upgrades": "^1.21.0",
+    "@pendle/core-v2": "^6.5.0",
     "@solidity-parser/parser": "^0.13.2",
     "@venusprotocol/solidity-utilities": "2.0.3",
     "ethers": "^5.7.0",
@@ -78,6 +79,7 @@
     "@venusprotocol/oracle": "^2.13.0",
     "@venusprotocol/protocol-reserve": "^3.3.0",
     "@venusprotocol/venus-protocol": "10.1.0-dev.8",
+    "axios": "^1.13.5",
     "bignumber.js": "9.0.0",
     "chai": "^4.3.6",
     "dotenv": "^10.0.0",
