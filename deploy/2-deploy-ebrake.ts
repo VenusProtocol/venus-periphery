@@ -56,6 +56,12 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
       constructorArguments: [comptroller, isIsolatedPool],
     });
   }
+
+  const eBrake = await hre.ethers.getContract("EBrake");
+  if (network.live && (await eBrake.owner()) === deployer) {
+    await eBrake.transferOwnership(timelock);
+    console.log(`EBrake ownership transferred to timelock: ${timelock}`);
+  }
 };
 
 export default func;
