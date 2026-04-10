@@ -6,9 +6,10 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
 /**
  * @title IEBrake
  * @author Venus Protocol
- * @notice Interface for the EBrake (Emergency Brake) contract on BNB Chain.
- *         EBrake is a stateless emergency action router that can only TIGHTEN restrictions,
- *         never loosen them.
+ * @notice Interface for the EBrake (Emergency Brake) contract.
+ *         EBrake is an emergency action router that can only TIGHTEN restrictions,
+ *         never loosen them. It also snapshots pre-incident values (CF, caps) so that
+ *         governance can read and restore them via VIP. See resetCFSnapshot() / resetCapSnapshot().
  *
  * @dev Design goals and integration patterns:
  *
@@ -20,7 +21,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *      Contracts like DeviationSentinel or any Venus monitoring contract are also whitelisted.
  *      They contain their own detection logic (e.g. price deviation checks) and call into EBrake
  *      when a threat is detected. Example: DeviationSentinel detects a price anomaly → calls
- *      EBrake.pauseSupply() or EBrake.setCFZero(). The detection logic stays isolated in
+ *      EBrake.pauseSupply() or EBrake.decreaseCF(). The detection logic stays isolated in
  *      the monitor; EBrake only handles execution.
  *
  *   3. THIRD-PARTY MONITORS VIA SAFE MODULES
@@ -56,25 +57,36 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *      Worst-case if EBrake is compromised:
  *        - Pauses minting/borrowing/redeeming/transfers (inconvenient, no fund loss)
  *        - Zeros supply/borrow caps (blocks new positions, existing ones unaffected)
- *        - Zeros collateral factor (blocks new borrows against asset, does NOT liquidate
+ *        - Decreases collateral factor (blocks new borrows against asset, does NOT liquidate
  *          existing positions — that requires LT change, which EBrake cannot do)
  *        - Pauses flash loans (blocks flash loan attack vector, no user impact)
  *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.
  *
  *   BSC vs NON-BSC DIFFERENCES:
  *
- *      BSC (BNB Chain) — Diamond Comptroller (venus-protocol repo):
- *        - setCFZero(market, poolId) — uses poolMarkets() (7-value return) to read LT,
- *          calls setCollateralFactor(poolId, market, 0, LT) which returns uint256 error code
+ *      The IS_ISOLATED_POOL immutable determines which comptroller ABI is used.
+ *      It is set at deployment and cannot be changed.
+ *
+ *      BSC (BNB Chain) — Diamond Comptroller (IS_ISOLATED_POOL = false):
+ *        - decreaseCF(market, newCF) — iterates corePoolId to lastPoolId, applies newCF only to
+ *          pools where currentCF > newCF; silently skips pools already at or below newCF.
+ *        - decreaseCF(market, poolId, newCF) — targets a single pool (e.g. multisig use)
+ *        - Uses poolMarkets() (7-value return) to read LT,
+ *          calls setCollateralFactor(poolId, market, newCF, LT) which returns uint256 error code
  *        - Supports e-mode pools via poolId > 0
  *        - pauseFlashLoan() — flash loans only exist on Diamond
+ *        - disablePoolBorrow(poolId, market) — per-pool granular borrow disable, only on Diamond
+ *        - revokeFlashLoanAccess(account) — remove a single account from the flash loan
+ *          whitelist; flash loan whitelist only exists on Diamond
  *        - ACM permission strings use underscore prefix:
  *          _setActionsPaused, _setMarketBorrowCaps, _setMarketSupplyCaps
  *
- *      Non-BSC chains — IL Comptroller (isolated-pools repo):
- *        - setCFZeroIsolated(market) — uses markets() (3-value return) to read LT,
- *          calls setCollateralFactor(market, 0, LT) which returns void (no error code)
+ *      Non-BSC chains — IL Comptroller (IS_ISOLATED_POOL = true):
+ *        - decreaseCF(market, newCF) — uses markets() (3-value return) to read LT,
+ *          calls setCollateralFactor(market, newCF, LT) which returns void (no error code).
+ *          Reverts if newCF > currentCF.
  *        - No poolId concept — only the core pool exists (other pools are deprecated)
+ *        - decreaseCF(market, poolId, newCF) not granted ACM permission (no pool concept on IL)
  *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)
  *        - ACM permission strings have no underscore:
  *          setActionsPaused, setMarketBorrowCaps, setMarketSupplyCaps
@@ -104,14 +116,31 @@ interface IEBrake {
     /// @param caller The address that triggered the emergency action.
     event FlashLoanPaused(address indexed caller);
 
-    /// @notice Emitted when a collateral factor is set to zero.
+    /// @notice Emitted when borrowing is disabled for a market in a specific pool.
+    /// @param caller The address that triggered the emergency action.
+    /// @param poolId The pool identifier (0 = core pool, >0 = e-mode pools).
+    /// @param market The vToken market address whose pool-borrow flag was disabled.
+    event PoolBorrowDisabled(address indexed caller, uint96 indexed poolId, address indexed market);
+
+    /// @notice Emitted when an account is removed from the flash loan whitelist.
+    /// @param caller The address that triggered the emergency action.
+    /// @param account The account whose flash loan access was revoked.
+    event FlashLoanAccessRevoked(address indexed caller, address indexed account);
+
+    /// @notice Emitted when a collateral factor is decreased.
     ///         Used for both core/e-mode pools and IL comptrollers.
     /// @param caller The address that triggered the emergency action.
-    /// @param market The vToken market address whose CF was zeroed.
+    /// @param market The vToken market address whose CF was decreased.
     /// @param poolId The pool ID. On BNB Chain (Diamond comptroller) this identifies the core pool (0)
     ///        or an e-mode pool (>0). On other networks (IL comptroller) there is no poolId concept;
     ///        0 is used as a sentinel value to indicate that only the core pool is supported (other pools are deprecated).
-    event CollateralFactorZeroed(address indexed caller, address indexed market, uint96 indexed poolId);
+    /// @param newCF The new collateral factor value that the market was set to.
+    event CollateralFactorDecreased(
+        address indexed caller,
+        address indexed market,
+        uint96 indexed poolId,
+        uint256 newCF
+    );
 
     /// @notice Emitted when borrow caps are decreased.
     /// @param caller The address that triggered the emergency action.
@@ -124,6 +153,18 @@ interface IEBrake {
     /// @param markets The vToken market addresses whose supply caps were decreased.
     /// @param newSupplyCaps The new supply cap values.
     event SupplyCapsDecreased(address indexed caller, address[] markets, uint256[] newSupplyCaps);
+
+    /// @notice Emitted when a market's CF/LT snapshot is reset after governance recovery.
+    /// @param market The market address whose CF snapshot was cleared.
+    event CFSnapshotReset(address indexed market);
+
+    /// @notice Emitted when a market's borrow cap snapshot is reset after governance recovery.
+    /// @param market The market address whose borrow cap snapshot was cleared.
+    event BorrowCapSnapshotReset(address indexed market);
+
+    /// @notice Emitted when a market's supply cap snapshot is reset after governance recovery.
+    /// @param market The market address whose supply cap snapshot was cleared.
+    event SupplyCapSnapshotReset(address indexed market);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
@@ -161,6 +202,18 @@ interface IEBrake {
     /// @param currentCap The current cap value on the comptroller.
     /// @param requestedCap The new cap value that was rejected.
     error CapExceedsCurrent(address market, uint256 currentCap, uint256 requestedCap);
+
+    /// @notice Thrown when a function is called that is not supported on IL (isolated-pool) comptrollers.
+    ///         Pool ID is a Diamond-only concept — this function should never be ACM-granted on IL chains.
+    error NotSupportedOnIsolatedPool();
+
+    /// @notice Thrown when the requested collateral factor exceeds the current CF on the comptroller.
+    ///         EBrake can only tighten CF — newCF must be <= currentCF.
+    /// @param market The market whose CF was attempted to be increased.
+    /// @param poolId The pool ID where the violation was detected (0 on IL comptroller).
+    /// @param currentCF The current collateral factor on the comptroller.
+    /// @param requestedCF The new CF value that was rejected.
+    error CFExceedsCurrent(address market, uint96 poolId, uint256 currentCF, uint256 requestedCF);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — BATCH OPERATIONS
@@ -206,41 +259,128 @@ interface IEBrake {
     /// @notice Pause flash loans across the core pool.
     function pauseFlashLoan() external;
 
+    /**
+     * @notice Disable borrowing for a market in a specific pool, leaving other pools unaffected.
+     * @dev Only meaningful on Diamond comptroller (BSC) where the per-pool `isBorrowAllowed` flag exists.
+     *      On non-BSC chains the underlying call will revert (selector mismatch on IL comptroller).
+     *
+     *      This is independent of `pauseBorrow(market)` which flips the global
+     *      `_actionPaused[market][BORROW]` flag across every pool. Both flags must allow borrowing
+     *      for borrows to actually proceed in a given pool/market — recovery from a combined
+     *      tightening therefore requires governance to clear both flags.
+     *
+     *      The boolean argument is hardcoded to `false` inside the implementation to preserve
+     *      the EBrake "tighten only, never loosen" invariant. Re-enabling borrow is governance-only.
+     * @param poolId The pool identifier (0 = core pool, >0 = e-mode pools).
+     * @param market The vToken market address.
+     */
+    function disablePoolBorrow(uint96 poolId, address market) external;
+
+    /**
+     * @notice Remove a single account from the flash loan whitelist.
+     * @dev Only meaningful on Diamond comptroller (BSC) where the flash loan whitelist exists.
+     *      On non-BSC chains the underlying call will revert (selector mismatch on IL comptroller).
+     *
+     *      This is the surgical alternative to `pauseFlashLoan()`, which kills flash loans for
+     *      every whitelisted account. Use it when a single whitelisted integrator is compromised.
+     *
+     *      The boolean argument is hardcoded to `false` inside the implementation to preserve
+     *      the EBrake "tighten only, never loosen" invariant. Re-granting access is governance-only.
+     *
+     *      Idempotent: if the account is not currently whitelisted, the call is a no-op and
+     *      no event is emitted. FlashLoanAccessRevoked is a true state-change signal.
+     * @param account The account whose flash loan access should be revoked.
+     */
+    function revokeFlashLoanAccess(address account) external;
+
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — RISK PARAMETER ADJUSTMENTS
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Set collateral factor to zero for a market. Liquidation threshold is left unchanged.
-     *         Blocks new borrows against the asset. Does NOT make existing positions liquidatable —
+     * @notice Decrease collateral factor to `newCF` for a market across all relevant pools.
+     *         Liquidation threshold is left unchanged.
+     *         Blocks/limits new borrows against the asset. Does NOT make existing positions liquidatable —
      *         that would require lowering LT, which this contract cannot do.
-     * @param market The vToken market address whose CF should be zeroed.
+     * @dev On Diamond comptroller (IS_ISOLATED_POOL=false): iterates corePoolId to lastPoolId;
+     *      applies `newCF` only to pools where currentCF > newCF (silently skips pools already
+     *      at or below newCF and unlisted pools). Never reverts due to CF comparison — use the
+     *      per-pool overload if you need strict enforcement on a specific pool.
+     *      On IL comptroller (IS_ISOLATED_POOL=true): applies to the single market entry and
+     *      reverts with CFExceedsCurrent if newCF > currentCF.
+     * @param market The vToken market address whose CF should be decreased.
+     * @param newCF The new collateral factor value. On Diamond, pools already at or below this
+     *              value are silently skipped. On IL, must be <= current CF.
+     */
+    function decreaseCF(address market, uint256 newCF) external;
+
+    /**
+     * @notice Decrease collateral factor to `newCF` for a market in a specific pool.
+     *         Same safety guarantees as decreaseCF(address,uint256) — LT is left unchanged.
+     * @dev Only meaningful on Diamond comptroller (BSC) where multiple pools exist.
+     *      Reverts with NotSupportedOnIsolatedPool on IL chains — ACM must not grant this permission there.
+     *      Reverts with CFExceedsCurrent if newCF > current CF in the targeted pool.
+     * @param market The vToken market address whose CF should be decreased.
      * @param poolId The pool ID (0 for core pool, >0 for e-mode pools).
+     * @param newCF The new collateral factor value. Must be <= current CF in the targeted pool.
      */
-    function setCFZero(address market, uint96 poolId) external;
+    function decreaseCF(address market, uint96 poolId, uint256 newCF) external;
 
     /**
-     * @notice Set collateral factor to zero for a market on an IL comptroller.
-     *         Same safety guarantees as setCFZero — LT is left unchanged.
-     * @dev Separate function because IL comptrollers have a different ABI: markets() returns
-     *      a 3-value tuple (vs 7 on Diamond) and setCollateralFactor returns void (vs uint256).
-     * @param market The vToken market address whose CF should be zeroed.
-     */
-    function setCFZeroIsolated(address market) external;
-
-    /**
-     * @notice Decrease borrow caps on markets. Can only set caps LOWER than or equal to current values.
-     *         Setting to 0 blocks all new borrows. Existing borrows are never affected by caps.
+     * @notice Decrease borrow caps on markets. Each new cap must be strictly LOWER than the current value.
+     *         Elements equal to the current cap are silently skipped. Setting to 0 blocks all new borrows.
+     *         Existing borrows are never affected by caps.
      * @param markets The vToken market addresses to adjust borrow caps on.
-     * @param newBorrowCaps The new borrow cap values. Each must be <= current cap.
+     * @param newBorrowCaps The new borrow cap values. Each must be < current cap (equality is a no-op, > reverts).
      */
     function setMarketBorrowCaps(address[] calldata markets, uint256[] calldata newBorrowCaps) external;
 
     /**
-     * @notice Decrease supply caps on markets. Can only set caps LOWER than or equal to current values.
-     *         Setting to 0 blocks all new deposits. Existing deposits are never affected by caps.
+     * @notice Decrease supply caps on markets. Each new cap must be strictly LOWER than the current value.
+     *         Elements equal to the current cap are silently skipped. Setting to 0 blocks all new deposits.
+     *         Existing deposits are never affected by caps.
      * @param markets The vToken market addresses to adjust supply caps on.
-     * @param newSupplyCaps The new supply cap values. Each must be <= current cap.
+     * @param newSupplyCaps The new supply cap values. Each must be < current cap (equality is a no-op, > reverts).
      */
     function setMarketSupplyCaps(address[] calldata markets, uint256[] calldata newSupplyCaps) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     MARKET STATE SNAPSHOT — RESET & VIEW
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Reset only the stored CF/LT snapshot for a market.
+     * @dev Called by governance as part of a recovery VIP after restoring collateral factors.
+     *      Clears per-pool CF/LT values so that future EBrake actions can capture fresh
+     *      pre-incident values. Does not touch cap snapshots.
+     * @param market The vToken market address whose CF snapshot should be cleared.
+     */
+    function resetCFSnapshot(address market) external;
+
+    /**
+     * @notice Reset only the stored borrow cap snapshot for a market.
+     * @dev Called by governance as part of a recovery VIP after restoring the borrow cap.
+     *      Clears borrowCap and borrowCapSnapshotted so that future EBrake actions can capture
+     *      a fresh pre-incident value. Does not touch the supply cap or CF snapshots.
+     * @param market The vToken market address whose borrow cap snapshot should be cleared.
+     */
+    function resetBorrowCapSnapshot(address market) external;
+
+    /**
+     * @notice Reset only the stored supply cap snapshot for a market.
+     * @dev Called by governance as part of a recovery VIP after restoring the supply cap.
+     *      Clears supplyCap and supplyCapSnapshotted so that future EBrake actions can capture
+     *      a fresh pre-incident value. Does not touch the borrow cap or CF snapshots.
+     * @param market The vToken market address whose supply cap snapshot should be cleared.
+     */
+    function resetSupplyCapSnapshot(address market) external;
+
+    /**
+     * @notice Read the stored collateral factor and liquidation threshold snapshot for a market in a specific pool.
+     * @param market The vToken market address.
+     * @param poolId The pool ID (0 for IL chains or core pool on Diamond).
+     * @return cf The collateral factor that was stored before EBrake zeroed it. 0 if no snapshot exists.
+     * @return lt The liquidation threshold at the time of the snapshot. 0 if no snapshot exists.
+     */
+    function getMarketCFSnapshot(address market, uint96 poolId) external view returns (uint256 cf, uint256 lt);
 }

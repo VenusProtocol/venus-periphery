@@ -2,7 +2,7 @@ import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
 import { forking } from "../utils";
 import { unichainmainnetConfig } from "./configs";
-import { EBrakeFixture, createDeployFixture, runSharedTests, setCFZeroIsolatedTests } from "./shared";
+import { EBrakeFixture, createDeployFixture, runSharedTests } from "./shared";
 
 const config = unichainmainnetConfig;
 
@@ -19,7 +19,6 @@ if (process.env.FORKED_NETWORK === config.networkName) {
       });
 
       runSharedTests(config, get);
-      setCFZeroIsolatedTests(config, get);
     });
   });
 }
