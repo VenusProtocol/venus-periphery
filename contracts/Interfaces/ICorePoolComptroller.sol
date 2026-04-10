@@ -56,6 +56,10 @@ interface ICorePoolComptroller is IComptroller {
     /// @param isWhiteListed True to whitelist, false to revoke.
     function setWhiteListFlashLoanAccount(address account, bool isWhiteListed) external;
 
+    /// @notice Returns whether an account is authorized for flash loans.
+    /// @param account The account address.
+    function authorizedFlashLoan(address account) external view returns (bool);
+
     /// @notice Get the core pool identifier.
     /// @return uint96 The core pool ID.
     function corePoolId() external view returns (uint96);

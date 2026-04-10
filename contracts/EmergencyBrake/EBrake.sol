@@ -138,6 +138,12 @@ contract EBrake is IEBrake, AccessControlledV8 {
     function revokeFlashLoanAccess(address account) external {
         _checkAccessAllowed("revokeFlashLoanAccess(address)");
         if (account == address(0)) revert ZeroAddress();
+
+        // Idempotent: skip the external call AND the event when already revoked.
+        // Keeps FlashLoanAccessRevoked a true state-change signal, consistent with
+        // the pauseFlashLoan() pattern.
+        if (!COMPTROLLER.authorizedFlashLoan(account)) return;
+
         // `false` is hardcoded — EBrake can only revoke, never grant.
         COMPTROLLER.setWhiteListFlashLoanAccount(account, false);
         emit FlashLoanAccessRevoked(msg.sender, account);

@@ -1,3 +1,4 @@
+import "@nomicfoundation/hardhat-chai-matchers";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
@@ -334,16 +335,22 @@ if (FORK_MAINNET) {
           ).to.be.revertedWithCustomError(eBrake, "ZeroAddress");
         });
 
-        it("should still emit event when account is already not whitelisted (idempotent at comptroller layer)", async () => {
+        it("no-op when account is already not whitelisted — no event emitted", async () => {
           const { eBrake, comptroller, whitelistedUser } = get();
           await eBrake.connect(whitelistedUser).revokeFlashLoanAccess(TEST_FLASH_LOAN_ACCOUNT);
           expect(await comptroller.authorizedFlashLoan(TEST_FLASH_LOAN_ACCOUNT)).to.be.false;
 
-          // Second call: comptroller no-ops, EBrake still emits
-          await expect(eBrake.connect(whitelistedUser).revokeFlashLoanAccess(TEST_FLASH_LOAN_ACCOUNT))
-            .to.emit(eBrake, "FlashLoanAccessRevoked")
-            .withArgs(whitelistedUser.address, TEST_FLASH_LOAN_ACCOUNT);
+          // Second call: EBrake early-returns, no event emitted
+          const tx = eBrake.connect(whitelistedUser).revokeFlashLoanAccess(TEST_FLASH_LOAN_ACCOUNT);
+          await expect(tx).to.not.emit(eBrake, "FlashLoanAccessRevoked");
           expect(await comptroller.authorizedFlashLoan(TEST_FLASH_LOAN_ACCOUNT)).to.be.false;
+        });
+
+        it("no-op when account was never whitelisted — no event emitted", async () => {
+          const { eBrake, whitelistedUser } = get();
+          const NEVER_WHITELISTED = "0x0000000000000000000000000000000000001111";
+          const tx = eBrake.connect(whitelistedUser).revokeFlashLoanAccess(NEVER_WHITELISTED);
+          await expect(tx).to.not.emit(eBrake, "FlashLoanAccessRevoked");
         });
 
         it("should not affect other whitelisted accounts (surgical revoke)", async () => {
