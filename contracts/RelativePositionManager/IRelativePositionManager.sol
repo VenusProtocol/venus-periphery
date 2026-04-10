@@ -600,7 +600,8 @@ interface IRelativePositionManager {
      * @param user User address
      * @param longVToken The vToken market for the long asset
      * @param shortVToken The vToken market for the short asset
-     * @return position The Position struct (user, longVToken, shortVToken, positionAccount, isActive, dsaIndex, dsaVToken, suppliedPrincipalVTokens, effectiveLeverage, cycleId)
+     * @return position The Position struct
+     * (user, longVToken, shortVToken, positionAccount, isActive, dsaIndex, dsaVToken, suppliedPrincipalVTokens, effectiveLeverage, cycleId)
      */
     function getPosition(
         address user,

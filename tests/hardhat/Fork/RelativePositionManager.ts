@@ -382,7 +382,6 @@ if (FORK_MAINNET) {
     let rpm: RelativePositionManager;
     let comptroller: ComptrollerMock;
     let dsa: IERC20;
-    let long: IERC20;
     let short: IERC20;
     let longVToken: IVToken;
     let shortVToken: IVToken;
@@ -398,7 +397,7 @@ if (FORK_MAINNET) {
       });
 
       beforeEach(async () => {
-        ({ rpm, comptroller, dsa, long, short, longVToken, shortVToken, leverageManager, dsaVToken } =
+        ({ rpm, comptroller, dsa, short, longVToken, shortVToken, leverageManager, dsaVToken } =
           await loadFixture(setupRpmForkFixture));
         [, alice] = await ethers.getSigners();
       });

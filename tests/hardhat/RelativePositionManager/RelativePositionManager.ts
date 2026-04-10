@@ -3034,7 +3034,6 @@ describe("RelativePositionManager", () => {
         dsaToken,
       );
 
-      const principalVTokensBefore = positionBefore.suppliedPrincipalVTokens;
       const principalUnderlyingBefore = await relativePositionManager.callStatic.getSuppliedPrincipalBalance(
         aliceAddress,
         dsaMarket.address,
