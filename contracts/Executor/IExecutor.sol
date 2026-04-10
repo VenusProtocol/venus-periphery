@@ -18,8 +18,8 @@ pragma solidity ^0.8.25;
  *      Governance is granted ACM access to admin functions (setMarketConfig).
  *
  *      Safety model:
- *        - LTV adjustments are bounded by [0, originalLTV] (governance-approved ceiling)
- *        - Cap adjustments are bounded by [minCap, originalCap]
+ *        - LTV adjustments are tighten-only (decrease only), enforced by EBrake
+ *        - Cap adjustments are bounded below by [minCap], tighten-only enforced by EBrake
  *        - All adjustments are tighten-only (decreases only) — recovery via governance VIP
  *        - Supply and borrow halts are one-way (pause only) — recovery via governance VIP
  *        - Worst case if compromised: temporary freeze — parameters restored by governance
@@ -40,18 +40,14 @@ interface IExecutor {
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice Per-market configuration for automated risk parameter adjustments.
-    /// @param originalLTV Governance-approved collateral factor mantissa (1e18 scale). Hard ceiling for LTV adjustments.
     /// @param minBorrowCap Floor for borrow cap adjustments. Cap cannot be set below this value.
     /// @param minSupplyCap Floor for supply cap adjustments. Cap cannot be set below this value.
-    /// @param originalBorrowCap Governance-approved original borrow cap. Hard ceiling for cap adjustments.
-    /// @param originalSupplyCap Governance-approved original supply cap. Hard ceiling for cap adjustments.
+    /// @param configured Whether this market has been registered via setMarketConfig.
     /// @param enabled Whether automated adjustment is active for this market.
     struct MarketConfig {
-        uint256 originalLTV;
         uint256 minBorrowCap;
         uint256 minSupplyCap;
-        uint256 originalBorrowCap;
-        uint256 originalSupplyCap;
+        bool configured;
         bool enabled;
     }
 
@@ -101,20 +97,10 @@ interface IExecutor {
     /// @param market The market address.
     error MarketDisabled(address market);
 
-    /// @notice Thrown when the adjusted LTV exceeds the governance-approved original.
-    /// @param adjustedLTV The requested LTV value.
-    /// @param originalLTV The maximum allowed LTV (governance-approved).
-    error AdjustedLTVExceedsOriginal(uint256 adjustedLTV, uint256 originalLTV);
-
     /// @notice Thrown when the adjusted cap is below the configured minimum.
     /// @param adjustedCap The requested cap value.
     /// @param minCap The minimum allowed cap.
     error CapBelowMinimum(uint256 adjustedCap, uint256 minCap);
-
-    /// @notice Thrown when the adjusted cap exceeds the governance-approved original.
-    /// @param adjustedCap The requested cap value.
-    /// @param originalCap The maximum allowed cap (governance-approved).
-    error CapExceedsOriginal(uint256 adjustedCap, uint256 originalCap);
 
     /// @notice Thrown when on-chain cap validation fails in handleSupplyHalt or handleBorrowHalt (cap not breached).
     error CapNotBreached();
@@ -122,34 +108,31 @@ interface IExecutor {
     /// @notice Thrown when a zero address is passed where a valid address is required.
     error ZeroAddress();
 
-    /// @notice Thrown when a MarketConfig has contradictory or out-of-range values.
-    error InvalidConfig();
-
     // ═══════════════════════════════════════════════════════════════════════
     //                     CONDITION HANDLERS (ACM-gated)
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Decrease the collateral factor (LTV) for a market, bounded by the governance-approved original.
+     * @notice Decrease the collateral factor (LTV) for a market.
      *         Triggered by S2 price spike signal: price increase > 1/LTV - 1 in 10 min.
-     *         Tighten-only: adjustedLTV must be <= current CF. Recovery via governance VIP.
+     *         Tighten-only: adjustedLTV must be <= current CF, enforced by EBrake. Recovery via governance VIP.
      *
      * @dev    On BSC (Diamond comptroller), EBrake loops all e-mode pools internally.
      *         On non-BSC (IL comptroller), EBrake makes a single call.
      *
      * @param market The vToken market address.
-     * @param adjustedLTV The new collateral factor mantissa (1e18 scale). Must be <= originalLTV and <= current CF.
+     * @param adjustedLTV The new collateral factor mantissa (1e18 scale). Must be <= current CF.
      */
     function handleLTVAdjust(address market, uint256 adjustedLTV) external;
 
     /**
-     * @notice Decrease a borrow or supply cap for a market, bounded within [minCap, originalCap].
+     * @notice Decrease a borrow or supply cap for a market, bounded within [minCap, currentCap].
      *         Triggered by S2 price drop signal: price decrease > k*(1-LTV) in 10 min.
      *         Tighten-only: adjustedCap must be <= current cap. Recovery via governance VIP.
      *
      * @param market The vToken market address.
      * @param capType Whether to adjust the borrow cap or supply cap.
-     * @param adjustedCap The new cap value. Must be >= minCap, <= originalCap, and <= current cap.
+     * @param adjustedCap The new cap value. Must be >= minCap and <= current cap (enforced by EBrake).
      */
     function handleCapAdjust(address market, CapType capType, uint256 adjustedCap) external;
 

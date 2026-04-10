@@ -186,7 +186,7 @@ export function createDeployFixture(config: ExecutorNetworkConfig): () => Promis
     }
 
     // ── Grant governance permission to call Executor admin functions ──
-    const adminFunctions = ["setMarketConfig(address,(uint256,uint256,uint256,uint256,uint256,bool))"];
+    const adminFunctions = ["setMarketConfig(address,(uint256,uint256,bool,bool))"];
     for (const sig of adminFunctions) {
       await acm.giveCallPermission(executor.address, sig, governance.address);
     }
@@ -198,11 +198,9 @@ export function createDeployFixture(config: ExecutorNetworkConfig): () => Promis
 
     // ── Configure test market in Executor ──
     await executor.connect(governance).setMarketConfig(config.testMarket, {
-      originalLTV,
       minBorrowCap: originalBorrowCap.div(4),
       minSupplyCap: originalSupplyCap.div(4),
-      originalBorrowCap,
-      originalSupplyCap,
+      configured: true,
       enabled: true,
     });
 
@@ -260,14 +258,12 @@ export function accessControlTests(_config: ExecutorNetworkConfig, get: FixtureG
     });
 
     it("setMarketConfig: reverts for unauthorized caller", async () => {
-      const { executor, randomUser, testMarket, originalLTV, originalBorrowCap, originalSupplyCap } = get();
+      const { executor, randomUser, testMarket, originalBorrowCap, originalSupplyCap } = get();
       await expect(
         executor.connect(randomUser).setMarketConfig(testMarket, {
-          originalLTV,
           minBorrowCap: originalBorrowCap.div(4),
           minSupplyCap: originalSupplyCap.div(4),
-          originalBorrowCap,
-          originalSupplyCap,
+          configured: true,
           enabled: true,
         }),
       ).to.be.revertedWithCustomError(executor, "Unauthorized");
@@ -278,13 +274,11 @@ export function accessControlTests(_config: ExecutorNetworkConfig, get: FixtureG
 export function setMarketConfigTests(_config: ExecutorNetworkConfig, get: FixtureGetter): void {
   describe("setMarketConfig", () => {
     it("stores config and emits MarketConfigSet", async () => {
-      const { executor, governance, testMarket, originalLTV, originalBorrowCap, originalSupplyCap } = get();
+      const { executor, governance, testMarket, originalBorrowCap, originalSupplyCap } = get();
       const marketConfig = {
-        originalLTV,
         minBorrowCap: originalBorrowCap.div(4),
         minSupplyCap: originalSupplyCap.div(4),
-        originalBorrowCap,
-        originalSupplyCap,
+        configured: true,
         enabled: true,
       };
       await expect(executor.connect(governance).setMarketConfig(testMarket, marketConfig)).to.emit(
@@ -293,76 +287,30 @@ export function setMarketConfigTests(_config: ExecutorNetworkConfig, get: Fixtur
       );
 
       const stored = await executor.marketConfigs(testMarket);
-      expect(stored.originalLTV).to.equal(originalLTV);
-      expect(stored.originalBorrowCap).to.equal(originalBorrowCap);
+      expect(stored.minBorrowCap).to.equal(originalBorrowCap.div(4));
+      expect(stored.configured).to.be.true;
       expect(stored.enabled).to.be.true;
     });
 
     it("reverts on zero market address", async () => {
-      const { executor, governance, originalLTV, originalBorrowCap, originalSupplyCap } = get();
+      const { executor, governance, originalBorrowCap, originalSupplyCap } = get();
       await expect(
         executor.connect(governance).setMarketConfig(ethers.constants.AddressZero, {
-          originalLTV,
           minBorrowCap: originalBorrowCap.div(4),
           minSupplyCap: originalSupplyCap.div(4),
-          originalBorrowCap,
-          originalSupplyCap,
+          configured: true,
           enabled: true,
         }),
       ).to.be.revertedWithCustomError(executor, "ZeroAddress");
-    });
-
-    it("reverts when originalLTV > 1e18", async () => {
-      const { executor, governance, testMarket, originalBorrowCap, originalSupplyCap } = get();
-      await expect(
-        executor.connect(governance).setMarketConfig(testMarket, {
-          originalLTV: ethers.utils.parseUnits("1.01"),
-          minBorrowCap: originalBorrowCap.div(4),
-          minSupplyCap: originalSupplyCap.div(4),
-          originalBorrowCap,
-          originalSupplyCap,
-          enabled: true,
-        }),
-      ).to.be.revertedWithCustomError(executor, "InvalidConfig");
-    });
-
-    it("reverts when minBorrowCap > originalBorrowCap", async () => {
-      const { executor, governance, testMarket, originalLTV, originalBorrowCap, originalSupplyCap } = get();
-      await expect(
-        executor.connect(governance).setMarketConfig(testMarket, {
-          originalLTV,
-          minBorrowCap: originalBorrowCap.add(1),
-          minSupplyCap: originalSupplyCap.div(4),
-          originalBorrowCap,
-          originalSupplyCap,
-          enabled: true,
-        }),
-      ).to.be.revertedWithCustomError(executor, "InvalidConfig");
-    });
-
-    it("reverts when minSupplyCap > originalSupplyCap", async () => {
-      const { executor, governance, testMarket, originalLTV, originalBorrowCap, originalSupplyCap } = get();
-      await expect(
-        executor.connect(governance).setMarketConfig(testMarket, {
-          originalLTV,
-          minBorrowCap: originalBorrowCap.div(4),
-          minSupplyCap: originalSupplyCap.add(1),
-          originalBorrowCap,
-          originalSupplyCap,
-          enabled: true,
-        }),
-      ).to.be.revertedWithCustomError(executor, "InvalidConfig");
     });
 
     it("handleLTVAdjust reverts when market is disabled", async () => {
       const { executor, governance, hypernative, testMarket, originalLTV, originalBorrowCap, originalSupplyCap } =
         get();
       await executor.connect(governance).setMarketConfig(testMarket, {
-        originalLTV,
         minBorrowCap: originalBorrowCap.div(4),
         minSupplyCap: originalSupplyCap.div(4),
-        originalBorrowCap,
-        originalSupplyCap,
+        configured: true,
         enabled: false,
       });
       await expect(
@@ -383,11 +331,19 @@ export function handleLTVAdjustTests(config: ExecutorNetworkConfig, get: Fixture
       ).to.be.revertedWithCustomError(executor, "MarketNotConfigured");
     });
 
-    it("reverts when adjustedLTV exceeds originalLTV", async () => {
-      const { executor, hypernative, testMarket, originalLTV } = get();
+    it("reverts when adjustedLTV exceeds current CF", async () => {
+      const { executor, eBrake, hypernative, testMarket, originalLTV } = get();
       await expect(
         executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.add(1)),
-      ).to.be.revertedWithCustomError(executor, "AdjustedLTVExceedsOriginal");
+      ).to.be.revertedWithCustomError(eBrake, "CFExceedsCurrent");
+    });
+
+    it("no-op when adjustedLTV equals current CF — no event emitted", async () => {
+      const { executor, hypernative, testMarket, originalLTV } = get();
+      await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV)).to.not.emit(
+        executor,
+        "LTVAdjusted",
+      );
     });
 
     it("decreases CF and verifies on comptroller", async () => {
@@ -433,11 +389,11 @@ export function handleCapAdjustTests(_config: ExecutorNetworkConfig, get: Fixtur
       ).to.be.revertedWithCustomError(executor, "CapBelowMinimum");
     });
 
-    it("reverts when borrow cap exceeds originalBorrowCap", async () => {
-      const { executor, hypernative, testMarket, originalBorrowCap } = get();
+    it("reverts when borrow cap exceeds current cap", async () => {
+      const { executor, eBrake, hypernative, testMarket, originalBorrowCap } = get();
       await expect(
         executor.connect(hypernative).handleCapAdjust(testMarket, 0, originalBorrowCap.add(1)),
-      ).to.be.revertedWithCustomError(executor, "CapExceedsOriginal");
+      ).to.be.revertedWithCustomError(eBrake, "CapExceedsCurrent");
     });
 
     it("no-op when borrow cap is already at requested value", async () => {
@@ -466,11 +422,11 @@ export function handleCapAdjustTests(_config: ExecutorNetworkConfig, get: Fixtur
       ).to.be.revertedWithCustomError(executor, "CapBelowMinimum");
     });
 
-    it("reverts when supply cap exceeds originalSupplyCap", async () => {
-      const { executor, hypernative, testMarket, originalSupplyCap } = get();
+    it("reverts when supply cap exceeds current cap", async () => {
+      const { executor, eBrake, hypernative, testMarket, originalSupplyCap } = get();
       await expect(
         executor.connect(hypernative).handleCapAdjust(testMarket, 1, originalSupplyCap.add(1)),
-      ).to.be.revertedWithCustomError(executor, "CapExceedsOriginal");
+      ).to.be.revertedWithCustomError(eBrake, "CapExceedsCurrent");
     });
   });
 }
@@ -479,6 +435,15 @@ export function handleSupplyHaltTests(config: ExecutorNetworkConfig, get: Fixtur
   describe("handleSupplyHalt", () => {
     it("reverts when supply cap is not breached", async () => {
       const { executor, hypernative, testMarket } = get();
+      await expect(executor.connect(hypernative).handleSupplyHalt(testMarket)).to.be.revertedWithCustomError(
+        executor,
+        "CapNotBreached",
+      );
+    });
+
+    it("reverts when supply cap is not set (cap == 0 means unlimited)", async () => {
+      const { executor, hypernative, comptroller, governance, testMarket } = get();
+      await setSupplyCapDirect(comptroller.connect(governance), testMarket, 0, config);
       await expect(executor.connect(hypernative).handleSupplyHalt(testMarket)).to.be.revertedWithCustomError(
         executor,
         "CapNotBreached",
@@ -516,6 +481,15 @@ export function handleBorrowHaltTests(config: ExecutorNetworkConfig, get: Fixtur
   describe("handleBorrowHalt", () => {
     it("reverts when borrow cap is not breached", async () => {
       const { executor, hypernative, testMarket } = get();
+      await expect(executor.connect(hypernative).handleBorrowHalt(testMarket)).to.be.revertedWithCustomError(
+        executor,
+        "CapNotBreached",
+      );
+    });
+
+    it("reverts when borrow cap is not set (cap == 0 means unlimited)", async () => {
+      const { executor, hypernative, comptroller, governance, testMarket } = get();
+      await setBorrowCapDirect(comptroller.connect(governance), testMarket, 0, config);
       await expect(executor.connect(hypernative).handleBorrowHalt(testMarket)).to.be.revertedWithCustomError(
         executor,
         "CapNotBreached",

@@ -71,11 +71,12 @@ if (FORK_MAINNET) {
           ).to.be.revertedWithCustomError(executor, "MarketNotConfigured");
         });
 
-        it("reverts when adjustedLTV exceeds originalLTV", async () => {
+        it("no-op when adjustedLTV equals current CF — no event emitted, no pool changed", async () => {
           const { executor, hypernative, testMarket, originalLTV } = get();
-          await expect(
-            executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.add(1)),
-          ).to.be.revertedWithCustomError(executor, "AdjustedLTVExceedsOriginal");
+          await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV)).to.not.emit(
+            executor,
+            "LTVAdjusted",
+          );
         });
 
         it("decreases CF in every listed collateral pool to the requested value", async () => {
@@ -133,6 +134,15 @@ if (FORK_MAINNET) {
       describe("handleSupplyHalt (Diamond multi-pool)", () => {
         it("reverts when supply cap is not breached", async () => {
           const { executor, hypernative, testMarket } = get();
+          await expect(executor.connect(hypernative).handleSupplyHalt(testMarket)).to.be.revertedWithCustomError(
+            executor,
+            "CapNotBreached",
+          );
+        });
+
+        it("reverts when supply cap is not set (cap == 0 means unlimited)", async () => {
+          const { executor, hypernative, comptroller, governance, testMarket } = get();
+          await comptroller.connect(governance)._setMarketSupplyCaps([testMarket], [0]);
           await expect(executor.connect(hypernative).handleSupplyHalt(testMarket)).to.be.revertedWithCustomError(
             executor,
             "CapNotBreached",

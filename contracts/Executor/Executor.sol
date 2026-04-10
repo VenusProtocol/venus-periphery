@@ -18,8 +18,8 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  * @dev    Example Flow: Hypernative (off-chain signal S1-S8) → Executor (validate) → EBrake (execute) → Comptroller
  *
  *         The Executor is the validation layer. It ensures:
- *         - LTV adjustments stay within [0, originalLTV] and are tighten-only (decrease only)
- *         - Cap adjustments stay within [minCap, originalCap] and are tighten-only (decrease only)
+ *         - LTV adjustments are tighten-only (decrease only), enforced by EBrake
+ *         - Cap adjustments stay within [minCap, currentCap] and are tighten-only, enforced by EBrake
  *         - Supply and borrow halts only fire when caps are actually breached on-chain
  *
  *         The Executor does NOT hold detection logic — that lives off-chain in the signal pipeline.
@@ -42,6 +42,9 @@ contract Executor is IExecutor, AccessControlledV8 {
 
     /// @notice Per-market configuration for automated risk parameter adjustments.
     mapping(address => MarketConfig) public marketConfigs;
+
+    /// @dev Storage gap for future upgrades.
+    uint256[49] private __gap;
 
     /// @notice Deploy Executor with the EBrake contract and comptroller type.
     /// @param eBrake_ The EBrake contract address.
@@ -73,20 +76,14 @@ contract Executor is IExecutor, AccessControlledV8 {
     function handleLTVAdjust(address market, uint256 adjustedLTV) external {
         _checkAccessAllowed("handleLTVAdjust(address,uint256)");
 
-        MarketConfig memory config = _getEnabledConfig(market);
+        _getEnabledConfig(market);
 
-        if (adjustedLTV > config.originalLTV) {
-            revert AdjustedLTVExceedsOriginal(adjustedLTV, config.originalLTV);
-        }
-
+        // Read pre-action CF for event emission and no-op check only — EBrake validates the decrease.
+        // Known limitation (Diamond path): if adjustedLTV < currentCF but EBrake silently skips every
+        // listed pool (e.g. all pools already at or below adjustedLTV), the event still fires.
+        // Fix requires EBrake.decreaseCF to return bool anyChanged. Deferred.
         uint256 currentCF = _getCurrentCF(market);
-
-        if (adjustedLTV == currentCF && !IS_CORE_POOL) {
-            // IL path: single pool, truly a no-op.
-            return;
-        }
-        // Note: for IS_CORE_POOL, we do NOT early-exit when adjustedLTV == corePoolCF because
-        // e-mode pools may have a higher CF that still needs to be brought down to adjustedLTV.
+        if (adjustedLTV == currentCF) return;
 
         EBRAKE.decreaseCF(market, adjustedLTV);
         emit LTVAdjusted(msg.sender, market, currentCF, adjustedLTV);
@@ -107,8 +104,6 @@ contract Executor is IExecutor, AccessControlledV8 {
 
         if (capType == IExecutor.CapType.BORROW) {
             if (adjustedCap < config.minBorrowCap) revert CapBelowMinimum(adjustedCap, config.minBorrowCap);
-            if (adjustedCap > config.originalBorrowCap)
-                revert CapExceedsOriginal(adjustedCap, config.originalBorrowCap);
 
             uint256 currentCap = comptroller.borrowCaps(market);
             if (adjustedCap == currentCap) return;
@@ -117,8 +112,6 @@ contract Executor is IExecutor, AccessControlledV8 {
             emit CapAdjusted(msg.sender, market, capType, currentCap, adjustedCap);
         } else {
             if (adjustedCap < config.minSupplyCap) revert CapBelowMinimum(adjustedCap, config.minSupplyCap);
-            if (adjustedCap > config.originalSupplyCap)
-                revert CapExceedsOriginal(adjustedCap, config.originalSupplyCap);
 
             uint256 currentCap = comptroller.supplyCaps(market);
             if (adjustedCap == currentCap) return;
@@ -132,11 +125,15 @@ contract Executor is IExecutor, AccessControlledV8 {
     function handleSupplyHalt(address market) external {
         _checkAccessAllowed("handleSupplyHalt(address)");
 
+        _getEnabledConfig(market);
+
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
+        // exchangeRateCurrent() accrues interest as a side effect before the cap comparison.
         uint256 supplyUnderlying = (IVToken(market).totalSupply() * IVToken(market).exchangeRateCurrent()) / 1e18;
         uint256 supplyCap = comptroller.supplyCaps(market);
 
-        if (supplyUnderlying < supplyCap) revert CapNotBreached();
+        // supplyCap == 0 means no cap is set (unlimited) — treat as not breached.
+        if (supplyCap == 0 || supplyUnderlying < supplyCap) revert CapNotBreached();
 
         EBRAKE.pauseSupply(market);
         EBRAKE.decreaseCF(market, 0);
@@ -147,11 +144,14 @@ contract Executor is IExecutor, AccessControlledV8 {
     function handleBorrowHalt(address market) external {
         _checkAccessAllowed("handleBorrowHalt(address)");
 
+        _getEnabledConfig(market);
+
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
         uint256 totalBorrows = IVToken(market).totalBorrows();
         uint256 borrowCap = comptroller.borrowCaps(market);
 
-        if (totalBorrows < borrowCap) revert CapNotBreached();
+        // borrowCap == 0 means no cap is set (unlimited) — treat as not breached.
+        if (borrowCap == 0 || totalBorrows < borrowCap) revert CapNotBreached();
 
         EBRAKE.pauseBorrow(market);
 
@@ -164,11 +164,8 @@ contract Executor is IExecutor, AccessControlledV8 {
 
     /// @inheritdoc IExecutor
     function setMarketConfig(address market, MarketConfig calldata config) external {
-        _checkAccessAllowed("setMarketConfig(address,(uint256,uint256,uint256,uint256,uint256,bool))");
+        _checkAccessAllowed("setMarketConfig(address,(uint256,uint256,bool,bool))");
         if (market == address(0)) revert ZeroAddress();
-        if (config.originalLTV > 1e18) revert InvalidConfig();
-        if (config.minBorrowCap > config.originalBorrowCap) revert InvalidConfig();
-        if (config.minSupplyCap > config.originalSupplyCap) revert InvalidConfig();
 
         marketConfigs[market] = config;
         emit MarketConfigSet(market, config);
@@ -185,7 +182,7 @@ contract Executor is IExecutor, AccessControlledV8 {
      */
     function _getEnabledConfig(address market) internal view returns (MarketConfig memory config) {
         config = marketConfigs[market];
-        if (config.originalLTV == 0) revert MarketNotConfigured(market);
+        if (!config.configured) revert MarketNotConfigured(market);
         if (!config.enabled) revert MarketDisabled(market);
     }
 
@@ -197,7 +194,7 @@ contract Executor is IExecutor, AccessControlledV8 {
      */
     function _getCurrentCF(address market) internal view returns (uint256 currentCF) {
         if (IS_CORE_POOL) {
-            (, currentCF, , , , , ) = COMPTROLLER.poolMarkets(0, market);
+            (, currentCF, , , , , ) = COMPTROLLER.poolMarkets(COMPTROLLER.corePoolId(), market);
         } else {
             IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
             currentCF = m.collateralFactorMantissa;
