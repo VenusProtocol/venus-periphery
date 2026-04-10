@@ -17,6 +17,8 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  *         large deviations are detected. All emergency actions are routed through the EBrake contract.
  * @dev This contract can only TIGHTEN restrictions (pause, zero CF), never loosen them.
  *      Recovery (unpausing, restoring CF) is handled via governance VIP.
+ *      CF tightening is performed by calling EBrake.decreaseCF(market, 0) — the most aggressive
+ *      sentinel response — which zeros the collateral factor.
  *      Idempotency is handled by EBrake — duplicate calls are no-ops.
  */
 contract DeviationSentinel is AccessControlledV8 {
@@ -26,6 +28,14 @@ contract DeviationSentinel is AccessControlledV8 {
     struct DeviationConfig {
         uint8 deviation;
         bool enabled;
+    }
+
+    /// @notice Action taken by the sentinel when handling a deviation
+    /// @param BorrowPaused Borrow was paused (sentinel price > oracle price)
+    /// @param SupplyPausedAndCFZeroed CF was zeroed and supply was paused (sentinel price <= oracle price)
+    enum DeviationAction {
+        BorrowPaused,
+        SupplyPausedAndCFZeroed
     }
 
     /// @notice Maximum allowed price deviation in percentage (e.g., 10 = 10%)
@@ -67,13 +77,12 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param isTrusted Whether the keeper is trusted
     event TrustedKeeperUpdated(address indexed keeper, bool isTrusted);
 
-    /// @notice Emitted when borrow is paused for a market
+    /// @notice Emitted when a price deviation is detected and handled for a market
     /// @param market The market address
-    event BorrowPaused(address indexed market);
-
-    /// @notice Emitted when supply is paused for a market
-    /// @param market The market address
-    event SupplyPaused(address indexed market);
+    /// @param oraclePrice The price from the resilient oracle at the time of detection
+    /// @param sentinelPrice The price from the sentinel oracle at the time of detection
+    /// @param action The action taken in response to the deviation
+    event DeviationHandled(address indexed market, uint256 oraclePrice, uint256 sentinelPrice, DeviationAction action);
 
     /// @notice Thrown when deviation is set to zero
     error ZeroDeviation();
@@ -176,8 +185,7 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Handle price deviation for a market by pausing borrow or zeroing CF and pausing supply
     /// @dev This contract can only tighten restrictions. Recovery (unpausing, restoring CF) is via governance VIP.
     /// @param market The vToken market to handle
-    /// @custom:event Emits BorrowPaused when borrow is paused due to high sentinel price
-    /// @custom:event Emits SupplyPaused when supply is paused due to low sentinel price
+    /// @custom:event Emits DeviationHandled with price context and the action taken
     /// @custom:error UnauthorizedKeeper is thrown when caller is not a trusted keeper
     /// @custom:error MarketNotConfigured is thrown when market's underlying token has no deviation config
     /// @custom:error TokenMonitoringDisabled is thrown when monitoring is disabled for the token
@@ -192,14 +200,16 @@ contract DeviationSentinel is AccessControlledV8 {
 
         if (!hasDeviation) return;
 
+        DeviationAction action;
         if (sentinelPrice > oraclePrice) {
             EBRAKE.pauseBorrow(address(market));
-            emit BorrowPaused(address(market));
+            action = DeviationAction.BorrowPaused;
         } else {
-            EBRAKE.setCFZero(address(market));
+            EBRAKE.decreaseCF(address(market), 0);
             EBRAKE.pauseSupply(address(market));
-            emit SupplyPaused(address(market));
+            action = DeviationAction.SupplyPausedAndCFZeroed;
         }
+        emit DeviationHandled(address(market), oraclePrice, sentinelPrice, action);
     }
 
     /// @notice Check if there is a price deviation between resilient oracle and sentinel oracle for a market

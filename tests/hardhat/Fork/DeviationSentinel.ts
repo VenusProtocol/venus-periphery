@@ -4,6 +4,14 @@ import { BigNumber, Contract } from "ethers";
 import { ethers } from "hardhat";
 
 import bscmainnetAddresses from "../../../deployments/bscmainnet_addresses.json";
+import { DeviationSentinel, ResilientOracle, SentinelOracle, UniswapOracle } from "../../../typechain";
+import { ChainlinkOracle__factory } from "../../../typechain/factories/ChainlinkOracle__factory";
+import { DeviationSentinel__factory } from "../../../typechain/factories/DeviationSentinel__factory";
+import { IAccessControlManagerV8__factory } from "../../../typechain/factories/IAccessControlManagerV8__factory";
+import { PancakeSwapOracle__factory } from "../../../typechain/factories/PancakeSwapOracle__factory";
+import { ResilientOracle__factory } from "../../../typechain/factories/ResilientOracle__factory";
+import { SentinelOracle__factory } from "../../../typechain/factories/SentinelOracle__factory";
+import { UniswapOracle__factory } from "../../../typechain/factories/UniswapOracle__factory";
 import { forking, initMainnetUser } from "./utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -58,59 +66,10 @@ const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 // ABIs
 // ═══════════════════════════════════════════════════════════════════════════
 
-const DEVIATION_SENTINEL_ABI = [
-  "function EBRAKE() view returns (address)",
-  "function RESILIENT_ORACLE() view returns (address)",
-  "function SENTINEL_ORACLE() view returns (address)",
-  "function owner() view returns (address)",
-  "function pendingOwner() view returns (address)",
-  "function acceptOwnership()",
-  "function trustedKeepers(address) view returns (bool)",
-  "function tokenConfigs(address) view returns (uint8 deviation, bool enabled)",
-  "function checkPriceDeviation(address vToken) view returns (bool hasDeviation, uint256 oraclePrice, uint256 sentinelPrice, uint256 deviationPercent)",
-  "function handleDeviation(address vToken)",
-  "function setTrustedKeeper(address keeper, bool trusted)",
-  "function setTokenConfig(address token, tuple(uint8 deviation, bool enabled) config)",
-  "function setTokenMonitoringEnabled(address token, bool enabled)",
-  "event SupplyPaused(address indexed vToken)",
-  "event BorrowPaused(address indexed vToken)",
-  "event TrustedKeeperUpdated(address indexed keeper, bool trusted)",
-  "event TokenMonitoringStatusChanged(address indexed token, bool enabled)",
-];
-
-const SENTINEL_ORACLE_ABI = [
-  "function owner() view returns (address)",
-  "function pendingOwner() view returns (address)",
-  "function acceptOwnership()",
-  "function getPrice(address token) view returns (uint256)",
-  "function tokenConfigs(address) view returns (address)",
-  "function setTokenOracleConfig(address token, address oracle)",
-  "function setDirectPrice(address token, uint256 price)",
-];
-
-const DEX_ORACLE_ABI = [
-  "function owner() view returns (address)",
-  "function pendingOwner() view returns (address)",
-  "function acceptOwnership()",
-  "function tokenPools(address) view returns (address)",
-  "function setPoolConfig(address token, address pool)",
-];
-
-const ACM_ABI = [
-  "function giveCallPermission(address contractAddress, string calldata functionSig, address accountToPermit)",
-  "function isAllowedToCall(address account, string calldata functionSig) view returns (bool)",
-];
-
-const RESILIENT_ORACLE_ABI = ["function getPrice(address token) view returns (uint256)"];
-
-// ChainlinkOracle ABI for extending staleness period
+// ChainlinkOracle address for extending staleness period
 const CHAINLINK_ORACLE = "0x1B2103441A0A108daD8848D8F5d790e4D402921F";
-const CHAINLINK_ORACLE_ABI = [
-  "function tokenConfigs(address) view returns (address asset, address feed, uint256 maxStalePeriod)",
-  "function setTokenConfig(tuple(address asset, address feed, uint256 maxStalePeriod) tokenConfig)",
-];
 
-// Venus V2 Comptroller ABI (BSC Mainnet)
+// Venus V2 Comptroller ABI (BSC Mainnet — legacy Diamond, no clean typechain match)
 const COMPTROLLER_ABI = [
   "function markets(address vToken) view returns (bool isListed, uint256 collateralFactorMantissa, bool isVenus)",
   "function actionPaused(address vToken, uint8 action) view returns (bool)",
@@ -129,7 +88,7 @@ const PROXY_ADMIN = "0x6beb6D2695B67FEb73ad4f172E8E2975497187e4";
  * Grants all required ACM permissions for the new EBrake-integrated flow.
  */
 async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Promise<{ eBrake: Contract }> {
-  const acm = new ethers.Contract(ACM, ACM_ABI, timelock);
+  const acm = IAccessControlManagerV8__factory.connect(ACM, timelock);
 
   // Deploy EBrake behind proxy (BSC = Diamond comptroller, so isIsolatedPool = false)
   const EBrakeFactory = await ethers.getContractFactory("EBrake");
@@ -157,7 +116,7 @@ async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Prom
   // Grant DeviationSentinel permissions on EBrake
   await acm.giveCallPermission(eBrake.address, "pauseBorrow(address)", DEVIATION_SENTINEL);
   await acm.giveCallPermission(eBrake.address, "pauseSupply(address)", DEVIATION_SENTINEL);
-  await acm.giveCallPermission(eBrake.address, "setCFZero(address)", DEVIATION_SENTINEL);
+  await acm.giveCallPermission(eBrake.address, "decreaseCF(address,uint256)", DEVIATION_SENTINEL);
 
   // Deploy new DeviationSentinel implementation with EBrake
   const SentinelFactory = await ethers.getContractFactory("DeviationSentinel");
@@ -183,10 +142,10 @@ async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Prom
  * Note: resetMarketState permission removed — function no longer exists.
  */
 async function executeVip900(timelock: SignerWithAddress): Promise<void> {
-  const acm = new ethers.Contract(ACM, ACM_ABI, timelock);
-  const deviationSentinel = new ethers.Contract(DEVIATION_SENTINEL, DEVIATION_SENTINEL_ABI, timelock);
-  const sentinelOracle = new ethers.Contract(SENTINEL_ORACLE, SENTINEL_ORACLE_ABI, timelock);
-  const pancakeSwapOracle = new ethers.Contract(PANCAKESWAP_ORACLE, DEX_ORACLE_ABI, timelock);
+  const acm = IAccessControlManagerV8__factory.connect(ACM, timelock);
+  const deviationSentinel = DeviationSentinel__factory.connect(DEVIATION_SENTINEL, timelock);
+  const sentinelOracle = SentinelOracle__factory.connect(SENTINEL_ORACLE, timelock);
+  const pancakeSwapOracle = PancakeSwapOracle__factory.connect(PANCAKESWAP_ORACLE, timelock);
 
   console.log("Executing VIP-900...");
 
@@ -290,11 +249,11 @@ if (FORK_MAINNET) {
 
   forking(FORK_BLOCK, () => {
     let timelock: SignerWithAddress;
-    let deviationSentinel: Contract;
-    let sentinelOracle: Contract;
-    let _uniswapOracle: Contract;
+    let deviationSentinel: DeviationSentinel;
+    let sentinelOracle: SentinelOracle;
+    let _uniswapOracle: UniswapOracle;
     let coreComptroller: Contract;
-    let resilientOracle: Contract;
+    let resilientOracle: ResilientOracle;
     let eBrake: Contract;
 
     describe("DeviationSentinel Fork Tests (BSC Mainnet)", () => {
@@ -303,10 +262,10 @@ if (FORK_MAINNET) {
         timelock = await initMainnetUser(NORMAL_TIMELOCK, ethers.utils.parseUnits("10"));
 
         // Connect to deployed contracts
-        sentinelOracle = new ethers.Contract(SENTINEL_ORACLE, SENTINEL_ORACLE_ABI, timelock);
-        _uniswapOracle = new ethers.Contract(UNISWAP_ORACLE, DEX_ORACLE_ABI, timelock);
+        sentinelOracle = SentinelOracle__factory.connect(SENTINEL_ORACLE, timelock);
+        _uniswapOracle = UniswapOracle__factory.connect(UNISWAP_ORACLE, timelock);
         coreComptroller = new ethers.Contract(COMPTROLLER, COMPTROLLER_ABI, timelock);
-        resilientOracle = new ethers.Contract(RESILIENT_ORACLE, RESILIENT_ORACLE_ABI, timelock);
+        resilientOracle = ResilientOracle__factory.connect(RESILIENT_ORACLE, timelock);
 
         // Execute VIP-900 (sets up admin permissions, keepers, oracle configs)
         await executeVip900(timelock);
@@ -315,11 +274,11 @@ if (FORK_MAINNET) {
         const deployed = await deployEBrakeAndUpgradeSentinel(timelock);
         eBrake = deployed.eBrake;
 
-        // Connect to the upgraded DeviationSentinel (same proxy address, new ABI)
-        deviationSentinel = new ethers.Contract(DEVIATION_SENTINEL, DEVIATION_SENTINEL_ABI, timelock);
+        // Connect to the upgraded DeviationSentinel (same proxy address)
+        deviationSentinel = DeviationSentinel__factory.connect(DEVIATION_SENTINEL, timelock);
 
         // Extend ChainlinkOracle staleness period for BTCB
-        const chainlinkOracle = new ethers.Contract(CHAINLINK_ORACLE, CHAINLINK_ORACLE_ABI, timelock);
+        const chainlinkOracle = ChainlinkOracle__factory.connect(CHAINLINK_ORACLE, timelock);
         const btcbConfig = await chainlinkOracle.tokenConfigs(BTCB);
         await chainlinkOracle.setTokenConfig({
           asset: BTCB,
@@ -408,9 +367,7 @@ if (FORK_MAINNET) {
         it("should pause supply when sentinel price is lower", async () => {
           await setSentinelPriceLower(sentinelOracle, 50);
 
-          await expect(deviationSentinel.handleDeviation(vBTCB))
-            .to.emit(deviationSentinel, "SupplyPaused")
-            .withArgs(vBTCB);
+          await expect(deviationSentinel.handleDeviation(vBTCB)).to.emit(deviationSentinel, "DeviationHandled");
 
           expect(await coreComptroller.actionPaused(vBTCB, Action.MINT)).to.be.true;
         });
@@ -419,7 +376,7 @@ if (FORK_MAINNET) {
           await setSentinelPriceNoDeviation(sentinelOracle);
 
           const tx = deviationSentinel.handleDeviation(vBTCB);
-          await expect(tx).to.not.emit(deviationSentinel, "SupplyPaused");
+          await expect(tx).to.not.emit(deviationSentinel, "DeviationHandled");
 
           // Comptroller remains paused — recovery is via governance VIP
           expect(await coreComptroller.actionPaused(vBTCB, Action.MINT)).to.be.true;
@@ -438,9 +395,7 @@ if (FORK_MAINNET) {
         it("should pause borrow when sentinel price is higher", async () => {
           await setSentinelPriceHigher(sentinelOracle, 50);
 
-          await expect(deviationSentinel.handleDeviation(vBTCB))
-            .to.emit(deviationSentinel, "BorrowPaused")
-            .withArgs(vBTCB);
+          await expect(deviationSentinel.handleDeviation(vBTCB)).to.emit(deviationSentinel, "DeviationHandled");
 
           expect(await coreComptroller.actionPaused(vBTCB, Action.BORROW)).to.be.true;
         });
@@ -449,7 +404,7 @@ if (FORK_MAINNET) {
           await setSentinelPriceNoDeviation(sentinelOracle);
 
           const tx = deviationSentinel.handleDeviation(vBTCB);
-          await expect(tx).to.not.emit(deviationSentinel, "BorrowPaused");
+          await expect(tx).to.not.emit(deviationSentinel, "DeviationHandled");
 
           // Comptroller remains paused
           expect(await coreComptroller.actionPaused(vBTCB, Action.BORROW)).to.be.true;
@@ -483,13 +438,11 @@ if (FORK_MAINNET) {
           // STEP 2: Deviation resolved — no action
           await setSentinelPriceNoDeviation(sentinelOracle);
           const tx = deviationSentinel.handleDeviation(vBTCB);
-          await expect(tx).to.not.emit(deviationSentinel, "SupplyPaused");
+          await expect(tx).to.not.emit(deviationSentinel, "DeviationHandled");
 
           // STEP 3: New deviation hits — sentinel re-pauses (no stale state issue)
           await setSentinelPriceLower(sentinelOracle, 50);
-          await expect(deviationSentinel.handleDeviation(vBTCB))
-            .to.emit(deviationSentinel, "SupplyPaused")
-            .withArgs(vBTCB);
+          await expect(deviationSentinel.handleDeviation(vBTCB)).to.emit(deviationSentinel, "DeviationHandled");
 
           // Cleanup
           await resetToCleanState(sentinelOracle, coreComptroller);
@@ -507,7 +460,7 @@ if (FORK_MAINNET) {
           // Deviation resolved — no action
           await setSentinelPriceNoDeviation(sentinelOracle);
           const tx = deviationSentinel.handleDeviation(vBTCB);
-          await expect(tx).to.not.emit(deviationSentinel, "BorrowPaused");
+          await expect(tx).to.not.emit(deviationSentinel, "DeviationHandled");
           expect(await coreComptroller.actionPaused(vBTCB, Action.BORROW)).to.be.false;
         });
       });
@@ -533,9 +486,7 @@ if (FORK_MAINNET) {
           await deviationSentinel.setTokenMonitoringEnabled(BTCB, true);
           expect((await deviationSentinel.tokenConfigs(BTCB)).enabled).to.be.true;
 
-          await expect(deviationSentinel.handleDeviation(vBTCB))
-            .to.emit(deviationSentinel, "SupplyPaused")
-            .withArgs(vBTCB);
+          await expect(deviationSentinel.handleDeviation(vBTCB)).to.emit(deviationSentinel, "DeviationHandled");
 
           // Cleanup
           await resetToCleanState(sentinelOracle, coreComptroller);
@@ -566,9 +517,7 @@ if (FORK_MAINNET) {
           expect(result.hasDeviation).to.be.true;
           expect(result.sentinelPrice).to.be.gt(result.oraclePrice);
 
-          await expect(deviationSentinel.handleDeviation(vBTCB))
-            .to.emit(deviationSentinel, "BorrowPaused")
-            .withArgs(vBTCB);
+          await expect(deviationSentinel.handleDeviation(vBTCB)).to.emit(deviationSentinel, "DeviationHandled");
         });
 
         it("should detect deviation via direct price override (sentinel lower)", async () => {
@@ -581,9 +530,7 @@ if (FORK_MAINNET) {
           expect(result.hasDeviation).to.be.true;
           expect(result.sentinelPrice).to.be.lt(result.oraclePrice);
 
-          await expect(deviationSentinel.handleDeviation(vBTCB))
-            .to.emit(deviationSentinel, "SupplyPaused")
-            .withArgs(vBTCB);
+          await expect(deviationSentinel.handleDeviation(vBTCB)).to.emit(deviationSentinel, "DeviationHandled");
 
           // Cleanup
           await resetToCleanState(sentinelOracle, coreComptroller);
