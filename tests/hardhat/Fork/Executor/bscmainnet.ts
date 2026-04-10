@@ -2,15 +2,14 @@
 // Executor Fork Tests — BSC Mainnet (Diamond / Core Pool)
 //
 // BSC's Diamond comptroller is multi-pool: a market can be listed in the core
-// pool and one or more e-mode pools, each with its own (CF, LT) pair. Both
-// EBrake.adjustCollateralFactor and EBrake.setCFZero iterate corePoolId..lastPoolId
-// and update every listed instance, so the corresponding handlers
-// (handleLTVAdjust / handleSupplyHalt) need BSC-specific assertions that walk
-// the same pool range. The shared (single-pool) tests in shared.ts only assert
-// CORE_POOL_ID and would miss e-mode side effects, so they live behind
-// `runIsolatedPoolTests` and are not used here.
+// pool and one or more e-mode pools, each with its own (CF, LT) pair.
+// EBrake.decreaseCF iterates corePoolId..lastPoolId and updates every listed
+// instance, so handleLTVAdjust / handleSupplyHalt need BSC-specific assertions
+// that walk the same pool range. The shared (single-pool) tests in shared.ts
+// only assert CORE_POOL_ID and would miss e-mode side effects, so they live
+// behind `runIsolatedPoolTests` and are not used here.
 // ═══════════════════════════════════════════════════════════════════════════
-import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
+import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { BigNumber } from "ethers";
 import { ethers } from "hardhat";
@@ -21,7 +20,6 @@ import { Action, ExecutorFixture, createDeployFixture, runSharedTests } from "./
 
 const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 const config = bscmainnetConfig;
-const CORE_POOL_ID = 0;
 
 if (FORK_MAINNET) {
   const deployFixture = createDeployFixture(config);
@@ -125,68 +123,6 @@ if (FORK_MAINNET) {
             const m = await readPoolMarket(poolId, testMarket);
             expect(m.liquidationThresholdMantissa, `pool ${poolId} LT`).to.equal(ltsBefore[poolId]);
           }
-        });
-
-        it("first increase goes through immediately (lastLTVIncreaseTime = 0)", async () => {
-          const { executor, hypernative, testMarket, originalLTV } = get();
-
-          await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(70).div(100));
-          const restored = originalLTV.mul(80).div(100);
-          await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, restored)).to.emit(
-            executor,
-            "LTVAdjusted",
-          );
-
-          const corePoolMarket = await readPoolMarket(CORE_POOL_ID, testMarket);
-          expect(corePoolMarket.collateralFactorMantissa).to.equal(restored);
-        });
-
-        it("second increase within cooldown reverts with CooldownNotExpired", async () => {
-          const { executor, hypernative, testMarket, originalLTV } = get();
-
-          await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(60).div(100));
-          await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(70).div(100));
-
-          await expect(
-            executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(80).div(100)),
-          ).to.be.revertedWithCustomError(executor, "CooldownNotExpired");
-        });
-
-        it("increase succeeds after cooldown elapses", async () => {
-          const { executor, governance, hypernative, testMarket, originalLTV } = get();
-
-          // Shrink the cooldown to 1s before stamping `lastLTVIncreaseTime`. The Venus
-          // resilient oracle on BSC enforces per-feed staleness on every setCollateralFactor
-          // call; advancing time by `config.cooldownPeriod + 1` (1801s) blows past the
-          // Chainlink heartbeat for vBTCB and reverts with "invalid resilient oracle price".
-          // A 1-second cooldown is enough to exercise the cooldown branch without aging the
-          // oracle feed.
-          await executor.connect(governance).setCooldownPeriod(1);
-
-          await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(60).div(100));
-          await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(70).div(100));
-
-          await time.increase(2);
-
-          const target = originalLTV.mul(80).div(100);
-          await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, target)).to.emit(
-            executor,
-            "LTVAdjusted",
-          );
-
-          const corePoolMarket = await readPoolMarket(CORE_POOL_ID, testMarket);
-          expect(corePoolMarket.collateralFactorMantissa).to.equal(target);
-        });
-
-        it("cannot set CF above originalLTV even after cooldown", async () => {
-          const { executor, governance, hypernative, testMarket, originalLTV } = get();
-          // See note in "increase succeeds after cooldown elapses" — keep the time jump small
-          // to avoid blowing past the resilient oracle's staleness window.
-          await executor.connect(governance).setCooldownPeriod(1);
-          await time.increase(2);
-          await expect(
-            executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.add(1)),
-          ).to.be.revertedWithCustomError(executor, "AdjustedLTVExceedsOriginal");
         });
       });
 

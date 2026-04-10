@@ -18,8 +18,6 @@ export interface ExecutorNetworkConfig {
   testMarket: string;
   /** Secondary vToken used in multi-market tests */
   testMarket2: string;
-  /** Cooldown period in seconds used during fixture setup */
-  cooldownPeriod: number;
 }
 
 // ── BSC Mainnet (Diamond Comptroller) ──
@@ -35,7 +33,6 @@ export const bscmainnetConfig: ExecutorNetworkConfig = {
   isCorePool: true,
   testMarket: "0x882C173bC7Ff3b7786CA16dfeD3DFFfb9Ee7847B", // vBTCB
   testMarket2: "0xfD5840Cd36d94D7229439859C0112a4185BC0255", // vUSDT
-  cooldownPeriod: 1800,
 };
 
 // ── Ethereum Mainnet (IL Comptroller) ──
@@ -51,7 +48,6 @@ export const ethereumConfig: ExecutorNetworkConfig = {
   isCorePool: false,
   testMarket: "0x7c8ff7d2A1372433726f879BD945fFb250B94c65", // vWETH_Core
   testMarket2: "0x17C07e0c232f2f80DfDbd7a95b942D893A4C5ACb", // vUSDC_Core
-  cooldownPeriod: 1800,
 };
 
 // ── Arbitrum One (IL Comptroller) ──
@@ -67,7 +63,6 @@ export const arbitrumoneConfig: ExecutorNetworkConfig = {
   isCorePool: false,
   testMarket: "0x68a34332983f4Bf866768DD6D6E638b02eF5e1f0", // vWETH_Core
   testMarket2: "0x7D8609f8da70fF9027E9bc5229Af4F6727662707", // vUSDC_Core
-  cooldownPeriod: 1800,
 };
 
 // ── Base Mainnet (IL Comptroller) ──
@@ -83,7 +78,6 @@ export const basemainnetConfig: ExecutorNetworkConfig = {
   isCorePool: false,
   testMarket: "0x133d3BCD77158D125B75A17Cb517fFD4B4BE64C5", // vwstETH_Core
   testMarket2: "0x3cb752d175740043Ec463673094e06ACDa2F9a2e", // vUSDC_Core
-  cooldownPeriod: 1800,
 };
 
 // ── OP Mainnet (IL Comptroller) ──
@@ -99,7 +93,6 @@ export const opmainnetConfig: ExecutorNetworkConfig = {
   isCorePool: false,
   testMarket: "0x37ac9731B0B02df54975cd0c7240e0977a051721", // vUSDT_Core
   testMarket2: "0x66d5AE25731Ce99D46770745385e662C8e0B4025", // vWETH_Core
-  cooldownPeriod: 1800,
 };
 
 // ── opBNB Mainnet (IL Comptroller) ──
@@ -115,7 +108,6 @@ export const opbnbmainnetConfig: ExecutorNetworkConfig = {
   isCorePool: false,
   testMarket: "0x509e81eF638D489936FA85BC58F52Df01190d26C", // vETH_Core
   testMarket2: "0xb7a01Ba126830692238521a1aA7E7A7509410b8e", // vUSDT_Core
-  cooldownPeriod: 1800,
 };
 
 // ── Unichain Mainnet (IL Comptroller) ──
@@ -131,5 +123,4 @@ export const unichainmainnetConfig: ExecutorNetworkConfig = {
   isCorePool: false,
   testMarket: "0xbEC19Bef402C697a7be315d3e59E5F65b89Fa1BB", // vwstETH_Core
   testMarket2: "0xB953f92B9f759d97d2F2Dec10A8A3cf75fcE3A95", // vUSDC_Core
-  cooldownPeriod: 1800,
 };

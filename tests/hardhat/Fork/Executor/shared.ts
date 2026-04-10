@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Executor Fork Test — Shared Fixture and Test Factories
 // ═══════════════════════════════════════════════════════════════════════════
+/// <reference types="@openzeppelin/hardhat-upgrades" />
 import "@nomicfoundation/hardhat-chai-matchers";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { BigNumber, Contract } from "ethers";
@@ -64,7 +64,7 @@ function comptrollerPermissions(config: ExecutorNetworkConfig): string[] {
         "setCollateralFactor(address,uint256,uint256)",
         "setMarketBorrowCaps(address[],uint256[])",
         "setMarketSupplyCaps(address[],uint256[])",
-        "setActionsPaused(address[],uint256[],bool)",
+        "setActionsPaused(address[],uint8[],bool)",
       ];
 }
 
@@ -151,17 +151,17 @@ export function createDeployFixture(config: ExecutorNetworkConfig): () => Promis
 
     // ── Deploy Executor proxy ──
     const ExecutorFactory = await ethers.getContractFactory("Executor");
-    const executor = (await upgrades.deployProxy(ExecutorFactory, [config.acm, config.cooldownPeriod], {
+    const executor = (await upgrades.deployProxy(ExecutorFactory, [config.acm], {
       constructorArgs: [eBrake.address, config.comptroller, config.isCorePool],
       unsafeAllow: ["constructor", "state-variable-immutable"],
       kind: "transparent",
     })) as Executor;
 
-    // ── Grant Executor permission to call EBrake executor-gated functions ──
+    // ── Grant Executor permission to call EBrake functions ──
     const eBrakeExecutorFunctions = [
-      "adjustCollateralFactor(address,uint256)",
-      "adjustCap(address,uint8,uint256)",
-      "setCFZero(address)",
+      "decreaseCF(address,uint256)",
+      "setMarketBorrowCaps(address[],uint256[])",
+      "setMarketSupplyCaps(address[],uint256[])",
       "pauseSupply(address)",
       "pauseBorrow(address)",
     ];
@@ -186,10 +186,7 @@ export function createDeployFixture(config: ExecutorNetworkConfig): () => Promis
     }
 
     // ── Grant governance permission to call Executor admin functions ──
-    const adminFunctions = [
-      "setMarketConfig(address,(uint256,uint256,uint256,uint256,uint256,bool))",
-      "setCooldownPeriod(uint256)",
-    ];
+    const adminFunctions = ["setMarketConfig(address,(uint256,uint256,uint256,uint256,uint256,bool))"];
     for (const sig of adminFunctions) {
       await acm.giveCallPermission(executor.address, sig, governance.address);
     }
@@ -274,14 +271,6 @@ export function accessControlTests(_config: ExecutorNetworkConfig, get: FixtureG
           enabled: true,
         }),
       ).to.be.revertedWithCustomError(executor, "Unauthorized");
-    });
-
-    it("setCooldownPeriod: reverts for unauthorized caller", async () => {
-      const { executor, randomUser } = get();
-      await expect(executor.connect(randomUser).setCooldownPeriod(3600)).to.be.revertedWithCustomError(
-        executor,
-        "Unauthorized",
-      );
     });
   });
 }
@@ -383,34 +372,6 @@ export function setMarketConfigTests(_config: ExecutorNetworkConfig, get: Fixtur
   });
 }
 
-export function setCooldownPeriodTests(config: ExecutorNetworkConfig, get: FixtureGetter): void {
-  describe("setCooldownPeriod", () => {
-    it("updates cooldown and emits CooldownPeriodUpdated", async () => {
-      const { executor, governance } = get();
-      await expect(executor.connect(governance).setCooldownPeriod(3600))
-        .to.emit(executor, "CooldownPeriodUpdated")
-        .withArgs(config.cooldownPeriod, 3600);
-      expect(await executor.cooldownPeriod()).to.equal(3600);
-    });
-
-    it("reverts on zero value", async () => {
-      const { executor, governance } = get();
-      await expect(executor.connect(governance).setCooldownPeriod(0)).to.be.revertedWithCustomError(
-        executor,
-        "ZeroValue",
-      );
-    });
-
-    it("reverts when value is unchanged", async () => {
-      const { executor, governance } = get();
-      await expect(executor.connect(governance).setCooldownPeriod(config.cooldownPeriod)).to.be.revertedWithCustomError(
-        executor,
-        "NoChange",
-      );
-    });
-  });
-}
-
 export function handleLTVAdjustTests(config: ExecutorNetworkConfig, get: FixtureGetter): void {
   describe("handleLTVAdjust", () => {
     it("reverts for unconfigured market", async () => {
@@ -449,57 +410,10 @@ export function handleLTVAdjustTests(config: ExecutorNetworkConfig, get: Fixture
       const { lt: ltAfter } = await getMarketCF(comptroller, testMarket, config);
       expect(ltAfter).to.equal(ltBefore);
     });
-
-    it("first increase goes through immediately (lastLTVIncreaseTime = 0)", async () => {
-      const { executor, hypernative, comptroller, testMarket, originalLTV } = get();
-
-      await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(70).div(100));
-
-      const restored = originalLTV.mul(80).div(100);
-      await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, restored)).to.emit(
-        executor,
-        "LTVAdjusted",
-      );
-      const { cf } = await getMarketCF(comptroller, testMarket, config);
-      expect(cf).to.equal(restored);
-    });
-
-    it("second increase within cooldown reverts with CooldownNotExpired", async () => {
-      const { executor, hypernative, testMarket, originalLTV } = get();
-
-      await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(60).div(100));
-      await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(70).div(100)); // stamps timestamp
-
-      await expect(
-        executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(80).div(100)),
-      ).to.be.revertedWithCustomError(executor, "CooldownNotExpired");
-    });
-
-    it("increase succeeds after cooldown elapses", async () => {
-      const { executor, hypernative, comptroller, testMarket, originalLTV } = get();
-
-      await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(60).div(100));
-      await executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.mul(70).div(100));
-
-      await time.increase(config.cooldownPeriod + 1);
-
-      const target = originalLTV.mul(80).div(100);
-      await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, target)).to.emit(executor, "LTVAdjusted");
-      const { cf } = await getMarketCF(comptroller, testMarket, config);
-      expect(cf).to.equal(target);
-    });
-
-    it("cannot set CF above originalLTV even after cooldown", async () => {
-      const { executor, hypernative, testMarket, originalLTV } = get();
-      await time.increase(config.cooldownPeriod + 1);
-      await expect(
-        executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV.add(1)),
-      ).to.be.revertedWithCustomError(executor, "AdjustedLTVExceedsOriginal");
-    });
   });
 }
 
-export function handleCapAdjustTests(config: ExecutorNetworkConfig, get: FixtureGetter): void {
+export function handleCapAdjustTests(_config: ExecutorNetworkConfig, get: FixtureGetter): void {
   describe("handleCapAdjust — Borrow Cap", () => {
     it("decreases borrow cap and emits CapAdjusted", async () => {
       const { executor, hypernative, comptroller, testMarket, originalBorrowCap } = get();
@@ -524,32 +438,6 @@ export function handleCapAdjustTests(config: ExecutorNetworkConfig, get: Fixture
       await expect(
         executor.connect(hypernative).handleCapAdjust(testMarket, 0, originalBorrowCap.add(1)),
       ).to.be.revertedWithCustomError(executor, "CapExceedsOriginal");
-    });
-
-    it("second borrow cap increase within cooldown reverts", async () => {
-      const { executor, hypernative, testMarket, originalBorrowCap } = get();
-
-      await executor.connect(hypernative).handleCapAdjust(testMarket, 0, originalBorrowCap.mul(60).div(100));
-      await executor.connect(hypernative).handleCapAdjust(testMarket, 0, originalBorrowCap.mul(75).div(100)); // first increase
-
-      await expect(
-        executor.connect(hypernative).handleCapAdjust(testMarket, 0, originalBorrowCap),
-      ).to.be.revertedWithCustomError(executor, "CooldownNotExpired");
-    });
-
-    it("borrow cap increase succeeds after cooldown", async () => {
-      const { executor, hypernative, comptroller, testMarket, originalBorrowCap } = get();
-
-      await executor.connect(hypernative).handleCapAdjust(testMarket, 0, originalBorrowCap.mul(60).div(100));
-      await executor.connect(hypernative).handleCapAdjust(testMarket, 0, originalBorrowCap.mul(75).div(100));
-
-      await time.increase(config.cooldownPeriod + 1);
-
-      await expect(executor.connect(hypernative).handleCapAdjust(testMarket, 0, originalBorrowCap)).to.emit(
-        executor,
-        "CapAdjusted",
-      );
-      expect(await comptroller.borrowCaps(testMarket)).to.equal(originalBorrowCap);
     });
 
     it("no-op when borrow cap is already at requested value", async () => {
@@ -583,32 +471,6 @@ export function handleCapAdjustTests(config: ExecutorNetworkConfig, get: Fixture
       await expect(
         executor.connect(hypernative).handleCapAdjust(testMarket, 1, originalSupplyCap.add(1)),
       ).to.be.revertedWithCustomError(executor, "CapExceedsOriginal");
-    });
-
-    it("second supply cap increase within cooldown reverts", async () => {
-      const { executor, hypernative, testMarket, originalSupplyCap } = get();
-
-      await executor.connect(hypernative).handleCapAdjust(testMarket, 1, originalSupplyCap.mul(60).div(100));
-      await executor.connect(hypernative).handleCapAdjust(testMarket, 1, originalSupplyCap.mul(75).div(100));
-
-      await expect(
-        executor.connect(hypernative).handleCapAdjust(testMarket, 1, originalSupplyCap),
-      ).to.be.revertedWithCustomError(executor, "CooldownNotExpired");
-    });
-
-    it("supply cap increase succeeds after cooldown", async () => {
-      const { executor, hypernative, comptroller, testMarket, originalSupplyCap } = get();
-
-      await executor.connect(hypernative).handleCapAdjust(testMarket, 1, originalSupplyCap.mul(60).div(100));
-      await executor.connect(hypernative).handleCapAdjust(testMarket, 1, originalSupplyCap.mul(75).div(100));
-
-      await time.increase(config.cooldownPeriod + 1);
-
-      await expect(executor.connect(hypernative).handleCapAdjust(testMarket, 1, originalSupplyCap)).to.emit(
-        executor,
-        "CapAdjusted",
-      );
-      expect(await comptroller.supplyCaps(testMarket)).to.equal(originalSupplyCap);
     });
   });
 }
@@ -693,16 +555,14 @@ export function handleBorrowHaltTests(config: ExecutorNetworkConfig, get: Fixtur
 //     either don't touch collateral factor at all, or they read state via the type-aware
 //     `getMarketCF` helper.
 //
-//   - LTV adjust + supply halt go through EBrake.adjustCollateralFactor / setCFZero, which
-//     iterate every pool on the BSC Diamond comptroller. The IL versions assume a single
-//     pool, so they live behind `runIsolatedPoolTests`. BSC has its own multi-pool variants
-//     in `tests/hardhat/Fork/Executor/bscmainnet.ts`.
+//   - LTV adjust + supply halt go through EBrake.decreaseCF, which iterates every pool on
+//     the BSC Diamond comptroller. The IL versions assume a single pool, so they live behind
+//     `runIsolatedPoolTests`. BSC has its own multi-pool variants in bscmainnet.ts.
 
 /// Tests that pass on both Diamond and IL comptrollers.
 export function runSharedTests(config: ExecutorNetworkConfig, get: FixtureGetter): void {
   accessControlTests(config, get);
   setMarketConfigTests(config, get);
-  setCooldownPeriodTests(config, get);
   handleCapAdjustTests(config, get);
   handleBorrowHaltTests(config, get);
 }

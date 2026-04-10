@@ -64,7 +64,7 @@ const DIAMOND_COMPTROLLER_PERMISSIONS = [
 ];
 
 const IL_COMPTROLLER_PERMISSIONS = [
-  "setActionsPaused(address[],uint256[],bool)",
+  "setActionsPaused(address[],uint8[],bool)",
   "setCollateralFactor(address,uint256,uint256)",
   "setMarketBorrowCaps(address[],uint256[])",
   "setMarketSupplyCaps(address[],uint256[])",
