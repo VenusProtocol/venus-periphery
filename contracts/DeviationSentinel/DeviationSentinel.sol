@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity ^0.8.25;
 
-import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
-import { IILComptroller } from "../Interfaces/IILComptroller.sol";
-import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
+import { IEBrake } from "../EmergencyBrake/IEBrake.sol";
 import {
     ResilientOracleInterface,
     OracleInterface
@@ -16,11 +14,12 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  * @author Venus
  * @notice Sentinel that compares ResilientOracle and SentinelOracle prices (via keeper) and pauses
  *         specific actions (borrow, mint, collateral factor) per market when
- *         large deviations are detected.
- * @dev IMPORTANT: When creating VIPs to update collateral factor (CF) or mint/supply pause state for markets
- *      monitored by this contract, ALWAYS call resetMarketState() BEFORE applying the parameter changes.
- *      This prevents race conditions where the DeviationSentinel might store outdated values and later
- *      restore them incorrectly, overwriting the VIP's intended changes.
+ *         large deviations are detected. All emergency actions are routed through the EBrake contract.
+ * @dev This contract can only TIGHTEN restrictions (pause, zero CF), never loosen them.
+ *      Recovery (unpausing, restoring CF) is handled via governance VIP.
+ *      CF tightening is performed by calling EBrake.decreaseCF(market, 0) — the most aggressive
+ *      sentinel response — which zeros the collateral factor.
+ *      Idempotency is handled by EBrake — duplicate calls are no-ops.
  */
 contract DeviationSentinel is AccessControlledV8 {
     /// @notice Configuration for price deviation monitoring
@@ -31,24 +30,20 @@ contract DeviationSentinel is AccessControlledV8 {
         bool enabled;
     }
 
-    /// @notice State tracking for market modifications by this contract
-    /// @param borrowPaused True if borrow is paused for this market by this contract
-    /// @param cfModifiedAndSupplyPaused True if collateral factor was modified and supply is paused by this contract
-    /// @param poolCFs Mapping of pool ID to original collateral factor (0 for isolated pools, 1+ for core pool emode groups)
-    /// @param poolLTs Mapping of pool ID to original liquidation threshold (0 for isolated pools, 1+ for core pool emode groups)
-    struct MarketState {
-        bool borrowPaused;
-        bool cfModifiedAndSupplyPaused;
-        mapping(uint96 => uint256) poolCFs;
-        mapping(uint96 => uint256) poolLTs;
+    /// @notice Action taken by the sentinel when handling a deviation
+    /// @param BorrowPaused Borrow was paused (sentinel price > oracle price)
+    /// @param SupplyPausedAndCFZeroed CF was zeroed and supply was paused (sentinel price <= oracle price)
+    enum DeviationAction {
+        BorrowPaused,
+        SupplyPausedAndCFZeroed
     }
 
     /// @notice Maximum allowed price deviation in percentage (e.g., 10 = 10%)
     uint8 public constant MAX_DEVIATION = 100;
 
-    /// @notice Address of the Core Pool Comptroller
+    /// @notice Emergency Brake contract for executing pause and CF-zero actions
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
-    ICorePoolComptroller public immutable CORE_POOL_COMPTROLLER;
+    IEBrake public immutable EBRAKE;
 
     /// @notice Resilient Oracle for getting reference prices
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
@@ -64,8 +59,8 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Mapping of trusted keeper addresses
     mapping(address => bool) public trustedKeepers;
 
-    /// @notice Mapping to track market state changes made by this contract
-    mapping(address => MarketState) public marketStates;
+    /// @dev Storage gap for future upgrades.
+    uint256[48] private __gap;
 
     /// @notice Emitted when a token's deviation configuration is updated
     /// @param token The token address
@@ -82,33 +77,12 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param isTrusted Whether the keeper is trusted
     event TrustedKeeperUpdated(address indexed keeper, bool isTrusted);
 
-    /// @notice Emitted when a market's state is reset
+    /// @notice Emitted when a price deviation is detected and handled for a market
     /// @param market The market address
-    event MarketStateReset(address indexed market);
-
-    /// @notice Emitted when borrow is paused for a market
-    /// @param market The market address
-    event BorrowPaused(address indexed market);
-
-    /// @notice Emitted when borrow is unpaused for a market
-    /// @param market The market address
-    event BorrowUnpaused(address indexed market);
-
-    /// @notice Emitted when supply is paused for a market
-    /// @param market The market address
-    event SupplyPaused(address indexed market);
-
-    /// @notice Emitted when supply is unpaused for a market
-    /// @param market The market address
-    event SupplyUnpaused(address indexed market);
-
-    /// @notice Emitted when collateral factor is updated
-    /// @notice Emitted when collateral factor is updated
-    /// @param market The market address
-    /// @param poolId The pool ID (emode group for core pools, 0 for isolated pools)
-    /// @param oldCF The old collateral factor
-    /// @param newCF The new collateral factor
-    event CollateralFactorUpdated(address indexed market, uint96 indexed poolId, uint256 oldCF, uint256 newCF);
+    /// @param oraclePrice The price from the resilient oracle at the time of detection
+    /// @param sentinelPrice The price from the sentinel oracle at the time of detection
+    /// @param action The action taken in response to the deviation
+    event DeviationHandled(address indexed market, uint256 oraclePrice, uint256 sentinelPrice, DeviationAction action);
 
     /// @notice Thrown when deviation is set to zero
     error ZeroDeviation();
@@ -128,29 +102,22 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Thrown when token monitoring is disabled
     error TokenMonitoringDisabled();
 
-    /// @notice Thrown when comptroller operation fails
-    /// @param errorCode The error code returned by the comptroller
-    error ComptrollerError(uint256 errorCode);
-
     modifier onlyKeeper() {
         if (!trustedKeepers[msg.sender]) revert UnauthorizedKeeper();
         _;
     }
 
     /// @notice Constructor for DeviationSentinel
-    /// @param corePoolComptroller_ Address of the core pool comptroller
+    /// @param eBrake_ Address of the EBrake contract
     /// @param resilientOracle_ Address of the resilient oracle
     /// @param sentinelOracle_ Address of the sentinel oracle
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(
-        ICorePoolComptroller corePoolComptroller_,
-        ResilientOracleInterface resilientOracle_,
-        OracleInterface sentinelOracle_
-    ) {
-        CORE_POOL_COMPTROLLER = corePoolComptroller_;
-
+    constructor(IEBrake eBrake_, ResilientOracleInterface resilientOracle_, OracleInterface sentinelOracle_) {
+        if (address(eBrake_) == address(0)) revert ZeroAddress();
         if (address(resilientOracle_) == address(0)) revert ZeroAddress();
         if (address(sentinelOracle_) == address(0)) revert ZeroAddress();
+
+        EBRAKE = eBrake_;
         RESILIENT_ORACLE = resilientOracle_;
         SENTINEL_ORACLE = sentinelOracle_;
 
@@ -215,53 +182,13 @@ contract DeviationSentinel is AccessControlledV8 {
         emit TokenMonitoringStatusChanged(token, enabled);
     }
 
-    /// @notice Reset the market state for a specific market
-    /// @dev This should be called after manually intervening in a paused market and before re-enabling deviation monitoring.
-    ///      It clears all stored state including pause flags and original collateral factors to prevent mismatches
-    ///      between the protocol state and this contract's tracked state.
-    /// @param market The vToken market to reset
-    /// @custom:event Emits MarketStateReset event
-    /// @custom:error ZeroAddress is thrown when market address is zero
-    function resetMarketState(IVToken market) external {
-        _checkAccessAllowed("resetMarketState(address)");
-
-        if (address(market) == address(0)) revert ZeroAddress();
-
-        MarketState storage state = marketStates[address(market)];
-        IComptroller comptroller = market.comptroller();
-
-        // Clear pool-specific data for core pool
-        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
-            uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
-            uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
-            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
-                delete state.poolCFs[i];
-                delete state.poolLTs[i];
-            }
-        } else {
-            // Clear isolated pool data (stored at index 0)
-            delete state.poolCFs[0];
-            delete state.poolLTs[0];
-        }
-
-        // Clear pause flags
-        state.borrowPaused = false;
-        state.cfModifiedAndSupplyPaused = false;
-
-        emit MarketStateReset(address(market));
-    }
-
-    /// @notice Handle price deviation for a market by pausing or adjusting collateral factor
+    /// @notice Handle price deviation for a market by pausing borrow or zeroing CF and pausing supply
+    /// @dev This contract can only tighten restrictions. Recovery (unpausing, restoring CF) is via governance VIP.
     /// @param market The vToken market to handle
-    /// @custom:event Emits BorrowPaused when borrow is paused due to high sentinel price
-    /// @custom:event Emits BorrowUnpaused when borrow is unpaused after deviation resolved
-    /// @custom:event Emits SupplyPaused when supply is paused due to low sentinel price
-    /// @custom:event Emits SupplyUnpaused when supply is unpaused after deviation resolved
-    /// @custom:event Emits CollateralFactorUpdated when collateral factor is modified
+    /// @custom:event Emits DeviationHandled with price context and the action taken
     /// @custom:error UnauthorizedKeeper is thrown when caller is not a trusted keeper
     /// @custom:error MarketNotConfigured is thrown when market's underlying token has no deviation config
     /// @custom:error TokenMonitoringDisabled is thrown when monitoring is disabled for the token
-    /// @custom:error ComptrollerError is thrown when comptroller operation fails
     function handleDeviation(IVToken market) external onlyKeeper {
         address underlyingToken = market.underlying();
         DeviationConfig memory config = tokenConfigs[underlyingToken];
@@ -271,35 +198,18 @@ contract DeviationSentinel is AccessControlledV8 {
 
         (bool hasDeviation, uint256 oraclePrice, uint256 sentinelPrice, ) = checkPriceDeviation(market);
 
-        MarketState storage state = marketStates[address(market)];
+        if (!hasDeviation) return;
 
-        if (hasDeviation) {
-            if (sentinelPrice > oraclePrice) {
-                // Early return if borrow is already paused
-                if (state.borrowPaused) return;
-
-                _pauseBorrow(market);
-                state.borrowPaused = true;
-            } else {
-                // Early return if CF is already modified and supply is already paused
-                if (state.cfModifiedAndSupplyPaused) return;
-
-                _setCollateralFactorToZero(market);
-                _pauseSupply(market);
-                state.cfModifiedAndSupplyPaused = true;
-            }
+        DeviationAction action;
+        if (sentinelPrice > oraclePrice) {
+            EBRAKE.pauseBorrow(address(market));
+            action = DeviationAction.BorrowPaused;
         } else {
-            if (state.borrowPaused) {
-                _unpauseBorrow(market);
-                state.borrowPaused = false;
-            }
-
-            if (state.cfModifiedAndSupplyPaused) {
-                _restoreCollateralFactor(market);
-                _unpauseSupply(market);
-                state.cfModifiedAndSupplyPaused = false;
-            }
+            EBRAKE.decreaseCF(address(market), 0);
+            EBRAKE.pauseSupply(address(market));
+            action = DeviationAction.SupplyPausedAndCFZeroed;
         }
+        emit DeviationHandled(address(market), oraclePrice, sentinelPrice, action);
     }
 
     /// @notice Check if there is a price deviation between resilient oracle and sentinel oracle for a market
@@ -313,6 +223,8 @@ contract DeviationSentinel is AccessControlledV8 {
     ) public view returns (bool hasDeviation, uint256 oraclePrice, uint256 sentinelPrice, uint256 deviationPercent) {
         address underlyingToken = market.underlying();
         DeviationConfig memory config = tokenConfigs[underlyingToken];
+
+        if (config.deviation == 0 || !config.enabled) return (false, 0, 0, 0);
 
         oraclePrice = RESILIENT_ORACLE.getPrice(underlyingToken);
         sentinelPrice = SENTINEL_ORACLE.getPrice(underlyingToken);
@@ -333,186 +245,5 @@ contract DeviationSentinel is AccessControlledV8 {
 
         deviationPercent = (priceDiff * 100) / oraclePrice;
         hasDeviation = deviationPercent >= config.deviation;
-    }
-
-    /// @notice Pause borrow action for a market
-    /// @param market The market to pause borrow for
-    function _pauseBorrow(IVToken market) internal {
-        IComptroller comptroller = market.comptroller();
-
-        address[] memory markets = new address[](1);
-        markets[0] = address(market);
-        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = IComptroller.Action.BORROW;
-
-        comptroller.setActionsPaused(markets, actions, true);
-        emit BorrowPaused(address(market));
-    }
-
-    /// @notice Unpause borrow action for a market
-    /// @param market The market to unpause borrow for
-    function _unpauseBorrow(IVToken market) internal {
-        IComptroller comptroller = market.comptroller();
-
-        address[] memory markets = new address[](1);
-        markets[0] = address(market);
-        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = IComptroller.Action.BORROW;
-
-        comptroller.setActionsPaused(markets, actions, false);
-        emit BorrowUnpaused(address(market));
-    }
-
-    /// @notice Pause supply action for a market
-    /// @param market The market to pause supply for
-    function _pauseSupply(IVToken market) internal {
-        IComptroller comptroller = market.comptroller();
-
-        address[] memory markets = new address[](1);
-        markets[0] = address(market);
-        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = IComptroller.Action.MINT;
-
-        comptroller.setActionsPaused(markets, actions, true);
-        emit SupplyPaused(address(market));
-    }
-
-    /// @notice Unpause supply action for a market
-    /// @param market The market to unpause supply for
-    function _unpauseSupply(IVToken market) internal {
-        IComptroller comptroller = market.comptroller();
-
-        address[] memory markets = new address[](1);
-        markets[0] = address(market);
-        IComptroller.Action[] memory actions = new IComptroller.Action[](1);
-        actions[0] = IComptroller.Action.MINT;
-
-        comptroller.setActionsPaused(markets, actions, false);
-        emit SupplyUnpaused(address(market));
-    }
-
-    /// @notice Set collateral factor to zero and store original value
-    /// @param market The market to modify
-    function _setCollateralFactorToZero(IVToken market) internal {
-        IComptroller comptroller = market.comptroller();
-        MarketState storage state = marketStates[address(market)];
-
-        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
-            // Store original CF and LT for each emode group, then set to 0
-            uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
-            uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
-            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
-                (
-                    bool isListed,
-                    uint256 collateralFactorMantissa, // isVenus
-                    ,
-                    uint256 liquidationThresholdMantissa, // liquidationIncentiveMantissa // marketPoolId // isBorrowAllowed
-                    ,
-                    ,
-
-                ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
-
-                if (isListed) {
-                    // Store original values for this pool ID
-                    state.poolCFs[i] = collateralFactorMantissa;
-                    state.poolLTs[i] = liquidationThresholdMantissa;
-
-                    // Set collateral factor to 0, keep liquidation threshold unchanged
-                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(
-                        i,
-                        address(market),
-                        0,
-                        liquidationThresholdMantissa
-                    );
-                    if (result != 0) revert ComptrollerError(result);
-
-                    // Emit event for each pool ID
-                    emit CollateralFactorUpdated(address(market), i, collateralFactorMantissa, 0);
-                }
-            }
-        } else {
-            IILComptroller.Market memory marketData = IILComptroller(address(comptroller)).markets(address(market));
-            if (marketData.isListed) {
-                state.poolCFs[0] = marketData.collateralFactorMantissa;
-                state.poolLTs[0] = marketData.liquidationThresholdMantissa;
-                IILComptroller(address(comptroller)).setCollateralFactor(
-                    address(market),
-                    0,
-                    marketData.liquidationThresholdMantissa
-                );
-                emit CollateralFactorUpdated(address(market), 0, marketData.collateralFactorMantissa, 0);
-            }
-        }
-    }
-
-    /// @notice Restore original collateral factor
-    /// @param market The market to restore
-    function _restoreCollateralFactor(IVToken market) internal {
-        IComptroller comptroller = market.comptroller();
-        MarketState storage state = marketStates[address(market)];
-
-        // Check if this is a core pool or isolated pool
-        if (address(comptroller) == address(CORE_POOL_COMPTROLLER)) {
-            // Core pool - restore original CF and LT for each emode group
-            uint96 corePoolId = CORE_POOL_COMPTROLLER.corePoolId();
-            uint96 lastPoolId = CORE_POOL_COMPTROLLER.lastPoolId();
-            for (uint96 i = corePoolId; i <= lastPoolId; i++) {
-                (
-                    bool isListed,
-                    uint256 currentCF, // isVenus
-                    ,
-                    uint256 currentLT, // liquidationIncentiveMantissa // marketPoolId // isBorrowAllowed
-                    ,
-                    ,
-
-                ) = CORE_POOL_COMPTROLLER.poolMarkets(i, address(market));
-
-                if (isListed) {
-                    // Retrieve stored original CF and LT
-                    uint256 storedCF = state.poolCFs[i];
-                    uint256 storedLT = state.poolLTs[i];
-
-                    // - If storedCF is 0 and currentCF != 0, this pool was added after _setCollateralFactorToZero,
-                    //   so we skip restoring to avoid overwriting new pool config with zero values.
-                    // - If storedLT is 0, skip restoration to prevent setting LT=0, which could cause immediate liquidation risk.
-                    //   This also protects against uninitialized storage for new pools.
-                    if (storedCF == 0 && currentCF != 0) {
-                        continue;
-                    }
-                    if (storedLT == 0) {
-                        continue;
-                    }
-
-                    // If stored value is 0 and current CF is also 0, it might be the original value, allow restoration.
-                    uint256 result = CORE_POOL_COMPTROLLER.setCollateralFactor(i, address(market), storedCF, storedLT);
-                    if (result != 0) revert ComptrollerError(result);
-
-                    emit CollateralFactorUpdated(address(market), i, 0, storedCF);
-
-                    delete state.poolCFs[i];
-                    delete state.poolLTs[i];
-                }
-            }
-        } else {
-            // Isolated pool
-            IILComptroller.Market memory marketData = IILComptroller(address(comptroller)).markets(address(market));
-
-            // Check if market is still listed before restoring
-            if (!marketData.isListed) {
-                return;
-            }
-
-            uint256 originalCF = state.poolCFs[0];
-            uint256 originalLT = state.poolLTs[0];
-
-            if (originalLT == 0) {
-                return;
-            }
-
-            IILComptroller(address(comptroller)).setCollateralFactor(address(market), originalCF, originalLT);
-            emit CollateralFactorUpdated(address(market), 0, 0, originalCF);
-            delete state.poolCFs[0];
-            delete state.poolLTs[0];
-        }
     }
 }

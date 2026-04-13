@@ -10,7 +10,6 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   console.log(`Deploying Sentinel contracts with the account: ${deployer}`);
   const ADDRESSES = await getConfig(network.name);
 
-  const corePool = await getContractAddressOrNullAddress(deployments, "Unitroller");
   const accessControlManager = ADDRESSES.preconfiguredAddresses.AccessControlManager;
   const timelock = ADDRESSES.preconfiguredAddresses.NormalTimelock;
   const resilientOracle = ADDRESSES.preconfiguredAddresses.ResilientOracle;
@@ -64,13 +63,19 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   });
 
   const sentinelOracle = await hre.ethers.getContract("SentinelOracle");
+  const eBrakeAddress = await getContractAddressOrNullAddress(deployments, "EBrake");
+
+  if (eBrakeAddress === "0x0000000000000000000000000000000000000000") {
+    console.log("EBrake not deployed, skipping DeviationSentinel deployment");
+    return;
+  }
 
   await deploy("DeviationSentinel", {
     contract: "DeviationSentinel",
     from: deployer,
     log: true,
     deterministicDeployment: false,
-    args: [corePool, resilientOracle, sentinelOracle.address],
+    args: [eBrakeAddress, resilientOracle, sentinelOracle.address],
     proxy: {
       owner: network.live ? timelock : deployer,
       proxyContract: "OptimizedTransparentProxy",
@@ -104,3 +109,4 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
 
 export default func;
 func.tags = ["sentinel"];
+func.dependencies = ["ebrake"];
