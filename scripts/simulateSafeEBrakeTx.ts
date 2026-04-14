@@ -189,66 +189,82 @@ describe(`EBrake TX Simulation — ${metadata.operation} on ${metadata.network} 
     }
   });
 
-  it("state reflects expected changes on comptroller", async () => {
-    for (const { parsed } of decoded) {
-      const name = parsed.name;
+  // ── Per-assertion it() blocks generated at load time from the decoded batch ──
+  // decoded is populated before any test runs, so Mocha sees each check as a
+  // separate named test case with its own ✔ / ✘ line.
 
-      if (name === "pauseActions") {
-        const [markets, actions] = parsed.args as [string[], number[]];
-        for (const market of markets) {
-          const sym = metadata.symbols[market] || market;
-          for (const action of actions) {
-            const paused = await comptroller.actionPaused(market, action);
-            expect(paused, `actionPaused(${sym}, action=${action}) should be true`).to.be.true;
-          }
+  const ACTION_NAMES: Record<number, string> = { 0: "MINT", 1: "REDEEM", 2: "BORROW", 6: "TRANSFER" };
+
+  for (const { parsed } of decoded) {
+    const name = parsed.name;
+
+    if (name === "pauseActions") {
+      const [markets, actions] = parsed.args as [string[], number[]];
+      for (const market of markets) {
+        const sym = metadata.symbols[market] || market;
+        for (const action of actions) {
+          const actionName = ACTION_NAMES[action] ?? String(action);
+          it(`${sym} (${market}) action ${actionName} should be paused`, async () => {
+            expect(await comptroller.actionPaused(market, action)).to.be.true;
+          });
         }
-      } else if (name === "decreaseCF" && parsed.args.length === 2) {
-        // decreaseCF(address vToken, uint256 newCF) — all pools (BSC) or IL
-        const [vToken, newCF] = parsed.args as [string, BigNumber];
-        const sym = metadata.symbols[vToken] || vToken;
+      }
+    } else if (name === "decreaseCF" && parsed.args.length === 2) {
+      const [vToken, newCF] = parsed.args as [string, BigNumber];
+      const sym = metadata.symbols[vToken] || vToken;
+      it(`${sym} (${vToken}) CF should be decreased to ${newCF}`, async () => {
         if (isIsolatedPool) {
           const market = await comptroller.markets(vToken);
-          expect(market.collateralFactorMantissa.toString(), `CF for ${sym}`).to.equal(newCF.toString());
+          expect(market.collateralFactorMantissa.toString()).to.equal(newCF.toString());
         } else {
           const corePoolId: BigNumber = await comptroller.corePoolId();
           const market = await comptroller.poolMarkets(corePoolId, vToken);
-          expect(market.collateralFactorMantissa.toString(), `CF for ${sym} (pool ${corePoolId})`).to.equal(
-            newCF.toString(),
-          );
+          expect(market.collateralFactorMantissa.toString()).to.equal(newCF.toString());
         }
-      } else if (name === "decreaseCF" && parsed.args.length === 3) {
-        // decreaseCF(address vToken, uint96 poolId, uint256 newCF) — single pool
-        const [vToken, poolId, newCF] = parsed.args as [string, BigNumber, BigNumber];
-        const sym = metadata.symbols[vToken] || vToken;
+      });
+    } else if (name === "decreaseCF" && parsed.args.length === 3) {
+      const [vToken, poolId, newCF] = parsed.args as [string, BigNumber, BigNumber];
+      const sym = metadata.symbols[vToken] || vToken;
+      it(`${sym} (${vToken}) CF in pool ${poolId} should be decreased to ${newCF}`, async () => {
         const market = await comptroller.poolMarkets(poolId, vToken);
-        expect(market.collateralFactorMantissa.toString(), `CF for ${sym} (pool ${poolId})`).to.equal(newCF.toString());
-      } else if (name === "setMarketBorrowCaps") {
-        const [markets, caps] = parsed.args as [string[], BigNumber[]];
-        for (let i = 0; i < markets.length; i++) {
-          const sym = metadata.symbols[markets[i]] || markets[i];
-          const actual = await comptroller.borrowCaps(markets[i]);
-          expect(actual.toString(), `borrowCap for ${sym}`).to.equal(caps[i].toString());
-        }
-      } else if (name === "setMarketSupplyCaps") {
-        const [markets, caps] = parsed.args as [string[], BigNumber[]];
-        for (let i = 0; i < markets.length; i++) {
-          const sym = metadata.symbols[markets[i]] || markets[i];
-          const actual = await comptroller.supplyCaps(markets[i]);
-          expect(actual.toString(), `supplyCap for ${sym}`).to.equal(caps[i].toString());
-        }
-      } else if (name === "pauseFlashLoan") {
-        const paused = await comptroller.flashLoanPaused();
-        expect(paused, "flashLoanPaused should be true").to.be.true;
-      } else if (name === "revokeFlashLoanAccess") {
-        const [account] = parsed.args as [string];
-        const authorized = await comptroller.authorizedFlashLoan(account);
-        expect(authorized, `authorizedFlashLoan(${account}) should be false`).to.be.false;
-      } else if (name === "disablePoolBorrow") {
-        const [poolId, vToken] = parsed.args as [BigNumber, string];
-        const sym = metadata.symbols[vToken] || vToken;
-        const market = await comptroller.poolMarkets(poolId, vToken);
-        expect(market.isBorrowAllowed, `isBorrowAllowed for ${sym} (pool ${poolId}) should be false`).to.be.false;
+        expect(market.collateralFactorMantissa.toString()).to.equal(newCF.toString());
+      });
+    } else if (name === "setMarketBorrowCaps") {
+      const [markets, caps] = parsed.args as [string[], BigNumber[]];
+      for (let i = 0; i < markets.length; i++) {
+        const sym = metadata.symbols[markets[i]] || markets[i];
+        const market = markets[i];
+        const cap = caps[i];
+        it(`${sym} (${market}) borrow cap should be decreased to ${cap}`, async () => {
+          expect((await comptroller.borrowCaps(market)).toString()).to.equal(cap.toString());
+        });
       }
+    } else if (name === "setMarketSupplyCaps") {
+      const [markets, caps] = parsed.args as [string[], BigNumber[]];
+      for (let i = 0; i < markets.length; i++) {
+        const sym = metadata.symbols[markets[i]] || markets[i];
+        const market = markets[i];
+        const cap = caps[i];
+        it(`${sym} (${market}) supply cap should be decreased to ${cap}`, async () => {
+          expect((await comptroller.supplyCaps(market)).toString()).to.equal(cap.toString());
+        });
+      }
+    } else if (name === "pauseFlashLoan") {
+      it("flash loans should be paused", async () => {
+        expect(await comptroller.flashLoanPaused()).to.be.true;
+      });
+    } else if (name === "revokeFlashLoanAccess") {
+      const [account] = parsed.args as [string];
+      it(`flash loan access for ${account} should be revoked`, async () => {
+        expect(await comptroller.authorizedFlashLoan(account)).to.be.false;
+      });
+    } else if (name === "disablePoolBorrow") {
+      const [poolId, vToken] = parsed.args as [BigNumber, string];
+      const sym = metadata.symbols[vToken] || vToken;
+      it(`${sym} (${vToken}) borrow in pool ${poolId} should be disabled`, async () => {
+        const market = await comptroller.poolMarkets(poolId, vToken);
+        expect(market.isBorrowAllowed).to.be.false;
+      });
     }
-  });
+  }
 });
