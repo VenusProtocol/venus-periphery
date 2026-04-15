@@ -34,27 +34,37 @@
  *     - Revoke flash loan access         (revokeFlashLoanAccess)
  *     - Disable pool borrow              (disablePoolBorrow)
  *
- * OUTPUT
- * ──────
- * Written to helpers/data/:
- *   safeEBrakeTxBuilder[_cf].json   — import this into Gnosis Safe TX Builder UI
- *   safeEBrakeTxMetadata[_cf].json  — audit trail (EBrake address, network, block, symbols)
+ * Multiple operations can be batched in a single run (e.g. pause + decrease CF).
  *
  * OUTPUT
  * ──────
- * Written to helpers/data/:
- *   safeEBrakeTxBuilder.json   — import this into Gnosis Safe TX Builder UI
- *   safeEBrakeTxMetadata.json  — audit trail (EBrake address, network, block, symbols)
+ * Written to helpers/data/ (gitignored, overwritten on every run):
+ *   safeEBrakeTxBuilder.json   — import this into the Gnosis Safe TX Builder UI
+ *   safeEBrakeTxMetadata.json  — audit trail (EBrake address, network, block, symbols, operations)
+ *   markets.json               — symbol → vToken cache, refreshed on every file-mode run
+ *   cf_values.json / cf_values_pool<id>.json / borrow_caps.json / supply_caps.json
+ *                              — per-market value templates (file-mode input for CF / caps steps)
  *
  * You will be prompted for the Safe address that should sign the transaction.
- * Use the correct Safe for the operation (e.g. GUARDIAN for pauses,
- * CRITICAL_GUARDIAN for CF/cap changes on BSC).
  */
 import type { BigNumber } from "ethers";
 import * as fs from "fs";
 import { ethers, network } from "hardhat";
 import * as path from "path";
 import * as readline from "readline";
+
+// ─── Terminal colors ─────────────────────────────────────────────────────────
+
+const colorEnabled = process.stdout.isTTY && !process.env.NO_COLOR;
+const colorWrap =
+  (code: string) =>
+  (s: string): string =>
+    colorEnabled ? `\x1b[${code}m${s}\x1b[0m` : s;
+const red = colorWrap("31");
+const green = colorWrap("32");
+const yellow = colorWrap("33");
+const cyan = colorWrap("36");
+const bold = colorWrap("1");
 
 // ─── Retry helper ────────────────────────────────────────────────────────────
 
@@ -79,8 +89,9 @@ async function retry<T = any>(fn: () => Promise<T>, retries = 3, delayMs = 1000)
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
-const MARKETS_FILE = path.resolve(__dirname, "data", "markets.json");
 const OUTPUT_DIR = path.resolve(__dirname, "data");
+
+const MARKETS_FILE = path.resolve(OUTPUT_DIR, "markets.json");
 
 const EBRAKE_ABI = [
   "function IS_ISOLATED_POOL() view returns (bool)",
@@ -180,36 +191,39 @@ export interface EBrakeCommand {
   params: any[];
 }
 
-export interface EBrakeInput {
+export interface EBrakeStep {
+  operation: EBrakeOperation;
+  marketAddresses: string[];
+  symbols: Map<string, string>;
+  pauseActions?: number[];
+  newCFs?: Map<string, string>; // per-market CF mantissa (decrease_cf + decrease_cf_pool)
+  poolId?: number;
+  newCaps?: Map<string, string>;
+  revokeAccounts?: string[];
+}
+
+export interface EBrakeBatchInput {
   eBrakeAddress: string;
   comptrollerAddress: string;
   isIsolatedPool: boolean;
   network: string;
   chainId: number;
-  operation: EBrakeOperation;
-  marketAddresses: string[];
-  symbols: Map<string, string>;
-  pauseActions?: number[];
-  newCF?: string;
-  poolId?: number;
-  newCaps?: Map<string, string>;
-  revokeAccounts?: string[];
   safeAddress: string;
   blockNumber: number;
+  steps: EBrakeStep[];
 }
 
 interface EBrakeMetadata {
   eBrakeAddress: string;
   comptrollerAddress: string;
   network: string;
-  operation: EBrakeOperation;
+  operations: EBrakeOperation[];
   blockNumber: number;
   createdAt: string;
   symbols: Record<string, string>;
 }
 
 export interface ExportResult {
-  label: string;
   txBuilderFile: string;
   metadataFile: string;
   txCount: number;
@@ -233,33 +247,38 @@ const pickOne = async (prompt: string, options: string[]): Promise<string> => {
     if (idx >= 0 && idx < options.length) {
       return options[idx];
     }
-    console.log(`Invalid selection "${answer}". Please enter a number between 1 and ${options.length}.`);
+    console.log(red(`Invalid selection "${answer}". Please enter a number between 1 and ${options.length}.`));
   }
 };
 
-const pickMultiple = async (prompt: string, options: { name: string; value: string }[]): Promise<string[]> => {
+const pickMultiple = async (
+  prompt: string,
+  options: { name: string; value: string }[],
+  { allowAll = true, preserveOrder = false }: { allowAll?: boolean; preserveOrder?: boolean } = {},
+): Promise<string[]> => {
   console.log(`\n${prompt}`);
   options.forEach(opt => console.log(`  ${opt.value}. ${opt.name}`));
   const validValues = new Set(options.map(o => o.value));
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    console.log("Enter comma-separated values or 'all' for all:");
+    console.log(allowAll ? "Enter comma-separated values or 'all' for all:" : "Enter comma-separated values:");
     const answer = await ask("> ");
-    if (answer.toLowerCase() === "all") return options.map(o => o.value);
+    if (allowAll && answer.toLowerCase() === "all") return options.map(o => o.value);
     const tokens = answer
       .split(",")
       .map(n => n.trim())
       .filter(v => v.length > 0);
     if (tokens.length === 0) {
-      console.log("No values entered. Please try again.");
+      console.log(red("No values entered. Please try again."));
       continue;
     }
     const invalid = tokens.filter(v => !validValues.has(v));
     if (invalid.length > 0) {
-      console.log(`Invalid value(s): ${invalid.join(", ")}. Valid options are: ${[...validValues].join(", ")}.`);
+      console.log(red(`Invalid value(s): ${invalid.join(", ")}. Valid options are: ${[...validValues].join(", ")}.`));
       continue;
     }
-    return [...new Set(tokens)];
+    // preserveOrder=true keeps duplicates and caller's order (e.g., "1,3,2" stays [1,3,2]).
+    return preserveOrder ? tokens : [...new Set(tokens)];
   }
 };
 
@@ -270,7 +289,7 @@ const askYesNo = async (prompt: string): Promise<boolean> => {
     const answer = (await ask("(y/n): ")).toLowerCase();
     if (answer === "y" || answer === "yes") return true;
     if (answer === "n" || answer === "no") return false;
-    console.log(`Invalid input "${answer}". Please enter y or n.`);
+    console.log(red(`Invalid input "${answer}". Please enter y or n.`));
   }
 };
 
@@ -284,12 +303,12 @@ const pickValidAddresses = async (prompt: string): Promise<string[]> => {
       .map(a => a.trim())
       .filter(a => a.length > 0);
     if (tokens.length === 0) {
-      console.log("No addresses entered. Please try again.");
+      console.log(red("No addresses entered. Please try again."));
       continue;
     }
     const invalid = tokens.filter(a => !ethers.utils.isAddress(a));
     if (invalid.length > 0) {
-      console.log(`Invalid address(es): ${invalid.join(", ")}. Please enter valid Ethereum addresses.`);
+      console.log(red(`Invalid address(es): ${invalid.join(", ")}. Please enter valid Ethereum addresses.`));
       continue;
     }
     return [...new Set(tokens)];
@@ -306,7 +325,7 @@ const askUint256 = async (prompt: string): Promise<string> => {
       if (bn.lt(0)) throw new Error("negative");
       return bn.toString();
     } catch {
-      console.log(`Invalid uint256 "${answer}". Please enter a non-negative integer.`);
+      console.log(red(`Invalid uint256 "${answer}". Please enter a non-negative integer.`));
     }
   }
 };
@@ -318,7 +337,7 @@ const askPoolId = async (prompt: string): Promise<number> => {
     const answer = await ask("> ");
     const n = parseInt(answer, 10);
     if (!isNaN(n) && n >= 0) return n;
-    console.log(`Invalid pool ID "${answer}". Please enter a non-negative integer.`);
+    console.log(red(`Invalid pool ID "${answer}". Please enter a non-negative integer.`));
   }
 };
 
@@ -369,16 +388,11 @@ const filterListedAndFetchSymbols = async (
       addresses.push(market);
       symbols.set(market, symbol);
     } else if (logUnlisted) {
-      console.log(`  Skipping unlisted market: ${market}`);
+      console.log(yellow(`  Skipping unlisted market: ${market}`));
     }
   }
-  console.log(`  Found ${addresses.length} listed market(s)`);
+  console.log(green(`  Found ${addresses.length} listed market(s)`));
   return { addresses, symbols };
-};
-
-const formatMantissa = (mantissa: BigNumber): string => {
-  const pct = parseFloat(ethers.utils.formatUnits(mantissa, 18)) * 100;
-  return `${mantissa.toString()} (${pct.toFixed(2)}%)`;
 };
 
 const fetchCurrentCF = async (
@@ -415,35 +429,37 @@ const fetchCurrentCaps = async (
 
 // ─── Markets file helpers ────────────────────────────────────────────────────
 
-const loadMarketsFromFile = (): string[] => {
-  if (!fs.existsSync(MARKETS_FILE)) return [];
-  let content: unknown;
-  try {
-    content = JSON.parse(fs.readFileSync(MARKETS_FILE, "utf-8"));
-  } catch (error) {
-    console.error(`Failed to parse ${MARKETS_FILE}: ${(error as Error).message}`);
-    rl.close();
-    process.exit(1);
-  }
-  if (!Array.isArray(content)) {
-    console.error(`${MARKETS_FILE} must contain a JSON array of addresses.`);
-    rl.close();
-    process.exit(1);
-  }
-  const invalid = content.filter((addr: string) => !ethers.utils.isAddress(addr));
-  if (invalid.length > 0) {
-    console.error(`Invalid address(es) in ${MARKETS_FILE}: ${invalid.join(", ")}`);
-    console.error("Fix the file and run again.");
-    rl.close();
-    process.exit(1);
-  }
-  return [...new Set(content as string[])];
+type NetworkMarkets = Record<string, string>; // symbol → vTokenAddress
+
+const saveMarkets = (markets: NetworkMarkets) => {
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.writeFileSync(MARKETS_FILE, JSON.stringify(markets, null, 2) + "\n");
+  console.log(green(`Markets saved to ${MARKETS_FILE} (${Object.keys(markets).length} markets)`));
 };
 
-const saveMarketsToFile = (addresses: string[]) => {
-  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  fs.writeFileSync(MARKETS_FILE, JSON.stringify(addresses, null, 2));
-  console.log(`Markets saved to ${MARKETS_FILE} (${addresses.length} addresses)`);
+const buildMarketsFromChain = async (comptroller: string, isIsolatedPool: boolean): Promise<NetworkMarkets> => {
+  console.log("\nQuerying comptroller for all markets...");
+  const allMarkets = await fetchAllMarkets(comptroller, isIsolatedPool);
+  const { addresses, symbols } = await filterListedAndFetchSymbols(comptroller, isIsolatedPool, allMarkets, false);
+  const markets: NetworkMarkets = {};
+  const collisions: string[] = [];
+  for (const addr of addresses) {
+    const sym = symbols.get(addr)!;
+    if (markets[sym]) {
+      collisions.push(`${sym}: ${markets[sym]} and ${addr}`);
+    } else {
+      markets[sym] = addr;
+    }
+  }
+  if (collisions.length > 0) {
+    console.error(red("Symbol collision(s) detected:"));
+    collisions.forEach(c => console.error(red(`  ${c}`)));
+    console.error(red("Cannot build markets file with duplicate symbol keys."));
+    rl.close();
+    process.exit(1);
+  }
+  saveMarkets(markets);
+  return markets;
 };
 
 // ─── Network helpers ─────────────────────────────────────────────────────────
@@ -455,7 +471,7 @@ const getEBrakeAddress = async (networkName: string): Promise<string> => {
     try {
       const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf-8")) as { address: string };
       if (ethers.utils.isAddress(artifact.address)) {
-        console.log(`EBrake address from deployment artifact: ${artifact.address}`);
+        console.log(green(`EBrake address from deployment artifact: ${artifact.address}`));
         return artifact.address;
       }
     } catch {
@@ -465,82 +481,82 @@ const getEBrakeAddress = async (networkName: string): Promise<string> => {
   console.log(`No EBrake deployment artifact found for network "${networkName}".`);
   const entered = await ask("Enter EBrake proxy address manually: ");
   if (!ethers.utils.isAddress(entered)) {
-    console.error("Invalid address!");
+    console.error(red("Invalid address!"));
     rl.close();
     process.exit(1);
   }
   return entered;
 };
 
-// Defined here (before askSafeAddress) so it can be used for the hint
-const isCriticalOperation = (operation: EBrakeOperation): boolean =>
-  operation === "decrease_cf" ||
-  operation === "decrease_cf_pool" ||
-  operation === "set_borrow_caps" ||
-  operation === "set_supply_caps";
-
-const askSafeAddress = async (networkName: string, operation: EBrakeOperation): Promise<string> => {
-  const hint =
-    isCriticalOperation(operation) && networkName === "bscmainnet"
-      ? "  (use CRITICAL_GUARDIAN Safe for CF/cap operations on BSC)"
-      : "  (use GUARDIAN Safe)";
-  console.log(`\nEnter the Gnosis Safe address that will sign this transaction.${hint}`);
+const askSafeAddress = async (): Promise<string> => {
+  console.log("\nEnter the Gnosis Safe address that will sign this transaction.");
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const answer = await ask("> ");
     if (ethers.utils.isAddress(answer)) return answer;
-    console.log(`Invalid address "${answer}". Please enter a valid Ethereum address.`);
+    console.log(red(`Invalid address "${answer}". Please enter a valid Ethereum address.`));
   }
 };
 
 // ─── Market selection helper ─────────────────────────────────────────────────
+
+const pickSymbols = async (entries: Array<[string, string]>): Promise<Array<[string, string]>> => {
+  const validSymbols = new Set(entries.map(([s]) => s));
+  console.log("\nEnter comma-separated names or 'all':");
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const answer = await ask("> ");
+    if (answer.trim().toLowerCase() === "all") return entries;
+    const tokens = answer
+      .split(",")
+      .map(n => n.trim())
+      .filter(v => v.length > 0);
+    if (tokens.length === 0) {
+      console.log(red("No names entered. Please try again."));
+      continue;
+    }
+    const invalid = tokens.filter(t => !validSymbols.has(t));
+    if (invalid.length > 0) {
+      console.log(red(`Unknown symbol(s): ${invalid.join(", ")}. Valid symbols: ${[...validSymbols].join(", ")}.`));
+      continue;
+    }
+    const dedup = [...new Set(tokens)];
+    return dedup.map(sym => entries.find(([s]) => s === sym)!);
+  }
+};
 
 const selectMarkets = async (
   comptroller: string,
   isIsolatedPool: boolean,
 ): Promise<{ marketAddresses: string[]; symbols: Map<string, string> }> => {
   const marketMode = await pickOne("How to load markets?", [
-    "Fetch all markets from comptroller (saves to helpers/data/markets.json)",
-    "Use addresses from helpers/data/markets.json (edit the file manually first)",
     "Enter addresses manually in CLI",
+    "Select by name from helpers/data/markets.json",
   ]);
 
   let marketAddresses: string[] = [];
   let symbols = new Map<string, string>();
 
-  if (marketMode.startsWith("Fetch")) {
-    console.log("\nQuerying comptroller for all markets...");
-    const allMarkets = await fetchAllMarkets(comptroller, isIsolatedPool);
-    const result = await filterListedAndFetchSymbols(comptroller, isIsolatedPool, allMarkets, false);
-    marketAddresses = result.addresses;
-    symbols = result.symbols;
-    console.log(`Found ${marketAddresses.length} listed market(s):`);
-    marketAddresses.forEach(addr => console.log(`  ${symbols.get(addr)} (${addr})`));
-    saveMarketsToFile(marketAddresses);
-  } else if (marketMode.startsWith("Use")) {
-    const loaded = loadMarketsFromFile();
-    if (loaded.length === 0) {
-      console.error(`\nNo addresses found in ${MARKETS_FILE}.`);
-      console.log("Add vToken addresses to the file and run again.");
-      rl.close();
-      process.exit(1);
-    }
-    console.log(`\nLoaded ${loaded.length} address(es) from ${MARKETS_FILE}`);
-    const result = await filterListedAndFetchSymbols(comptroller, isIsolatedPool, loaded, true);
-    marketAddresses = result.addresses;
-    symbols = result.symbols;
-    marketAddresses.forEach(addr => console.log(`  ${symbols.get(addr)} (${addr})`));
-  } else {
+  if (marketMode.startsWith("Enter")) {
     const entered = await pickValidAddresses("Enter market addresses (comma-separated):");
     const result = await filterListedAndFetchSymbols(comptroller, isIsolatedPool, entered, true);
     marketAddresses = result.addresses;
     symbols = result.symbols;
     console.log(`\nUsing ${marketAddresses.length} address(es):`);
     marketAddresses.forEach(addr => console.log(`  ${symbols.get(addr)} (${addr})`));
+  } else {
+    // Always refetch so markets.json stays in sync with the active network.
+    const networkMarkets = await buildMarketsFromChain(comptroller, isIsolatedPool);
+    const entries = Object.entries(networkMarkets);
+    const selected = await pickSymbols(entries);
+    marketAddresses = selected.map(([, addr]) => addr);
+    symbols = new Map(selected.map(([sym, addr]) => [addr, sym]));
+    console.log(`\nSelected ${marketAddresses.length} market(s):`);
+    selected.forEach(([sym, addr]) => console.log(`  ${sym} (${addr})`));
   }
 
   if (marketAddresses.length === 0) {
-    console.error("\nNo listed markets found. Exiting.");
+    console.error(red("\nNo listed markets found. Exiting."));
     rl.close();
     process.exit(1);
   }
@@ -550,62 +566,135 @@ const selectMarkets = async (
 
 // ─── Phase 1: Gather Input ───────────────────────────────────────────────────
 
-export const gatherInput = async (): Promise<EBrakeInput> => {
-  const networkName = network.name;
-  const chainId = network.config.chainId;
-  if (!chainId) {
-    console.error(`No chainId configured for network "${networkName}".`);
-    rl.close();
-    process.exit(1);
-  }
+interface StepContext {
+  comptrollerAddress: string;
+  isIsolatedPool: boolean;
+}
 
-  console.log(`=== Safe EBrake JSON Generator (${networkName}, chain ${chainId}) ===\n`);
+interface PerMarketValueConfig {
+  kind: string; // display label: "CF", "borrow cap", "supply cap"
+  defaultFilename: string; // e.g. "bsctestnet_cf_values.json"
+  fetchCurrent: (market: string) => Promise<string>;
+}
 
-  // 1. Resolve EBrake address
-  const eBrakeAddress = await getEBrakeAddress(networkName);
-
-  // 2. Read IS_ISOLATED_POOL and COMPTROLLER from the contract
-  const eBrake = new ethers.Contract(eBrakeAddress, EBRAKE_ABI, ethers.provider);
-  const [isIsolatedPool, comptrollerAddress]: [boolean, string] = await Promise.all([
-    retry(() => eBrake.IS_ISOLATED_POOL()),
-    retry(() => eBrake.COMPTROLLER()),
+// Collect per-market values (CF or cap) via one of three modes: uniform, per-market CLI, or file.
+const gatherPerMarketValues = async (
+  markets: string[],
+  symbols: Map<string, string>,
+  cfg: PerMarketValueConfig,
+): Promise<Map<string, string>> => {
+  const mode = await pickOne(`Apply ${cfg.kind}:`, [
+    `Single value to ALL selected markets (e.g. 0 to block)`,
+    `Per-market values via CLI prompts`,
+    `Load values from a JSON file`,
   ]);
-  console.log(`  IS_ISOLATED_POOL: ${isIsolatedPool}`);
-  console.log(`  COMPTROLLER:      ${comptrollerAddress}\n`);
 
-  // 3. Operation menu — BSC-only options shown only when !isIsolatedPool
-  const operationChoices: { label: string; value: EBrakeOperation }[] = [
-    { label: "Pause actions on markets (pauseActions)", value: "pause_actions" },
-    { label: "Decrease collateral factor — all pools (decreaseCF)", value: "decrease_cf" },
-    { label: "Decrease borrow caps (setMarketBorrowCaps)", value: "set_borrow_caps" },
-    { label: "Decrease supply caps (setMarketSupplyCaps)", value: "set_supply_caps" },
-  ];
-  if (!isIsolatedPool) {
-    operationChoices.push(
-      { label: "[BSC] Decrease CF — specific pool (decreaseCF with poolId)", value: "decrease_cf_pool" },
-      { label: "[BSC] Pause flash loans (pauseFlashLoan)", value: "pause_flash_loan" },
-      { label: "[BSC] Revoke flash loan access (revokeFlashLoanAccess)", value: "revoke_flash_loan" },
-      { label: "[BSC] Disable pool borrow (disablePoolBorrow)", value: "disable_pool_borrow" },
-    );
+  const result = new Map<string, string>();
+
+  const fetchAllCurrent = async (): Promise<Map<string, string>> => {
+    const entries = await Promise.all(markets.map(async m => [m, await cfg.fetchCurrent(m)] as const));
+    return new Map(entries);
+  };
+
+  if (mode.startsWith("Single")) {
+    const value = await askUint256(`Enter new ${cfg.kind} for all selected markets:`);
+    markets.forEach(m => result.set(m, value));
+  } else if (mode.startsWith("Per-market")) {
+    const current = await fetchAllCurrent();
+    for (const m of markets) {
+      const sym = symbols.get(m) || m;
+      const value = await askUint256(`  ${sym} [current: ${current.get(m)}]:`);
+      result.set(m, value);
+    }
+  } else {
+    const defaultPath = path.resolve(OUTPUT_DIR, cfg.defaultFilename);
+    console.log(`\nEnter path to ${cfg.kind} values file (press enter for default: ${defaultPath})`);
+    const entered = await ask("> ");
+    const filePath = entered.length > 0 ? entered : defaultPath;
+
+    if (!fs.existsSync(filePath)) {
+      console.log(`\n${filePath} not found — generating template with current on-chain ${cfg.kind} values...`);
+      const current = await fetchAllCurrent();
+      const template: Record<string, string> = {};
+      for (const m of markets) {
+        const sym = symbols.get(m) || m;
+        template[sym] = current.get(m) ?? "0";
+      }
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, JSON.stringify(template, null, 2) + "\n");
+      console.log(green(`\nTemplate written to ${filePath}`));
+      console.log(`Edit the values (they currently match on-chain ${cfg.kind}) and re-run.`);
+      rl.close();
+      process.exit(0);
+    }
+
+    let content: unknown;
+    try {
+      content = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    } catch (error) {
+      console.error(red(`Failed to parse ${filePath}: ${(error as Error).message}`));
+      rl.close();
+      process.exit(1);
+    }
+    if (typeof content !== "object" || content === null || Array.isArray(content)) {
+      console.error(red(`${filePath} must contain a JSON object mapping symbol-or-address → value.`));
+      rl.close();
+      process.exit(1);
+    }
+
+    // Accept either symbol keys or address keys. Build lookup from the current selection.
+    const symbolToAddress = new Map<string, string>();
+    symbols.forEach((sym, addr) => symbolToAddress.set(sym, addr));
+    const selectionSet = new Set(markets);
+
+    for (const [key, rawValue] of Object.entries(content as Record<string, unknown>)) {
+      const addr = ethers.utils.isAddress(key) ? key : symbolToAddress.get(key);
+      if (!addr || !selectionSet.has(addr)) {
+        console.log(yellow(`  Ignoring "${key}" — not in current selection`));
+        continue;
+      }
+      try {
+        const bn = ethers.BigNumber.from(rawValue);
+        if (bn.lt(0)) throw new Error("negative");
+        result.set(addr, bn.toString());
+      } catch {
+        console.error(red(`Invalid ${cfg.kind} value for "${key}": ${String(rawValue)}`));
+        rl.close();
+        process.exit(1);
+      }
+    }
+
+    const missing = markets.filter(m => !result.has(m)).map(m => symbols.get(m) || m);
+    if (missing.length > 0) {
+      console.error(red(`\nFile missing entries for selected markets: ${missing.join(", ")}`));
+      console.error(red(`Add entries to ${filePath} and re-run.`));
+      rl.close();
+      process.exit(1);
+    }
+
+    const current = await fetchAllCurrent();
+    console.log("\nWill apply:");
+    for (const m of markets) {
+      const sym = symbols.get(m) || m;
+      console.log(`  ${sym}  new=${result.get(m)}  [current: ${current.get(m)}]`);
+    }
   }
 
-  const operationLabel = await pickOne(
-    "Select operation:",
-    operationChoices.map(c => c.label),
-  );
-  const operation = operationChoices.find(c => c.label === operationLabel)!.value;
+  return result;
+};
 
-  // 4. Operation-specific input gathering
+// Collect the per-operation inputs (markets, actions, CFs, caps, etc.) for a single step.
+const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise<EBrakeStep> => {
+  const { comptrollerAddress, isIsolatedPool } = ctx;
   let marketAddresses: string[] = [];
   let symbols = new Map<string, string>();
   let pauseActions: number[] | undefined;
-  let newCF: string | undefined;
+  let newCFs: Map<string, string> | undefined;
   let poolId: number | undefined;
   let newCaps: Map<string, string> | undefined;
   let revokeAccounts: string[] | undefined;
 
   if (operation === "pause_flash_loan") {
-    // No market selection needed
     const confirmed = await askYesNo("Pause all flash loans on the core pool?");
     if (!confirmed) {
       console.log("Aborted.");
@@ -613,14 +702,12 @@ export const gatherInput = async (): Promise<EBrakeInput> => {
       process.exit(0);
     }
   } else if (operation === "revoke_flash_loan") {
-    // Ask for accounts to revoke
     revokeAccounts = await pickValidAddresses(
       "Enter account address(es) to revoke flash loan access from (comma-separated):",
     );
     console.log(`\nRevoking flash loan access from ${revokeAccounts.length} account(s).`);
   } else {
-    // All other operations need market selection
-    console.log("\n--- Market Selection ---");
+    console.log(cyan("\n--- Market Selection ---"));
     const result = await selectMarkets(comptrollerAddress, isIsolatedPool);
     marketAddresses = result.marketAddresses;
     symbols = result.symbols;
@@ -636,73 +723,122 @@ export const gatherInput = async (): Promise<EBrakeInput> => {
       );
       pauseActions = selected.map(Number);
       if (pauseActions.length === 0) {
-        console.error("No actions selected. Exiting.");
+        console.error(red("No actions selected. Exiting."));
         rl.close();
         process.exit(1);
       }
     } else if (operation === "decrease_cf") {
-      // Fetch and display current CFs
-      console.log("\nQuerying current collateral factors...");
-      await Promise.all(
-        marketAddresses.map(async vToken => {
-          const symbol = symbols.get(vToken) || vToken;
-          const { cf, lt } = await fetchCurrentCF(comptrollerAddress, vToken, isIsolatedPool);
-          console.log(`  ${symbol} (${vToken})`);
-          console.log(`    CF: ${formatMantissa(cf)}`);
-          console.log(`    LT: ${formatMantissa(lt)}`);
-        }),
-      );
-      newCF = await askUint256(
-        "Enter new CF mantissa to apply to all selected markets\n(e.g. 750000000000000000 = 75%, 0 = block new borrows):",
-      );
+      newCFs = await gatherPerMarketValues(marketAddresses, symbols, {
+        kind: "CF",
+        defaultFilename: "cf_values.json",
+        fetchCurrent: async m => {
+          try {
+            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isIsolatedPool);
+            return cf.toString();
+          } catch {
+            return "(not listed)";
+          }
+        },
+      });
     } else if (operation === "decrease_cf_pool") {
       poolId = await askPoolId("Enter pool ID (0 = core pool, >0 = e-mode pool ID):");
-      // Fetch and display current CFs for the specific pool
-      console.log(`\nQuerying current CFs for pool ${poolId}...`);
-      await Promise.all(
-        marketAddresses.map(async vToken => {
-          const symbol = symbols.get(vToken) || vToken;
+      const capturedPoolId = poolId;
+      newCFs = await gatherPerMarketValues(marketAddresses, symbols, {
+        kind: "CF",
+        defaultFilename: `cf_values_pool${capturedPoolId}.json`,
+        fetchCurrent: async m => {
           try {
-            const { cf, lt } = await fetchCurrentCF(comptrollerAddress, vToken, isIsolatedPool, poolId);
-            console.log(`  ${symbol} (${vToken})`);
-            console.log(`    CF (pool ${poolId}): ${formatMantissa(cf)}`);
-            console.log(`    LT (pool ${poolId}): ${formatMantissa(lt)}`);
+            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isIsolatedPool, capturedPoolId);
+            return cf.toString();
           } catch {
-            console.log(`  ${symbol} (${vToken}) — not listed in pool ${poolId}, will revert`);
+            return "(not listed)";
           }
-        }),
-      );
-      newCF = await askUint256("Enter new CF mantissa to apply to all selected markets in this pool:");
+        },
+      });
     } else if (operation === "set_borrow_caps") {
-      // Fetch and display current borrow caps, then ask per market
-      console.log("\nQuerying current borrow caps...");
-      newCaps = new Map<string, string>();
-      for (const vToken of marketAddresses) {
-        const symbol = symbols.get(vToken) || vToken;
-        const { borrowCap } = await fetchCurrentCaps(comptrollerAddress, vToken, isIsolatedPool);
-        console.log(`\n  ${symbol} (${vToken})`);
-        console.log(`    Current borrow cap: ${borrowCap.toString()}`);
-        const cap = await askUint256(`  Enter new borrow cap for ${symbol} (must be < ${borrowCap.toString()}):`);
-        newCaps.set(vToken, cap);
-      }
+      newCaps = await gatherPerMarketValues(marketAddresses, symbols, {
+        kind: "borrow cap",
+        defaultFilename: "borrow_caps.json",
+        fetchCurrent: async m => {
+          const { borrowCap } = await fetchCurrentCaps(comptrollerAddress, m, isIsolatedPool);
+          return borrowCap.toString();
+        },
+      });
     } else if (operation === "set_supply_caps") {
-      // Fetch and display current supply caps, then ask per market
-      console.log("\nQuerying current supply caps...");
-      newCaps = new Map<string, string>();
-      for (const vToken of marketAddresses) {
-        const symbol = symbols.get(vToken) || vToken;
-        const { supplyCap } = await fetchCurrentCaps(comptrollerAddress, vToken, isIsolatedPool);
-        console.log(`\n  ${symbol} (${vToken})`);
-        console.log(`    Current supply cap: ${supplyCap.toString()}`);
-        const cap = await askUint256(`  Enter new supply cap for ${symbol} (must be < ${supplyCap.toString()}):`);
-        newCaps.set(vToken, cap);
-      }
+      newCaps = await gatherPerMarketValues(marketAddresses, symbols, {
+        kind: "supply cap",
+        defaultFilename: "supply_caps.json",
+        fetchCurrent: async m => {
+          const { supplyCap } = await fetchCurrentCaps(comptrollerAddress, m, isIsolatedPool);
+          return supplyCap.toString();
+        },
+      });
     } else if (operation === "disable_pool_borrow") {
       poolId = await askPoolId("Enter pool ID to disable borrowing in (0 = core pool, >0 = e-mode pool ID):");
     }
   }
 
-  const safeAddress = await askSafeAddress(networkName, operation);
+  return { operation, marketAddresses, symbols, pauseActions, newCFs, poolId, newCaps, revokeAccounts };
+};
+
+export const gatherInput = async (): Promise<EBrakeBatchInput> => {
+  const networkName = network.name;
+  const chainId = network.config.chainId;
+  if (!chainId) {
+    console.error(red(`No chainId configured for network "${networkName}".`));
+    rl.close();
+    process.exit(1);
+  }
+
+  console.log(cyan(`=== Safe EBrake JSON Generator (${networkName}, chain ${chainId}) ===\n`));
+
+  // 1. Resolve EBrake address + probe
+  const eBrakeAddress = await getEBrakeAddress(networkName);
+  const eBrake = new ethers.Contract(eBrakeAddress, EBRAKE_ABI, ethers.provider);
+  const [isIsolatedPool, comptrollerAddress]: [boolean, string] = await Promise.all([
+    retry(() => eBrake.IS_ISOLATED_POOL()),
+    retry(() => eBrake.COMPTROLLER()),
+  ]);
+  console.log(`  IS_ISOLATED_POOL: ${isIsolatedPool}`);
+  console.log(`  COMPTROLLER:      ${comptrollerAddress}\n`);
+
+  // 2. Operation menu — BSC-only options shown only when !isIsolatedPool
+  const operationChoices: { label: string; value: EBrakeOperation }[] = [
+    { label: "Pause actions on markets (pauseActions)", value: "pause_actions" },
+    { label: "Decrease collateral factor — all pools (decreaseCF)", value: "decrease_cf" },
+    { label: "Decrease borrow caps (setMarketBorrowCaps)", value: "set_borrow_caps" },
+    { label: "Decrease supply caps (setMarketSupplyCaps)", value: "set_supply_caps" },
+  ];
+  if (!isIsolatedPool) {
+    operationChoices.push(
+      { label: "[BSC] Decrease CF — specific pool (decreaseCF with poolId)", value: "decrease_cf_pool" },
+      { label: "[BSC] Pause flash loans (pauseFlashLoan)", value: "pause_flash_loan" },
+      { label: "[BSC] Revoke flash loan access (revokeFlashLoanAccess)", value: "revoke_flash_loan" },
+      { label: "[BSC] Disable pool borrow (disablePoolBorrow)", value: "disable_pool_borrow" },
+    );
+  }
+
+  // 3. Upfront multi-select: pick ALL operations to batch.
+  //    Order-preserving + duplicates allowed (same op twice with different markets is valid).
+  const choiceOptions = operationChoices.map((c, i) => ({ name: c.label, value: String(i + 1) }));
+  const selectedIndices = await pickMultiple(
+    "Select operations (comma-separated, e.g. 1,2,5):",
+    choiceOptions,
+    { allowAll: false, preserveOrder: true },
+  );
+  const selectedOps = selectedIndices.map(i => operationChoices[parseInt(i, 10) - 1].value);
+
+  // 4. Iterate selected operations, collecting per-step inputs.
+  const ctx: StepContext = { comptrollerAddress, isIsolatedPool };
+  const steps: EBrakeStep[] = [];
+  for (let i = 0; i < selectedOps.length; i++) {
+    const op = selectedOps[i];
+    console.log(cyan(`\n─── Step ${i + 1}/${selectedOps.length}: ${op} ───`));
+    steps.push(await gatherStep(op, ctx));
+  }
+
+  // 6. Ask for the Safe (once) using the first step's role hint.
+  const safeAddress = await askSafeAddress();
   const blockNumber = await ethers.provider.getBlockNumber();
 
   return {
@@ -711,14 +847,7 @@ export const gatherInput = async (): Promise<EBrakeInput> => {
     isIsolatedPool,
     network: networkName,
     chainId,
-    operation,
-    marketAddresses,
-    symbols,
-    pauseActions,
-    newCF,
-    poolId,
-    newCaps,
-    revokeAccounts,
+    steps,
     safeAddress,
     blockNumber,
   };
@@ -726,8 +855,8 @@ export const gatherInput = async (): Promise<EBrakeInput> => {
 
 // ─── Phase 2: Generate Commands ──────────────────────────────────────────────
 
-export const generateCommands = (input: EBrakeInput): EBrakeCommand[] => {
-  const { operation, marketAddresses, symbols, pauseActions, newCF, poolId, newCaps, revokeAccounts } = input;
+const commandsForStep = (step: EBrakeStep): EBrakeCommand[] => {
+  const { operation, marketAddresses, symbols, pauseActions, newCFs, poolId, newCaps, revokeAccounts } = step;
   const commands: EBrakeCommand[] = [];
 
   switch (operation) {
@@ -745,26 +874,26 @@ export const generateCommands = (input: EBrakeInput): EBrakeCommand[] => {
     }
 
     case "decrease_cf": {
-      if (!newCF) break;
-      for (const vToken of marketAddresses) {
+      if (!newCFs || newCFs.size === 0) break;
+      for (const [vToken, cf] of newCFs) {
         const symbol = symbols.get(vToken) || vToken;
-        console.log(`  ${symbol} → decreaseCF(${vToken}, ${newCF})`);
+        console.log(`  ${symbol} → decreaseCF(${vToken}, ${cf})`);
         commands.push({
           signature: "decreaseCF(address,uint256)",
-          params: [vToken, newCF],
+          params: [vToken, cf],
         });
       }
       break;
     }
 
     case "decrease_cf_pool": {
-      if (!newCF || poolId === undefined) break;
-      for (const vToken of marketAddresses) {
+      if (!newCFs || newCFs.size === 0 || poolId === undefined) break;
+      for (const [vToken, cf] of newCFs) {
         const symbol = symbols.get(vToken) || vToken;
-        console.log(`  ${symbol} → decreaseCF(${vToken}, poolId=${poolId}, ${newCF})`);
+        console.log(`  ${symbol} → decreaseCF(${vToken}, poolId=${poolId}, ${cf})`);
         commands.push({
           signature: "decreaseCF(address,uint96,uint256)",
-          params: [vToken, poolId, newCF],
+          params: [vToken, poolId, cf],
         });
       }
       break;
@@ -829,44 +958,52 @@ export const generateCommands = (input: EBrakeInput): EBrakeCommand[] => {
   return commands;
 };
 
+export const generateCommands = (batch: EBrakeBatchInput): EBrakeCommand[] =>
+  batch.steps.flatMap((step, i) => {
+    console.log(`\n[Step ${i + 1}/${batch.steps.length}] ${step.operation}`);
+    return commandsForStep(step);
+  });
+
 // ─── Phase 3: Export JSON ─────────────────────────────────────────────────────
 
 export const exportJson = async (
   commands: EBrakeCommand[],
-  input: EBrakeInput,
+  batch: EBrakeBatchInput,
   safeAddress: string,
-  suffix?: string,
 ): Promise<ExportResult | null> => {
   if (commands.length === 0) {
-    console.log(`No commands generated${suffix ? ` for ${suffix}` : ""}. Skipping.`);
+    console.log("No commands generated. Skipping.");
     return null;
   }
 
-  const label = suffix || "";
-  const txBuilderFile = path.resolve(OUTPUT_DIR, `safeEBrakeTxBuilder${label}.json`);
-  const metadataFile = path.resolve(OUTPUT_DIR, `safeEBrakeTxMetadata${label}.json`);
+  const txBuilderFile = path.resolve(OUTPUT_DIR, `safeEBrakeTxBuilder.json`);
+  const metadataFile = path.resolve(OUTPUT_DIR, `safeEBrakeTxMetadata.json`);
 
   // Direct calldata encoding — no governance VIP wrapper
   const iface = new ethers.utils.Interface(EBRAKE_ABI);
   const txData = commands.map(cmd => ({
-    to: input.eBrakeAddress,
+    to: batch.eBrakeAddress,
     value: "0",
     data: iface.encodeFunctionData(cmd.signature, cmd.params),
   }));
 
-  const outputJson = buildSafeBatch(safeAddress, txData, input.chainId, input.blockNumber);
+  const outputJson = buildSafeBatch(safeAddress, txData, batch.chainId, batch.blockNumber);
 
+  // Merge symbols across all steps (a given address may appear in multiple steps;
+  // last write wins, but they should be identical since symbols come from chain).
   const symbolsRecord: Record<string, string> = {};
-  input.symbols.forEach((sym, addr) => {
-    symbolsRecord[addr] = sym;
-  });
+  for (const step of batch.steps) {
+    step.symbols.forEach((sym, addr) => {
+      symbolsRecord[addr] = sym;
+    });
+  }
 
   const metadata: EBrakeMetadata = {
-    eBrakeAddress: input.eBrakeAddress,
-    comptrollerAddress: input.comptrollerAddress,
-    network: input.network,
-    operation: input.operation,
-    blockNumber: input.blockNumber,
+    eBrakeAddress: batch.eBrakeAddress,
+    comptrollerAddress: batch.comptrollerAddress,
+    network: batch.network,
+    operations: batch.steps.map(s => s.operation),
+    blockNumber: batch.blockNumber,
     createdAt: new Date().toISOString(),
     symbols: symbolsRecord,
   };
@@ -875,46 +1012,49 @@ export const exportJson = async (
   fs.writeFileSync(txBuilderFile, JSON.stringify(outputJson, null, 2));
   fs.writeFileSync(metadataFile, JSON.stringify(metadata, null, 2));
 
-  return { label, txBuilderFile, metadataFile, txCount: commands.length, safeAddress };
+  return { txBuilderFile, metadataFile, txCount: commands.length, safeAddress };
 };
 
 // ─── Phase 4: Orchestration ──────────────────────────────────────────────────
 
-export const orchestrate = async (input: EBrakeInput): Promise<ExportResult[]> => {
-  const results: ExportResult[] = [];
+const printBatchSummary = (batch: EBrakeBatchInput, txCount: number) => {
+  console.log(cyan("\n─── Batch summary ───"));
+  batch.steps.forEach((step, i) => {
+    console.log(`  [${i + 1}/${batch.steps.length}] ${step.operation}`);
+  });
+  console.log(`  Total transactions: ${txCount}`);
+  console.log(`  Network: ${batch.network} (chain ${batch.chainId})`);
+  console.log(`  EBrake:  ${batch.eBrakeAddress}`);
+  console.log(`  Safe:    ${batch.safeAddress}`);
+};
 
-  console.log("\n--- Generating commands ---");
-  const commands = generateCommands(input);
-
-  const result = await exportJson(commands, input, input.safeAddress);
-  if (result) results.push(result);
-
-  return results;
+export const orchestrate = async (batch: EBrakeBatchInput): Promise<ExportResult | null> => {
+  console.log(cyan("\n--- Generating commands ---"));
+  const commands = generateCommands(batch);
+  printBatchSummary(batch, commands.length);
+  return exportJson(commands, batch, batch.safeAddress);
 };
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-const printResults = (results: ExportResult[], networkName: string) => {
-  console.log("\n=== Output ===");
-  for (const r of results) {
-    console.log(`\n  ${r.label || "(default)"}`);
-    console.log(`    Safe TX Builder JSON: ${r.txBuilderFile}`);
-    console.log(`    Metadata:             ${r.metadataFile}`);
-    console.log(`    Transactions:         ${r.txCount}`);
-    console.log(`    Safe address:         ${r.safeAddress}`);
-    console.log(`    Simulate:             npx hardhat test scripts/simulateSafeEBrakeTx.ts --fork ${networkName}`);
-  }
+const printResult = (r: ExportResult, networkName: string) => {
+  console.log(cyan("\n=== Output ==="));
+  console.log(`  Safe TX Builder JSON: ${r.txBuilderFile}`);
+  console.log(`  Metadata:             ${r.metadataFile}`);
+  console.log(`  Transactions:         ${r.txCount}`);
+  console.log(`  Safe address:         ${r.safeAddress}`);
+  console.log(`  Simulate:             ${bold(`npx hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts --fork ${networkName}`)}`);
 };
 
 export const main = async () => {
   const input = await gatherInput();
 
-  console.log("\n--- Processing ---");
+  console.log(cyan("\n--- Processing ---"));
 
-  const results = await orchestrate(input);
+  const result = await orchestrate(input);
 
-  if (results.length > 0) {
-    printResults(results, input.network);
+  if (result) {
+    printResult(result, input.network);
   }
 
   rl.close();

@@ -7,7 +7,7 @@
  *
  * USAGE
  * ─────
- *   npx hardhat test scripts/simulateSafeEBrakeTx.ts
+ *   npx hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts --fork <network>
  *
  * PREREQUISITES
  * ─────────────
@@ -58,8 +58,9 @@ const COMPTROLLER_READ_ABI = [
 
 // ─── Load JSON files ──────────────────────────────────────────────────────────
 
-const TX_BUILDER_FILE = path.resolve(__dirname, "../helpers/data/safeEBrakeTxBuilder.json");
-const METADATA_FILE = path.resolve(__dirname, "../helpers/data/safeEBrakeTxMetadata.json");
+// __dirname is tests/hardhat/Fork/ — go up 3 levels to reach repo root.
+const TX_BUILDER_FILE = path.resolve(__dirname, "../../../helpers/data/safeEBrakeTxBuilder.json");
+const METADATA_FILE = path.resolve(__dirname, "../../../helpers/data/safeEBrakeTxMetadata.json");
 
 interface TxBuilderJson {
   chainId: string;
@@ -72,7 +73,8 @@ interface EBrakeMetadata {
   eBrakeAddress: string;
   comptrollerAddress: string;
   network: string;
-  operation: string;
+  operations?: string[]; // new multi-op shape
+  operation?: string; // legacy single-op shape
   blockNumber: number;
   symbols: Record<string, string>;
 }
@@ -96,7 +98,9 @@ const decoded = txBuilder.transactions.map(tx => ({
 
 // ─── Test suite ──────────────────────────────────────────────────────────────
 
-describe(`EBrake TX Simulation — ${metadata.operation} on ${metadata.network} (block ${metadata.blockNumber})`, () => {
+const operationsLabel = (metadata.operations ?? (metadata.operation ? [metadata.operation] : [])).join(", ") || "(no ops)";
+
+describe(`EBrake TX Simulation — [${operationsLabel}] on ${metadata.network} (block ${metadata.blockNumber})`, () => {
   let eBrakeContract: Contract;
   let comptroller: Contract;
   let isIsolatedPool: boolean;
@@ -152,7 +156,7 @@ describe(`EBrake TX Simulation — ${metadata.operation} on ${metadata.network} 
 
     console.log(`\nNetwork:      ${metadata.network}`);
     console.log(`Block:        ${metadata.blockNumber}`);
-    console.log(`Operation:    ${metadata.operation}`);
+    console.log(`Operations:   ${operationsLabel}`);
     console.log(`EBrake:       ${metadata.eBrakeAddress}`);
     console.log(`Comptroller:  ${metadata.comptrollerAddress}`);
     console.log(`Safe:         ${txBuilder.meta.createdFromSafeAddress}`);
