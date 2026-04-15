@@ -98,7 +98,8 @@ const decoded = txBuilder.transactions.map(tx => ({
 
 // ─── Test suite ──────────────────────────────────────────────────────────────
 
-const operationsLabel = (metadata.operations ?? (metadata.operation ? [metadata.operation] : [])).join(", ") || "(no ops)";
+const operationsLabel =
+  (metadata.operations ?? (metadata.operation ? [metadata.operation] : [])).join(", ") || "(no ops)";
 
 describe(`EBrake TX Simulation — [${operationsLabel}] on ${metadata.network} (block ${metadata.blockNumber})`, () => {
   let eBrakeContract: Contract;

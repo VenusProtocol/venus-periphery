@@ -821,11 +821,10 @@ export const gatherInput = async (): Promise<EBrakeBatchInput> => {
   // 3. Upfront multi-select: pick ALL operations to batch.
   //    Order-preserving + duplicates allowed (same op twice with different markets is valid).
   const choiceOptions = operationChoices.map((c, i) => ({ name: c.label, value: String(i + 1) }));
-  const selectedIndices = await pickMultiple(
-    "Select operations (comma-separated, e.g. 1,2,5):",
-    choiceOptions,
-    { allowAll: false, preserveOrder: true },
-  );
+  const selectedIndices = await pickMultiple("Select operations (comma-separated, e.g. 1,2,5):", choiceOptions, {
+    allowAll: false,
+    preserveOrder: true,
+  });
   const selectedOps = selectedIndices.map(i => operationChoices[parseInt(i, 10) - 1].value);
 
   // 4. Iterate selected operations, collecting per-step inputs.
@@ -1043,7 +1042,9 @@ const printResult = (r: ExportResult, networkName: string) => {
   console.log(`  Metadata:             ${r.metadataFile}`);
   console.log(`  Transactions:         ${r.txCount}`);
   console.log(`  Safe address:         ${r.safeAddress}`);
-  console.log(`  Simulate:             ${bold(`npx hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts --fork ${networkName}`)}`);
+  console.log(
+    `  Simulate:             ${bold(`npx hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts --fork ${networkName}`)}`,
+  );
 };
 
 export const main = async () => {

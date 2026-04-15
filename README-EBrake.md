@@ -19,6 +19,7 @@ npx hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts --fork bsctestnet
 ```
 
 What you should see:
+
 1. The generator walks you through picking operations → markets → values → Safe address, then writes two JSON files under `helpers/data/`.
 2. The simulator forks bsctestnet at the exact block the generator used, replays the batch while impersonating your Safe, and asserts every expected state change.
 
@@ -28,19 +29,19 @@ If both commands finish green, you understand the flow. Read the rest below when
 
 ## 1. What is EBrake?
 
-`EBrake` is a Venus contract that lets a designated Gnosis Safe trigger emergency actions on a comptroller with a single signature — no timelock, no governance proposal. Intended use: stop a developing incident *now*, then follow up with a normal governance flow to restore or finalize state.
+`EBrake` is a Venus contract that lets a designated Gnosis Safe trigger emergency actions on a comptroller with a single signature — no timelock, no governance proposal. Intended use: stop a developing incident _now_, then follow up with a normal governance flow to restore or finalize state.
 
 Supported operations:
 
-| Category | Operation | Target function |
-|---|---|---|
-| Pause markets | Pause one or more actions per market | `pauseActions(address[], uint8[])` |
-| Collateral factor | Reduce CF across all pools | `decreaseCF(address, uint256)` |
-| Caps | Reduce borrow/supply caps | `setMarketBorrowCaps` / `setMarketSupplyCaps` |
-| BSC diamond only | Decrease CF per pool | `decreaseCF(address, uint96, uint256)` |
-| BSC diamond only | Pause flash loans | `pauseFlashLoan()` |
-| BSC diamond only | Revoke flash-loan access | `revokeFlashLoanAccess(address)` |
-| BSC diamond only | Disable pool borrow | `disablePoolBorrow(uint96, address)` |
+| Category          | Operation                            | Target function                               |
+| ----------------- | ------------------------------------ | --------------------------------------------- |
+| Pause markets     | Pause one or more actions per market | `pauseActions(address[], uint8[])`            |
+| Collateral factor | Reduce CF across all pools           | `decreaseCF(address, uint256)`                |
+| Caps              | Reduce borrow/supply caps            | `setMarketBorrowCaps` / `setMarketSupplyCaps` |
+| BSC diamond only  | Decrease CF per pool                 | `decreaseCF(address, uint96, uint256)`        |
+| BSC diamond only  | Pause flash loans                    | `pauseFlashLoan()`                            |
+| BSC diamond only  | Revoke flash-loan access             | `revokeFlashLoanAccess(address)`              |
+| BSC diamond only  | Disable pool borrow                  | `disablePoolBorrow(uint96, address)`          |
 
 EBrake reverts if the caller doesn't have the right permission in the AccessControlManager (ACM). The simulator catches this before you ever sign.
 
@@ -49,11 +50,13 @@ EBrake reverts if the caller doesn't have the right permission in the AccessCont
 ## 2. When to use this
 
 Use this flow for:
+
 - An active exploit / oracle manipulation in progress
 - Market instability requiring immediate caps/CF reduction before a VIP can pass
 - Any situation where the timelock delay is unacceptable
 
 Do **not** use this flow for:
+
 - Routine parameter tuning → use a governance VIP
 - Actions that `EBrake` doesn't expose (e.g. liquidation pause, market listing) → governance
 - Operations that can be safely delayed by the timelock → governance
@@ -61,6 +64,7 @@ Do **not** use this flow for:
 ### Incident checklist
 
 Before running the generator:
+
 1. Confirm the incident severity warrants skipping governance.
 2. Identify the EBrake-holder Safe address for the affected network (see §8).
 3. Make sure your `ARCHIVE_NODE_<network>` env var is set (§3).
@@ -197,17 +201,18 @@ Apply <CF|borrow cap|supply cap>:
   3. Load values from a JSON file
 ```
 
-| Option | When to use |
-|---|---|
-| Uniform | "Zero out everything" emergency action — one prompt, done. |
-| Per-market CLI | A handful of markets with distinct values — inline prompts show current on-chain values. |
-| File | Many markets / pre-prepared runbook. The script creates a template at `helpers/data/<kind>.json` pre-filled with current on-chain values on first run, then exits so you can edit and re-run. |
+| Option         | When to use                                                                                                                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Uniform        | "Zero out everything" emergency action — one prompt, done.                                                                                                                                    |
+| Per-market CLI | A handful of markets with distinct values — inline prompts show current on-chain values.                                                                                                      |
+| File           | Many markets / pre-prepared runbook. The script creates a template at `helpers/data/<kind>.json` pre-filled with current on-chain values on first run, then exits so you can edit and re-run. |
 
 File format (accepts symbol or address keys):
+
 ```json
 {
-  "vBNB":  "700000000000000000",
-  "vETH":  "650000000000000000",
+  "vBNB": "700000000000000000",
+  "vETH": "650000000000000000",
   "0x...": "0"
 }
 ```
@@ -294,16 +299,16 @@ If anything looks off, **do not sign**.
 
 ## 9. Operation cheatsheet
 
-| Operation | Markets needed? | Extra inputs | Notes |
-|---|---|---|---|
-| `pause_actions` | Yes | Which actions (MINT/REDEEM/BORROW/TRANSFER) | Fully reversible by governance |
-| `decrease_cf` | Yes | New CF mantissa (uint256, scaled 1e18) | Must be strictly less than current CF; EBrake reverts otherwise |
-| `set_borrow_caps` | Yes | New cap per market | Must be strictly less than current cap |
-| `set_supply_caps` | Yes | New cap per market | Must be strictly less than current cap |
-| `decrease_cf_pool` *(BSC)* | Yes | Pool ID + new CF | Pool 0 = core; positive IDs = e-mode pools |
-| `pause_flash_loan` *(BSC)* | No | — | Global flash-loan kill-switch |
-| `revoke_flash_loan` *(BSC)* | No | Account(s) to revoke | Can revoke multiple in one step |
-| `disable_pool_borrow` *(BSC)* | Yes | Pool ID | Disables borrow on a specific pool |
+| Operation                     | Markets needed? | Extra inputs                                | Notes                                                           |
+| ----------------------------- | --------------- | ------------------------------------------- | --------------------------------------------------------------- |
+| `pause_actions`               | Yes             | Which actions (MINT/REDEEM/BORROW/TRANSFER) | Fully reversible by governance                                  |
+| `decrease_cf`                 | Yes             | New CF mantissa (uint256, scaled 1e18)      | Must be strictly less than current CF; EBrake reverts otherwise |
+| `set_borrow_caps`             | Yes             | New cap per market                          | Must be strictly less than current cap                          |
+| `set_supply_caps`             | Yes             | New cap per market                          | Must be strictly less than current cap                          |
+| `decrease_cf_pool` _(BSC)_    | Yes             | Pool ID + new CF                            | Pool 0 = core; positive IDs = e-mode pools                      |
+| `pause_flash_loan` _(BSC)_    | No              | —                                           | Global flash-loan kill-switch                                   |
+| `revoke_flash_loan` _(BSC)_   | No              | Account(s) to revoke                        | Can revoke multiple in one step                                 |
+| `disable_pool_borrow` _(BSC)_ | Yes             | Pool ID                                     | Disables borrow on a specific pool                              |
 
 EBrake actions apply to permissions — they **cannot raise** caps or CF, only lower them.
 
@@ -312,17 +317,22 @@ EBrake actions apply to permissions — they **cannot raise** caps or CF, only l
 ## 10. Troubleshooting
 
 ### `ARCHIVE_NODE_<network> environment variable is not set`
+
 Set the appropriate env var in `.env` and re-run. The network name must match the one used in `hardhat.config.ts`.
 
 ### `ACM check failed — Safe X is not authorized to call: ...`
+
 Your Safe doesn't have the required ACM permission for one or more functions in the batch. Either:
+
 - Pick a different Safe that holds the permission, or
 - File a governance VIP to grant the permission first (much slower — only viable for non-urgent work).
 
 Re-run the simulator after fixing; it must go green before you sign.
 
 ### `No known hardfork for execution on historical block N in chain with id X`
+
 Hardhat doesn't know the chain's hardfork timeline. Add the chain to the `networks.hardhat.chains` map in `hardhat.config.ts`:
+
 ```ts
 chains: {
   <chainId>: { hardforkHistory: { cancun: 0 } },
@@ -331,14 +341,18 @@ chains: {
 ```
 
 ### `Markets file empty / missing entries for selected markets`
+
 Occurs in file-mode for CF / caps inputs. Either:
+
 - Delete the file and re-run (auto-regenerates a template with current on-chain values), or
 - Manually add the missing `{symbol|address: value}` entries and re-run.
 
 ### `Symbol collision(s) detected`
+
 Two vTokens on the same comptroller return identical `symbol()`. Rare; indicates a mis-configured market. Investigate manually — the generator refuses to build a markets file with ambiguous keys.
 
 ### Simulation passes, but on-chain execution reverts
+
 Most likely: the chain state moved between generation and execution (e.g. someone else already paused one of the markets, so `pauseActions` is idempotent but `decreaseCF` reverts because `newCF >= currentCF` now). Regenerate the batch against the latest block and re-simulate.
 
 ---
@@ -347,22 +361,22 @@ Most likely: the chain state moved between generation and execution (e.g. someon
 
 EBrake deployment status is maintained in `deployments/<network>/EBrake.json`. Quick reference:
 
-| Network | Chain ID | Deployed | Pool type |
-|---|---|---|---|
-| bscmainnet | 56 | ✅ | Core diamond (core + e-mode pools + IL pools) |
-| bsctestnet | 97 | ✅ | Core diamond |
-| ethereum | 1 | ✅ | Isolated Lending |
-| sepolia | 11155111 | ✅ | Isolated Lending |
-| arbitrumone | 42161 | ✅ | Isolated Lending |
-| arbitrumsepolia | 421614 | ✅ | Isolated Lending |
-| opmainnet | 10 | ✅ | Isolated Lending |
-| opsepolia | 11155420 | ✅ | Isolated Lending |
-| basemainnet | 8453 | ✅ | Isolated Lending |
-| basesepolia | 84532 | ✅ | Isolated Lending |
-| unichainmainnet | 130 | ✅ | Isolated Lending |
-| unichainsepolia | 1301 | ✅ | Isolated Lending |
-| opbnbmainnet | 204 | ✅ | Isolated Lending |
-| opbnbtestnet | 5611 | ✅ | Isolated Lending |
+| Network         | Chain ID | Deployed | Pool type                                     |
+| --------------- | -------- | -------- | --------------------------------------------- |
+| bscmainnet      | 56       | ✅       | Core diamond (core + e-mode pools + IL pools) |
+| bsctestnet      | 97       | ✅       | Core diamond                                  |
+| ethereum        | 1        | ✅       | Isolated Lending                              |
+| sepolia         | 11155111 | ✅       | Isolated Lending                              |
+| arbitrumone     | 42161    | ✅       | Isolated Lending                              |
+| arbitrumsepolia | 421614   | ✅       | Isolated Lending                              |
+| opmainnet       | 10       | ✅       | Isolated Lending                              |
+| opsepolia       | 11155420 | ✅       | Isolated Lending                              |
+| basemainnet     | 8453     | ✅       | Isolated Lending                              |
+| basesepolia     | 84532    | ✅       | Isolated Lending                              |
+| unichainmainnet | 130      | ✅       | Isolated Lending                              |
+| unichainsepolia | 1301     | ✅       | Isolated Lending                              |
+| opbnbmainnet    | 204      | ✅       | Isolated Lending                              |
+| opbnbtestnet    | 5611     | ✅       | Isolated Lending                              |
 
 Pool-specific operations (`decrease_cf_pool`, `pause_flash_loan`, `revoke_flash_loan`, `disable_pool_borrow`) are only shown in the generator when `IS_ISOLATED_POOL === false` (i.e. BSC core diamond).
 
@@ -372,12 +386,12 @@ Pool-specific operations (`decrease_cf_pool`, `pause_flash_loan`, `revoke_flash_
 
 All under `helpers/data/`, gitignored, overwritten per run:
 
-| File | Purpose |
-|---|---|
-| `safeEBrakeTxBuilder.json` | Gnosis Safe TX Builder import payload (upload this). |
-| `safeEBrakeTxMetadata.json` | Audit trail: EBrake address, network, block, symbols, operations. Simulator reads this. |
-| `markets.json` | `{symbol: address}` cache, refreshed on every file-mode market-picker run. |
-| `cf_values.json` / `cf_values_pool<id>.json` / `borrow_caps.json` / `supply_caps.json` | File-mode value input templates for CF / caps steps. |
+| File                                                                                   | Purpose                                                                                 |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `safeEBrakeTxBuilder.json`                                                             | Gnosis Safe TX Builder import payload (upload this).                                    |
+| `safeEBrakeTxMetadata.json`                                                            | Audit trail: EBrake address, network, block, symbols, operations. Simulator reads this. |
+| `markets.json`                                                                         | `{symbol: address}` cache, refreshed on every file-mode market-picker run.              |
+| `cf_values.json` / `cf_values_pool<id>.json` / `borrow_caps.json` / `supply_caps.json` | File-mode value input templates for CF / caps steps.                                    |
 
 Templates are auto-generated (pre-filled with current on-chain values) on first file-mode run; subsequent runs read them.
 
