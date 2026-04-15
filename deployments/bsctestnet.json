@@ -798,13 +798,13 @@
       ]
     },
     "DeviationSentinel_Implementation": {
-      "address": "0x4f84B6Bbd8f8cD4702Ec79A41715dAcC4Ce8188c",
+      "address": "0xBC7249c0ABb89a374CD2AA2bEEd0820E2E189e03",
       "abi": [
         {
           "inputs": [
             {
-              "internalType": "contract ICorePoolComptroller",
-              "name": "corePoolComptroller_",
+              "internalType": "contract IEBrake",
+              "name": "eBrake_",
               "type": "address"
             },
             {
@@ -820,17 +820,6 @@
           ],
           "stateMutability": "nonpayable",
           "type": "constructor"
-        },
-        {
-          "inputs": [
-            {
-              "internalType": "uint256",
-              "name": "errorCode",
-              "type": "uint256"
-            }
-          ],
-          "name": "ComptrollerError",
-          "type": "error"
         },
         {
           "inputs": [],
@@ -900,75 +889,6 @@
           "anonymous": false,
           "inputs": [
             {
-              "indexed": true,
-              "internalType": "address",
-              "name": "market",
-              "type": "address"
-            }
-          ],
-          "name": "BorrowUnpaused",
-          "type": "event"
-        },
-        {
-          "anonymous": false,
-          "inputs": [
-            {
-              "indexed": true,
-              "internalType": "address",
-              "name": "market",
-              "type": "address"
-            },
-            {
-              "indexed": true,
-              "internalType": "uint96",
-              "name": "poolId",
-              "type": "uint96"
-            },
-            {
-              "indexed": false,
-              "internalType": "uint256",
-              "name": "oldCF",
-              "type": "uint256"
-            },
-            {
-              "indexed": false,
-              "internalType": "uint256",
-              "name": "newCF",
-              "type": "uint256"
-            }
-          ],
-          "name": "CollateralFactorUpdated",
-          "type": "event"
-        },
-        {
-          "anonymous": false,
-          "inputs": [
-            {
-              "indexed": true,
-              "internalType": "address",
-              "name": "market",
-              "type": "address"
-            },
-            {
-              "indexed": false,
-              "internalType": "uint256",
-              "name": "oldCF",
-              "type": "uint256"
-            },
-            {
-              "indexed": false,
-              "internalType": "uint256",
-              "name": "newCF",
-              "type": "uint256"
-            }
-          ],
-          "name": "CollateralFactorUpdated",
-          "type": "event"
-        },
-        {
-          "anonymous": false,
-          "inputs": [
-            {
               "indexed": false,
               "internalType": "uint8",
               "name": "version",
@@ -976,19 +896,6 @@
             }
           ],
           "name": "Initialized",
-          "type": "event"
-        },
-        {
-          "anonymous": false,
-          "inputs": [
-            {
-              "indexed": true,
-              "internalType": "address",
-              "name": "market",
-              "type": "address"
-            }
-          ],
-          "name": "MarketStateReset",
           "type": "event"
         },
         {
@@ -1067,19 +974,6 @@
             {
               "indexed": true,
               "internalType": "address",
-              "name": "market",
-              "type": "address"
-            }
-          ],
-          "name": "SupplyUnpaused",
-          "type": "event"
-        },
-        {
-          "anonymous": false,
-          "inputs": [
-            {
-              "indexed": true,
-              "internalType": "address",
               "name": "token",
               "type": "address"
             },
@@ -1145,10 +1039,10 @@
         },
         {
           "inputs": [],
-          "name": "CORE_POOL_COMPTROLLER",
+          "name": "EBRAKE",
           "outputs": [
             {
-              "internalType": "contract ICorePoolComptroller",
+              "internalType": "contract IEBrake",
               "name": "",
               "type": "address"
             }
@@ -1276,30 +1170,6 @@
           "type": "function"
         },
         {
-          "inputs": [
-            {
-              "internalType": "address",
-              "name": "",
-              "type": "address"
-            }
-          ],
-          "name": "marketStates",
-          "outputs": [
-            {
-              "internalType": "bool",
-              "name": "borrowPaused",
-              "type": "bool"
-            },
-            {
-              "internalType": "bool",
-              "name": "cfModifiedAndSupplyPaused",
-              "type": "bool"
-            }
-          ],
-          "stateMutability": "view",
-          "type": "function"
-        },
-        {
           "inputs": [],
           "name": "owner",
           "outputs": [
@@ -1328,19 +1198,6 @@
         {
           "inputs": [],
           "name": "renounceOwnership",
-          "outputs": [],
-          "stateMutability": "nonpayable",
-          "type": "function"
-        },
-        {
-          "inputs": [
-            {
-              "internalType": "contract IVToken",
-              "name": "market",
-              "type": "address"
-            }
-          ],
-          "name": "resetMarketState",
           "outputs": [],
           "stateMutability": "nonpayable",
           "type": "function"
@@ -1484,6 +1341,1629 @@
     },
     "DeviationSentinel_Proxy": {
       "address": "0x9245d72712548707809D66848e63B8E2B169F3c1",
+      "abi": [
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "_logic",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "admin_",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes",
+              "name": "_data",
+              "type": "bytes"
+            }
+          ],
+          "stateMutability": "payable",
+          "type": "constructor"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "address",
+              "name": "previousAdmin",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address",
+              "name": "newAdmin",
+              "type": "address"
+            }
+          ],
+          "name": "AdminChanged",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "beacon",
+              "type": "address"
+            }
+          ],
+          "name": "BeaconUpgraded",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "implementation",
+              "type": "address"
+            }
+          ],
+          "name": "Upgraded",
+          "type": "event"
+        },
+        {
+          "stateMutability": "payable",
+          "type": "fallback"
+        },
+        {
+          "inputs": [],
+          "name": "admin",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "admin_",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "implementation",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "implementation_",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newImplementation",
+              "type": "address"
+            }
+          ],
+          "name": "upgradeTo",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newImplementation",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes",
+              "name": "data",
+              "type": "bytes"
+            }
+          ],
+          "name": "upgradeToAndCall",
+          "outputs": [],
+          "stateMutability": "payable",
+          "type": "function"
+        },
+        {
+          "stateMutability": "payable",
+          "type": "receive"
+        }
+      ]
+    },
+    "EBrake": {
+      "address": "0x957c09e3Ac3d9e689244DC74307c94111FBa8B42",
+      "abi": [
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "address",
+              "name": "previousAdmin",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address",
+              "name": "newAdmin",
+              "type": "address"
+            }
+          ],
+          "name": "AdminChanged",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "beacon",
+              "type": "address"
+            }
+          ],
+          "name": "BeaconUpgraded",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "implementation",
+              "type": "address"
+            }
+          ],
+          "name": "Upgraded",
+          "type": "event"
+        },
+        {
+          "stateMutability": "payable",
+          "type": "fallback"
+        },
+        {
+          "inputs": [],
+          "name": "admin",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "admin_",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "implementation",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "implementation_",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newImplementation",
+              "type": "address"
+            }
+          ],
+          "name": "upgradeTo",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newImplementation",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes",
+              "name": "data",
+              "type": "bytes"
+            }
+          ],
+          "name": "upgradeToAndCall",
+          "outputs": [],
+          "stateMutability": "payable",
+          "type": "function"
+        },
+        {
+          "stateMutability": "payable",
+          "type": "receive"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint256",
+              "name": "expected",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "actual",
+              "type": "uint256"
+            }
+          ],
+          "name": "ArrayLengthMismatch",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "currentCap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "requestedCap",
+              "type": "uint256"
+            }
+          ],
+          "name": "CapExceedsCurrent",
+          "type": "error"
+        },
+        {
+          "inputs": [],
+          "name": "EmptyArray",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "enum IComptroller.Action",
+              "name": "action",
+              "type": "uint8"
+            }
+          ],
+          "name": "ForbiddenAction",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            },
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "MarketNotListed",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint256",
+              "name": "errorCode",
+              "type": "uint256"
+            }
+          ],
+          "name": "SetCollateralFactorFailed",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "sender",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "calledContract",
+              "type": "address"
+            },
+            {
+              "internalType": "string",
+              "name": "methodSignature",
+              "type": "string"
+            }
+          ],
+          "name": "Unauthorized",
+          "type": "error"
+        },
+        {
+          "inputs": [],
+          "name": "ZeroAddress",
+          "type": "error"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "enum IComptroller.Action",
+              "name": "action",
+              "type": "uint8"
+            }
+          ],
+          "name": "ActionPaused",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "indexed": false,
+              "internalType": "enum IComptroller.Action[]",
+              "name": "actions",
+              "type": "uint8[]"
+            }
+          ],
+          "name": "ActionsPaused",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "indexed": false,
+              "internalType": "uint256[]",
+              "name": "newBorrowCaps",
+              "type": "uint256[]"
+            }
+          ],
+          "name": "BorrowCapsDecreased",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            }
+          ],
+          "name": "CollateralFactorZeroed",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            }
+          ],
+          "name": "FlashLoanPaused",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint8",
+              "name": "version",
+              "type": "uint8"
+            }
+          ],
+          "name": "Initialized",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "MarketStateReset",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "address",
+              "name": "oldAccessControlManager",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address",
+              "name": "newAccessControlManager",
+              "type": "address"
+            }
+          ],
+          "name": "NewAccessControlManager",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "previousOwner",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "newOwner",
+              "type": "address"
+            }
+          ],
+          "name": "OwnershipTransferStarted",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "previousOwner",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "newOwner",
+              "type": "address"
+            }
+          ],
+          "name": "OwnershipTransferred",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "indexed": false,
+              "internalType": "uint256[]",
+              "name": "newSupplyCaps",
+              "type": "uint256[]"
+            }
+          ],
+          "name": "SupplyCapsDecreased",
+          "type": "event"
+        },
+        {
+          "inputs": [],
+          "name": "COMPTROLLER",
+          "outputs": [
+            {
+              "internalType": "contract ICorePoolComptroller",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "IS_ISOLATED_POOL",
+          "outputs": [
+            {
+              "internalType": "bool",
+              "name": "",
+              "type": "bool"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "acceptOwnership",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "accessControlManager",
+          "outputs": [
+            {
+              "internalType": "contract IAccessControlManagerV8",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            }
+          ],
+          "name": "getMarketCFSnapshot",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "cf",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lt",
+              "type": "uint256"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "accessControlManager_",
+              "type": "address"
+            }
+          ],
+          "name": "initialize",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "name": "marketStates",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "borrowCap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "supplyCap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "borrowCapSnapshotted",
+              "type": "bool"
+            },
+            {
+              "internalType": "bool",
+              "name": "supplyCapSnapshotted",
+              "type": "bool"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "owner",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "internalType": "enum IComptroller.Action[]",
+              "name": "actions",
+              "type": "uint8[]"
+            }
+          ],
+          "name": "pauseActions",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "pauseBorrow",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "pauseFlashLoan",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "pauseRedeem",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "pauseSupply",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "pauseTransfer",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "pendingOwner",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "renounceOwnership",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "resetMarketState",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "accessControlManager_",
+              "type": "address"
+            }
+          ],
+          "name": "setAccessControlManager",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "setCFZero",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            }
+          ],
+          "name": "setCFZero",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "newBorrowCaps",
+              "type": "uint256[]"
+            }
+          ],
+          "name": "setMarketBorrowCaps",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "newSupplyCaps",
+              "type": "uint256[]"
+            }
+          ],
+          "name": "setMarketSupplyCaps",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newOwner",
+              "type": "address"
+            }
+          ],
+          "name": "transferOwnership",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "_logic",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "admin_",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes",
+              "name": "_data",
+              "type": "bytes"
+            }
+          ],
+          "stateMutability": "payable",
+          "type": "constructor"
+        }
+      ]
+    },
+    "EBrake_Implementation": {
+      "address": "0xa5eC4e225F4838E395E62695a629CA5ee5bCC009",
+      "abi": [
+        {
+          "inputs": [
+            {
+              "internalType": "contract ICorePoolComptroller",
+              "name": "corePoolComptroller_",
+              "type": "address"
+            },
+            {
+              "internalType": "bool",
+              "name": "isIsolatedPool_",
+              "type": "bool"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "constructor"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint256",
+              "name": "expected",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "actual",
+              "type": "uint256"
+            }
+          ],
+          "name": "ArrayLengthMismatch",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "currentCap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "requestedCap",
+              "type": "uint256"
+            }
+          ],
+          "name": "CapExceedsCurrent",
+          "type": "error"
+        },
+        {
+          "inputs": [],
+          "name": "EmptyArray",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "enum IComptroller.Action",
+              "name": "action",
+              "type": "uint8"
+            }
+          ],
+          "name": "ForbiddenAction",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            },
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "MarketNotListed",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint256",
+              "name": "errorCode",
+              "type": "uint256"
+            }
+          ],
+          "name": "SetCollateralFactorFailed",
+          "type": "error"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "sender",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "calledContract",
+              "type": "address"
+            },
+            {
+              "internalType": "string",
+              "name": "methodSignature",
+              "type": "string"
+            }
+          ],
+          "name": "Unauthorized",
+          "type": "error"
+        },
+        {
+          "inputs": [],
+          "name": "ZeroAddress",
+          "type": "error"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "enum IComptroller.Action",
+              "name": "action",
+              "type": "uint8"
+            }
+          ],
+          "name": "ActionPaused",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "indexed": false,
+              "internalType": "enum IComptroller.Action[]",
+              "name": "actions",
+              "type": "uint8[]"
+            }
+          ],
+          "name": "ActionsPaused",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "indexed": false,
+              "internalType": "uint256[]",
+              "name": "newBorrowCaps",
+              "type": "uint256[]"
+            }
+          ],
+          "name": "BorrowCapsDecreased",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            }
+          ],
+          "name": "CollateralFactorZeroed",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            }
+          ],
+          "name": "FlashLoanPaused",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint8",
+              "name": "version",
+              "type": "uint8"
+            }
+          ],
+          "name": "Initialized",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "MarketStateReset",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "address",
+              "name": "oldAccessControlManager",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address",
+              "name": "newAccessControlManager",
+              "type": "address"
+            }
+          ],
+          "name": "NewAccessControlManager",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "previousOwner",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "newOwner",
+              "type": "address"
+            }
+          ],
+          "name": "OwnershipTransferStarted",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "previousOwner",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "newOwner",
+              "type": "address"
+            }
+          ],
+          "name": "OwnershipTransferred",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "indexed": false,
+              "internalType": "uint256[]",
+              "name": "newSupplyCaps",
+              "type": "uint256[]"
+            }
+          ],
+          "name": "SupplyCapsDecreased",
+          "type": "event"
+        },
+        {
+          "inputs": [],
+          "name": "COMPTROLLER",
+          "outputs": [
+            {
+              "internalType": "contract ICorePoolComptroller",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "IS_ISOLATED_POOL",
+          "outputs": [
+            {
+              "internalType": "bool",
+              "name": "",
+              "type": "bool"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "acceptOwnership",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "accessControlManager",
+          "outputs": [
+            {
+              "internalType": "contract IAccessControlManagerV8",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            }
+          ],
+          "name": "getMarketCFSnapshot",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "cf",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lt",
+              "type": "uint256"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "accessControlManager_",
+              "type": "address"
+            }
+          ],
+          "name": "initialize",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "name": "marketStates",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "borrowCap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "supplyCap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "borrowCapSnapshotted",
+              "type": "bool"
+            },
+            {
+              "internalType": "bool",
+              "name": "supplyCapSnapshotted",
+              "type": "bool"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "owner",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "internalType": "enum IComptroller.Action[]",
+              "name": "actions",
+              "type": "uint8[]"
+            }
+          ],
+          "name": "pauseActions",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "pauseBorrow",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "pauseFlashLoan",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "pauseRedeem",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "pauseSupply",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "pauseTransfer",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "pendingOwner",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "renounceOwnership",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "resetMarketState",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "accessControlManager_",
+              "type": "address"
+            }
+          ],
+          "name": "setAccessControlManager",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "setCFZero",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            }
+          ],
+          "name": "setCFZero",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "newBorrowCaps",
+              "type": "uint256[]"
+            }
+          ],
+          "name": "setMarketBorrowCaps",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "markets",
+              "type": "address[]"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "newSupplyCaps",
+              "type": "uint256[]"
+            }
+          ],
+          "name": "setMarketSupplyCaps",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newOwner",
+              "type": "address"
+            }
+          ],
+          "name": "transferOwnership",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        }
+      ]
+    },
+    "EBrake_Proxy": {
+      "address": "0x957c09e3Ac3d9e689244DC74307c94111FBa8B42",
       "abi": [
         {
           "inputs": [
