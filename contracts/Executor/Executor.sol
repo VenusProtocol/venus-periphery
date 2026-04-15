@@ -8,6 +8,7 @@ import { IVToken } from "../Interfaces/IVToken.sol";
 import { IEBrake } from "../EmergencyBrake/IEBrake.sol";
 import { IExecutor } from "./IExecutor.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
+import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 
 /**
  * @title Executor — Signal-Driven Condition Handler for E-brake V2
@@ -26,7 +27,7 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  *         The Executor does NOT call the comptroller directly — all mutations go through EBrake.
  *         Recovery from any tightening action always requires a governance VIP.
  */
-contract Executor is IExecutor, AccessControlledV8 {
+contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
     /// @notice The EBrake contract that executes emergency actions on the comptroller.
     IEBrake public immutable EBRAKE;
 
@@ -66,6 +67,7 @@ contract Executor is IExecutor, AccessControlledV8 {
     /// @param accessControlManager_ Address of the Venus Access Control Manager.
     function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
+        __ReentrancyGuard_init();
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -73,24 +75,25 @@ contract Executor is IExecutor, AccessControlledV8 {
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IExecutor
-    function handleLTVAdjust(address market, uint256 adjustedLTV) external {
+    function handleLTVAdjust(address market, uint256 adjustedLTV) external nonReentrant {
         _checkAccessAllowed("handleLTVAdjust(address,uint256)");
 
         _getEnabledConfig(market);
 
-        // Read pre-action CF for event emission and no-op check only — EBrake validates the decrease.
-        // Known limitation (Diamond path): if adjustedLTV < currentCF but EBrake silently skips every
-        // listed pool (e.g. all pools already at or below adjustedLTV), the event still fires.
-        // Fix requires EBrake.decreaseCF to return bool anyChanged. Deferred.
+        // Read core-pool CF for event context only — not used as a guard.
+        // On IS_CORE_POOL, e-mode CFs are always >= core-pool CF, so comparing
+        // adjustedLTV against core-pool CF alone could suppress a needed e-mode
+        // tightening (adjustedLTV == coreCF but e-mode CF still higher).
+        // EBrake.decreaseCF iterates all pools and no-ops per-pool when already
+        // at or below adjustedLTV — idempotency is guaranteed on EBrake's side.
         uint256 currentCF = _getCurrentCF(market);
-        if (adjustedLTV == currentCF) return;
 
         EBRAKE.decreaseCF(market, adjustedLTV);
         emit LTVAdjusted(msg.sender, market, currentCF, adjustedLTV);
     }
 
     /// @inheritdoc IExecutor
-    function handleCapAdjust(address market, IExecutor.CapType capType, uint256 adjustedCap) external {
+    function handleCapAdjust(address market, IExecutor.CapType capType, uint256 adjustedCap) external nonReentrant {
         _checkAccessAllowed("handleCapAdjust(address,uint8,uint256)");
 
         MarketConfig memory config = _getEnabledConfig(market);
@@ -122,7 +125,7 @@ contract Executor is IExecutor, AccessControlledV8 {
     }
 
     /// @inheritdoc IExecutor
-    function handleSupplyHalt(address market) external {
+    function handleSupplyHalt(address market) external nonReentrant {
         _checkAccessAllowed("handleSupplyHalt(address)");
 
         _getEnabledConfig(market);
@@ -141,7 +144,7 @@ contract Executor is IExecutor, AccessControlledV8 {
     }
 
     /// @inheritdoc IExecutor
-    function handleBorrowHalt(address market) external {
+    function handleBorrowHalt(address market) external nonReentrant {
         _checkAccessAllowed("handleBorrowHalt(address)");
 
         _getEnabledConfig(market);
@@ -166,6 +169,15 @@ contract Executor is IExecutor, AccessControlledV8 {
     function setMarketConfig(address market, MarketConfig calldata config) external {
         _checkAccessAllowed("setMarketConfig(address,(uint256,uint256,bool,bool))");
         if (market == address(0)) revert ZeroAddress();
+        if (!config.configured) revert InvalidConfig();
+
+        if (IS_CORE_POOL) {
+            (bool isListed, , , , , , ) = COMPTROLLER.poolMarkets(COMPTROLLER.corePoolId(), market);
+            if (!isListed) revert MarketNotListed(market);
+        } else {
+            IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
+            if (!m.isListed) revert MarketNotListed(market);
+        }
 
         marketConfigs[market] = config;
         emit MarketConfigSet(market, config);
@@ -197,6 +209,7 @@ contract Executor is IExecutor, AccessControlledV8 {
             (, currentCF, , , , , ) = COMPTROLLER.poolMarkets(COMPTROLLER.corePoolId(), market);
         } else {
             IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
+            if (!m.isListed) revert MarketNotListed(market);
             currentCF = m.collateralFactorMantissa;
         }
     }

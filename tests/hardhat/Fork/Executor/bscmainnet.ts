@@ -71,9 +71,9 @@ if (FORK_MAINNET) {
           ).to.be.revertedWithCustomError(executor, "MarketNotConfigured");
         });
 
-        it("no-op when adjustedLTV equals current CF — no event emitted, no pool changed", async () => {
+        it("emits LTVAdjusted even when adjustedLTV equals current CF (EBrake is always called)", async () => {
           const { executor, hypernative, testMarket, originalLTV } = get();
-          await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV)).to.not.emit(
+          await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV)).to.emit(
             executor,
             "LTVAdjusted",
           );

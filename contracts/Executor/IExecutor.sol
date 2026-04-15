@@ -30,9 +30,11 @@ interface IExecutor {
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice Identifies which cap is being adjusted in handleCapAdjust.
+    /// @dev Wire values are load-bearing: off-chain callers encode BORROW=0, SUPPLY=1
+    ///      in the uint8 ABI slot. Do not reorder.
     enum CapType {
-        BORROW,
-        SUPPLY
+        BORROW, // = 0
+        SUPPLY // = 1
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -108,6 +110,13 @@ interface IExecutor {
     /// @notice Thrown when a zero address is passed where a valid address is required.
     error ZeroAddress();
 
+    /// @notice Thrown when a market is not listed in the comptroller.
+    /// @param market The market address.
+    error MarketNotListed(address market);
+
+    /// @notice Thrown when a market config is invalid (e.g. configured=false).
+    error InvalidConfig();
+
     // ═══════════════════════════════════════════════════════════════════════
     //                     CONDITION HANDLERS (ACM-gated)
     // ═══════════════════════════════════════════════════════════════════════
@@ -166,6 +175,9 @@ interface IExecutor {
      * @notice Set or update the market configuration for automated risk parameter adjustments.
      * @param market The vToken market address.
      * @param config The market configuration containing bounds and coefficients.
+     * @dev Reverts with ZeroAddress if market is the zero address.
+     *      Reverts with InvalidConfig if config.configured is false.
+     *      Reverts with MarketNotListed if market is not listed in the comptroller.
      */
     function setMarketConfig(address market, MarketConfig calldata config) external;
 }

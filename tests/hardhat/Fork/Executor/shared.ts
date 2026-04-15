@@ -304,6 +304,31 @@ export function setMarketConfigTests(_config: ExecutorNetworkConfig, get: Fixtur
       ).to.be.revertedWithCustomError(executor, "ZeroAddress");
     });
 
+    it("reverts when configured=false", async () => {
+      const { executor, governance, testMarket, originalBorrowCap, originalSupplyCap } = get();
+      await expect(
+        executor.connect(governance).setMarketConfig(testMarket, {
+          minBorrowCap: originalBorrowCap.div(4),
+          minSupplyCap: originalSupplyCap.div(4),
+          configured: false,
+          enabled: true,
+        }),
+      ).to.be.revertedWithCustomError(executor, "InvalidConfig");
+    });
+
+    it("reverts when market is not listed in comptroller", async () => {
+      const { executor, governance, originalBorrowCap, originalSupplyCap } = get();
+      const unlistedMarket = "0x0000000000000000000000000000000000000002";
+      await expect(
+        executor.connect(governance).setMarketConfig(unlistedMarket, {
+          minBorrowCap: originalBorrowCap.div(4),
+          minSupplyCap: originalSupplyCap.div(4),
+          configured: true,
+          enabled: true,
+        }),
+      ).to.be.revertedWithCustomError(executor, "MarketNotListed");
+    });
+
     it("handleLTVAdjust reverts when market is disabled", async () => {
       const { executor, governance, hypernative, testMarket, originalLTV, originalBorrowCap, originalSupplyCap } =
         get();
@@ -338,9 +363,9 @@ export function handleLTVAdjustTests(config: ExecutorNetworkConfig, get: Fixture
       ).to.be.revertedWithCustomError(eBrake, "CFExceedsCurrent");
     });
 
-    it("no-op when adjustedLTV equals current CF — no event emitted", async () => {
+    it("emits LTVAdjusted even when adjustedLTV equals current CF (EBrake is always called)", async () => {
       const { executor, hypernative, testMarket, originalLTV } = get();
-      await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV)).to.not.emit(
+      await expect(executor.connect(hypernative).handleLTVAdjust(testMarket, originalLTV)).to.emit(
         executor,
         "LTVAdjusted",
       );
