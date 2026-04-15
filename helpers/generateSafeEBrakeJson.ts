@@ -1043,7 +1043,7 @@ const printResult = (r: ExportResult, networkName: string) => {
   console.log(`  Transactions:         ${r.txCount}`);
   console.log(`  Safe address:         ${r.safeAddress}`);
   console.log(
-    `  Simulate:             ${bold(`npx hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts --fork ${networkName}`)}`,
+    `  Simulate:             ${bold(`npx hardhat test scripts/simulateSafeEBrakeTx.ts --fork ${networkName}`)}`,
   );
 };
 

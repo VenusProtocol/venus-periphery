@@ -15,7 +15,7 @@ Just run these two commands against **bsctestnet** (safe to experiment on) to se
 npx hardhat run helpers/generateSafeEBrakeJson.ts --network bsctestnet
 
 # 2. Simulate it on a fork — should print "all passing"
-npx hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts --fork bsctestnet
+npx hardhat test scripts/simulateSafeEBrakeTx.ts --fork bsctestnet
 ```
 
 What you should see:
@@ -122,8 +122,7 @@ cp .env.example .env  # then fill in ARCHIVE_NODE_* values
                               ↓
 ┌───────────────────────────────────────────────────────────────────────┐
 │ 2. Simulate                                                           │
-│    yarn hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts \     │
-│                     --fork <net>                                      │
+│    yarn hardhat test scripts/simulateSafeEBrakeTx.ts --fork <net>     │
 │      → forks at metadata.blockNumber                                  │
 │      → ACM pre-flight                                                 │
 │      → impersonates Safe, executes every tx                           │
@@ -222,7 +221,7 @@ File format (accepts symbol or address keys):
 ## 7. Simulate
 
 ```bash
-npx hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts --fork bsctestnet
+npx hardhat test scripts/simulateSafeEBrakeTx.ts --fork bsctestnet
 ```
 
 The `--fork <network>` flag sets `FORKED_NETWORK` so the test picks the correct `ARCHIVE_NODE_*` env var. If omitted, the test falls back to `metadata.network`.

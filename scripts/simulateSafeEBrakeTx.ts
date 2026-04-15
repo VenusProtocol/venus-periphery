@@ -7,7 +7,7 @@
  *
  * USAGE
  * ─────
- *   npx hardhat test tests/hardhat/Fork/simulateSafeEBrakeTx.ts --fork <network>
+ *   npx hardhat test scripts/simulateSafeEBrakeTx.ts --fork <network>
  *
  * PREREQUISITES
  * ─────────────
@@ -58,9 +58,9 @@ const COMPTROLLER_READ_ABI = [
 
 // ─── Load JSON files ──────────────────────────────────────────────────────────
 
-// __dirname is tests/hardhat/Fork/ — go up 3 levels to reach repo root.
-const TX_BUILDER_FILE = path.resolve(__dirname, "../../../helpers/data/safeEBrakeTxBuilder.json");
-const METADATA_FILE = path.resolve(__dirname, "../../../helpers/data/safeEBrakeTxMetadata.json");
+// __dirname is scripts/ — one level up reaches repo root.
+const TX_BUILDER_FILE = path.resolve(__dirname, "../helpers/data/safeEBrakeTxBuilder.json");
+const METADATA_FILE = path.resolve(__dirname, "../helpers/data/safeEBrakeTxMetadata.json");
 
 interface TxBuilderJson {
   chainId: string;
