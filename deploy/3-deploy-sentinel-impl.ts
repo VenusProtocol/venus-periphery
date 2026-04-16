@@ -1,8 +1,9 @@
+import { ethers } from "ethers";
 import hre from "hardhat";
 import { DeployFunction } from "hardhat-deploy/dist/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 
-import { getConfig } from "../helpers/deploymentConfig";
+import { getConfig, getContractAddressOrNullAddress } from "../helpers/deploymentConfig";
 
 /**
  * Deploys only the new DeviationSentinel implementation contract.
@@ -14,11 +15,17 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   console.log(`Deploying new DeviationSentinel implementation with the account: ${deployer}`);
   const ADDRESSES = await getConfig(network.name);
 
+  const eBrakeAddress = await getContractAddressOrNullAddress(deployments, "EBrake");
+
+  if (eBrakeAddress === ethers.constants.AddressZero) {
+    console.log("EBrake not deployed, skipping DeviationSentinel implementation deployment");
+    return;
+  }
+
   const resilientOracle = ADDRESSES.preconfiguredAddresses.ResilientOracle;
-  const eBrake = await hre.ethers.getContract("EBrake");
   const sentinelOracle = await hre.ethers.getContract("SentinelOracle");
 
-  const constructorArgs = [eBrake.address, resilientOracle, sentinelOracle.address];
+  const constructorArgs = [eBrakeAddress, resilientOracle, sentinelOracle.address];
 
   const result = await deploy("DeviationSentinel_Implementation", {
     contract: "DeviationSentinel",
@@ -42,3 +49,4 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
 
 export default func;
 func.tags = ["sentinel-impl"];
+func.dependencies = ["ebrake", "sentinel"];

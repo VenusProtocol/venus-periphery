@@ -286,6 +286,9 @@ interface IEBrake {
      *
      *      The boolean argument is hardcoded to `false` inside the implementation to preserve
      *      the EBrake "tighten only, never loosen" invariant. Re-granting access is governance-only.
+     *
+     *      Idempotent: if the account is not currently whitelisted, the call is a no-op and
+     *      no event is emitted. FlashLoanAccessRevoked is a true state-change signal.
      * @param account The account whose flash loan access should be revoked.
      */
     function revokeFlashLoanAccess(address account) external;

@@ -103,7 +103,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
      * @notice Constructor to set immutable variables.
      * @param _comptroller The address of the Comptroller contract.
      * @param _nativeMarket The address of the native market (e.g., vBNB).
-     * @custom:error Throw ZeroAddress if comptroller address is zero.
+     * @custom:error Throw ZeroAddress if comptroller or nativeMarket address is zero.
      */
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _comptroller, address _nativeMarket) {
@@ -233,6 +233,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
 
     /**
      * @notice Allows the owner to sweep leftover native tokens (e.g., BNB) from the contract.
+     * @custom:error Throw TransferFailed if the native transfer to the owner fails.
      * @custom:event Emits SweepNative event.
      */
     function sweepNative() external onlyOwner {
@@ -425,7 +426,7 @@ contract PositionSwapper is Ownable2StepUpgradeable, ReentrancyGuardUpgradeable 
     /**
      * @dev Accrue interests on the vToken, reverting the transaction on failure
      * @param vToken The VToken whose interests we want to accrue
-     * @custom:error Thrwo AccrueInterestFailed if accrueInterest action fails on the VToken
+     * @custom:error Throw AccrueInterestFailed if accrueInterest action fails on the VToken
      */
     function _accrueInterest(IVToken vToken) internal {
         uint256 err = vToken.accrueInterest();
