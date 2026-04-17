@@ -521,9 +521,9 @@ const pickSymbols = async (entries: Array<[string, string]>): Promise<Array<[str
 };
 
 const selectMarkets = async (
-  comptroller: string,
-  isIsolatedPool: boolean,
+  ctx: StepContext,
 ): Promise<{ marketAddresses: string[]; symbols: Map<string, string> }> => {
+  const { comptrollerAddress: comptroller, isIsolatedPool } = ctx;
   const marketMode = await pickOne("How to load markets?", [
     "Enter addresses manually in CLI",
     "Select by name from helpers/data/markets.json",
@@ -540,9 +540,15 @@ const selectMarkets = async (
     console.log(`\nUsing ${marketAddresses.length} address(es):`);
     marketAddresses.forEach(addr => console.log(`  ${symbols.get(addr)} (${addr})`));
   } else {
-    // Always refetch so markets.json stays in sync with the active network.
-    const networkMarkets = await buildMarketsFromChain(comptroller, isIsolatedPool);
+    let networkMarkets = ctx.marketsCache;
+    if (!networkMarkets) {
+      networkMarkets = await buildMarketsFromChain(comptroller, isIsolatedPool);
+      ctx.marketsCache = networkMarkets;
+    } else {
+      console.log(`Reusing ${Object.keys(networkMarkets).length} market(s) fetched earlier in this run.`);
+    }
     const entries = Object.entries(networkMarkets);
+    console.log(`Available markets: ${entries.map(([sym]) => sym).join(", ")}`);
     const selected = await pickSymbols(entries);
     marketAddresses = selected.map(([, addr]) => addr);
     symbols = new Map(selected.map(([sym, addr]) => [addr, sym]));
@@ -605,13 +611,19 @@ const enumerateBscPools = async (comptroller: string): Promise<BscPool[]> => {
 // so commandsForStep can fan out one tx per (market, pool) pair. Pools without
 // the market are skipped automatically — they never appear in poolIdsByMarket.
 const pickBscMarketsFanOut = async (
-  comptroller: string,
+  ctx: StepContext,
 ): Promise<{
   marketAddresses: string[];
   symbols: Map<string, string>;
   poolIdsByMarket: Map<string, number[]>;
 }> => {
-  const pools = await enumerateBscPools(comptroller);
+  let pools = ctx.bscPoolsCache;
+  if (!pools) {
+    pools = await enumerateBscPools(ctx.comptrollerAddress);
+    ctx.bscPoolsCache = pools;
+  } else {
+    console.log(`Reusing ${pools.length} pool(s) fetched earlier in this run.`);
+  }
   if (pools.length === 0) {
     console.error(red("\nNo listed markets found on any pool. Exiting."));
     rl.close();
@@ -660,6 +672,11 @@ const pickBscMarketsFanOut = async (
 interface StepContext {
   comptrollerAddress: string;
   isIsolatedPool: boolean;
+  // In-memory caches shared across steps in a single run. Reset every invocation
+  // of the script, so multi-step batches don't refetch while avoiding any
+  // persisted cross-network staleness.
+  marketsCache?: NetworkMarkets;
+  bscPoolsCache?: BscPool[];
 }
 
 interface PerMarketValueConfig {
@@ -807,13 +824,13 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
   } else {
     if (operation === "decrease_cf_pool" || operation === "disable_pool_borrow") {
       console.log(cyan("\n--- Pool & Market Selection ---"));
-      const picked = await pickBscMarketsFanOut(comptrollerAddress);
+      const picked = await pickBscMarketsFanOut(ctx);
       poolIdsByMarket = picked.poolIdsByMarket;
       marketAddresses = picked.marketAddresses;
       symbols = picked.symbols;
     } else {
       console.log(cyan("\n--- Market Selection ---"));
-      const result = await selectMarkets(comptrollerAddress, isIsolatedPool);
+      const result = await selectMarkets(ctx);
       marketAddresses = result.marketAddresses;
       symbols = result.symbols;
     }
