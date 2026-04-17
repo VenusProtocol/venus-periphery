@@ -71,6 +71,7 @@ task(TASK_TEST)
   .setAction(async (args, _hre, runSuper) => {
     if (args.fork) {
       process.env.FORKED_NETWORK = args.fork;
+      process.env.HARDHAT_FORK_NETWORK = args.fork;
     }
     return runSuper(args);
   });

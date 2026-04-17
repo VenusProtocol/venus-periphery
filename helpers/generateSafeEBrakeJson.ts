@@ -488,11 +488,15 @@ const getEBrakeAddress = async (networkName: string): Promise<string> => {
   return entered;
 };
 
+const DEFAULT_SAFE_ADDRESS = "0xCCa5a587eBDBe80f23c8610F2e53B03158e62948";
+
 const askSafeAddress = async (): Promise<string> => {
   console.log("\nEnter the Gnosis Safe address that will sign this transaction.");
+  console.log(`Press Enter to use the default: ${DEFAULT_SAFE_ADDRESS}`);
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const answer = await ask("> ");
+    const answer = (await ask("> ")).trim();
+    if (answer === "") return DEFAULT_SAFE_ADDRESS;
     if (ethers.utils.isAddress(answer)) return answer;
     console.log(red(`Invalid address "${answer}". Please enter a valid Ethereum address.`));
   }

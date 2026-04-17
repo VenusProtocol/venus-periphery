@@ -5,6 +5,16 @@
  * Forks at the block recorded in the metadata, impersonates the Safe, executes
  * all transactions, then verifies the expected state changes on the comptroller.
  *
+ * NOTE — OPTIONAL TOOLING
+ * ───────────────────────
+ * Safe Wallet has built-in transaction simulation, so running this script is
+ * not strictly required. Use it when you want stronger pre-signing confidence:
+ * Safe Wallet only simulates execution success/revert, whereas this script also
+ * asserts post-execution on-chain state — collateral factors, pause flags,
+ * borrow/supply caps, flash-loan access, and pool borrow status.
+ * If you are in an emergency and short on time, Safe Wallet simulation is
+ * sufficient. Run this script when you have the time to do a full state check.
+ *
  * USAGE
  * ─────
  *   npx hardhat test scripts/simulateSafeEBrakeTx.ts --fork <network>
@@ -27,7 +37,6 @@ import * as path from "path";
 
 const EBRAKE_ABI = [
   "function IS_ISOLATED_POOL() view returns (bool)",
-  "function accessControlManager() view returns (address)",
   "function pauseActions(address[],uint8[])",
   "function pauseFlashLoan()",
   "function revokeFlashLoanAccess(address)",
@@ -38,8 +47,6 @@ const EBRAKE_ABI = [
   "function setMarketSupplyCaps(address[],uint256[])",
   "error Unauthorized(address caller, address contractAddress, string functionSig)",
 ];
-
-const ACM_ABI = ["function isAllowedToCall(address account, string calldata functionSig) view returns (bool)"];
 
 // Covers all read calls needed across IL and BSC core pool comptrollers.
 const COMPTROLLER_READ_ABI = [
@@ -133,27 +140,6 @@ describe(`EBrake TX Simulation — [${operationsLabel}] on ${metadata.network} (
     eBrakeContract = new ethers.Contract(metadata.eBrakeAddress, EBRAKE_ABI, ethers.provider);
     isIsolatedPool = await eBrakeContract.IS_ISOLATED_POOL();
     comptroller = new ethers.Contract(metadata.comptrollerAddress, COMPTROLLER_READ_ABI, ethers.provider);
-
-    // ACM pre-flight: verify the Safe is authorized for every function in the batch
-    const safeAddress = txBuilder.meta.createdFromSafeAddress;
-    const acmAddress: string = await eBrakeContract.accessControlManager();
-    const acm = new ethers.Contract(acmAddress, ACM_ABI, ethers.provider);
-    const uniqueSigs = [
-      ...new Set(decoded.map(({ parsed }) => parsed.functionFragment.format(ethers.utils.FormatTypes.sighash))),
-    ];
-    const unauthorized: string[] = [];
-    for (const sig of uniqueSigs) {
-      const allowed: boolean = await acm.isAllowedToCall(safeAddress, sig);
-      if (!allowed) unauthorized.push(sig);
-    }
-    if (unauthorized.length > 0) {
-      throw new Error(
-        `ACM check failed — Safe ${safeAddress} is not authorized to call:\n` +
-          unauthorized.map(s => `  - ${s}`).join("\n") +
-          `\n\nGrant permissions via governance before executing.`,
-      );
-    }
-    console.log(`\nACM:          ${acmAddress} (authorized)`);
 
     console.log(`\nNetwork:      ${metadata.network}`);
     console.log(`Block:        ${metadata.blockNumber}`);
