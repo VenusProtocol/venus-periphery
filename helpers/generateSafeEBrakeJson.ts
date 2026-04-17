@@ -197,7 +197,9 @@ export interface EBrakeStep {
   symbols: Map<string, string>;
   pauseActions?: number[];
   newCFs?: Map<string, string>; // per-market CF mantissa (decrease_cf + decrease_cf_pool)
-  poolId?: number;
+  // For decrease_cf_pool + disable_pool_borrow: every pool each market is listed in.
+  // commandsForStep fans out one tx per (market, pool) pair.
+  poolIdsByMarket?: Map<string, number[]>;
   newCaps?: Map<string, string>;
   revokeAccounts?: string[];
 }
@@ -327,17 +329,6 @@ const askUint256 = async (prompt: string): Promise<string> => {
     } catch {
       console.log(red(`Invalid uint256 "${answer}". Please enter a non-negative integer.`));
     }
-  }
-};
-
-const askPoolId = async (prompt: string): Promise<number> => {
-  console.log(`\n${prompt}`);
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const answer = await ask("> ");
-    const n = parseInt(answer, 10);
-    if (!isNaN(n) && n >= 0) return n;
-    console.log(red(`Invalid pool ID "${answer}". Please enter a non-negative integer.`));
   }
 };
 
@@ -568,6 +559,102 @@ const selectMarkets = async (
   return { marketAddresses, symbols };
 };
 
+// ─── BSC core-diamond pool enumeration ───────────────────────────────────────
+
+interface BscPool {
+  poolId: number;
+  addresses: string[];
+  symbols: Map<string, string>;
+}
+
+// A market can be listed in multiple pools (core + e-mode) with different
+// settings, so we walk every (poolId, market) pair via poolMarkets().isListed.
+// markets().marketPoolId only surfaces one pool per market and would miss the others.
+const enumerateBscPools = async (comptroller: string): Promise<BscPool[]> => {
+  const contract = new ethers.Contract(comptroller, BSC_COMPTROLLER_QUERY_ABI, ethers.provider);
+  const [allMarkets, lastPoolIdBn]: [string[], BigNumber] = await Promise.all([
+    retry(() => contract.getAllMarkets()),
+    retry(() => contract.lastPoolId()),
+  ]);
+  const lastPoolId = lastPoolIdBn.toNumber();
+  console.log(`Scanning ${allMarkets.length} market(s) across ${lastPoolId + 1} pool(s)...`);
+
+  // Fetch each symbol once — a market in multiple pools reuses the same symbol.
+  const symbolEntries = await Promise.all(allMarkets.map(async m => [m, await fetchSymbol(m)] as const));
+  const symbolMap = new Map(symbolEntries);
+
+  const pools: BscPool[] = [];
+  for (let poolId = 0; poolId <= lastPoolId; poolId++) {
+    const listed = await Promise.all(
+      allMarkets.map(async market => {
+        const data = await retry(() => contract.poolMarkets(poolId, market));
+        return data.isListed ? market : null;
+      }),
+    );
+    const addresses = listed.filter((m): m is string => m !== null);
+    if (addresses.length === 0) continue;
+    const poolSymbols = new Map<string, string>();
+    addresses.forEach(a => poolSymbols.set(a, symbolMap.get(a) ?? a));
+    pools.push({ poolId, addresses, symbols: poolSymbols });
+  }
+  return pools;
+};
+
+// Lists pools for context, then asks the operator to pick markets from the
+// cross-pool union. Each picked market is mapped to the pool IDs it's listed in,
+// so commandsForStep can fan out one tx per (market, pool) pair. Pools without
+// the market are skipped automatically — they never appear in poolIdsByMarket.
+const pickBscMarketsFanOut = async (
+  comptroller: string,
+): Promise<{
+  marketAddresses: string[];
+  symbols: Map<string, string>;
+  poolIdsByMarket: Map<string, number[]>;
+}> => {
+  const pools = await enumerateBscPools(comptroller);
+  if (pools.length === 0) {
+    console.error(red("\nNo listed markets found on any pool. Exiting."));
+    rl.close();
+    process.exit(1);
+  }
+
+  // Build {market → [poolIds]} and {symbol ↔ address} across the union.
+  const poolsByMarket = new Map<string, number[]>();
+  const addressToSymbol = new Map<string, string>();
+  for (const p of pools) {
+    for (const addr of p.addresses) {
+      const list = poolsByMarket.get(addr) ?? [];
+      list.push(p.poolId);
+      poolsByMarket.set(addr, list);
+      addressToSymbol.set(addr, p.symbols.get(addr) ?? addr);
+    }
+  }
+
+  const lastPoolId = Math.max(...pools.map(p => p.poolId));
+  const allSymbols = Array.from(addressToSymbol.values()).join(", ");
+  console.log(cyan(`\n${pools.length} pools available (lastPoolId = ${lastPoolId})`));
+  console.log(`Available markets: ${allSymbols}`);
+
+  const entries: Array<[string, string]> = Array.from(addressToSymbol, ([addr, sym]) => [sym, addr]);
+  const selected = await pickSymbols(entries);
+
+  const marketAddresses = selected.map(([, addr]) => addr);
+  const symbols = new Map(selected.map(([sym, addr]) => [addr, sym]));
+  const poolIdsByMarket = new Map<string, number[]>();
+  for (const addr of marketAddresses) {
+    poolIdsByMarket.set(addr, poolsByMarket.get(addr) ?? []);
+  }
+
+  console.log(cyan("\nFan-out plan:"));
+  for (const addr of marketAddresses) {
+    const sym = symbols.get(addr) ?? addr;
+    const ids = poolIdsByMarket.get(addr) ?? [];
+    console.log(`  ${sym} → pool(s) [${ids.join(", ")}]`);
+  }
+
+  return { marketAddresses, symbols, poolIdsByMarket };
+};
+
 // ─── Phase 1: Gather Input ───────────────────────────────────────────────────
 
 interface StepContext {
@@ -701,7 +788,7 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
   let symbols = new Map<string, string>();
   let pauseActions: number[] | undefined;
   let newCFs: Map<string, string> | undefined;
-  let poolId: number | undefined;
+  let poolIdsByMarket: Map<string, number[]> | undefined;
   let newCaps: Map<string, string> | undefined;
   let revokeAccounts: string[] | undefined;
 
@@ -718,10 +805,18 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
     );
     console.log(`\nRevoking flash loan access from ${revokeAccounts.length} account(s).`);
   } else {
-    console.log(cyan("\n--- Market Selection ---"));
-    const result = await selectMarkets(comptrollerAddress, isIsolatedPool);
-    marketAddresses = result.marketAddresses;
-    symbols = result.symbols;
+    if (operation === "decrease_cf_pool" || operation === "disable_pool_borrow") {
+      console.log(cyan("\n--- Pool & Market Selection ---"));
+      const picked = await pickBscMarketsFanOut(comptrollerAddress);
+      poolIdsByMarket = picked.poolIdsByMarket;
+      marketAddresses = picked.marketAddresses;
+      symbols = picked.symbols;
+    } else {
+      console.log(cyan("\n--- Market Selection ---"));
+      const result = await selectMarkets(comptrollerAddress, isIsolatedPool);
+      marketAddresses = result.marketAddresses;
+      symbols = result.symbols;
+    }
 
     if (operation === "pause_actions") {
       const actionOptions = Object.entries(ALLOWED_PAUSE_ACTIONS).map(([name, value]) => ({
@@ -752,15 +847,14 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
         },
       });
     } else if (operation === "decrease_cf_pool") {
-      poolId = await askPoolId("Enter pool ID (0 = core pool, >0 = e-mode pool ID):");
-      const capturedPoolId = poolId;
+      // Value applies to every pool the market is listed in; show core CF as reference.
       newCFs = await gatherPerMarketValues(marketAddresses, symbols, {
         kind: "CF",
-        defaultFilename: `cf_values_pool${capturedPoolId}.json`,
+        defaultFilename: "cf_values_all_pools.json",
         fetchCurrent: async m => {
           try {
-            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isIsolatedPool, capturedPoolId);
-            return cf.toString();
+            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isIsolatedPool, 0);
+            return `${cf.toString()} (core)`;
           } catch {
             return "(not listed)";
           }
@@ -784,12 +878,10 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
           return supplyCap.toString();
         },
       });
-    } else if (operation === "disable_pool_borrow") {
-      poolId = await askPoolId("Enter pool ID to disable borrowing in (0 = core pool, >0 = e-mode pool ID):");
     }
   }
 
-  return { operation, marketAddresses, symbols, pauseActions, newCFs, poolId, newCaps, revokeAccounts };
+  return { operation, marketAddresses, symbols, pauseActions, newCFs, poolIdsByMarket, newCaps, revokeAccounts };
 };
 
 export const gatherInput = async (): Promise<EBrakeBatchInput> => {
@@ -866,7 +958,7 @@ export const gatherInput = async (): Promise<EBrakeBatchInput> => {
 // ─── Phase 2: Generate Commands ──────────────────────────────────────────────
 
 const commandsForStep = (step: EBrakeStep): EBrakeCommand[] => {
-  const { operation, marketAddresses, symbols, pauseActions, newCFs, poolId, newCaps, revokeAccounts } = step;
+  const { operation, marketAddresses, symbols, pauseActions, newCFs, poolIdsByMarket, newCaps, revokeAccounts } = step;
   const commands: EBrakeCommand[] = [];
 
   switch (operation) {
@@ -897,14 +989,17 @@ const commandsForStep = (step: EBrakeStep): EBrakeCommand[] => {
     }
 
     case "decrease_cf_pool": {
-      if (!newCFs || newCFs.size === 0 || poolId === undefined) break;
+      if (!newCFs || newCFs.size === 0 || !poolIdsByMarket) break;
       for (const [vToken, cf] of newCFs) {
         const symbol = symbols.get(vToken) || vToken;
-        console.log(`  ${symbol} → decreaseCF(${vToken}, poolId=${poolId}, ${cf})`);
-        commands.push({
-          signature: "decreaseCF(address,uint96,uint256)",
-          params: [vToken, poolId, cf],
-        });
+        const poolIds = poolIdsByMarket.get(vToken) ?? [];
+        for (const pid of poolIds) {
+          console.log(`  ${symbol} → decreaseCF(${vToken}, poolId=${pid}, ${cf})`);
+          commands.push({
+            signature: "decreaseCF(address,uint96,uint256)",
+            params: [vToken, pid, cf],
+          });
+        }
       }
       break;
     }
@@ -952,14 +1047,17 @@ const commandsForStep = (step: EBrakeStep): EBrakeCommand[] => {
     }
 
     case "disable_pool_borrow": {
-      if (poolId === undefined) break;
+      if (!poolIdsByMarket) break;
       for (const vToken of marketAddresses) {
         const symbol = symbols.get(vToken) || vToken;
-        console.log(`  ${symbol} → disablePoolBorrow(poolId=${poolId}, ${vToken})`);
-        commands.push({
-          signature: "disablePoolBorrow(uint96,address)",
-          params: [poolId, vToken],
-        });
+        const poolIds = poolIdsByMarket.get(vToken) ?? [];
+        for (const pid of poolIds) {
+          console.log(`  ${symbol} → disablePoolBorrow(poolId=${pid}, ${vToken})`);
+          commands.push({
+            signature: "disablePoolBorrow(uint96,address)",
+            params: [pid, vToken],
+          });
+        }
       }
       break;
     }
