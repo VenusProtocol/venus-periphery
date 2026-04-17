@@ -470,13 +470,12 @@ const getEBrakeAddress = async (networkName: string): Promise<string> => {
     }
   }
   console.log(`No EBrake deployment artifact found for network "${networkName}".`);
-  const entered = await ask("Enter EBrake proxy address manually: ");
-  if (!ethers.utils.isAddress(entered)) {
-    console.error(red("Invalid address!"));
-    rl.close();
-    process.exit(1);
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const entered = await ask("Enter EBrake proxy address manually: ");
+    if (ethers.utils.isAddress(entered)) return entered;
+    console.log(red(`Invalid address "${entered}". Please enter a valid Ethereum address.`));
   }
-  return entered;
 };
 
 const DEFAULT_SAFE_ADDRESS = "0xCCa5a587eBDBe80f23c8610F2e53B03158e62948";
