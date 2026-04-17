@@ -525,7 +525,7 @@ const selectMarkets = async (
   const { comptrollerAddress: comptroller, isIsolatedPool } = ctx;
   const marketMode = await pickOne("How to load markets?", [
     "Enter addresses manually in CLI",
-    "Select by name from helpers/data/markets.json",
+    "Select by name from (Auto-fetch all listed markets) helpers/data/markets.json",
   ]);
 
   let marketAddresses: string[] = [];
