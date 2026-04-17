@@ -44,12 +44,10 @@ interface IExecutor {
     /// @notice Per-market configuration for automated risk parameter adjustments.
     /// @param minBorrowCap Floor for borrow cap adjustments. Cap cannot be set below this value.
     /// @param minSupplyCap Floor for supply cap adjustments. Cap cannot be set below this value.
-    /// @param configured Whether this market has been registered via setMarketConfig.
     /// @param enabled Whether automated adjustment is active for this market.
     struct MarketConfig {
         uint256 minBorrowCap;
         uint256 minSupplyCap;
-        bool configured;
         bool enabled;
     }
 
@@ -65,9 +63,8 @@ interface IExecutor {
     /// @notice Emitted when the collateral factor (LTV) is adjusted via handleLTVAdjust.
     /// @param caller The address that triggered the adjustment.
     /// @param market The vToken market address.
-    /// @param oldLTV The previous collateral factor mantissa.
     /// @param newLTV The new collateral factor mantissa.
-    event LTVAdjusted(address indexed caller, address indexed market, uint256 oldLTV, uint256 newLTV);
+    event LTVAdjusted(address indexed caller, address indexed market, uint256 newLTV);
 
     /// @notice Emitted when a borrow or supply cap is adjusted.
     /// @param caller The address that triggered the adjustment.
@@ -91,7 +88,7 @@ interface IExecutor {
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Thrown when the market has no configuration set.
+    /// @notice Thrown when the market has never been registered via setMarketConfig.
     /// @param market The market address.
     error MarketNotConfigured(address market);
 
@@ -113,9 +110,6 @@ interface IExecutor {
     /// @notice Thrown when a market is not listed in the comptroller.
     /// @param market The market address.
     error MarketNotListed(address market);
-
-    /// @notice Thrown when a market config is invalid (e.g. configured=false).
-    error InvalidConfig();
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     CONDITION HANDLERS (ACM-gated)
@@ -176,7 +170,6 @@ interface IExecutor {
      * @param market The vToken market address.
      * @param config The market configuration containing bounds and coefficients.
      * @dev Reverts with ZeroAddress if market is the zero address.
-     *      Reverts with InvalidConfig if config.configured is false.
      *      Reverts with MarketNotListed if market is not listed in the comptroller.
      */
     function setMarketConfig(address market, MarketConfig calldata config) external;

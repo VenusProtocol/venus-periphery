@@ -35,17 +35,18 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
     ICorePoolComptroller public immutable COMPTROLLER;
 
     /// @notice Whether this Executor targets a BSC Diamond comptroller (true) or IL comptroller (false).
-    /// @dev    Used by _getCurrentCF to read from the correct comptroller ABI:
-    ///         - BSC (Diamond): poolMarkets(corePoolId, market) — 7-value return
-    ///         - Non-BSC (IL): markets(market) — 3-value return
-    ///         EBrake handles both paths internally via its own IS_ISOLATED_POOL flag.
+    /// @dev    EBrake handles both paths internally via its own IS_ISOLATED_POOL flag.
     bool public immutable IS_CORE_POOL;
 
     /// @notice Per-market configuration for automated risk parameter adjustments.
     mapping(address => MarketConfig) public marketConfigs;
 
+    /// @dev Tracks whether a market has ever been registered via setMarketConfig.
+    ///      Separate from MarketConfig.enabled so we can distinguish "never set" from "set but disabled".
+    mapping(address => bool) private _isConfigured;
+
     /// @dev Storage gap for future upgrades.
-    uint256[49] private __gap;
+    uint256[48] private __gap;
 
     /// @notice Deploy Executor with the EBrake contract and comptroller type.
     /// @param eBrake_ The EBrake contract address.
@@ -78,25 +79,19 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
     function handleLTVAdjust(address market, uint256 adjustedLTV) external nonReentrant {
         _checkAccessAllowed("handleLTVAdjust(address,uint256)");
 
-        _getEnabledConfig(market);
+        _checkAndGetConfig(market);
 
-        // Read core-pool CF for event context only — not used as a guard.
-        // On IS_CORE_POOL, e-mode CFs are always >= core-pool CF, so comparing
-        // adjustedLTV against core-pool CF alone could suppress a needed e-mode
-        // tightening (adjustedLTV == coreCF but e-mode CF still higher).
-        // EBrake.decreaseCF iterates all pools and no-ops per-pool when already
-        // at or below adjustedLTV — idempotency is guaranteed on EBrake's side.
-        uint256 currentCF = _getCurrentCF(market);
-
+        // EBrake.decreaseCF iterates all pools (including e-mode) and no-ops per-pool
+        // when already at or below adjustedLTV — idempotency is guaranteed on EBrake's side.
         EBRAKE.decreaseCF(market, adjustedLTV);
-        emit LTVAdjusted(msg.sender, market, currentCF, adjustedLTV);
+        emit LTVAdjusted(msg.sender, market, adjustedLTV);
     }
 
     /// @inheritdoc IExecutor
     function handleCapAdjust(address market, IExecutor.CapType capType, uint256 adjustedCap) external nonReentrant {
         _checkAccessAllowed("handleCapAdjust(address,uint8,uint256)");
 
-        MarketConfig memory config = _getEnabledConfig(market);
+        MarketConfig storage config = _checkAndGetConfig(market);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
 
@@ -128,7 +123,7 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
     function handleSupplyHalt(address market) external nonReentrant {
         _checkAccessAllowed("handleSupplyHalt(address)");
 
-        _getEnabledConfig(market);
+        _checkAndGetConfig(market);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
         // exchangeRateCurrent() accrues interest as a side effect before the cap comparison.
@@ -147,10 +142,10 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
     function handleBorrowHalt(address market) external nonReentrant {
         _checkAccessAllowed("handleBorrowHalt(address)");
 
-        _getEnabledConfig(market);
+        _checkAndGetConfig(market);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
-        uint256 totalBorrows = IVToken(market).totalBorrows();
+        uint256 totalBorrows = IVToken(market).totalBorrowsCurrent();
         uint256 borrowCap = comptroller.borrowCaps(market);
 
         // borrowCap == 0 means no cap is set (unlimited) — treat as not breached.
@@ -167,9 +162,8 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
 
     /// @inheritdoc IExecutor
     function setMarketConfig(address market, MarketConfig calldata config) external {
-        _checkAccessAllowed("setMarketConfig(address,(uint256,uint256,bool,bool))");
+        _checkAccessAllowed("setMarketConfig(address,(uint256,uint256,bool))");
         if (market == address(0)) revert ZeroAddress();
-        if (!config.configured) revert InvalidConfig();
 
         if (IS_CORE_POOL) {
             (bool isListed, , , , , , ) = COMPTROLLER.poolMarkets(COMPTROLLER.corePoolId(), market);
@@ -179,6 +173,7 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
             if (!m.isListed) revert MarketNotListed(market);
         }
 
+        _isConfigured[market] = true;
         marketConfigs[market] = config;
         emit MarketConfigSet(market, config);
     }
@@ -190,27 +185,11 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
     /**
      * @notice Load and validate market configuration. Reverts if not configured or disabled.
      * @param market The vToken market address.
-     * @return config The validated market configuration.
+     * @return config Storage pointer to the validated market configuration.
      */
-    function _getEnabledConfig(address market) internal view returns (MarketConfig memory config) {
+    function _checkAndGetConfig(address market) internal view returns (MarketConfig storage config) {
+        if (!_isConfigured[market]) revert MarketNotConfigured(market);
         config = marketConfigs[market];
-        if (!config.configured) revert MarketNotConfigured(market);
         if (!config.enabled) revert MarketDisabled(market);
-    }
-
-    /**
-     * @notice Read current collateral factor for a market from the comptroller.
-     * @dev    On BSC, reads from corePoolId. On non-BSC, reads from IL markets().
-     * @param market The vToken market address.
-     * @return currentCF The current collateral factor mantissa.
-     */
-    function _getCurrentCF(address market) internal view returns (uint256 currentCF) {
-        if (IS_CORE_POOL) {
-            (, currentCF, , , , , ) = COMPTROLLER.poolMarkets(COMPTROLLER.corePoolId(), market);
-        } else {
-            IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
-            if (!m.isListed) revert MarketNotListed(market);
-            currentCF = m.collateralFactorMantissa;
-        }
     }
 }

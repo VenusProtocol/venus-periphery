@@ -200,7 +200,6 @@ export function createDeployFixture(config: ExecutorNetworkConfig): () => Promis
     await executor.connect(governance).setMarketConfig(config.testMarket, {
       minBorrowCap: originalBorrowCap.div(4),
       minSupplyCap: originalSupplyCap.div(4),
-      configured: true,
       enabled: true,
     });
 
@@ -263,7 +262,6 @@ export function accessControlTests(_config: ExecutorNetworkConfig, get: FixtureG
         executor.connect(randomUser).setMarketConfig(testMarket, {
           minBorrowCap: originalBorrowCap.div(4),
           minSupplyCap: originalSupplyCap.div(4),
-          configured: true,
           enabled: true,
         }),
       ).to.be.revertedWithCustomError(executor, "Unauthorized");
@@ -278,7 +276,6 @@ export function setMarketConfigTests(_config: ExecutorNetworkConfig, get: Fixtur
       const marketConfig = {
         minBorrowCap: originalBorrowCap.div(4),
         minSupplyCap: originalSupplyCap.div(4),
-        configured: true,
         enabled: true,
       };
       await expect(executor.connect(governance).setMarketConfig(testMarket, marketConfig)).to.emit(
@@ -288,7 +285,6 @@ export function setMarketConfigTests(_config: ExecutorNetworkConfig, get: Fixtur
 
       const stored = await executor.marketConfigs(testMarket);
       expect(stored.minBorrowCap).to.equal(originalBorrowCap.div(4));
-      expect(stored.configured).to.be.true;
       expect(stored.enabled).to.be.true;
     });
 
@@ -298,22 +294,20 @@ export function setMarketConfigTests(_config: ExecutorNetworkConfig, get: Fixtur
         executor.connect(governance).setMarketConfig(ethers.constants.AddressZero, {
           minBorrowCap: originalBorrowCap.div(4),
           minSupplyCap: originalSupplyCap.div(4),
-          configured: true,
           enabled: true,
         }),
       ).to.be.revertedWithCustomError(executor, "ZeroAddress");
     });
 
-    it("reverts when configured=false", async () => {
+    it("allows storing a disabled config (enabled=false)", async () => {
       const { executor, governance, testMarket, originalBorrowCap, originalSupplyCap } = get();
       await expect(
         executor.connect(governance).setMarketConfig(testMarket, {
           minBorrowCap: originalBorrowCap.div(4),
           minSupplyCap: originalSupplyCap.div(4),
-          configured: false,
-          enabled: true,
+          enabled: false,
         }),
-      ).to.be.revertedWithCustomError(executor, "InvalidConfig");
+      ).to.emit(executor, "MarketConfigSet");
     });
 
     it("reverts when market is not listed in comptroller", async () => {
@@ -323,7 +317,6 @@ export function setMarketConfigTests(_config: ExecutorNetworkConfig, get: Fixtur
         executor.connect(governance).setMarketConfig(unlistedMarket, {
           minBorrowCap: originalBorrowCap.div(4),
           minSupplyCap: originalSupplyCap.div(4),
-          configured: true,
           enabled: true,
         }),
       ).to.be.revertedWithCustomError(executor, "MarketNotListed");
@@ -335,7 +328,6 @@ export function setMarketConfigTests(_config: ExecutorNetworkConfig, get: Fixtur
       await executor.connect(governance).setMarketConfig(testMarket, {
         minBorrowCap: originalBorrowCap.div(4),
         minSupplyCap: originalSupplyCap.div(4),
-        configured: true,
         enabled: false,
       });
       await expect(
