@@ -612,75 +612,82 @@ const gatherPerMarketValues = async (
     }
   } else {
     const defaultPath = path.resolve(OUTPUT_DIR, cfg.defaultFilename);
-    console.log(`\nEnter path to ${cfg.kind} values file (press enter for default: ${defaultPath})`);
-    const entered = await ask("> ");
-    const filePath = entered.length > 0 ? entered : defaultPath;
 
-    if (!fs.existsSync(filePath)) {
-      console.log(`\n${filePath} not found — generating template with current on-chain ${cfg.kind} values...`);
-      const current = await fetchAllCurrent();
-      const template: Record<string, string> = {};
-      for (const m of markets) {
-        const sym = symbols.get(m) || m;
-        template[sym] = current.get(m) ?? "0";
+    // Re-prompt on any validation failure so a typo in the path or the file's
+    // contents doesn't force the operator to restart the whole flow.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      console.log(`\nEnter path to ${cfg.kind} values file (press enter for default: ${defaultPath})`);
+      const entered = await ask("> ");
+      const filePath = entered.length > 0 ? entered : defaultPath;
+
+      if (!fs.existsSync(filePath)) {
+        console.log(`\n${filePath} not found — generating template with current on-chain ${cfg.kind} values...`);
+        const current = await fetchAllCurrent();
+        const template: Record<string, string> = {};
+        for (const m of markets) {
+          const sym = symbols.get(m) || m;
+          template[sym] = current.get(m) ?? "0";
+        }
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, JSON.stringify(template, null, 2) + "\n");
+        console.log(green(`\nTemplate written to ${filePath}`));
+        console.log(`Edit the values (they currently match on-chain ${cfg.kind}) and re-run.`);
+        rl.close();
+        process.exit(0);
       }
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, JSON.stringify(template, null, 2) + "\n");
-      console.log(green(`\nTemplate written to ${filePath}`));
-      console.log(`Edit the values (they currently match on-chain ${cfg.kind}) and re-run.`);
-      rl.close();
-      process.exit(0);
-    }
 
-    let content: unknown;
-    try {
-      content = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    } catch (error) {
-      console.error(red(`Failed to parse ${filePath}: ${(error as Error).message}`));
-      rl.close();
-      process.exit(1);
-    }
-    if (typeof content !== "object" || content === null || Array.isArray(content)) {
-      console.error(red(`${filePath} must contain a JSON object mapping symbol-or-address → value.`));
-      rl.close();
-      process.exit(1);
-    }
-
-    // Accept either symbol keys or address keys. Build lookup from the current selection.
-    const symbolToAddress = new Map<string, string>();
-    symbols.forEach((sym, addr) => symbolToAddress.set(sym, addr));
-    const selectionSet = new Set(markets);
-
-    for (const [key, rawValue] of Object.entries(content as Record<string, unknown>)) {
-      const addr = ethers.utils.isAddress(key) ? key : symbolToAddress.get(key);
-      if (!addr || !selectionSet.has(addr)) {
-        console.log(yellow(`  Ignoring "${key}" — not in current selection`));
+      let content: unknown;
+      try {
+        content = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      } catch (error) {
+        console.error(red(`Failed to parse ${filePath}: ${(error as Error).message}`));
         continue;
       }
-      try {
-        const bn = ethers.BigNumber.from(rawValue);
-        if (bn.lt(0)) throw new Error("negative");
-        result.set(addr, bn.toString());
-      } catch {
-        console.error(red(`Invalid ${cfg.kind} value for "${key}": ${String(rawValue)}`));
-        rl.close();
-        process.exit(1);
+      if (typeof content !== "object" || content === null || Array.isArray(content)) {
+        console.error(red(`${filePath} must contain a JSON object mapping symbol-or-address → value.`));
+        continue;
       }
-    }
 
-    const missing = markets.filter(m => !result.has(m)).map(m => symbols.get(m) || m);
-    if (missing.length > 0) {
-      console.error(red(`\nFile missing entries for selected markets: ${missing.join(", ")}`));
-      console.error(red(`Add entries to ${filePath} and re-run.`));
-      rl.close();
-      process.exit(1);
-    }
+      // Accept either symbol keys or address keys. Build lookup from the current selection.
+      const symbolToAddress = new Map<string, string>();
+      symbols.forEach((sym, addr) => symbolToAddress.set(sym, addr));
+      const selectionSet = new Set(markets);
 
-    const current = await fetchAllCurrent();
-    console.log("\nWill apply:");
-    for (const m of markets) {
-      const sym = symbols.get(m) || m;
-      console.log(`  ${sym}  new=${result.get(m)}  [current: ${current.get(m)}]`);
+      let invalid = false;
+      result.clear();
+      for (const [key, rawValue] of Object.entries(content as Record<string, unknown>)) {
+        const addr = ethers.utils.isAddress(key) ? key : symbolToAddress.get(key);
+        if (!addr || !selectionSet.has(addr)) {
+          console.log(yellow(`  Ignoring "${key}" — not in current selection`));
+          continue;
+        }
+        try {
+          const bn = ethers.BigNumber.from(rawValue);
+          if (bn.lt(0)) throw new Error("negative");
+          result.set(addr, bn.toString());
+        } catch {
+          console.error(red(`Invalid ${cfg.kind} value for "${key}": ${String(rawValue)}`));
+          invalid = true;
+          break;
+        }
+      }
+      if (invalid) continue;
+
+      const missing = markets.filter(m => !result.has(m)).map(m => symbols.get(m) || m);
+      if (missing.length > 0) {
+        console.error(red(`\nFile missing entries for selected markets: ${missing.join(", ")}`));
+        console.error(red(`Add entries to ${filePath} and re-try.`));
+        continue;
+      }
+
+      const current = await fetchAllCurrent();
+      console.log("\nWill apply:");
+      for (const m of markets) {
+        const sym = symbols.get(m) || m;
+        console.log(`  ${sym}  new=${result.get(m)}  [current: ${current.get(m)}]`);
+      }
+      break;
     }
   }
 
