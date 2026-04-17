@@ -725,7 +725,9 @@ const gatherPerMarketValues = async (
       const filePath = entered.length > 0 ? entered : defaultPath;
 
       if (!fs.existsSync(filePath)) {
-        console.log(`\n${filePath} not found — generating template with current on-chain ${cfg.kind} values...`);
+        const confirm = await askYesNo(`${filePath} not found. Generate template there?`);
+        if (!confirm) continue;
+        console.log(`\nGenerating template with current on-chain ${cfg.kind} values...`);
         const current = await fetchAllCurrent();
         const template: Record<string, string> = {};
         for (const m of markets) {
