@@ -186,7 +186,7 @@ export function createDeployFixture(config: ExecutorNetworkConfig): () => Promis
     }
 
     // ── Grant governance permission to call Executor admin functions ──
-    const adminFunctions = ["setMarketConfig(address,(uint256,uint256,bool,bool))"];
+    const adminFunctions = ["setMarketConfig(address,(uint256,uint256,bool))"];
     for (const sig of adminFunctions) {
       await acm.giveCallPermission(executor.address, sig, governance.address);
     }
