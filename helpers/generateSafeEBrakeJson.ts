@@ -196,7 +196,10 @@ export interface EBrakeStep {
   marketAddresses: string[];
   symbols: Map<string, string>;
   pauseActions?: number[];
-  newCFs?: Map<string, string>; // per-market CF mantissa (decrease_cf + decrease_cf_pool)
+  newCFs?: Map<string, string>; // per-market CF mantissa (decrease_cf)
+  // decrease_cf_pool: per (market, poolId) CF mantissa — a market listed in multiple
+  // pools can take a different new CF per pool.
+  newCFsByPool?: Map<string, Map<number, string>>;
   // For decrease_cf_pool + disable_pool_borrow: every pool each market is listed in.
   // commandsForStep fans out one tx per (market, pool) pair.
   poolIdsByMarket?: Map<string, number[]>;
@@ -799,6 +802,175 @@ const gatherPerMarketValues = async (
   return result;
 };
 
+interface PerPoolValueConfig {
+  kind: string;
+  defaultFilename: string;
+  fetchCurrent: (market: string, poolId: number) => Promise<string>;
+}
+
+// Collect per (market, poolId) values for ops that act on a market-in-pool tuple
+// (decrease_cf_pool). Without this, a market listed in N pools would reuse the
+// same value across all pools, making the per-pool op indistinguishable from the
+// all-pools variant.
+const gatherPerPoolValues = async (
+  markets: string[],
+  symbols: Map<string, string>,
+  poolIdsByMarket: Map<string, number[]>,
+  cfg: PerPoolValueConfig,
+): Promise<Map<string, Map<number, string>>> => {
+  const pairs: Array<{ market: string; poolId: number }> = [];
+  for (const m of markets) {
+    for (const pid of poolIdsByMarket.get(m) ?? []) pairs.push({ market: m, poolId: pid });
+  }
+
+  const mode = await pickOne(`Apply ${cfg.kind}:`, [
+    `Single value to ALL selected (market, pool) pairs (e.g. 0 to block)`,
+    `Per-pair values via CLI prompts`,
+    `Load values from a JSON file`,
+  ]);
+
+  const result = new Map<string, Map<number, string>>();
+  const setVal = (market: string, poolId: number, value: string) => {
+    let inner = result.get(market);
+    if (!inner) {
+      inner = new Map<number, string>();
+      result.set(market, inner);
+    }
+    inner.set(poolId, value);
+  };
+
+  const fetchAllCurrent = async (): Promise<Map<string, Map<number, string>>> => {
+    const out = new Map<string, Map<number, string>>();
+    await Promise.all(
+      pairs.map(async ({ market, poolId }) => {
+        const v = await cfg.fetchCurrent(market, poolId);
+        let inner = out.get(market);
+        if (!inner) {
+          inner = new Map<number, string>();
+          out.set(market, inner);
+        }
+        inner.set(poolId, v);
+      }),
+    );
+    return out;
+  };
+
+  if (mode.startsWith("Single")) {
+    const value = await askUint256(`Enter new ${cfg.kind} for all selected (market, pool) pairs:`);
+    for (const { market, poolId } of pairs) setVal(market, poolId, value);
+  } else if (mode.startsWith("Per-pair")) {
+    const current = await fetchAllCurrent();
+    for (const { market, poolId } of pairs) {
+      const sym = symbols.get(market) || market;
+      const cur = current.get(market)?.get(poolId) ?? "(unknown)";
+      const value = await askUint256(`  ${sym} pool=${poolId} [current: ${cur}]:`);
+      setVal(market, poolId, value);
+    }
+  } else {
+    const defaultPath = path.resolve(OUTPUT_DIR, cfg.defaultFilename);
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      console.log(`\nEnter path to ${cfg.kind} values file (press enter for default: ${defaultPath})`);
+      const entered = await ask("> ");
+      const filePath = entered.length > 0 ? entered : defaultPath;
+
+      if (!fs.existsSync(filePath)) {
+        const confirm = await askYesNo(`${filePath} not found. Generate template there?`);
+        if (!confirm) continue;
+        console.log(`\nGenerating template with current on-chain ${cfg.kind} values...`);
+        const current = await fetchAllCurrent();
+        const template: Record<string, Record<string, string>> = {};
+        for (const { market, poolId } of pairs) {
+          const sym = symbols.get(market) || market;
+          template[sym] ??= {};
+          template[sym][String(poolId)] = current.get(market)?.get(poolId) ?? "0";
+        }
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, JSON.stringify(template, null, 2) + "\n");
+        console.log(green(`\nTemplate written to ${filePath}`));
+        console.log(`Edit the values (they currently match on-chain ${cfg.kind}) and re-run.`);
+        rl.close();
+        process.exit(0);
+      }
+
+      let content: unknown;
+      try {
+        content = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      } catch (error) {
+        console.error(red(`Failed to parse ${filePath}: ${(error as Error).message}`));
+        continue;
+      }
+      if (typeof content !== "object" || content === null || Array.isArray(content)) {
+        console.error(red(`${filePath} must contain a JSON object mapping symbol-or-address → {poolId: value}.`));
+        continue;
+      }
+
+      const symbolToAddress = new Map<string, string>();
+      symbols.forEach((sym, addr) => symbolToAddress.set(sym, addr));
+      const selectionSet = new Set(markets);
+
+      let invalid = false;
+      result.clear();
+      for (const [key, rawInner] of Object.entries(content as Record<string, unknown>)) {
+        const addr = ethers.utils.isAddress(key) ? key : symbolToAddress.get(key);
+        if (!addr || !selectionSet.has(addr)) {
+          console.log(yellow(`  Ignoring "${key}" — not in current selection`));
+          continue;
+        }
+        if (typeof rawInner !== "object" || rawInner === null || Array.isArray(rawInner)) {
+          console.error(red(`Entry for "${key}" must be an object {poolId: value}.`));
+          invalid = true;
+          break;
+        }
+        const allowedPools = new Set(poolIdsByMarket.get(addr) ?? []);
+        for (const [pidKey, rawValue] of Object.entries(rawInner as Record<string, unknown>)) {
+          const pid = Number(pidKey);
+          if (!Number.isInteger(pid) || !allowedPools.has(pid)) {
+            console.log(yellow(`  Ignoring "${key}" poolId "${pidKey}" — market not listed in that pool`));
+            continue;
+          }
+          try {
+            const bn = ethers.BigNumber.from(rawValue);
+            if (bn.lt(0)) throw new Error("negative");
+            setVal(addr, pid, bn.toString());
+          } catch {
+            console.error(red(`Invalid ${cfg.kind} value for "${key}" pool ${pid}: ${String(rawValue)}`));
+            invalid = true;
+            break;
+          }
+        }
+        if (invalid) break;
+      }
+      if (invalid) continue;
+
+      const missing: string[] = [];
+      for (const { market, poolId } of pairs) {
+        if (!result.get(market)?.has(poolId)) {
+          missing.push(`${symbols.get(market) || market} pool=${poolId}`);
+        }
+      }
+      if (missing.length > 0) {
+        console.error(red(`\nFile missing entries for: ${missing.join(", ")}`));
+        console.error(red(`Add entries to ${filePath} and re-try.`));
+        continue;
+      }
+
+      const current = await fetchAllCurrent();
+      console.log("\nWill apply:");
+      for (const { market, poolId } of pairs) {
+        const sym = symbols.get(market) || market;
+        const cur = current.get(market)?.get(poolId) ?? "(unknown)";
+        const val = result.get(market)?.get(poolId) ?? "";
+        console.log(`  ${sym} pool=${poolId}  new=${val}  [current: ${cur}]`);
+      }
+      break;
+    }
+  }
+
+  return result;
+};
+
 // Collect the per-operation inputs (markets, actions, CFs, caps, etc.) for a single step.
 const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise<EBrakeStep> => {
   const { comptrollerAddress, isIsolatedPool } = ctx;
@@ -806,6 +978,7 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
   let symbols = new Map<string, string>();
   let pauseActions: number[] | undefined;
   let newCFs: Map<string, string> | undefined;
+  let newCFsByPool: Map<string, Map<number, string>> | undefined;
   let poolIdsByMarket: Map<string, number[]> | undefined;
   let newCaps: Map<string, string> | undefined;
   let revokeAccounts: string[] | undefined;
@@ -865,14 +1038,14 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
         },
       });
     } else if (operation === "decrease_cf_pool") {
-      // Value applies to every pool the market is listed in; show core CF as reference.
-      newCFs = await gatherPerMarketValues(marketAddresses, symbols, {
+      if (!poolIdsByMarket) throw new Error("poolIdsByMarket missing for decrease_cf_pool");
+      newCFsByPool = await gatherPerPoolValues(marketAddresses, symbols, poolIdsByMarket, {
         kind: "CF",
-        defaultFilename: "cf_values_all_pools.json",
-        fetchCurrent: async m => {
+        defaultFilename: "cf_values_per_pool.json",
+        fetchCurrent: async (m, pid) => {
           try {
-            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isIsolatedPool, 0);
-            return `${cf.toString()} (core)`;
+            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isIsolatedPool, pid);
+            return cf.toString();
           } catch {
             return "(not listed)";
           }
@@ -899,7 +1072,17 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
     }
   }
 
-  return { operation, marketAddresses, symbols, pauseActions, newCFs, poolIdsByMarket, newCaps, revokeAccounts };
+  return {
+    operation,
+    marketAddresses,
+    symbols,
+    pauseActions,
+    newCFs,
+    newCFsByPool,
+    poolIdsByMarket,
+    newCaps,
+    revokeAccounts,
+  };
 };
 
 export const gatherInput = async (): Promise<EBrakeBatchInput> => {
@@ -976,7 +1159,17 @@ export const gatherInput = async (): Promise<EBrakeBatchInput> => {
 // ─── Phase 2: Generate Commands ──────────────────────────────────────────────
 
 const commandsForStep = (step: EBrakeStep): EBrakeCommand[] => {
-  const { operation, marketAddresses, symbols, pauseActions, newCFs, poolIdsByMarket, newCaps, revokeAccounts } = step;
+  const {
+    operation,
+    marketAddresses,
+    symbols,
+    pauseActions,
+    newCFs,
+    newCFsByPool,
+    poolIdsByMarket,
+    newCaps,
+    revokeAccounts,
+  } = step;
   const commands: EBrakeCommand[] = [];
 
   switch (operation) {
@@ -1007,11 +1200,10 @@ const commandsForStep = (step: EBrakeStep): EBrakeCommand[] => {
     }
 
     case "decrease_cf_pool": {
-      if (!newCFs || newCFs.size === 0 || !poolIdsByMarket) break;
-      for (const [vToken, cf] of newCFs) {
+      if (!newCFsByPool || newCFsByPool.size === 0) break;
+      for (const [vToken, byPool] of newCFsByPool) {
         const symbol = symbols.get(vToken) || vToken;
-        const poolIds = poolIdsByMarket.get(vToken) ?? [];
-        for (const pid of poolIds) {
+        for (const [pid, cf] of byPool) {
           console.log(`  ${symbol} → decreaseCF(${vToken}, poolId=${pid}, ${cf})`);
           commands.push({
             signature: "decreaseCF(address,uint96,uint256)",
