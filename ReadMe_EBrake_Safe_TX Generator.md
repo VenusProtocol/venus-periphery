@@ -97,7 +97,6 @@ All under `helpers/data/`, gitignored, overwritten per run:
 | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `safeEBrakeTxBuilder.json`                                                             | Gnosis Safe TX Builder import payload (upload this).                                    |
 | `safeEBrakeTxMetadata.json`                                                            | Audit trail: EBrake address, network, block, symbols, operations. Simulator reads this. |
-| `markets.json`                                                                         | `{symbol: address}` cache, refreshed on every file-mode market-picker run.              |
 | `cf_values.json` / `cf_values_pool<id>.json` / `borrow_caps.json` / `supply_caps.json` | File-mode value input templates for CF / caps steps.                                    |
 
 Templates are auto-generated (pre-filled with current on-chain values) on first file-mode run; subsequent runs read them.

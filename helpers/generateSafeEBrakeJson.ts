@@ -41,7 +41,6 @@
  * Written to helpers/data/ (gitignored, overwritten on every run):
  *   safeEBrakeTxBuilder.json   — import this into the Gnosis Safe TX Builder UI
  *   safeEBrakeTxMetadata.json  — audit trail (EBrake address, network, block, symbols, operations)
- *   markets.json               — symbol → vToken cache, refreshed on every file-mode run
  *   cf_values.json / cf_values_pool<id>.json / borrow_caps.json / supply_caps.json
  *                              — per-market value templates (file-mode input for CF / caps steps)
  *
@@ -90,8 +89,6 @@ async function retry<T = any>(fn: () => Promise<T>, retries = 3, delayMs = 1000)
 // ─── Configuration ──────────────────────────────────────────────────────────
 
 const OUTPUT_DIR = path.resolve(__dirname, "data");
-
-const MARKETS_FILE = path.resolve(OUTPUT_DIR, "markets.json");
 
 const EBRAKE_ABI = [
   "function IS_ISOLATED_POOL() view returns (bool)",
@@ -425,12 +422,6 @@ const fetchCurrentCaps = async (
 
 type NetworkMarkets = Record<string, string>; // symbol → vTokenAddress
 
-const saveMarkets = (markets: NetworkMarkets) => {
-  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  fs.writeFileSync(MARKETS_FILE, JSON.stringify(markets, null, 2) + "\n");
-  console.log(green(`Markets saved to ${MARKETS_FILE} (${Object.keys(markets).length} markets)`));
-};
-
 const buildMarketsFromChain = async (comptroller: string, isIsolatedPool: boolean): Promise<NetworkMarkets> => {
   console.log("\nQuerying comptroller for all markets...");
   const allMarkets = await fetchAllMarkets(comptroller, isIsolatedPool);
@@ -448,11 +439,10 @@ const buildMarketsFromChain = async (comptroller: string, isIsolatedPool: boolea
   if (collisions.length > 0) {
     console.error(red("Symbol collision(s) detected:"));
     collisions.forEach(c => console.error(red(`  ${c}`)));
-    console.error(red("Cannot build markets file with duplicate symbol keys."));
+    console.error(red("Cannot build markets map with duplicate symbol keys."));
     rl.close();
     process.exit(1);
   }
-  saveMarkets(markets);
   return markets;
 };
 
@@ -528,7 +518,7 @@ const selectMarkets = async (
   const { comptrollerAddress: comptroller, isIsolatedPool } = ctx;
   const marketMode = await pickOne("How to load markets?", [
     "Enter addresses manually in CLI",
-    "Select by name from (Auto-fetch all listed markets) helpers/data/markets.json",
+    "Select by name (auto-fetch all listed markets on first use, cached for this run)",
   ]);
 
   let marketAddresses: string[] = [];
