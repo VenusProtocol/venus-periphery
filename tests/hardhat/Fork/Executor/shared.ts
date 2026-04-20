@@ -178,8 +178,8 @@ export function createDeployFixture(config: ExecutorNetworkConfig): () => Promis
     const handlerFunctions = [
       "handleLTVAdjust(address,uint256)",
       "handleCapAdjust(address,uint8,uint256)",
-      "handleSupplyHalt(address)",
-      "handleBorrowHalt(address)",
+      "handleSupplyCapExceeding(address)",
+      "handleBorrowCapExceeding(address)",
     ];
     for (const sig of handlerFunctions) {
       await acm.giveCallPermission(executor.address, sig, hypernative.address);
@@ -240,17 +240,17 @@ export function accessControlTests(_config: ExecutorNetworkConfig, get: FixtureG
       ).to.be.revertedWithCustomError(executor, "Unauthorized");
     });
 
-    it("handleSupplyHalt: reverts for unauthorized caller", async () => {
+    it("handleSupplyCapExceeding: reverts for unauthorized caller", async () => {
       const { executor, randomUser, testMarket } = get();
-      await expect(executor.connect(randomUser).handleSupplyHalt(testMarket)).to.be.revertedWithCustomError(
+      await expect(executor.connect(randomUser).handleSupplyCapExceeding(testMarket)).to.be.revertedWithCustomError(
         executor,
         "Unauthorized",
       );
     });
 
-    it("handleBorrowHalt: reverts for unauthorized caller", async () => {
+    it("handleBorrowCapExceeding: reverts for unauthorized caller", async () => {
       const { executor, randomUser, testMarket } = get();
-      await expect(executor.connect(randomUser).handleBorrowHalt(testMarket)).to.be.revertedWithCustomError(
+      await expect(executor.connect(randomUser).handleBorrowCapExceeding(testMarket)).to.be.revertedWithCustomError(
         executor,
         "Unauthorized",
       );
@@ -448,23 +448,27 @@ export function handleCapAdjustTests(_config: ExecutorNetworkConfig, get: Fixtur
   });
 }
 
-export function handleSupplyHaltTests(config: ExecutorNetworkConfig, get: FixtureGetter): void {
-  describe("handleSupplyHalt", () => {
-    it("reverts when supply cap is not breached", async () => {
+export function handleSupplyCapExceedingTests(config: ExecutorNetworkConfig, get: FixtureGetter): void {
+  describe("handleSupplyCapExceeding", () => {
+    it("reverts when supply cap is set and not breached", async () => {
       const { executor, hypernative, testMarket } = get();
-      await expect(executor.connect(hypernative).handleSupplyHalt(testMarket)).to.be.revertedWithCustomError(
+      await expect(executor.connect(hypernative).handleSupplyCapExceeding(testMarket)).to.be.revertedWithCustomError(
         executor,
         "CapNotBreached",
       );
     });
 
-    it("reverts when supply cap is not set (cap == 0 means unlimited)", async () => {
+    it("halts when supply cap is 0 (misconfiguration — treated as haltable)", async () => {
       const { executor, hypernative, comptroller, governance, testMarket } = get();
       await setSupplyCapDirect(comptroller.connect(governance), testMarket, 0, config);
-      await expect(executor.connect(hypernative).handleSupplyHalt(testMarket)).to.be.revertedWithCustomError(
-        executor,
-        "CapNotBreached",
-      );
+
+      await expect(executor.connect(hypernative).handleSupplyCapExceeding(testMarket))
+        .to.emit(executor, "SupplyCapExceeding")
+        .withArgs(hypernative.address, testMarket);
+
+      expect(await comptroller.actionPaused(testMarket, Action.MINT)).to.be.true;
+      const { cf } = await getMarketCF(comptroller, testMarket, config);
+      expect(cf).to.equal(0);
     });
 
     it("pauses supply and zeros CF when cap is breached", async () => {
@@ -472,8 +476,8 @@ export function handleSupplyHaltTests(config: ExecutorNetworkConfig, get: Fixtur
 
       await setSupplyCapDirect(comptroller.connect(governance), testMarket, 1, config);
 
-      await expect(executor.connect(hypernative).handleSupplyHalt(testMarket))
-        .to.emit(executor, "SupplyHalted")
+      await expect(executor.connect(hypernative).handleSupplyCapExceeding(testMarket))
+        .to.emit(executor, "SupplyCapExceeding")
         .withArgs(hypernative.address, testMarket);
 
       expect(await comptroller.actionPaused(testMarket, Action.MINT)).to.be.true;
@@ -486,7 +490,7 @@ export function handleSupplyHaltTests(config: ExecutorNetworkConfig, get: Fixtur
 
       const { lt: ltBefore } = await getMarketCF(comptroller, testMarket, config);
       await setSupplyCapDirect(comptroller.connect(governance), testMarket, 1, config);
-      await executor.connect(hypernative).handleSupplyHalt(testMarket);
+      await executor.connect(hypernative).handleSupplyCapExceeding(testMarket);
 
       const { lt: ltAfter } = await getMarketCF(comptroller, testMarket, config);
       expect(ltAfter).to.equal(ltBefore);
@@ -494,23 +498,25 @@ export function handleSupplyHaltTests(config: ExecutorNetworkConfig, get: Fixtur
   });
 }
 
-export function handleBorrowHaltTests(config: ExecutorNetworkConfig, get: FixtureGetter): void {
-  describe("handleBorrowHalt", () => {
-    it("reverts when borrow cap is not breached", async () => {
+export function handleBorrowCapExceedingTests(config: ExecutorNetworkConfig, get: FixtureGetter): void {
+  describe("handleBorrowCapExceeding", () => {
+    it("reverts when borrow cap is set and not breached", async () => {
       const { executor, hypernative, testMarket } = get();
-      await expect(executor.connect(hypernative).handleBorrowHalt(testMarket)).to.be.revertedWithCustomError(
+      await expect(executor.connect(hypernative).handleBorrowCapExceeding(testMarket)).to.be.revertedWithCustomError(
         executor,
         "CapNotBreached",
       );
     });
 
-    it("reverts when borrow cap is not set (cap == 0 means unlimited)", async () => {
+    it("halts when borrow cap is 0 (misconfiguration — treated as haltable)", async () => {
       const { executor, hypernative, comptroller, governance, testMarket } = get();
       await setBorrowCapDirect(comptroller.connect(governance), testMarket, 0, config);
-      await expect(executor.connect(hypernative).handleBorrowHalt(testMarket)).to.be.revertedWithCustomError(
-        executor,
-        "CapNotBreached",
-      );
+
+      await expect(executor.connect(hypernative).handleBorrowCapExceeding(testMarket))
+        .to.emit(executor, "BorrowCapExceeding")
+        .withArgs(hypernative.address, testMarket);
+
+      expect(await comptroller.actionPaused(testMarket, Action.BORROW)).to.be.true;
     });
 
     it("pauses borrow when cap is breached", async () => {
@@ -518,8 +524,8 @@ export function handleBorrowHaltTests(config: ExecutorNetworkConfig, get: Fixtur
 
       await setBorrowCapDirect(comptroller.connect(governance), testMarket, 1, config);
 
-      await expect(executor.connect(hypernative).handleBorrowHalt(testMarket))
-        .to.emit(executor, "BorrowHalted")
+      await expect(executor.connect(hypernative).handleBorrowCapExceeding(testMarket))
+        .to.emit(executor, "BorrowCapExceeding")
         .withArgs(hypernative.address, testMarket);
 
       expect(await comptroller.actionPaused(testMarket, Action.BORROW)).to.be.true;
@@ -530,7 +536,7 @@ export function handleBorrowHaltTests(config: ExecutorNetworkConfig, get: Fixtur
 
       const { cf: cfBefore } = await getMarketCF(comptroller, testMarket, config);
       await setBorrowCapDirect(comptroller.connect(governance), testMarket, 1, config);
-      await executor.connect(hypernative).handleBorrowHalt(testMarket);
+      await executor.connect(hypernative).handleBorrowCapExceeding(testMarket);
 
       const { cf: cfAfter } = await getMarketCF(comptroller, testMarket, config);
       expect(cfAfter).to.equal(cfBefore);
@@ -555,12 +561,12 @@ export function runSharedTests(config: ExecutorNetworkConfig, get: FixtureGetter
   accessControlTests(config, get);
   setMarketConfigTests(config, get);
   handleCapAdjustTests(config, get);
-  handleBorrowHaltTests(config, get);
+  handleBorrowCapExceedingTests(config, get);
 }
 
 /// Shared tests + IL-specific LTV / supply halt tests (single-pool comptroller).
 export function runIsolatedPoolTests(config: ExecutorNetworkConfig, get: FixtureGetter): void {
   runSharedTests(config, get);
   handleLTVAdjustTests(config, get);
-  handleSupplyHaltTests(config, get);
+  handleSupplyCapExceedingTests(config, get);
 }

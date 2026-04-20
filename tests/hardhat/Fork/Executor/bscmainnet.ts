@@ -4,7 +4,7 @@
 // BSC's Diamond comptroller is multi-pool: a market can be listed in the core
 // pool and one or more e-mode pools, each with its own (CF, LT) pair.
 // EBrake.decreaseCF iterates corePoolId..lastPoolId and updates every listed
-// instance, so handleLTVAdjust / handleSupplyHalt need BSC-specific assertions
+// instance, so handleLTVAdjust / handleSupplyCapExceeding need BSC-specific assertions
 // that walk the same pool range. The shared (single-pool) tests in shared.ts
 // only assert CORE_POOL_ID and would miss e-mode side effects, so they live
 // behind `runIsolatedPoolTests` and are not used here.
@@ -128,25 +128,35 @@ if (FORK_MAINNET) {
       });
 
       // ═════════════════════════════════════════════════════════════════════
-      // BSC-ONLY: handleSupplyHalt (zeroes CF across every listed pool)
+      // BSC-ONLY: handleSupplyCapExceeding (zeroes CF across every listed pool)
       // ═════════════════════════════════════════════════════════════════════
 
-      describe("handleSupplyHalt (Diamond multi-pool)", () => {
-        it("reverts when supply cap is not breached", async () => {
+      describe("handleSupplyCapExceeding (Diamond multi-pool)", () => {
+        it("reverts when supply cap is set and not breached", async () => {
           const { executor, hypernative, testMarket } = get();
-          await expect(executor.connect(hypernative).handleSupplyHalt(testMarket)).to.be.revertedWithCustomError(
-            executor,
-            "CapNotBreached",
-          );
+          await expect(
+            executor.connect(hypernative).handleSupplyCapExceeding(testMarket),
+          ).to.be.revertedWithCustomError(executor, "CapNotBreached");
         });
 
-        it("reverts when supply cap is not set (cap == 0 means unlimited)", async () => {
+        it("halts in every listed pool when supply cap is 0 (misconfiguration)", async () => {
           const { executor, hypernative, comptroller, governance, testMarket } = get();
+
+          const listedPools = await readListedPoolIds(testMarket);
+          expect(listedPools.length).to.be.gte(1);
+
           await comptroller.connect(governance)._setMarketSupplyCaps([testMarket], [0]);
-          await expect(executor.connect(hypernative).handleSupplyHalt(testMarket)).to.be.revertedWithCustomError(
-            executor,
-            "CapNotBreached",
-          );
+
+          await expect(executor.connect(hypernative).handleSupplyCapExceeding(testMarket))
+            .to.emit(executor, "SupplyCapExceeding")
+            .withArgs(hypernative.address, testMarket);
+
+          expect(await comptroller.actionPaused(testMarket, Action.MINT)).to.be.true;
+
+          for (const poolId of listedPools) {
+            const m = await readPoolMarket(poolId, testMarket);
+            expect(m.collateralFactorMantissa, `pool ${poolId} CF`).to.equal(0);
+          }
         });
 
         it("pauses MINT and zeros CF in every listed pool when cap is breached", async () => {
@@ -158,8 +168,8 @@ if (FORK_MAINNET) {
           // Force the supply cap below current supply so the breach check passes.
           await comptroller.connect(governance)._setMarketSupplyCaps([testMarket], [1]);
 
-          await expect(executor.connect(hypernative).handleSupplyHalt(testMarket))
-            .to.emit(executor, "SupplyHalted")
+          await expect(executor.connect(hypernative).handleSupplyCapExceeding(testMarket))
+            .to.emit(executor, "SupplyCapExceeding")
             .withArgs(hypernative.address, testMarket);
 
           expect(await comptroller.actionPaused(testMarket, Action.MINT)).to.be.true;
@@ -180,7 +190,7 @@ if (FORK_MAINNET) {
           }
 
           await comptroller.connect(governance)._setMarketSupplyCaps([testMarket], [1]);
-          await executor.connect(hypernative).handleSupplyHalt(testMarket);
+          await executor.connect(hypernative).handleSupplyCapExceeding(testMarket);
 
           for (const poolId of listedPools) {
             const m = await readPoolMarket(poolId, testMarket);

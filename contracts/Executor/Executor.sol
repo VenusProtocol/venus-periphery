@@ -21,7 +21,8 @@ import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/
  *         The Executor is the validation layer. It ensures:
  *         - LTV adjustments are tighten-only (decrease only), enforced by EBrake
  *         - Cap adjustments stay within [minCap, currentCap] and are tighten-only, enforced by EBrake
- *         - Supply and borrow halts only fire when caps are actually breached on-chain
+ *         - Supply and borrow cap-exceeding halts fire when caps are breached on-chain,
+ *           OR when the cap is 0 (treated as misconfiguration rather than "unlimited")
  *
  *         The Executor does NOT hold detection logic — that lives off-chain in the signal pipeline.
  *         The Executor does NOT call the comptroller directly — all mutations go through EBrake.
@@ -120,8 +121,8 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
     }
 
     /// @inheritdoc IExecutor
-    function handleSupplyHalt(address market) external nonReentrant {
-        _checkAccessAllowed("handleSupplyHalt(address)");
+    function handleSupplyCapExceeding(address market) external nonReentrant {
+        _checkAccessAllowed("handleSupplyCapExceeding(address)");
 
         _checkAndGetConfig(market);
 
@@ -130,17 +131,20 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
         uint256 supplyUnderlying = (IVToken(market).totalSupply() * IVToken(market).exchangeRateCurrent()) / 1e18;
         uint256 supplyCap = comptroller.supplyCaps(market);
 
-        // supplyCap == 0 means no cap is set (unlimited) — treat as not breached.
-        if (supplyCap == 0 || supplyUnderlying < supplyCap) revert CapNotBreached();
+        // supplyCap == 0 is treated as a misconfiguration (no Venus market is intentionally
+        // uncapped in production); halt is permitted so the market can always be frozen.
+        // Accidental halt of a genuinely-uncapped market is recoverable via governance VIP,
+        // whereas leaving a draining market un-haltable is not.
+        if (supplyCap != 0 && supplyUnderlying < supplyCap) revert CapNotBreached();
 
         EBRAKE.pauseSupply(market);
         EBRAKE.decreaseCF(market, 0);
-        emit SupplyHalted(msg.sender, market);
+        emit SupplyCapExceeding(msg.sender, market);
     }
 
     /// @inheritdoc IExecutor
-    function handleBorrowHalt(address market) external nonReentrant {
-        _checkAccessAllowed("handleBorrowHalt(address)");
+    function handleBorrowCapExceeding(address market) external nonReentrant {
+        _checkAccessAllowed("handleBorrowCapExceeding(address)");
 
         _checkAndGetConfig(market);
 
@@ -148,12 +152,12 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
         uint256 totalBorrows = IVToken(market).totalBorrowsCurrent();
         uint256 borrowCap = comptroller.borrowCaps(market);
 
-        // borrowCap == 0 means no cap is set (unlimited) — treat as not breached.
-        if (borrowCap == 0 || totalBorrows < borrowCap) revert CapNotBreached();
+        // borrowCap == 0 is treated as a misconfiguration — see handleSupplyCapExceeding.
+        if (borrowCap != 0 && totalBorrows < borrowCap) revert CapNotBreached();
 
         EBRAKE.pauseBorrow(market);
 
-        emit BorrowHalted(msg.sender, market);
+        emit BorrowCapExceeding(msg.sender, market);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

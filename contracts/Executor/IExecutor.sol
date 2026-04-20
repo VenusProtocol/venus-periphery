@@ -14,14 +14,15 @@ pragma solidity ^0.8.25;
  *      Example Flow: Hypernative/off-chain → Executor (validate) → EBrake (execute) → Comptroller
  *
  *      The Executor uses ACM (AccessControlManager) for all function access control. Hypernative or Keepers
- *      are granted ACM access to the handler functions (handleLTVAdjust, handleCapAdjust, handleSupplyHalt, handleBorrowHalt).
- *      Governance is granted ACM access to admin functions (setMarketConfig).
+ *      are granted ACM access to the handler functions (handleLTVAdjust, handleCapAdjust,
+ *      handleSupplyCapExceeding, handleBorrowCapExceeding). Governance is granted ACM access to admin
+ *      functions (setMarketConfig).
  *
  *      Safety model:
  *        - LTV adjustments are tighten-only (decrease only), enforced by EBrake
  *        - Cap adjustments are bounded below by [minCap], tighten-only enforced by EBrake
  *        - All adjustments are tighten-only (decreases only) — recovery via governance VIP
- *        - Supply and borrow halts are one-way (pause only) — recovery via governance VIP
+ *        - Cap-exceeding halts are one-way (pause only) — recovery via governance VIP
  *        - Worst case if compromised: temporary freeze — parameters restored by governance
  */
 interface IExecutor {
@@ -74,15 +75,15 @@ interface IExecutor {
     /// @param newCap The new cap value.
     event CapAdjusted(address indexed caller, address indexed market, CapType capType, uint256 oldCap, uint256 newCap);
 
-    /// @notice Emitted when supply is halted via handleSupplyHalt (supply paused + CF zeroed).
+    /// @notice Emitted when a supply-cap-exceeding signal is handled (supply paused + CF zeroed).
     /// @param caller The address that triggered the halt.
     /// @param market The vToken market address.
-    event SupplyHalted(address indexed caller, address indexed market);
+    event SupplyCapExceeding(address indexed caller, address indexed market);
 
-    /// @notice Emitted when borrow is halted via handleBorrowHalt.
+    /// @notice Emitted when a borrow-cap-exceeding signal is handled (borrow paused).
     /// @param caller The address that triggered the halt.
     /// @param market The vToken market address.
-    event BorrowHalted(address indexed caller, address indexed market);
+    event BorrowCapExceeding(address indexed caller, address indexed market);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
@@ -101,7 +102,9 @@ interface IExecutor {
     /// @param minCap The minimum allowed cap.
     error CapBelowMinimum(uint256 adjustedCap, uint256 minCap);
 
-    /// @notice Thrown when on-chain cap validation fails in handleSupplyHalt or handleBorrowHalt (cap not breached).
+    /// @notice Thrown when the configured cap is set (non-zero) and current usage is below it,
+    ///         so the cap-exceeding halt has no on-chain justification. A zero cap is treated as
+    ///         a misconfiguration and does NOT revert with this error.
     error CapNotBreached();
 
     /// @notice Thrown when a zero address is passed where a valid address is required.
@@ -140,26 +143,29 @@ interface IExecutor {
     function handleCapAdjust(address market, CapType capType, uint256 adjustedCap) external;
 
     /**
-     * @notice Halt supply for a market when supply cap is breached.
+     * @notice Handle the S4 supply-cap-exceeding signal: pause supply and zero CF.
      *         Triggered by S4 supply cap breach signal: totalSupply >= supplyCap
      *         AND supply delta >= 5% in N blocks.
-     *         Validates on-chain that totalSupply >= supplyCap, then pauses supply and zeros CF.
+     *         Reverts with CapNotBreached only when supplyCap is set AND totalSupply is below it.
+     *         If supplyCap == 0 (misconfiguration — no Venus market is intentionally uncapped),
+     *         the halt is permitted; governance recovery via VIP.
      *         One-way action — recovery requires governance VIP.
      *
      * @param market The vToken market address.
      */
-    function handleSupplyHalt(address market) external;
+    function handleSupplyCapExceeding(address market) external;
 
     /**
-     * @notice Halt borrowing for a market when borrow cap is breached.
+     * @notice Handle the S4 borrow-cap-exceeding signal: pause borrow.
      *         Triggered by S4 borrow cap breach signal: totalBorrows >= borrowCap
      *         AND borrow utilisation +10% in N blocks.
-     *         Validates on-chain that totalBorrows >= borrowCap, then pauses borrow.
+     *         Reverts with CapNotBreached only when borrowCap is set AND totalBorrows is below it.
+     *         If borrowCap == 0 (misconfiguration), the halt is permitted; governance recovery via VIP.
      *         One-way action — recovery requires governance VIP.
      *
      * @param market The vToken market address.
      */
-    function handleBorrowHalt(address market) external;
+    function handleBorrowCapExceeding(address market) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     ADMIN FUNCTIONS (ACM-gated)
