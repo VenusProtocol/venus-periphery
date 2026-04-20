@@ -82,14 +82,8 @@ EBrake deployment status is maintained in `deployments/<network>/EBrake.json`. Q
 | sepolia         | 11155111 | ✅       | Isolated Lending                              |
 | arbitrumone     | 42161    | ✅       | Isolated Lending                              |
 | arbitrumsepolia | 421614   | ✅       | Isolated Lending                              |
-| opmainnet       | 10       | ✅       | Isolated Lending                              |
-| opsepolia       | 11155420 | ✅       | Isolated Lending                              |
 | basemainnet     | 8453     | ✅       | Isolated Lending                              |
 | basesepolia     | 84532    | ✅       | Isolated Lending                              |
-| unichainmainnet | 130      | ✅       | Isolated Lending                              |
-| unichainsepolia | 1301     | ✅       | Isolated Lending                              |
-| opbnbmainnet    | 204      | ✅       | Isolated Lending                              |
-| opbnbtestnet    | 5611     | ✅       | Isolated Lending                              |
 
 Pool-specific operations (`decrease_cf_pool`, `pause_flash_loan`, `revoke_flash_loan`, `disable_pool_borrow`) are only shown in the generator when `IS_ISOLATED_POOL === false` (i.e. BSC core diamond).
 
