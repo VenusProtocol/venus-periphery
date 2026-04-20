@@ -764,17 +764,39 @@ const gatherPerMarketValues = async (
   } else {
     const defaultPath = path.resolve(OUTPUT_DIR, cfg.defaultFilename);
 
+    // Print expected file shape before asking for the path so operators can
+    // prepare the file rather than discovering the format by trial and error.
+    console.log(cyan(`\nExpected ${cfg.kind} file format:`));
+    console.log(`  JSON object mapping symbol (or address) → ${cfg.kind} value.`);
+    console.log(`  Example:`);
+    console.log(`    {`);
+    console.log(`      "vAAVE": "0",`);
+    console.log(`      "vBTCB": "500000000000000000"`);
+    console.log(`    }`);
+    console.log(`  Address keys are accepted too. Values must be non-negative integers.`);
+    console.log(`  If the file doesn't exist, a template pre-filled with current on-chain`);
+    console.log(`  values will be offered — edit it, save, re-run.`);
+
     // Re-prompt on any validation failure so a typo in the path or the file's
-    // contents doesn't force the operator to restart the whole flow.
+    // contents doesn't force the operator to restart the whole flow. The last
+    // entered path is remembered so the post-template-gen retry lands on the
+    // same file the operator just edited.
+    let stickyDefault = defaultPath;
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      console.log(`\nEnter path to ${cfg.kind} values file (press enter for default: ${defaultPath})`);
+      console.log(`\nEnter path to ${cfg.kind} values file (press enter for default: ${stickyDefault})`);
       const entered = await ask("> ");
-      const filePath = entered.length > 0 ? entered : defaultPath;
+      const filePath = entered.length > 0 ? entered : stickyDefault;
+      stickyDefault = filePath;
 
-      if (!fs.existsSync(filePath)) {
-        const confirm = await askYesNo(`${filePath} not found. Generate template there?`);
-        if (!confirm) continue;
+      // Local helper: writes a fresh template for the current selection, backs
+      // up any prior content to .bak, then pauses for operator edit+resume.
+      const regenerateTemplateAndPause = async (reason: "missing" | "new") => {
+        if (reason === "missing" && fs.existsSync(filePath)) {
+          const backup = `${filePath}.bak`;
+          fs.copyFileSync(filePath, backup);
+          console.log(yellow(`\nExisting file backed up to ${backup} before regeneration.`));
+        }
         console.log(`\nGenerating template with current on-chain ${cfg.kind} values...`);
         const current = await fetchAllCurrent();
         const template: Record<string, string> = {};
@@ -784,10 +806,22 @@ const gatherPerMarketValues = async (
         }
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, JSON.stringify(template, null, 2) + "\n");
-        console.log(green(`\nTemplate written to ${filePath}`));
-        console.log(`Edit the values (they currently match on-chain ${cfg.kind}) and re-run.`);
-        rl.close();
-        process.exit(0);
+        console.log(green(`Template written to ${filePath}`));
+        console.log(`Edit the values (they currently match on-chain ${cfg.kind}), save, then press Enter to continue.`);
+        console.log("Type 'q' + Enter to quit.");
+        const resume = (await ask("> ")).trim().toLowerCase();
+        if (resume === "q") {
+          rl.close();
+          process.exit(0);
+        }
+      };
+
+      if (!fs.existsSync(filePath)) {
+        const confirm = await askYesNo(`${filePath} not found. Generate template there?`);
+        if (!confirm) continue;
+        await regenerateTemplateAndPause("new");
+        // Fall through: loop restarts. stickyDefault = filePath, so Enter keeps the same file.
+        continue;
       }
 
       let content: unknown;
@@ -829,8 +863,9 @@ const gatherPerMarketValues = async (
 
       const missing = markets.filter(m => !result.has(m)).map(m => symbols.get(m) || m);
       if (missing.length > 0) {
-        console.error(red(`\nFile missing entries for selected markets: ${missing.join(", ")}`));
-        console.error(red(`Add entries to ${filePath} and re-try.`));
+        console.log(yellow(`\nFile stale — missing entries for selected markets: ${missing.join(", ")}.`));
+        console.log(yellow(`Regenerating template for current selection. Existing file will be backed up.`));
+        await regenerateTemplateAndPause("missing");
         continue;
       }
 
@@ -914,15 +949,41 @@ const gatherPerPoolValues = async (
   } else {
     const defaultPath = path.resolve(OUTPUT_DIR, cfg.defaultFilename);
 
+    // Print expected file shape before asking for the path so operators can
+    // prepare the file rather than discovering the format by trial and error.
+    console.log(cyan(`\nExpected ${cfg.kind} file format (per-pool):`));
+    console.log(`  JSON object: symbol (or address) → { poolId → ${cfg.kind} value }.`);
+    console.log(`  Example (vAAVE listed in pools 0 and 6):`);
+    console.log(`    {`);
+    console.log(`      "vAAVE": {`);
+    console.log(`        "0": "0",`);
+    console.log(`        "6": "700000000000000000"`);
+    console.log(`      }`);
+    console.log(`    }`);
+    console.log(`  Only poolIds the market is actually listed in are accepted.`);
+    console.log(`  Values must be non-negative integers.`);
+    console.log(`  If the file doesn't exist, a template pre-filled with current on-chain`);
+    console.log(`  values will be offered — edit it, save, re-run.`);
+
+    // The last entered path is remembered so the post-template-gen retry lands
+    // on the same file the operator just edited.
+    let stickyDefault = defaultPath;
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      console.log(`\nEnter path to ${cfg.kind} values file (press enter for default: ${defaultPath})`);
+      console.log(`\nEnter path to ${cfg.kind} values file (press enter for default: ${stickyDefault})`);
       const entered = await ask("> ");
-      const filePath = entered.length > 0 ? entered : defaultPath;
+      const filePath = entered.length > 0 ? entered : stickyDefault;
+      stickyDefault = filePath;
 
-      if (!fs.existsSync(filePath)) {
-        const confirm = await askYesNo(`${filePath} not found. Generate template there?`);
-        if (!confirm) continue;
+      // Local helper: writes a fresh template for the current (market,pool)
+      // pairs, backs up prior content to .bak on overwrite, then pauses for
+      // operator edit+resume.
+      const regenerateTemplateAndPause = async (reason: "missing" | "new") => {
+        if (reason === "missing" && fs.existsSync(filePath)) {
+          const backup = `${filePath}.bak`;
+          fs.copyFileSync(filePath, backup);
+          console.log(yellow(`\nExisting file backed up to ${backup} before regeneration.`));
+        }
         console.log(`\nGenerating template with current on-chain ${cfg.kind} values...`);
         const current = await fetchAllCurrent();
         const template: Record<string, Record<string, string>> = {};
@@ -933,10 +994,21 @@ const gatherPerPoolValues = async (
         }
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, JSON.stringify(template, null, 2) + "\n");
-        console.log(green(`\nTemplate written to ${filePath}`));
-        console.log(`Edit the values (they currently match on-chain ${cfg.kind}) and re-run.`);
-        rl.close();
-        process.exit(0);
+        console.log(green(`Template written to ${filePath}`));
+        console.log(`Edit the values (they currently match on-chain ${cfg.kind}), save, then press Enter to continue.`);
+        console.log("Type 'q' + Enter to quit.");
+        const resume = (await ask("> ")).trim().toLowerCase();
+        if (resume === "q") {
+          rl.close();
+          process.exit(0);
+        }
+      };
+
+      if (!fs.existsSync(filePath)) {
+        const confirm = await askYesNo(`${filePath} not found. Generate template there?`);
+        if (!confirm) continue;
+        await regenerateTemplateAndPause("new");
+        continue;
       }
 
       let content: unknown;
@@ -996,8 +1068,9 @@ const gatherPerPoolValues = async (
         }
       }
       if (missing.length > 0) {
-        console.error(red(`\nFile missing entries for: ${missing.join(", ")}`));
-        console.error(red(`Add entries to ${filePath} and re-try.`));
+        console.log(yellow(`\nFile stale — missing entries for: ${missing.join(", ")}.`));
+        console.log(yellow(`Regenerating template for current selection. Existing file will be backed up.`));
+        await regenerateTemplateAndPause("missing");
         continue;
       }
 
