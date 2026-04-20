@@ -512,6 +512,36 @@ const pickSymbols = async (entries: Array<[string, string]>): Promise<Array<[str
   }
 };
 
+// Asks operator to pick which pool IDs a market should act on. Called per
+// market after market selection — prevents blind fan-out to every pool the
+// market happens to be listed in when only a subset is intended.
+const pickPoolIds = async (sym: string, available: number[]): Promise<number[]> => {
+  const validSet = new Set(available);
+  console.log(cyan(`\n${sym} is listed in pool(s): [${available.join(", ")}]`));
+  console.log("Enter comma-separated pool IDs or 'all':");
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const answer = await ask("> ");
+    const t = answer.trim().toLowerCase();
+    if (t === "all") return available;
+    const tokens = answer
+      .split(",")
+      .map(s => s.trim())
+      .filter(v => v.length > 0);
+    if (tokens.length === 0) {
+      console.log(red("No pool IDs entered. Please try again."));
+      continue;
+    }
+    const parsed = tokens.map(Number);
+    const invalid = parsed.filter(n => !Number.isInteger(n) || !validSet.has(n));
+    if (invalid.length > 0) {
+      console.log(red(`Invalid or out-of-range pool ID(s): ${invalid.join(", ")}. Valid: ${available.join(", ")}.`));
+      continue;
+    }
+    return [...new Set(parsed)];
+  }
+};
+
 const selectMarkets = async (
   ctx: StepContext,
 ): Promise<{ marketAddresses: string[]; symbols: Map<string, string> }> => {
@@ -644,16 +674,41 @@ const pickBscMarketsFanOut = async (
 
   const marketAddresses = selected.map(([, addr]) => addr);
   const symbols = new Map(selected.map(([sym, addr]) => [addr, sym]));
+
+  // Per-market pool picker: operator chooses which pool IDs to act on.
+  // Markets listed in a single pool skip the prompt (nothing to pick).
+  console.log(cyan("\n--- Pool selection per market ---"));
   const poolIdsByMarket = new Map<string, number[]>();
   for (const addr of marketAddresses) {
-    poolIdsByMarket.set(addr, poolsByMarket.get(addr) ?? []);
+    const sym = symbols.get(addr) ?? addr;
+    const available = poolsByMarket.get(addr) ?? [];
+    if (available.length <= 1) {
+      poolIdsByMarket.set(addr, available);
+      if (available.length === 1) {
+        console.log(`${sym} → pool [${available[0]}] (only pool, no selection needed)`);
+      }
+      continue;
+    }
+    const picked = await pickPoolIds(sym, available);
+    poolIdsByMarket.set(addr, picked);
   }
 
   console.log(cyan("\nFan-out plan:"));
+  let totalTxs = 0;
   for (const addr of marketAddresses) {
     const sym = symbols.get(addr) ?? addr;
     const ids = poolIdsByMarket.get(addr) ?? [];
+    totalTxs += ids.length;
     console.log(`  ${sym} → pool(s) [${ids.join(", ")}]`);
+  }
+
+  // Guard against fat-finger 'all' on a market with many pools — explicit
+  // confirm before the batch is generated.
+  const proceed = await askYesNo(`About to fan out ${totalTxs} tx(s) across the selection. Proceed?`);
+  if (!proceed) {
+    console.log(yellow("Aborted by operator. No batch generated."));
+    rl.close();
+    process.exit(0);
   }
 
   return { marketAddresses, symbols, poolIdsByMarket };
