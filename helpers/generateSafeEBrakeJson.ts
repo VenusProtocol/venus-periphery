@@ -70,7 +70,7 @@ const bold = colorWrap("1");
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function retry<T = any>(fn: () => Promise<T>, retries = 3, delayMs = 1000): Promise<T> {
+export async function retry<T = any>(fn: () => Promise<T>, retries = 3, delayMs = 1000): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -126,7 +126,7 @@ const IL_COMPTROLLER_QUERY_ABI = [
 ];
 
 // Only MINT, REDEEM, BORROW, TRANSFER are allowed by EBrake (REPAY/SEIZE/LIQUIDATE are forbidden)
-const ALLOWED_PAUSE_ACTIONS: Record<string, number> = {
+export const ALLOWED_PAUSE_ACTIONS: Record<string, number> = {
   MINT: 0,
   REDEEM: 1,
   BORROW: 2,
@@ -135,7 +135,7 @@ const ALLOWED_PAUSE_ACTIONS: Record<string, number> = {
 
 // ─── Safe TX Builder JSON ────────────────────────────────────────────────────
 
-const buildSafeBatch = (
+export const buildSafeBatch = (
   safeAddress: string,
   transactions: { to: string; value: string; data: string }[],
   chainId: number,
@@ -317,18 +317,27 @@ const pickValidAddresses = async (prompt: string): Promise<string[]> => {
   }
 };
 
+// Pure parser: validates a user-entered uint256 string. Returns normalized
+// decimal string or null if invalid / negative. Extracted so unit tests can
+// cover every reject path without driving readline.
+export const parseUint256String = (raw: string): string | null => {
+  try {
+    const bn = ethers.BigNumber.from(raw);
+    if (bn.lt(0)) return null;
+    return bn.toString();
+  } catch {
+    return null;
+  }
+};
+
 const askUint256 = async (prompt: string): Promise<string> => {
   console.log(`\n${prompt}`);
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const answer = await ask("> ");
-    try {
-      const bn = ethers.BigNumber.from(answer);
-      if (bn.lt(0)) throw new Error("negative");
-      return bn.toString();
-    } catch {
-      console.log(red(`Invalid uint256 "${answer}". Please enter a non-negative integer.`));
-    }
+    const parsed = parseUint256String(answer);
+    if (parsed !== null) return parsed;
+    console.log(red(`Invalid uint256 "${answer}". Please enter a non-negative integer.`));
   }
 };
 
@@ -448,7 +457,7 @@ const buildMarketsFromChain = async (comptroller: string, isIsolatedPool: boolea
 
 // ─── Network helpers ─────────────────────────────────────────────────────────
 
-const getEBrakeAddress = async (networkName: string): Promise<string> => {
+export const getEBrakeAddress = async (networkName: string): Promise<string> => {
   // Try to load from hardhat-deploy artifact
   const artifactPath = path.resolve(__dirname, "..", "deployments", networkName, "EBrake.json");
   if (fs.existsSync(artifactPath)) {
@@ -512,33 +521,36 @@ const pickSymbols = async (entries: Array<[string, string]>): Promise<Array<[str
   }
 };
 
+// Pure parser: parses a pool-id list answer ("0,6" or "all") against the set
+// of available pools. Returns the picked pool IDs (deduped, order preserved)
+// or null if the answer is empty / contains unknown IDs. Extracted for unit
+// testing without driving readline.
+export const parsePoolIdList = (answer: string, available: number[]): number[] | null => {
+  const validSet = new Set(available);
+  const t = answer.trim().toLowerCase();
+  if (t === "all") return available;
+  const tokens = answer
+    .split(",")
+    .map(s => s.trim())
+    .filter(v => v.length > 0);
+  if (tokens.length === 0) return null;
+  const parsed = tokens.map(Number);
+  if (parsed.some(n => !Number.isInteger(n) || !validSet.has(n))) return null;
+  return [...new Set(parsed)];
+};
+
 // Asks operator to pick which pool IDs a market should act on. Called per
 // market after market selection — prevents blind fan-out to every pool the
 // market happens to be listed in when only a subset is intended.
 const pickPoolIds = async (sym: string, available: number[]): Promise<number[]> => {
-  const validSet = new Set(available);
   console.log(cyan(`\n${sym} is listed in pool(s): [${available.join(", ")}]`));
   console.log("Enter comma-separated pool IDs or 'all':");
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const answer = await ask("> ");
-    const t = answer.trim().toLowerCase();
-    if (t === "all") return available;
-    const tokens = answer
-      .split(",")
-      .map(s => s.trim())
-      .filter(v => v.length > 0);
-    if (tokens.length === 0) {
-      console.log(red("No pool IDs entered. Please try again."));
-      continue;
-    }
-    const parsed = tokens.map(Number);
-    const invalid = parsed.filter(n => !Number.isInteger(n) || !validSet.has(n));
-    if (invalid.length > 0) {
-      console.log(red(`Invalid or out-of-range pool ID(s): ${invalid.join(", ")}. Valid: ${available.join(", ")}.`));
-      continue;
-    }
-    return [...new Set(parsed)];
+    const picked = parsePoolIdList(answer, available);
+    if (picked !== null) return picked;
+    console.log(red(`Invalid pool ID entry "${answer}". Valid: ${available.join(", ")}.`));
   }
 };
 
@@ -726,6 +738,45 @@ interface StepContext {
   bscPoolsCache?: BscPool[];
 }
 
+// Tagged union describing the outcome of parsing a per-market value file.
+// Interactive code chooses which console.log/retry path to take; unit tests
+// inspect the structure directly without driving readline.
+export type PerMarketFileResult =
+  | { kind: "ok"; values: Map<string, string>; ignored: string[] }
+  | { kind: "notObject" }
+  | { kind: "invalidValue"; key: string; rawValue: unknown }
+  | { kind: "missing"; missingSymbols: string[]; ignored: string[] };
+
+export const parsePerMarketValuesJson = (
+  raw: unknown,
+  markets: string[],
+  symbols: Map<string, string>,
+): PerMarketFileResult => {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { kind: "notObject" };
+  const symbolToAddress = new Map<string, string>();
+  symbols.forEach((sym, addr) => symbolToAddress.set(sym, addr));
+  const selectionSet = new Set(markets);
+  const values = new Map<string, string>();
+  const ignored: string[] = [];
+  for (const [key, rawValue] of Object.entries(raw as Record<string, unknown>)) {
+    const addr = ethers.utils.isAddress(key) ? key : symbolToAddress.get(key);
+    if (!addr || !selectionSet.has(addr)) {
+      ignored.push(key);
+      continue;
+    }
+    try {
+      const bn = ethers.BigNumber.from(rawValue);
+      if (bn.lt(0)) throw new Error("neg");
+      values.set(addr, bn.toString());
+    } catch {
+      return { kind: "invalidValue", key, rawValue };
+    }
+  }
+  const missingSymbols = markets.filter(m => !values.has(m)).map(m => symbols.get(m) || m);
+  if (missingSymbols.length > 0) return { kind: "missing", missingSymbols, ignored };
+  return { kind: "ok", values, ignored };
+};
+
 interface PerMarketValueConfig {
   kind: string; // display label: "CF", "borrow cap", "supply cap"
   defaultFilename: string; // e.g. "bsctestnet_cf_values.json"
@@ -831,43 +882,26 @@ const gatherPerMarketValues = async (
         console.error(red(`Failed to parse ${filePath}: ${(error as Error).message}`));
         continue;
       }
-      if (typeof content !== "object" || content === null || Array.isArray(content)) {
+
+      const parsed = parsePerMarketValuesJson(content, markets, symbols);
+      if (parsed.kind === "notObject") {
         console.error(red(`${filePath} must contain a JSON object mapping symbol-or-address → value.`));
         continue;
       }
-
-      // Accept either symbol keys or address keys. Build lookup from the current selection.
-      const symbolToAddress = new Map<string, string>();
-      symbols.forEach((sym, addr) => symbolToAddress.set(sym, addr));
-      const selectionSet = new Set(markets);
-
-      let invalid = false;
-      result.clear();
-      for (const [key, rawValue] of Object.entries(content as Record<string, unknown>)) {
-        const addr = ethers.utils.isAddress(key) ? key : symbolToAddress.get(key);
-        if (!addr || !selectionSet.has(addr)) {
-          console.log(yellow(`  Ignoring "${key}" — not in current selection`));
-          continue;
-        }
-        try {
-          const bn = ethers.BigNumber.from(rawValue);
-          if (bn.lt(0)) throw new Error("negative");
-          result.set(addr, bn.toString());
-        } catch {
-          console.error(red(`Invalid ${cfg.kind} value for "${key}": ${String(rawValue)}`));
-          invalid = true;
-          break;
-        }
+      if (parsed.kind === "invalidValue") {
+        console.error(red(`Invalid ${cfg.kind} value for "${parsed.key}": ${String(parsed.rawValue)}`));
+        continue;
       }
-      if (invalid) continue;
-
-      const missing = markets.filter(m => !result.has(m)).map(m => symbols.get(m) || m);
-      if (missing.length > 0) {
-        console.log(yellow(`\nFile stale — missing entries for selected markets: ${missing.join(", ")}.`));
+      if (parsed.kind === "missing") {
+        parsed.ignored.forEach(k => console.log(yellow(`  Ignoring "${k}" — not in current selection`)));
+        console.log(yellow(`\nFile stale — missing entries for: ${parsed.missingSymbols.join(", ")}.`));
         console.log(yellow(`Regenerating template for current selection. Existing file will be backed up.`));
         await regenerateTemplateAndPause("missing");
         continue;
       }
+      parsed.ignored.forEach(k => console.log(yellow(`  Ignoring "${k}" — not in current selection`)));
+      result.clear();
+      parsed.values.forEach((v, k) => result.set(k, v));
 
       const current = await fetchAllCurrent();
       console.log("\nWill apply:");
@@ -880,6 +914,82 @@ const gatherPerMarketValues = async (
   }
 
   return result;
+};
+
+// Tagged union describing the outcome of parsing a per-pool value file.
+export type PerPoolFileResult =
+  | {
+      kind: "ok";
+      values: Map<string, Map<number, string>>;
+      ignoredKeys: string[];
+      ignoredPools: Array<{ key: string; poolIdKey: string }>;
+    }
+  | { kind: "notObject" }
+  | { kind: "innerNotObject"; key: string }
+  | { kind: "invalidValue"; key: string; poolId: number; rawValue: unknown }
+  | {
+      kind: "missing";
+      missing: string[];
+      ignoredKeys: string[];
+      ignoredPools: Array<{ key: string; poolIdKey: string }>;
+    };
+
+export const parsePerPoolValuesJson = (
+  raw: unknown,
+  markets: string[],
+  symbols: Map<string, string>,
+  poolIdsByMarket: Map<string, number[]>,
+): PerPoolFileResult => {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { kind: "notObject" };
+  const symbolToAddress = new Map<string, string>();
+  symbols.forEach((sym, addr) => symbolToAddress.set(sym, addr));
+  const selectionSet = new Set(markets);
+  const values = new Map<string, Map<number, string>>();
+  const setVal = (addr: string, pid: number, val: string) => {
+    let inner = values.get(addr);
+    if (!inner) {
+      inner = new Map<number, string>();
+      values.set(addr, inner);
+    }
+    inner.set(pid, val);
+  };
+  const ignoredKeys: string[] = [];
+  const ignoredPools: Array<{ key: string; poolIdKey: string }> = [];
+
+  for (const [key, rawInner] of Object.entries(raw as Record<string, unknown>)) {
+    const addr = ethers.utils.isAddress(key) ? key : symbolToAddress.get(key);
+    if (!addr || !selectionSet.has(addr)) {
+      ignoredKeys.push(key);
+      continue;
+    }
+    if (typeof rawInner !== "object" || rawInner === null || Array.isArray(rawInner)) {
+      return { kind: "innerNotObject", key };
+    }
+    const allowedPools = new Set(poolIdsByMarket.get(addr) ?? []);
+    for (const [pidKey, rawValue] of Object.entries(rawInner as Record<string, unknown>)) {
+      const pid = Number(pidKey);
+      if (!Number.isInteger(pid) || !allowedPools.has(pid)) {
+        ignoredPools.push({ key, poolIdKey: pidKey });
+        continue;
+      }
+      try {
+        const bn = ethers.BigNumber.from(rawValue);
+        if (bn.lt(0)) throw new Error("neg");
+        setVal(addr, pid, bn.toString());
+      } catch {
+        return { kind: "invalidValue", key, poolId: pid, rawValue };
+      }
+    }
+  }
+
+  const missing: string[] = [];
+  for (const m of markets) {
+    for (const pid of poolIdsByMarket.get(m) ?? []) {
+      if (!values.get(m)?.has(pid)) missing.push(`${symbols.get(m) || m} pool=${pid}`);
+    }
+  }
+  if (missing.length > 0) return { kind: "missing", missing, ignoredKeys, ignoredPools };
+  return { kind: "ok", values, ignoredKeys, ignoredPools };
 };
 
 interface PerPoolValueConfig {
@@ -1008,6 +1118,7 @@ const gatherPerPoolValues = async (
         const confirm = await askYesNo(`${filePath} not found. Generate template there?`);
         if (!confirm) continue;
         await regenerateTemplateAndPause("new");
+        // Fall through: loop restarts, file now exists, same path prompt accepts Enter for default.
         continue;
       }
 
@@ -1018,61 +1129,42 @@ const gatherPerPoolValues = async (
         console.error(red(`Failed to parse ${filePath}: ${(error as Error).message}`));
         continue;
       }
-      if (typeof content !== "object" || content === null || Array.isArray(content)) {
+
+      const parsed = parsePerPoolValuesJson(content, markets, symbols, poolIdsByMarket);
+      const logIgnored = (p: typeof parsed) => {
+        if ("ignoredKeys" in p) {
+          p.ignoredKeys.forEach(k => console.log(yellow(`  Ignoring "${k}" — not in current selection`)));
+          p.ignoredPools.forEach(({ key, poolIdKey }) =>
+            console.log(yellow(`  Ignoring "${key}" poolId "${poolIdKey}" — market not listed in that pool`)),
+          );
+        }
+      };
+      if (parsed.kind === "notObject") {
         console.error(red(`${filePath} must contain a JSON object mapping symbol-or-address → {poolId: value}.`));
         continue;
       }
-
-      const symbolToAddress = new Map<string, string>();
-      symbols.forEach((sym, addr) => symbolToAddress.set(sym, addr));
-      const selectionSet = new Set(markets);
-
-      let invalid = false;
-      result.clear();
-      for (const [key, rawInner] of Object.entries(content as Record<string, unknown>)) {
-        const addr = ethers.utils.isAddress(key) ? key : symbolToAddress.get(key);
-        if (!addr || !selectionSet.has(addr)) {
-          console.log(yellow(`  Ignoring "${key}" — not in current selection`));
-          continue;
-        }
-        if (typeof rawInner !== "object" || rawInner === null || Array.isArray(rawInner)) {
-          console.error(red(`Entry for "${key}" must be an object {poolId: value}.`));
-          invalid = true;
-          break;
-        }
-        const allowedPools = new Set(poolIdsByMarket.get(addr) ?? []);
-        for (const [pidKey, rawValue] of Object.entries(rawInner as Record<string, unknown>)) {
-          const pid = Number(pidKey);
-          if (!Number.isInteger(pid) || !allowedPools.has(pid)) {
-            console.log(yellow(`  Ignoring "${key}" poolId "${pidKey}" — market not listed in that pool`));
-            continue;
-          }
-          try {
-            const bn = ethers.BigNumber.from(rawValue);
-            if (bn.lt(0)) throw new Error("negative");
-            setVal(addr, pid, bn.toString());
-          } catch {
-            console.error(red(`Invalid ${cfg.kind} value for "${key}" pool ${pid}: ${String(rawValue)}`));
-            invalid = true;
-            break;
-          }
-        }
-        if (invalid) break;
+      if (parsed.kind === "innerNotObject") {
+        console.error(red(`Entry for "${parsed.key}" must be an object {poolId: value}.`));
+        continue;
       }
-      if (invalid) continue;
-
-      const missing: string[] = [];
-      for (const { market, poolId } of pairs) {
-        if (!result.get(market)?.has(poolId)) {
-          missing.push(`${symbols.get(market) || market} pool=${poolId}`);
-        }
+      if (parsed.kind === "invalidValue") {
+        console.error(
+          red(`Invalid ${cfg.kind} value for "${parsed.key}" pool ${parsed.poolId}: ${String(parsed.rawValue)}`),
+        );
+        continue;
       }
-      if (missing.length > 0) {
-        console.log(yellow(`\nFile stale — missing entries for: ${missing.join(", ")}.`));
+      if (parsed.kind === "missing") {
+        logIgnored(parsed);
+        console.log(yellow(`\nFile stale — missing entries for: ${parsed.missing.join(", ")}.`));
         console.log(yellow(`Regenerating template for current selection. Existing file will be backed up.`));
         await regenerateTemplateAndPause("missing");
         continue;
       }
+      logIgnored(parsed);
+      result.clear();
+      parsed.values.forEach((inner, addr) => {
+        inner.forEach((v, pid) => setVal(addr, pid, v));
+      });
 
       const current = await fetchAllCurrent();
       console.log("\nWill apply:");
