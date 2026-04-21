@@ -65,6 +65,9 @@ contracts/oracle/*
 contracts/generated
 deployments/localhost
 
+# EBrake generator artifacts (operator-local, gitignored)
+helpers/data/
+
 # IDE
 .idea
 .last_confs

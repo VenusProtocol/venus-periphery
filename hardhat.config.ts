@@ -9,6 +9,7 @@ import * as dotenv from "dotenv";
 import "hardhat-dependency-compiler";
 import "hardhat-deploy";
 import "hardhat-gas-reporter";
+import { TASK_TEST } from "hardhat/builtin-tasks/task-names";
 import { HardhatUserConfig, extendConfig, extendEnvironment, task } from "hardhat/config";
 import { HardhatConfig } from "hardhat/types";
 import "solidity-coverage";
@@ -61,6 +62,19 @@ extendConfig((config: HardhatConfig) => {
     }
   }
 });
+
+// Override the built-in test task to accept --fork <network>, which sets
+// FORKED_NETWORK so simulateSafeEBrakeTx.ts (and other fork tests) can pick
+// up the correct archive node URL without needing a separate env var.
+task(TASK_TEST)
+  .addOptionalParam("fork", "Fork a live network by name (e.g. bsctestnet, bscmainnet)")
+  .setAction(async (args, _hre, runSuper) => {
+    if (args.fork) {
+      process.env.FORKED_NETWORK = args.fork;
+      process.env.HARDHAT_FORK_NETWORK = args.fork;
+    }
+    return runSuper(args);
+  });
 
 // This is a sample Hardhat task. To learn how to create your own go to
 // https://hardhat.org/guides/create-task.html
@@ -136,6 +150,26 @@ const config: HardhatUserConfig = {
             blockNumber: process.env.HARDHAT_FORK_NUMBER ? parseInt(process.env.HARDHAT_FORK_NUMBER) : undefined,
           }
         : undefined,
+      // Hardhat only knows chain 1 (Ethereum mainnet) by default. All other chains
+      // used in Venus Protocol fork tests must declare their hardfork history here so
+      // that hardhat_reset with a specific blockNumber doesn't throw
+      // "No known hardfork for execution on historical block N in chain with id X".
+      // cancun: 0  →  treat every block on these chains as post-Cancun,
+      // which is consistent with evmVersion: "cancun" in the Solidity compiler settings.
+      chains: {
+        56: { hardforkHistory: { cancun: 0 } }, // BSC mainnet
+        97: { hardforkHistory: { cancun: 0 } }, // BSC testnet
+        204: { hardforkHistory: { cancun: 0 } }, // opBNB mainnet
+        5611: { hardforkHistory: { cancun: 0 } }, // opBNB testnet
+        10: { hardforkHistory: { cancun: 0 } }, // OP mainnet
+        11155420: { hardforkHistory: { cancun: 0 } }, // OP Sepolia
+        42161: { hardforkHistory: { cancun: 0 } }, // Arbitrum One
+        421614: { hardforkHistory: { cancun: 0 } }, // Arbitrum Sepolia
+        8453: { hardforkHistory: { cancun: 0 } }, // Base mainnet
+        84532: { hardforkHistory: { cancun: 0 } }, // Base Sepolia
+        130: { hardforkHistory: { cancun: 0 } }, // Unichain mainnet
+        1301: { hardforkHistory: { cancun: 0 } }, // Unichain Sepolia
+      },
     },
     development: {
       url: "http://127.0.0.1:8545/",
