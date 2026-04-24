@@ -127,8 +127,15 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
         _checkAndGetConfig(market);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
-        // exchangeRateCurrent() accrues interest as a side effect before the cap comparison.
-        uint256 supplyUnderlying = (IVToken(market).totalSupply() * IVToken(market).exchangeRateCurrent()) / 1e18;
+        // Fall back to the stored rate if accrual reverts (e.g. IRM bound, reserve transfer failure).
+        // Stored <= current, so the fallback can never false-trigger a pause on a healthy market.
+        uint256 exchangeRate;
+        try IVToken(market).exchangeRateCurrent() returns (uint256 rate) {
+            exchangeRate = rate;
+        } catch {
+            exchangeRate = IVToken(market).exchangeRateStored();
+        }
+        uint256 supplyUnderlying = (IVToken(market).totalSupply() * exchangeRate) / 1e18;
         uint256 supplyCap = comptroller.supplyCaps(market);
 
         // supplyCap == 0 is treated as a misconfiguration (no Venus market is intentionally
@@ -149,7 +156,14 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
         _checkAndGetConfig(market);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
-        uint256 totalBorrows = IVToken(market).totalBorrowsCurrent();
+        // Fall back to stored borrows if accrual reverts (e.g. IRM bound, reserve transfer failure).
+        // Stored <= current, so the fallback can never false-trigger a pause on a healthy market.
+        uint256 totalBorrows;
+        try IVToken(market).totalBorrowsCurrent() returns (uint256 b) {
+            totalBorrows = b;
+        } catch {
+            totalBorrows = IVToken(market).totalBorrows();
+        }
         uint256 borrowCap = comptroller.borrowCaps(market);
 
         // borrowCap == 0 is treated as a misconfiguration — see handleSupplyCapExceeding.
