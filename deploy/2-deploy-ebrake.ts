@@ -11,9 +11,17 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   console.log(`Deploying EBrake with the account: ${deployer}`);
   const ADDRESSES = await getConfig(network.name);
 
-  const comptroller = await getContractAddressOrNullAddress(deployments, "Unitroller");
+  const deployedUnitroller = await getContractAddressOrNullAddress(deployments, "Unitroller");
+  const comptroller =
+    deployedUnitroller !== ethers.constants.AddressZero
+      ? deployedUnitroller
+      : (ADDRESSES.preconfiguredAddresses.Unitroller ?? ethers.constants.AddressZero);
   const accessControlManager = ADDRESSES.preconfiguredAddresses.AccessControlManager;
-  const timelock = await getContractAddressOrNullAddress(deployments, "NormalTimelock");
+  const deployedTimelock = await getContractAddressOrNullAddress(deployments, "NormalTimelock");
+  const timelock =
+    deployedTimelock !== ethers.constants.AddressZero
+      ? deployedTimelock
+      : (ADDRESSES.preconfiguredAddresses.NormalTimelock ?? ethers.constants.AddressZero);
 
   if (comptroller === ethers.constants.AddressZero) {
     console.log("Unitroller not deployed, skipping EBrake deployment");
@@ -58,7 +66,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   }
 
   const eBrake = await hre.ethers.getContract("EBrake");
-  if (network.live && (await eBrake.owner()) === deployer) {
+  if (network.live && (await eBrake.owner()) === deployer && (await eBrake.pendingOwner()) !== timelock) {
     await eBrake.transferOwnership(timelock);
     console.log(`EBrake ownership transferred to timelock: ${timelock}`);
   }

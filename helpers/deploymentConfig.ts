@@ -14,8 +14,36 @@ import { contracts as governanceUnichainmainnet } from "@venusprotocol/governanc
 import { contracts as governanceUnichainsepolia } from "@venusprotocol/governance-contracts/deployments/unichainsepolia.json";
 import { contracts as governanceZkSyncMainnet } from "@venusprotocol/governance-contracts/deployments/zksyncmainnet.json";
 import { contracts as governanceZkSyncSepolia } from "@venusprotocol/governance-contracts/deployments/zksyncsepolia.json";
+import { addresses as ilPoolsArbitrumOne } from "@venusprotocol/isolated-pools/deployments/arbitrumone_addresses.json";
+import { addresses as ilPoolsArbitrumSepolia } from "@venusprotocol/isolated-pools/deployments/arbitrumsepolia_addresses.json";
+import { addresses as ilPoolsBaseMainnet } from "@venusprotocol/isolated-pools/deployments/basemainnet_addresses.json";
+import { addresses as ilPoolsBaseSepolia } from "@venusprotocol/isolated-pools/deployments/basesepolia_addresses.json";
+import { addresses as ilPoolsEthereum } from "@venusprotocol/isolated-pools/deployments/ethereum_addresses.json";
+import { addresses as ilPoolsOpbnbMainnet } from "@venusprotocol/isolated-pools/deployments/opbnbmainnet_addresses.json";
+import { addresses as ilPoolsOpbnbTestnet } from "@venusprotocol/isolated-pools/deployments/opbnbtestnet_addresses.json";
+import { addresses as ilPoolsOpmainnet } from "@venusprotocol/isolated-pools/deployments/opmainnet_addresses.json";
+import { addresses as ilPoolsOpsepolia } from "@venusprotocol/isolated-pools/deployments/opsepolia_addresses.json";
+import { addresses as ilPoolsSepolia } from "@venusprotocol/isolated-pools/deployments/sepolia_addresses.json";
+import { addresses as ilPoolsUnichainMainnet } from "@venusprotocol/isolated-pools/deployments/unichainmainnet_addresses.json";
+import { addresses as ilPoolsUnichainsepolia } from "@venusprotocol/isolated-pools/deployments/unichainsepolia_addresses.json";
+import { addresses as ilPoolsZkSyncMainnet } from "@venusprotocol/isolated-pools/deployments/zksyncmainnet_addresses.json";
+import { addresses as ilPoolsZkSyncSepolia } from "@venusprotocol/isolated-pools/deployments/zksyncsepolia_addresses.json";
+import { addresses as oracleArbitrumOne } from "@venusprotocol/oracle/deployments/arbitrumone_addresses.json";
+import { addresses as oracleArbitrumSepolia } from "@venusprotocol/oracle/deployments/arbitrumsepolia_addresses.json";
+import { addresses as oracleBaseMainnet } from "@venusprotocol/oracle/deployments/basemainnet_addresses.json";
+import { addresses as oracleBaseSepolia } from "@venusprotocol/oracle/deployments/basesepolia_addresses.json";
 import { contracts as oracleBscMainnet } from "@venusprotocol/oracle/deployments/bscmainnet.json";
 import { contracts as oracleBscTestnet } from "@venusprotocol/oracle/deployments/bsctestnet.json";
+import { addresses as oracleEthereum } from "@venusprotocol/oracle/deployments/ethereum_addresses.json";
+import { addresses as oracleOpbnbMainnet } from "@venusprotocol/oracle/deployments/opbnbmainnet_addresses.json";
+import { addresses as oracleOpbnbTestnet } from "@venusprotocol/oracle/deployments/opbnbtestnet_addresses.json";
+import { addresses as oracleOpmainnet } from "@venusprotocol/oracle/deployments/opmainnet_addresses.json";
+import { addresses as oracleOpsepolia } from "@venusprotocol/oracle/deployments/opsepolia_addresses.json";
+import { addresses as oracleSepolia } from "@venusprotocol/oracle/deployments/sepolia_addresses.json";
+import { addresses as oracleUnichainMainnet } from "@venusprotocol/oracle/deployments/unichainmainnet_addresses.json";
+import { addresses as oracleUnichainsepolia } from "@venusprotocol/oracle/deployments/unichainsepolia_addresses.json";
+import { addresses as oracleZkSyncMainnet } from "@venusprotocol/oracle/deployments/zksyncmainnet_addresses.json";
+import { addresses as oracleZkSyncSepolia } from "@venusprotocol/oracle/deployments/zksyncsepolia_addresses.json";
 import { Wallet } from "ethers";
 import { DeploymentsExtension } from "hardhat-deploy/dist/types";
 
@@ -81,58 +109,86 @@ export const preconfiguredAddresses = {
   sepolia: {
     NormalTimelock: governanceSepolia.NormalTimelock.address,
     AccessControlManager: governanceSepolia.AccessControlManager.address,
+    Unitroller: ilPoolsSepolia.Comptroller_Core,
+    ResilientOracle: oracleSepolia.ResilientOracle,
   },
   ethereum: {
     NormalTimelock: governanceEthereum.NormalTimelock.address,
     AccessControlManager: governanceEthereum.AccessControlManager.address,
+    Unitroller: ilPoolsEthereum.Comptroller_Core,
+    ResilientOracle: oracleEthereum.ResilientOracle,
   },
   opbnbtestnet: {
     NormalTimelock: OPBNBTESTNET_MULTISIG,
     AccessControlManager: governanceOpbnbTestnet.AccessControlManager.address,
+    Unitroller: ilPoolsOpbnbTestnet.Comptroller_Core,
+    ResilientOracle: oracleOpbnbTestnet.ResilientOracle,
   },
   opbnbmainnet: {
     NormalTimelock: OPBNBMAINNET_MULTISIG,
     AccessControlManager: governanceOpbnbMainnet.AccessControlManager.address,
+    Unitroller: ilPoolsOpbnbMainnet.Comptroller_Core,
+    ResilientOracle: oracleOpbnbMainnet.ResilientOracle,
   },
   arbitrumsepolia: {
     NormalTimelock: governanceArbitrumSepolia.NormalTimelock.address,
     AccessControlManager: governanceArbitrumSepolia.AccessControlManager.address,
+    Unitroller: ilPoolsArbitrumSepolia.Comptroller_Core,
+    ResilientOracle: oracleArbitrumSepolia.ResilientOracle,
   },
   arbitrumone: {
     NormalTimelock: governanceArbitrumOne.NormalTimelock.address,
     AccessControlManager: governanceArbitrumOne.AccessControlManager.address,
+    Unitroller: ilPoolsArbitrumOne.Comptroller_Core,
+    ResilientOracle: oracleArbitrumOne.ResilientOracle,
   },
   zksyncsepolia: {
     NormalTimelock: governanceZkSyncSepolia.NormalTimelock.address,
     AccessControlManager: governanceZkSyncSepolia.AccessControlManager.address,
+    Unitroller: ilPoolsZkSyncSepolia.Comptroller_Core,
+    ResilientOracle: oracleZkSyncSepolia.ResilientOracle,
   },
   zksyncmainnet: {
     NormalTimelock: governanceZkSyncMainnet.NormalTimelock.address,
     AccessControlManager: governanceZkSyncMainnet.AccessControlManager.address,
+    Unitroller: ilPoolsZkSyncMainnet.Comptroller_Core,
+    ResilientOracle: oracleZkSyncMainnet.ResilientOracle,
   },
   opsepolia: {
     NormalTimelock: governanceOpsepolia.NormalTimelock.address,
     AccessControlManager: governanceOpsepolia.AccessControlManager.address,
+    Unitroller: ilPoolsOpsepolia.Comptroller_Core,
+    ResilientOracle: oracleOpsepolia.ResilientOracle,
   },
   opmainnet: {
     NormalTimelock: governanceOpmainnet.NormalTimelock.address,
     AccessControlManager: governanceOpmainnet.AccessControlManager.address,
+    Unitroller: ilPoolsOpmainnet.Comptroller_Core,
+    ResilientOracle: oracleOpmainnet.ResilientOracle,
   },
   basesepolia: {
     NormalTimelock: governanceBaseSepolia.NormalTimelock.address,
     AccessControlManager: governanceBaseSepolia.AccessControlManager.address,
+    Unitroller: ilPoolsBaseSepolia.Comptroller_Core,
+    ResilientOracle: oracleBaseSepolia.ResilientOracle,
   },
   basemainnet: {
     NormalTimelock: governanceBaseMainnet.NormalTimelock.address,
     AccessControlManager: governanceBaseMainnet.AccessControlManager.address,
+    Unitroller: ilPoolsBaseMainnet.Comptroller_Core,
+    ResilientOracle: oracleBaseMainnet.ResilientOracle,
   },
   unichainsepolia: {
     NormalTimelock: governanceUnichainsepolia.NormalTimelock.address,
     AccessControlManager: governanceUnichainsepolia.AccessControlManager.address,
+    Unitroller: ilPoolsUnichainsepolia.Comptroller_Core,
+    ResilientOracle: oracleUnichainsepolia.ResilientOracle,
   },
   unichainmainnet: {
     NormalTimelock: governanceUnichainmainnet.NormalTimelock.address,
     AccessControlManager: governanceUnichainmainnet.NormalTimelock.address,
+    Unitroller: ilPoolsUnichainMainnet.Comptroller_Core,
+    ResilientOracle: oracleUnichainMainnet.ResilientOracle,
   },
 };
 
