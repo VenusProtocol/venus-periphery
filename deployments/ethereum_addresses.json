@@ -1,5 +1,22 @@
 {
   "name": "ethereum",
   "chainId": "1",
-  "addresses": {}
+  "addresses": {
+    "DefaultProxyAdmin": "0xA6a4E5196Fa108008b68fE6D6629D508C902D61c",
+    "DeviationSentinel": "0x7D0EFA41eBF1aF242A37174E1E047bD6ea1b1B9c",
+    "DeviationSentinel_Implementation": "0x98a0b21Ac3544F968fF212CC381B0311376278b3",
+    "DeviationSentinel_Proxy": "0x7D0EFA41eBF1aF242A37174E1E047bD6ea1b1B9c",
+    "EBrake": "0xCD09042c5DFFed762998Df9a058ec5944e39949B",
+    "EBrake_Implementation": "0x511a559a699cBd665546a1F75908f7E9454Bfc67",
+    "EBrake_Proxy": "0xCD09042c5DFFed762998Df9a058ec5944e39949B",
+    "PancakeSwapOracle": "0xCCB08e5107b406E67Ad8356023dd489CEbc79B40",
+    "PancakeSwapOracle_Implementation": "0xCFcC918275c35b21227405ec41fcD2D2643DF534",
+    "PancakeSwapOracle_Proxy": "0xCCB08e5107b406E67Ad8356023dd489CEbc79B40",
+    "SentinelOracle": "0x444C53E194B40c272fAd683210e2cB1c16Ab132e",
+    "SentinelOracle_Implementation": "0x5822Ba5f3f71C590c8e6CB131fB779CE5B8A3653",
+    "SentinelOracle_Proxy": "0x444C53E194B40c272fAd683210e2cB1c16Ab132e",
+    "UniswapOracle": "0x873993F8f5f5Ddbae0952e939ab3005Af363Af00",
+    "UniswapOracle_Implementation": "0xC6642B61293ffe794C2376f50bE521361E36cdd6",
+    "UniswapOracle_Proxy": "0x873993F8f5f5Ddbae0952e939ab3005Af363Af00"
+  }
 }
