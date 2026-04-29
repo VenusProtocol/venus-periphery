@@ -30,7 +30,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     },
   });
 
-  if (pancakeSwapOracleResult.newlyDeployed) {
+  if (pancakeSwapOracleResult.newlyDeployed && network.live) {
     await hre.run("verify:verify", {
       address: pancakeSwapOracleResult.implementation,
       constructorArguments: [resilientOracle],
@@ -53,7 +53,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     },
   });
 
-  if (uniswapOracleResult.newlyDeployed) {
+  if (uniswapOracleResult.newlyDeployed && network.live) {
     await hre.run("verify:verify", {
       address: uniswapOracleResult.implementation,
       constructorArguments: [resilientOracle],
@@ -76,7 +76,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     },
   });
 
-  if (sentinelOracleResult.newlyDeployed) {
+  if (sentinelOracleResult.newlyDeployed && network.live) {
     await hre.run("verify:verify", {
       address: sentinelOracleResult.implementation,
       constructorArguments: [],
@@ -107,7 +107,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     },
   });
 
-  if (deviationSentinelResult.newlyDeployed) {
+  if (deviationSentinelResult.newlyDeployed && network.live) {
     await hre.run("verify:verify", {
       address: deviationSentinelResult.implementation,
       constructorArguments: [eBrakeAddress, resilientOracle, sentinelOracle.address],

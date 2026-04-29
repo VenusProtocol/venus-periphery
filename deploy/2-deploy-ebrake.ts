@@ -58,11 +58,13 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
 
   if (result.newlyDeployed) {
     console.log(`EBrake proxy deployed at: ${result.address}`);
-    console.log("Verifying EBrake implementation on explorer...");
-    await hre.run("verify:verify", {
-      address: result.implementation,
-      constructorArguments: [comptroller, isIsolatedPool],
-    });
+    if (network.live) {
+      console.log("Verifying EBrake implementation on explorer...");
+      await hre.run("verify:verify", {
+        address: result.implementation,
+        constructorArguments: [comptroller, isIsolatedPool],
+      });
+    }
   }
 
   const eBrake = await hre.ethers.getContract("EBrake");
