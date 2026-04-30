@@ -18,6 +18,8 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
   );
 
+  const existingProxy = await deployments.getOrNull("CurveOracle");
+
   const result = await deploy("CurveOracle", {
     contract: "CurveOracle",
     from: deployer,
@@ -27,10 +29,13 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     proxy: {
       owner: network.live ? timelock : deployer,
       proxyContract: "OptimizedTransparentUpgradeableProxy",
-      execute: {
-        methodName: "initialize",
-        args: [accessControlManager],
-      },
+      // Only call initialize on first deployment — upgrades use upgrade() not upgradeAndCall()
+      ...(existingProxy === null && {
+        execute: {
+          methodName: "initialize",
+          args: [accessControlManager],
+        },
+      }),
       viaAdminContract: {
         name: "DefaultProxyAdmin",
         artifact: defaultProxyAdmin,
