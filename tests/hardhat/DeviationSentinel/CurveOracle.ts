@@ -81,64 +81,63 @@ describe("CurveOracle", () => {
 
   describe("setPoolConfig", () => {
     it("should store config including decimals", async () => {
-      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8);
       const cfg = await curveOracle.poolConfigs(EBTC_ADDR);
       expect(cfg.pool).to.equal(curvePool.address);
       expect(cfg.coinIndex).to.equal(0);
       expect(cfg.refCoinIndex).to.equal(1);
       expect(cfg.referenceToken).to.equal(WBTC_ADDR);
       expect(cfg.assetDecimals).to.equal(8);
-      expect(cfg.refDecimals).to.equal(8);
     });
 
     it("should emit PoolConfigUpdated event", async () => {
-      await expect(curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8))
+      await expect(curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8))
         .to.emit(curveOracle, "PoolConfigUpdated")
-        .withArgs(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR);
+        .withArgs(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8);
     });
 
     it("should allow updating config to a new pool", async () => {
       const newPool = await smock.fake<ICurveStableSwapNG>("ICurveStableSwapNG");
       newPool.coins.whenCalledWith(0).returns(EBTC_ADDR);
       newPool.coins.whenCalledWith(1).returns(WBTC_ADDR);
-      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
-      await curveOracle.setPoolConfig(EBTC_ADDR, newPool.address, 0, 1, WBTC_ADDR, 8, 8);
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8);
+      await curveOracle.setPoolConfig(EBTC_ADDR, newPool.address, 0, 1, WBTC_ADDR, 8);
       expect((await curveOracle.poolConfigs(EBTC_ADDR)).pool).to.equal(newPool.address);
     });
 
     it("should revert ZeroAddress when token is zero", async () => {
       await expect(
-        curveOracle.setPoolConfig(ethers.constants.AddressZero, curvePool.address, 0, 1, WBTC_ADDR, 8, 8),
+        curveOracle.setPoolConfig(ethers.constants.AddressZero, curvePool.address, 0, 1, WBTC_ADDR, 8),
       ).to.be.revertedWithCustomError(curveOracle, "ZeroAddress");
     });
 
     it("should revert ZeroAddress when pool is zero", async () => {
       await expect(
-        curveOracle.setPoolConfig(EBTC_ADDR, ethers.constants.AddressZero, 0, 1, WBTC_ADDR, 8, 8),
+        curveOracle.setPoolConfig(EBTC_ADDR, ethers.constants.AddressZero, 0, 1, WBTC_ADDR, 8),
       ).to.be.revertedWithCustomError(curveOracle, "ZeroAddress");
     });
 
     it("should revert ZeroAddress when referenceToken is zero", async () => {
       await expect(
-        curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, ethers.constants.AddressZero, 8, 8),
+        curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, ethers.constants.AddressZero, 8),
       ).to.be.revertedWithCustomError(curveOracle, "ZeroAddress");
     });
 
     it("should revert AssetMismatch when pool.coins(coinIndex) != token", async () => {
       await expect(
-        curveOracle.setPoolConfig(WBTC_ADDR, curvePool.address, 0, 1, EBTC_ADDR, 8, 8),
+        curveOracle.setPoolConfig(WBTC_ADDR, curvePool.address, 0, 1, EBTC_ADDR, 8),
       ).to.be.revertedWithCustomError(curveOracle, "AssetMismatch");
     });
 
     it("should revert ReferenceMismatch when pool.coins(refCoinIndex) != referenceToken", async () => {
       await expect(
-        curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, OTHER_ADDR, 8, 8),
+        curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, OTHER_ADDR, 8),
       ).to.be.revertedWithCustomError(curveOracle, "ReferenceMismatch");
     });
 
     it("should revert when caller is not authorized", async () => {
       accessControlManager.isAllowedToCall.returns(false);
-      await expect(curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8)).to.be.reverted;
+      await expect(curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8)).to.be.reverted;
       accessControlManager.isAllowedToCall.returns(true);
     });
   });
@@ -153,7 +152,7 @@ describe("CurveOracle", () => {
     });
 
     it("should revert ZeroPrice when get_dy returns zero", async () => {
-      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8);
       curvePool.get_dy.returns(0);
       resilientOracle.getPrice.returns(REF_PRICE);
       await expect(curveOracle.getPrice(EBTC_ADDR)).to.be.revertedWithCustomError(curveOracle, "ZeroPrice");
@@ -170,7 +169,7 @@ describe("CurveOracle", () => {
 
   describe("getPrice — coinIndex=0 (eBTC)", () => {
     beforeEach(async () => {
-      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8);
       resilientOracle.getPrice.whenCalledWith(WBTC_ADDR).returns(REF_PRICE);
     });
 
@@ -210,7 +209,7 @@ describe("CurveOracle", () => {
 
   describe("getPrice — coinIndex=1 (WBTC)", () => {
     beforeEach(async () => {
-      await curveOracle.setPoolConfig(WBTC_ADDR, curvePool.address, 1, 0, EBTC_ADDR, 8, 8);
+      await curveOracle.setPoolConfig(WBTC_ADDR, curvePool.address, 1, 0, EBTC_ADDR, 8);
       resilientOracle.getPrice.whenCalledWith(EBTC_ADDR).returns(REF_PRICE);
     });
 
@@ -247,12 +246,12 @@ describe("CurveOracle", () => {
       pool2.coins.whenCalledWith(0).returns(EBTC_ADDR);
       pool2.coins.whenCalledWith(1).returns(WBTC_ADDR);
 
-      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8);
       curvePool.get_dy.returns(DY_1_TO_1);
       resilientOracle.getPrice.whenCalledWith(WBTC_ADDR).returns(REF_PRICE);
       expect(await curveOracle.getPrice(EBTC_ADDR)).to.equal(REF_PRICE);
 
-      await curveOracle.setPoolConfig(EBTC_ADDR, pool2.address, 0, 1, WBTC_ADDR, 8, 8);
+      await curveOracle.setPoolConfig(EBTC_ADDR, pool2.address, 0, 1, WBTC_ADDR, 8);
       pool2.get_dy.returns(DY_2_TO_1);
       expect(await curveOracle.getPrice(EBTC_ADDR)).to.equal(REF_PRICE.mul(2));
     });
@@ -264,7 +263,7 @@ describe("CurveOracle", () => {
 
   describe("getPrice — varying reference prices", () => {
     beforeEach(async () => {
-      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8);
       curvePool.get_dy.returns(DY_1_TO_1);
     });
 

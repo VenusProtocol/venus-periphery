@@ -17,10 +17,15 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  *      reference token's USD price from ResilientOracle.
  *
  *      Price formula (uniform for any coinIndex):
- *        ratio = get_dy(i, j, 10**assetDecimals) * 1e18 / 10**refDecimals
- *        price = ratio * refPriceUsd / 1e18
+ *        price = get_dy(i, j, 10**assetDecimals) * refPriceUsd / 10**assetDecimals
  *
- *      Decimal values are stored in config at setup time to avoid per-call STATICCALL overhead.
+ *      Derivation: dy is in ref base units; refPriceUsd is in (36-refDecimals) format.
+ *        dy / 10**refDecimals × refPriceUsd  →  (36-refDecimals) units
+ *        ×  10**(36-assetDecimals) / 10**(36-refDecimals)  →  (36-assetDecimals) units
+ *        =  dy × refPriceUsd / 10**assetDecimals
+ *      refDecimals cancel out entirely.
+ *
+ *      assetDecimals is stored in config at setup time to avoid a per-call STATICCALL.
  */
 contract CurveOracle is AccessControlledV8 {
     /// @notice Resilient Oracle for getting reference token prices
@@ -32,15 +37,13 @@ contract CurveOracle is AccessControlledV8 {
     /// @param coinIndex Index of the asset in the pool
     /// @param refCoinIndex Index of the reference token in the pool
     /// @param referenceToken The paired token whose USD price is fetched from ResilientOracle
-    /// @param assetDecimals Decimals of the asset token
-    /// @param refDecimals Decimals of the reference token
+    /// @param assetDecimals Decimals of the asset token (refDecimals not needed — cancels in formula)
     struct PoolConfig {
         address pool;
         uint8 coinIndex;
         uint8 refCoinIndex;
         address referenceToken;
         uint8 assetDecimals;
-        uint8 refDecimals;
     }
 
     /// @notice Mapping of token addresses to their Curve pool configuration
@@ -52,7 +55,8 @@ contract CurveOracle is AccessControlledV8 {
         address indexed pool,
         uint8 coinIndex,
         uint8 refCoinIndex,
-        address referenceToken
+        address referenceToken,
+        uint8 assetDecimals
     );
 
     /// @notice Thrown when a zero address is provided
@@ -92,7 +96,6 @@ contract CurveOracle is AccessControlledV8 {
     /// @param refCoinIndex Index of the reference token in the pool
     /// @param referenceToken The reference token whose USD price is fetched from ResilientOracle
     /// @param assetDecimals Decimals of the asset token
-    /// @param refDecimals Decimals of the reference token
     /// @custom:event Emits PoolConfigUpdated
     /// @custom:error ZeroAddress if any address is zero
     /// @custom:error AssetMismatch if pool.coins(coinIndex) != token
@@ -103,10 +106,9 @@ contract CurveOracle is AccessControlledV8 {
         uint8 coinIndex,
         uint8 refCoinIndex,
         address referenceToken,
-        uint8 assetDecimals,
-        uint8 refDecimals
+        uint8 assetDecimals
     ) external {
-        _checkAccessAllowed("setPoolConfig(address,address,uint8,uint8,address,uint8,uint8)");
+        _checkAccessAllowed("setPoolConfig(address,address,uint8,uint8,address,uint8)");
 
         if (token == address(0) || pool == address(0) || referenceToken == address(0)) revert ZeroAddress();
         if (ICurveStableSwapNG(pool).coins(coinIndex) != token) revert AssetMismatch();
@@ -117,10 +119,9 @@ contract CurveOracle is AccessControlledV8 {
             coinIndex: coinIndex,
             refCoinIndex: refCoinIndex,
             referenceToken: referenceToken,
-            assetDecimals: assetDecimals,
-            refDecimals: refDecimals
+            assetDecimals: assetDecimals
         });
-        emit PoolConfigUpdated(token, pool, coinIndex, refCoinIndex, referenceToken);
+        emit PoolConfigUpdated(token, pool, coinIndex, refCoinIndex, referenceToken, assetDecimals);
     }
 
     /// @notice Get the price of an asset from its configured Curve pool
@@ -134,9 +135,8 @@ contract CurveOracle is AccessControlledV8 {
         return _getCurvePrice(cfg);
     }
 
-    /// @dev Queries get_dy(i, j, 1 asset unit) for instantaneous price, then converts to USD.
-    ///      ratio = dy * 1e18 / 10**refDecimals  (reference tokens per asset, in 1e18)
-    ///      price = ratio * refPriceUsd / 1e18
+    /// @dev Queries get_dy(i, j, 10**assetDecimals) for instantaneous price, then converts to USD.
+    ///      price = dy * refPriceUsd / 10**assetDecimals
     function _getCurvePrice(PoolConfig memory cfg) internal view returns (uint256 price) {
         uint256 dy = ICurveStableSwapNG(cfg.pool).get_dy(
             int128(uint128(cfg.coinIndex)),
@@ -145,8 +145,7 @@ contract CurveOracle is AccessControlledV8 {
         );
         if (dy == 0) revert ZeroPrice();
 
-        uint256 ratio = (dy * 1e18) / (10 ** cfg.refDecimals);
         uint256 refPriceUsd = RESILIENT_ORACLE.getPrice(cfg.referenceToken);
-        price = (ratio * refPriceUsd) / 1e18;
+        price = (dy * refPriceUsd) / (10 ** cfg.assetDecimals);
     }
 }

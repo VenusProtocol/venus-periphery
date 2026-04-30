@@ -47,13 +47,13 @@ if (FORK_ETHEREUM) {
       // Grant permission for setPoolConfig
       await acm.giveCallPermission(
         curveOracle.address,
-        "setPoolConfig(address,address,uint8,uint8,address,uint8,uint8)",
+        "setPoolConfig(address,address,uint8,uint8,address,uint8)",
         NORMAL_TIMELOCK,
       );
 
       // Configure eBTC: coins[0] in pool, reference = WBTC
       // eBTC: 8 decimals, WBTC: 8 decimals
-      await curveOracle.connect(timelock).setPoolConfig(EBTC, CURVE_EBTC_WBTC_POOL, 0, 1, WBTC, 8, 8);
+      await curveOracle.connect(timelock).setPoolConfig(EBTC, CURVE_EBTC_WBTC_POOL, 0, 1, WBTC, 8);
     });
 
     // ═══════════════════════════════════════════════════════════════════
@@ -71,7 +71,7 @@ if (FORK_ETHEREUM) {
       it("should reject setPoolConfig with wrong coinIndex", async () => {
         // coinIndex=1 points to WBTC, not eBTC → AssetMismatch
         await expect(
-          curveOracle.connect(timelock).setPoolConfig(EBTC, CURVE_EBTC_WBTC_POOL, 1, 0, WBTC, 8, 8),
+          curveOracle.connect(timelock).setPoolConfig(EBTC, CURVE_EBTC_WBTC_POOL, 1, 0, WBTC, 8),
         ).to.be.revertedWithCustomError(curveOracle, "AssetMismatch");
       });
     });
@@ -119,7 +119,7 @@ if (FORK_ETHEREUM) {
     describe("3. Reverse config — WBTC (coins[1])", () => {
       before(async () => {
         // Configure WBTC: coins[1] in pool, reference = eBTC
-        await curveOracle.connect(timelock).setPoolConfig(WBTC, CURVE_EBTC_WBTC_POOL, 1, 0, EBTC, 8, 8);
+        await curveOracle.connect(timelock).setPoolConfig(WBTC, CURVE_EBTC_WBTC_POOL, 1, 0, EBTC, 8);
       });
 
       it("should return WBTC price close to eBTC price (inverse relationship)", async () => {
