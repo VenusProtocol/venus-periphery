@@ -1,6 +1,7 @@
 import { FakeContract, smock } from "@defi-wonderland/smock";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import chai from "chai";
+import { BigNumber } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
@@ -14,35 +15,32 @@ import type {
 const { expect } = chai;
 chai.use(smock.matchers);
 
-// 1e18 as BigNumber
-const ONE_E18 = parseUnits("1", 18);
-
 describe("CurveOracle", () => {
   let curveOracle: CurveOracle;
   let accessControlManager: FakeContract<IAccessControlManagerV8>;
   let resilientOracle: FakeContract<ResilientOracleInterface>;
   let curvePool: FakeContract<ICurveStableSwapNG>;
 
-  // Addresses used as stand-ins for tokens
-  const EBTC = "0x0000000000000000000000000000000000000001"; // coins[0]
-  const WBTC = "0x0000000000000000000000000000000000000002"; // coins[1]
-  const OTHER = "0x0000000000000000000000000000000000000003"; // not in pool
+  const EBTC_ADDR = "0x0000000000000000000000000000000000000001"; // coins[0], 8 decimals
+  const WBTC_ADDR = "0x0000000000000000000000000000000000000002"; // coins[1], 8 decimals
+  const OTHER_ADDR = "0x0000000000000000000000000000000000000003";
 
-  // WBTC price in 36-8=28 decimal format; use 18 decimals here for simplicity
   const REF_PRICE = parseUnits("60000", 18);
 
-  async function deployFixture() {
-    const [owner, user] = await ethers.getSigners();
+  // get_dy output in WBTC base units (8 decimals) per 1 eBTC (1e8)
+  const DY_1_TO_1 = BigNumber.from(10).pow(8); // 1:1
+  const DY_2_TO_1 = BigNumber.from(10).pow(8).mul(2); // 2:1
+  const DY_HALF = BigNumber.from(10).pow(8).div(2); // 0.5:1
 
+  async function deployFixture() {
+    await ethers.getSigners(); // initializes Hardhat provider before smock
     accessControlManager = await smock.fake<IAccessControlManagerV8>("IAccessControlManagerV8");
     resilientOracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
     curvePool = await smock.fake<ICurveStableSwapNG>("ICurveStableSwapNG");
 
     accessControlManager.isAllowedToCall.returns(true);
-
-    // Default pool setup: coins[0]=EBTC, coins[1]=WBTC
-    curvePool.coins.whenCalledWith(0).returns(EBTC);
-    curvePool.coins.whenCalledWith(1).returns(WBTC);
+    curvePool.coins.whenCalledWith(0).returns(EBTC_ADDR);
+    curvePool.coins.whenCalledWith(1).returns(WBTC_ADDR);
 
     const CurveOracleFactory = await ethers.getContractFactory("CurveOracle");
     curveOracle = (await upgrades.deployProxy(CurveOracleFactory, [accessControlManager.address], {
@@ -50,7 +48,7 @@ describe("CurveOracle", () => {
       unsafeAllow: ["constructor"],
     })) as CurveOracle;
 
-    return { curveOracle, accessControlManager, resilientOracle, curvePool, owner, user };
+    return { curveOracle, accessControlManager, resilientOracle, curvePool };
   }
 
   beforeEach(async () => {
@@ -82,66 +80,65 @@ describe("CurveOracle", () => {
   // ═══════════════════════════════════════════════════════════════════
 
   describe("setPoolConfig", () => {
-    it("should store config in poolConfigs mapping", async () => {
-      await curveOracle.setPoolConfig(EBTC, curvePool.address, 0, WBTC);
-      const cfg = await curveOracle.poolConfigs(EBTC);
+    it("should store config including decimals", async () => {
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      const cfg = await curveOracle.poolConfigs(EBTC_ADDR);
       expect(cfg.pool).to.equal(curvePool.address);
       expect(cfg.coinIndex).to.equal(0);
-      expect(cfg.referenceToken).to.equal(WBTC);
+      expect(cfg.refCoinIndex).to.equal(1);
+      expect(cfg.referenceToken).to.equal(WBTC_ADDR);
+      expect(cfg.assetDecimals).to.equal(8);
+      expect(cfg.refDecimals).to.equal(8);
     });
 
     it("should emit PoolConfigUpdated event", async () => {
-      await expect(curveOracle.setPoolConfig(EBTC, curvePool.address, 0, WBTC))
+      await expect(curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8))
         .to.emit(curveOracle, "PoolConfigUpdated")
-        .withArgs(EBTC, curvePool.address, 0, WBTC);
+        .withArgs(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR);
     });
 
     it("should allow updating config to a new pool", async () => {
       const newPool = await smock.fake<ICurveStableSwapNG>("ICurveStableSwapNG");
-      newPool.coins.whenCalledWith(0).returns(EBTC);
-      await curveOracle.setPoolConfig(EBTC, curvePool.address, 0, WBTC);
-      await curveOracle.setPoolConfig(EBTC, newPool.address, 0, WBTC);
-      expect((await curveOracle.poolConfigs(EBTC)).pool).to.equal(newPool.address);
-    });
-
-    it("should configure multiple tokens independently", async () => {
-      const pool2 = await smock.fake<ICurveStableSwapNG>("ICurveStableSwapNG");
-      pool2.coins.whenCalledWith(1).returns(WBTC);
-      await curveOracle.setPoolConfig(EBTC, curvePool.address, 0, WBTC);
-      await curveOracle.setPoolConfig(WBTC, pool2.address, 1, EBTC);
-      expect((await curveOracle.poolConfigs(EBTC)).pool).to.equal(curvePool.address);
-      expect((await curveOracle.poolConfigs(WBTC)).pool).to.equal(pool2.address);
+      newPool.coins.whenCalledWith(0).returns(EBTC_ADDR);
+      newPool.coins.whenCalledWith(1).returns(WBTC_ADDR);
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      await curveOracle.setPoolConfig(EBTC_ADDR, newPool.address, 0, 1, WBTC_ADDR, 8, 8);
+      expect((await curveOracle.poolConfigs(EBTC_ADDR)).pool).to.equal(newPool.address);
     });
 
     it("should revert ZeroAddress when token is zero", async () => {
       await expect(
-        curveOracle.setPoolConfig(ethers.constants.AddressZero, curvePool.address, 0, WBTC),
+        curveOracle.setPoolConfig(ethers.constants.AddressZero, curvePool.address, 0, 1, WBTC_ADDR, 8, 8),
       ).to.be.revertedWithCustomError(curveOracle, "ZeroAddress");
     });
 
     it("should revert ZeroAddress when pool is zero", async () => {
       await expect(
-        curveOracle.setPoolConfig(EBTC, ethers.constants.AddressZero, 0, WBTC),
+        curveOracle.setPoolConfig(EBTC_ADDR, ethers.constants.AddressZero, 0, 1, WBTC_ADDR, 8, 8),
       ).to.be.revertedWithCustomError(curveOracle, "ZeroAddress");
     });
 
     it("should revert ZeroAddress when referenceToken is zero", async () => {
       await expect(
-        curveOracle.setPoolConfig(EBTC, curvePool.address, 0, ethers.constants.AddressZero),
+        curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, ethers.constants.AddressZero, 8, 8),
       ).to.be.revertedWithCustomError(curveOracle, "ZeroAddress");
     });
 
     it("should revert AssetMismatch when pool.coins(coinIndex) != token", async () => {
-      // coinIndex=0 maps to EBTC; passing WBTC as token should fail
-      await expect(curveOracle.setPoolConfig(WBTC, curvePool.address, 0, EBTC)).to.be.revertedWithCustomError(
-        curveOracle,
-        "AssetMismatch",
-      );
+      await expect(
+        curveOracle.setPoolConfig(WBTC_ADDR, curvePool.address, 0, 1, EBTC_ADDR, 8, 8),
+      ).to.be.revertedWithCustomError(curveOracle, "AssetMismatch");
+    });
+
+    it("should revert ReferenceMismatch when pool.coins(refCoinIndex) != referenceToken", async () => {
+      await expect(
+        curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, OTHER_ADDR, 8, 8),
+      ).to.be.revertedWithCustomError(curveOracle, "ReferenceMismatch");
     });
 
     it("should revert when caller is not authorized", async () => {
       accessControlManager.isAllowedToCall.returns(false);
-      await expect(curveOracle.setPoolConfig(EBTC, curvePool.address, 0, WBTC)).to.be.reverted;
+      await expect(curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8)).to.be.reverted;
       accessControlManager.isAllowedToCall.returns(true);
     });
   });
@@ -152,158 +149,135 @@ describe("CurveOracle", () => {
 
   describe("getPrice — revert cases", () => {
     it("should revert TokenNotConfigured when asset has no pool", async () => {
-      await expect(curveOracle.getPrice(OTHER)).to.be.revertedWithCustomError(curveOracle, "TokenNotConfigured");
+      await expect(curveOracle.getPrice(OTHER_ADDR)).to.be.revertedWithCustomError(curveOracle, "TokenNotConfigured");
     });
 
-    it("should revert ZeroPrice when pool returns zero ratio", async () => {
-      await curveOracle.setPoolConfig(EBTC, curvePool.address, 0, WBTC);
-      curvePool.price_oracle.returns(0);
+    it("should revert ZeroPrice when get_dy returns zero", async () => {
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      curvePool.get_dy.returns(0);
       resilientOracle.getPrice.returns(REF_PRICE);
-      await expect(curveOracle.getPrice(EBTC)).to.be.revertedWithCustomError(curveOracle, "ZeroPrice");
+      await expect(curveOracle.getPrice(EBTC_ADDR)).to.be.revertedWithCustomError(curveOracle, "ZeroPrice");
     });
   });
 
   // ═══════════════════════════════════════════════════════════════════
-  // 4. getPrice — asset is coins[0] (coinIndex=0)
+  // 4. getPrice — coinIndex=0, refCoinIndex=1
   //
-  // price_oracle(0) = coins[1] / coins[0] = WBTC per eBTC (in 1e18)
+  // get_dy(0, 1, 1e8) = WBTC base units per 1 eBTC
+  // ratio = dy * 1e18 / 1e8
   // price = ratio * refPrice / 1e18
-  //
-  // ratio = 1e18 (1:1 peg)  → price = refPrice
-  // ratio = 2e18 (eBTC worth 2x WBTC) → price = 2 * refPrice
-  // ratio = 0.5e18 (eBTC worth 0.5x WBTC) → price = 0.5 * refPrice
   // ═══════════════════════════════════════════════════════════════════
 
-  describe("getPrice — coinIndex=0 (asset is coins[0])", () => {
+  describe("getPrice — coinIndex=0 (eBTC)", () => {
     beforeEach(async () => {
-      await curveOracle.setPoolConfig(EBTC, curvePool.address, 0, WBTC);
-      resilientOracle.getPrice.whenCalledWith(WBTC).returns(REF_PRICE);
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      resilientOracle.getPrice.whenCalledWith(WBTC_ADDR).returns(REF_PRICE);
     });
 
-    it("should return refPrice when ratio is 1:1", async () => {
-      curvePool.price_oracle.returns(ONE_E18);
-      expect(await curveOracle.getPrice(EBTC)).to.equal(REF_PRICE);
+    it("should return refPrice when dy is 1:1", async () => {
+      curvePool.get_dy.returns(DY_1_TO_1);
+      expect(await curveOracle.getPrice(EBTC_ADDR)).to.equal(REF_PRICE);
     });
 
-    it("should return 2x refPrice when ratio is 2:1 (eBTC worth more)", async () => {
-      curvePool.price_oracle.returns(ONE_E18.mul(2));
-      expect(await curveOracle.getPrice(EBTC)).to.equal(REF_PRICE.mul(2));
+    it("should return 2x refPrice when dy is 2:1", async () => {
+      curvePool.get_dy.returns(DY_2_TO_1);
+      expect(await curveOracle.getPrice(EBTC_ADDR)).to.equal(REF_PRICE.mul(2));
     });
 
-    it("should return 0.5x refPrice when ratio is 0.5:1 (eBTC worth less)", async () => {
-      curvePool.price_oracle.returns(ONE_E18.div(2));
-      expect(await curveOracle.getPrice(EBTC)).to.equal(REF_PRICE.div(2));
+    it("should return 0.5x refPrice when dy is 0.5:1", async () => {
+      curvePool.get_dy.returns(DY_HALF);
+      expect(await curveOracle.getPrice(EBTC_ADDR)).to.equal(REF_PRICE.div(2));
     });
 
-    it("should use a realistic eBTC/WBTC ratio (~1.0021)", async () => {
-      // price_oracle(0) ≈ 1.0021e18
-      const ratio = parseUnits("1.0021", 18);
-      curvePool.price_oracle.returns(ratio);
-      const expected = REF_PRICE.mul(ratio).div(ONE_E18);
-      expect(await curveOracle.getPrice(EBTC)).to.equal(expected);
+    it("should call get_dy with (0, 1, 1e8)", async () => {
+      curvePool.get_dy.returns(DY_1_TO_1);
+      await curveOracle.getPrice(EBTC_ADDR);
+      expect(curvePool.get_dy).to.have.been.calledWith(0, 1, BigNumber.from(10).pow(8));
     });
 
-    it("should call price_oracle with index 0", async () => {
-      curvePool.price_oracle.returns(ONE_E18);
-      await curveOracle.getPrice(EBTC);
-      expect(curvePool.price_oracle).to.have.been.calledWith(0);
-    });
-
-    it("should call resilientOracle with referenceToken (WBTC)", async () => {
-      curvePool.price_oracle.returns(ONE_E18);
-      await curveOracle.getPrice(EBTC);
-      expect(resilientOracle.getPrice).to.have.been.calledWith(WBTC);
+    it("should call resilientOracle with WBTC", async () => {
+      curvePool.get_dy.returns(DY_1_TO_1);
+      await curveOracle.getPrice(EBTC_ADDR);
+      expect(resilientOracle.getPrice).to.have.been.calledWith(WBTC_ADDR);
     });
   });
 
   // ═══════════════════════════════════════════════════════════════════
-  // 5. getPrice — asset is coins[1] (coinIndex=1)
+  // 5. getPrice — coinIndex=1, refCoinIndex=0
   //
-  // price_oracle(0) = coins[1] / coins[0] = asset / refToken (in 1e18)
-  // price = refPrice * 1e18 / ratio
-  //
-  // ratio = 1e18 → price = refPrice
-  // ratio = 2e18 (1 refToken buys 2 assets) → price = refPrice / 2
-  // ratio = 0.5e18 (1 refToken buys 0.5 assets) → price = refPrice * 2
+  // Same formula — no special-casing needed vs coinIndex=0
   // ═══════════════════════════════════════════════════════════════════
 
-  describe("getPrice — coinIndex=1 (asset is coins[1])", () => {
+  describe("getPrice — coinIndex=1 (WBTC)", () => {
     beforeEach(async () => {
-      // WBTC as coins[1]; referenceToken = EBTC (coins[0])
-      await curveOracle.setPoolConfig(WBTC, curvePool.address, 1, EBTC);
-      resilientOracle.getPrice.whenCalledWith(EBTC).returns(REF_PRICE);
+      await curveOracle.setPoolConfig(WBTC_ADDR, curvePool.address, 1, 0, EBTC_ADDR, 8, 8);
+      resilientOracle.getPrice.whenCalledWith(EBTC_ADDR).returns(REF_PRICE);
     });
 
-    it("should return refPrice when ratio is 1:1", async () => {
-      curvePool.price_oracle.returns(ONE_E18);
-      expect(await curveOracle.getPrice(WBTC)).to.equal(REF_PRICE);
+    it("should return refPrice when dy is 1:1", async () => {
+      curvePool.get_dy.returns(DY_1_TO_1);
+      expect(await curveOracle.getPrice(WBTC_ADDR)).to.equal(REF_PRICE);
     });
 
-    it("should return refPrice/2 when ratio is 2:1 (asset worth less than ref)", async () => {
-      curvePool.price_oracle.returns(ONE_E18.mul(2));
-      expect(await curveOracle.getPrice(WBTC)).to.equal(REF_PRICE.div(2));
+    it("should return 2x refPrice when dy is 2:1", async () => {
+      curvePool.get_dy.returns(DY_2_TO_1);
+      expect(await curveOracle.getPrice(WBTC_ADDR)).to.equal(REF_PRICE.mul(2));
     });
 
-    it("should return 2x refPrice when ratio is 0.5:1 (asset worth more than ref)", async () => {
-      curvePool.price_oracle.returns(ONE_E18.div(2));
-      expect(await curveOracle.getPrice(WBTC)).to.equal(REF_PRICE.mul(2));
+    it("should call get_dy with (1, 0, 1e8)", async () => {
+      curvePool.get_dy.returns(DY_1_TO_1);
+      await curveOracle.getPrice(WBTC_ADDR);
+      expect(curvePool.get_dy).to.have.been.calledWith(1, 0, BigNumber.from(10).pow(8));
     });
 
-    it("should call price_oracle with index 0 (coinIndex-1)", async () => {
-      curvePool.price_oracle.returns(ONE_E18);
-      await curveOracle.getPrice(WBTC);
-      expect(curvePool.price_oracle).to.have.been.calledWith(0);
-    });
-
-    it("should call resilientOracle with referenceToken (EBTC)", async () => {
-      curvePool.price_oracle.returns(ONE_E18);
-      await curveOracle.getPrice(WBTC);
-      expect(resilientOracle.getPrice).to.have.been.calledWith(EBTC);
+    it("should call resilientOracle with EBTC", async () => {
+      curvePool.get_dy.returns(DY_1_TO_1);
+      await curveOracle.getPrice(WBTC_ADDR);
+      expect(resilientOracle.getPrice).to.have.been.calledWith(EBTC_ADDR);
     });
   });
 
   // ═══════════════════════════════════════════════════════════════════
-  // 6. getPrice — pool reconfiguration
+  // 6. Pool reconfiguration
   // ═══════════════════════════════════════════════════════════════════
 
   describe("getPrice — pool reconfiguration", () => {
     it("should use latest config after update", async () => {
       const pool2 = await smock.fake<ICurveStableSwapNG>("ICurveStableSwapNG");
-      pool2.coins.whenCalledWith(0).returns(EBTC);
+      pool2.coins.whenCalledWith(0).returns(EBTC_ADDR);
+      pool2.coins.whenCalledWith(1).returns(WBTC_ADDR);
 
-      // First pool: 1:1
-      await curveOracle.setPoolConfig(EBTC, curvePool.address, 0, WBTC);
-      curvePool.price_oracle.returns(ONE_E18);
-      resilientOracle.getPrice.whenCalledWith(WBTC).returns(REF_PRICE);
-      expect(await curveOracle.getPrice(EBTC)).to.equal(REF_PRICE);
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      curvePool.get_dy.returns(DY_1_TO_1);
+      resilientOracle.getPrice.whenCalledWith(WBTC_ADDR).returns(REF_PRICE);
+      expect(await curveOracle.getPrice(EBTC_ADDR)).to.equal(REF_PRICE);
 
-      // Reconfigure: 2:1
-      await curveOracle.setPoolConfig(EBTC, pool2.address, 0, WBTC);
-      pool2.price_oracle.returns(ONE_E18.mul(2));
-      expect(await curveOracle.getPrice(EBTC)).to.equal(REF_PRICE.mul(2));
+      await curveOracle.setPoolConfig(EBTC_ADDR, pool2.address, 0, 1, WBTC_ADDR, 8, 8);
+      pool2.get_dy.returns(DY_2_TO_1);
+      expect(await curveOracle.getPrice(EBTC_ADDR)).to.equal(REF_PRICE.mul(2));
     });
   });
 
   // ═══════════════════════════════════════════════════════════════════
-  // 7. getPrice — varying reference prices
+  // 7. Varying reference prices
   // ═══════════════════════════════════════════════════════════════════
 
   describe("getPrice — varying reference prices", () => {
     beforeEach(async () => {
-      await curveOracle.setPoolConfig(EBTC, curvePool.address, 0, WBTC);
-      curvePool.price_oracle.returns(ONE_E18); // 1:1 ratio
+      await curveOracle.setPoolConfig(EBTC_ADDR, curvePool.address, 0, 1, WBTC_ADDR, 8, 8);
+      curvePool.get_dy.returns(DY_1_TO_1);
     });
 
-    it("should scale with a high BTC reference price ($90000)", async () => {
+    it("should scale with high reference price ($90000)", async () => {
       const highPrice = parseUnits("90000", 18);
-      resilientOracle.getPrice.whenCalledWith(WBTC).returns(highPrice);
-      expect(await curveOracle.getPrice(EBTC)).to.equal(highPrice);
+      resilientOracle.getPrice.whenCalledWith(WBTC_ADDR).returns(highPrice);
+      expect(await curveOracle.getPrice(EBTC_ADDR)).to.equal(highPrice);
     });
 
-    it("should scale with a low reference price ($0.01)", async () => {
+    it("should scale with low reference price ($0.01)", async () => {
       const lowPrice = parseUnits("0.01", 18);
-      resilientOracle.getPrice.whenCalledWith(WBTC).returns(lowPrice);
-      expect(await curveOracle.getPrice(EBTC)).to.equal(lowPrice);
+      resilientOracle.getPrice.whenCalledWith(WBTC_ADDR).returns(lowPrice);
+      expect(await curveOracle.getPrice(EBTC_ADDR)).to.equal(lowPrice);
     });
   });
 });
