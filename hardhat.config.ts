@@ -163,8 +163,11 @@ const config: HardhatUserConfig = {
         5611: { hardforkHistory: { cancun: 0 } }, // opBNB testnet
         10: { hardforkHistory: { cancun: 0 } }, // OP mainnet
         11155420: { hardforkHistory: { cancun: 0 } }, // OP Sepolia
-        42161: { hardforkHistory: { cancun: 0 } }, // Arbitrum One
-        421614: { hardforkHistory: { cancun: 0 } }, // Arbitrum Sepolia
+        // Arbitrum doesn't include EIP-4844 blob fields in block headers, so EDR's Cancun
+        // decoder panics with `Header(ExcessBlobGasNotSet)` on recent blocks. Pin to
+        // Shanghai — the strict subset that omits blob gas.
+        42161: { hardforkHistory: { shanghai: 0 } }, // Arbitrum One
+        421614: { hardforkHistory: { shanghai: 0 } }, // Arbitrum Sepolia
         8453: { hardforkHistory: { cancun: 0 } }, // Base mainnet
         84532: { hardforkHistory: { cancun: 0 } }, // Base Sepolia
         130: { hardforkHistory: { cancun: 0 } }, // Unichain mainnet
