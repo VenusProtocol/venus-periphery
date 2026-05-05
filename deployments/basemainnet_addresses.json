@@ -7,6 +7,7 @@
     "AerodromeSlipstreamOracle_Proxy": "0x5DE0B322A74088fD64CDD01042BE2fBc47FE82EC",
     "DefaultProxyAdmin": "0x70d73Ee950F2436483b6E410915CB53D473f6EB1",
     "DeviationSentinel": "0x12D09d5b13A673269cdB624D17A42f45a5233076",
+    "DeviationSentinelConfigurator": "0x3fb0aD3828E6A62E3B527CF51F4F3d011B4a9EA1",
     "DeviationSentinel_Implementation": "0xC782fE421CD24F1D6067b0EBe291725E4806dcCA",
     "DeviationSentinel_Proxy": "0x12D09d5b13A673269cdB624D17A42f45a5233076",
     "EBrake": "0x062C68Af7B9Fb059DCB7FA4B6b92E633350fb7c2",

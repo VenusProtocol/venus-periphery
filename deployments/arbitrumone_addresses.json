@@ -4,6 +4,7 @@
   "addresses": {
     "DefaultProxyAdmin": "0x9fa1031e7f9578e9D4A260CF0dF79D4540CD1836",
     "DeviationSentinel": "0xb4CC54B33d34fD809E8fBD83A066158591ED7Fba",
+    "DeviationSentinelConfigurator": "0x2AFAed4A909491E0181E55429F7F621528BEd5Ef",
     "DeviationSentinel_Implementation": "0xfbF5D98185d0B02f136CD523B3596CcC713CD19a",
     "DeviationSentinel_Proxy": "0xb4CC54B33d34fD809E8fBD83A066158591ED7Fba",
     "EBrake": "0xFc4CE7Ca9BB5119705Cfb84d6e4476e8a4032b26",
