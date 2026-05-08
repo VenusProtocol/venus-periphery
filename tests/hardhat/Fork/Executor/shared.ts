@@ -64,7 +64,7 @@ function comptrollerPermissions(config: ExecutorNetworkConfig): string[] {
         "setCollateralFactor(address,uint256,uint256)",
         "setMarketBorrowCaps(address[],uint256[])",
         "setMarketSupplyCaps(address[],uint256[])",
-        "setActionsPaused(address[],uint8[],bool)",
+        "setActionsPaused(address[],uint256[],bool)",
       ];
 }
 
