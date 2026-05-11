@@ -78,4 +78,3 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
 
 export default func;
 func.tags = ["executor"];
-func.dependencies = ["ebrake"];
