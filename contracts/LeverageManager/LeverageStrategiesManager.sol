@@ -588,14 +588,16 @@ contract LeverageStrategiesManager is
     ) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
 
+        uint256 repayAmount;
+        uint256 err;
         {
             uint256 borrowedTotalDebtAmount = borrowMarket.borrowBalanceCurrent(onBehalf);
-            uint256 repayAmount = borrowedAssetAmountToRepayFromFlashLoan > borrowedTotalDebtAmount
+            repayAmount = borrowedAssetAmountToRepayFromFlashLoan > borrowedTotalDebtAmount
                 ? borrowedTotalDebtAmount
                 : borrowedAssetAmountToRepayFromFlashLoan;
 
             borrowedAsset.forceApprove(address(borrowMarket), repayAmount);
-            uint256 err = borrowMarket.repayBorrowBehalf(onBehalf, repayAmount);
+            err = borrowMarket.repayBorrowBehalf(onBehalf, repayAmount);
 
             if (err != SUCCESS) {
                 revert RepayBehalfFailed(err);
@@ -613,7 +615,7 @@ contract LeverageStrategiesManager is
                     (MANTISSA_ONE - treasuryPercent)
                 : collateralAmountToRedeem;
 
-            uint256 err = _collateralMarket.redeemUnderlyingBehalf(onBehalf, redeemAmount);
+            err = _collateralMarket.redeemUnderlyingBehalf(onBehalf, redeemAmount);
             if (err != SUCCESS) {
                 revert RedeemBehalfFailed(err);
             }
@@ -621,11 +623,19 @@ contract LeverageStrategiesManager is
 
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
 
-        _performSwap(collateralAsset, collateralAmountToRedeem, borrowedAsset, minAmountOutAfterSwap, swapCallData);
+        uint256 swapOut = _performSwap(
+            collateralAsset,
+            collateralAmountToRedeem,
+            borrowedAsset,
+            minAmountOutAfterSwap,
+            swapCallData
+        );
 
         flashLoanRepayAmount = borrowedAssetAmountToRepayFromFlashLoan + borrowedAssetFees;
 
-        if (borrowedAsset.balanceOf(address(this)) < flashLoanRepayAmount) {
+        // swapOut must cover what was spent repaying the user's debt plus the flash loan fee,
+        // ensuring pre-existing stranded tokens are never consumed.
+        if (swapOut < repayAmount + borrowedAssetFees) {
             revert InsufficientFundsToRepayFlashloan();
         }
 
@@ -690,7 +700,9 @@ contract LeverageStrategiesManager is
             revert RedeemBehalfFailed(err);
         }
 
-        if (collateralAsset.balanceOf(address(this)) < flashLoanRepayAmount) {
+        // redeemAmount must cover what was spent repaying the user's debt plus the flash loan fee,
+        // ensuring pre-existing stranded tokens are never consumed.
+        if (redeemAmount < repayAmount + collateralAmountFees) {
             revert InsufficientFundsToRepayFlashloan();
         }
 
