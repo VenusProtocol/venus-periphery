@@ -85,6 +85,13 @@ interface IExecutor {
     /// @param market The vToken market address.
     event BorrowCapExceeding(address indexed caller, address indexed market);
 
+    /// @notice Emitted when the interest-accrual read (exchangeRateCurrent / totalBorrowsCurrent)
+    ///         reverts during a cap-exceeding check, so the market is halted (fail closed) without
+    ///         a verified cap breach.
+    /// @param caller The address that triggered the halt.
+    /// @param market The vToken market address.
+    event HaltedWithoutCapCheck(address indexed caller, address indexed market);
+
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════
@@ -146,9 +153,12 @@ interface IExecutor {
      * @notice Handle the S4 supply-cap-exceeding signal: pause supply and zero CF.
      *         Triggered by S4 supply cap breach signal: totalSupply >= supplyCap
      *         AND supply delta >= 5% in N blocks.
-     *         Reverts with CapNotBreached only when supplyCap is set AND totalSupply is below it.
+     *         Reverts with CapNotBreached only when supplyCap is set AND a successful
+     *         exchangeRateCurrent read proves supply is below it. The exchange rate is used
+     *         only to reject a halt, never to gate one: if accrual reverts, the halt proceeds
+     *         (fail closed).
      *         If supplyCap == 0 (misconfiguration — no Venus market is intentionally uncapped),
-     *         the halt is permitted; governance recovery via VIP.
+     *         the halt is permitted without reading the rate; governance recovery via VIP.
      *         One-way action — recovery requires governance VIP.
      *
      * @param market The vToken market address.
@@ -159,8 +169,12 @@ interface IExecutor {
      * @notice Handle the S4 borrow-cap-exceeding signal: pause borrow.
      *         Triggered by S4 borrow cap breach signal: totalBorrows >= borrowCap
      *         AND borrow utilisation +10% in N blocks.
-     *         Reverts with CapNotBreached only when borrowCap is set AND totalBorrows is below it.
-     *         If borrowCap == 0 (misconfiguration), the halt is permitted; governance recovery via VIP.
+     *         Reverts with CapNotBreached only when borrowCap is set AND a successful
+     *         totalBorrowsCurrent read proves borrows are below it. The borrow total is used
+     *         only to reject a halt, never to gate one: if accrual reverts, the halt proceeds
+     *         (fail closed).
+     *         If borrowCap == 0 (misconfiguration), the halt is permitted without reading
+     *         borrows; governance recovery via VIP.
      *         One-way action — recovery requires governance VIP.
      *
      * @param market The vToken market address.
