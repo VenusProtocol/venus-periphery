@@ -776,9 +776,7 @@
         "blockNumber": 111365667,
         "transactionHash": "0x6397346f6bbe37bc9cdb811ecf01e55c0e5c3791819be24a42eca351833fe749",
         "address": "0xaD740d56dCf8FB0484f4C27CA3356cF1e379cb4e",
-        "topics": [
-          "0x7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498"
-        ],
+        "topics": ["0x7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498"],
         "data": "0x00000000000000000000000000000000000000000000000000000000000000ff",
         "logIndex": 0,
         "blockHash": "0x3bf500ce43d5c2fd4e7df6093977c9c9f85a508038b40a438dff5fb9a802b79c"
