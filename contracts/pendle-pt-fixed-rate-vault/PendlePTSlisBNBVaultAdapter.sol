@@ -44,19 +44,21 @@ contract PendlePTSlisBNBVaultAdapter is PendlePTVaultAdapter, IPendlePTSlisBNBVa
     //                          STATE VARIABLES
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Lista withdrawal request uuid → owner who may receive the unbonded BNB.
-    mapping(uint256 => address) public unstakeOwner;
+    /// @dev Lista withdrawal request uuid → recorded request data (owner/amount/startTime).
+    ///      Stored at request time so reads never depend on scanning Lista's live request array.
+    mapping(uint256 => UnstakeRequest) internal _unstakeRequests;
 
     /// @dev Owner → list of their outstanding unstake request uuids (compacted via swap-pop on claim).
     mapping(address => uint256[]) internal _userUuids;
 
-    /// @dev Reserved storage gap for future upgrades of the child.
-    uint256[49] private __gap;
+    /// @dev Reserved storage gap for future upgrades of the child (2 used slots + 48 = 50, matching the base).
+    uint256[48] private __gap;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                            CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════
 
+    /// @notice Sets the immutable slisBNB token, Lista StakeManager, and unbond period estimate
     /// @param pendleRouter_ Pendle Router (IPAllActionV3) address.
     /// @param comptroller_ Venus core pool Comptroller address.
     /// @param slisBnb_ slisBNB token address.
@@ -116,8 +118,84 @@ contract PendlePTSlisBNBVaultAdapter is PendlePTVaultAdapter, IPendlePTSlisBNBVa
         uuid = _enqueueUnstake(pendleMarket, vTokenAmount, ptReceived, slisBnbAmount);
     }
 
+    /// @inheritdoc IPendlePTSlisBNBVaultAdapter
+    function claimUnstaked(uint256 uuid) external nonReentrant {
+        // Intentionally NOT whenNotPaused so an adapter-level pause can never block a claim. Note this is not
+        // an unconditional guarantee: Lista's claimWithdraw is itself whenNotPaused and gated on bot
+        // confirmation, so a Lista-side pause or confirmation delay can still postpone the claim.
+        UnstakeRequest memory request = _unstakeRequests[uuid];
+        address user = request.owner;
+        if (user == address(0)) revert UnstakeRequestNotFound(uuid);
+
+        // Resolve the live index fresh — Lista compacts its array (swap-pop) on every claim, so the index
+        // is not stable across claims and must be looked up against Lista's current array each time.
+        IListaStakeManager.WithdrawalRequest[] memory requests = IListaStakeManager(LISTA_STAKE_MANAGER)
+            .getUserWithdrawalRequests(address(this));
+        (bool found, uint256 idx) = _findRequestIndex(requests, uuid);
+
+        // Effects before interactions (CEI).
+        delete _unstakeRequests[uuid];
+        _removeUserUuid(user, uuid);
+
+        uint256 bnbOut;
+        if (found) {
+            // Request still pending on the adapter: claim it now (BNB lands on the adapter via Lista).
+            uint256 balanceBefore = address(this).balance;
+            IListaStakeManager(LISTA_STAKE_MANAGER).claimWithdraw(idx);
+            bnbOut = address(this).balance - balanceBefore;
+        } else {
+            // The uuid left the adapter's Lista array, which is only possible if Lista's bot already claimed
+            // it via claimWithdrawFor (BOT-gated). Lista forwarded the BNB it locked at request time to this
+            // adapter, so forward that snapshot. Never recompute at claim — slisBNB appreciates, which would
+            // overpay from other requests' pooled BNB.
+            bnbOut = request.amountInBnb;
+        }
+
+        Address.sendValue(payable(user), bnbOut);
+
+        emit UnstakeClaimed(uuid, user, bnbOut);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                          VIEW FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @inheritdoc IPendlePTSlisBNBVaultAdapter
+    function getUserUuids(address user) external view returns (uint256[] memory) {
+        return _userUuids[user];
+    }
+
+    /// @inheritdoc IPendlePTSlisBNBVaultAdapter
+    function unstakeOwner(uint256 uuid) external view returns (address) {
+        return _unstakeRequests[uuid].owner;
+    }
+
+    /// @inheritdoc IPendlePTSlisBNBVaultAdapter
+    function getUnstakeRequest(
+        uint256 uuid
+    ) external view returns (address user, uint256 amountInSnBnb, uint256 startTime, uint256 claimableAt) {
+        UnstakeRequest memory request = _unstakeRequests[uuid];
+        user = request.owner;
+        amountInSnBnb = request.amountInSnBnb;
+        startTime = request.startTime;
+        // Off-chain estimate only; real claimability is reported by isClaimable().
+        claimableAt = startTime == 0 ? 0 : startTime + UNBOND_PERIOD;
+    }
+
+    /// @inheritdoc IPendlePTSlisBNBVaultAdapter
+    function isClaimable(uint256 uuid) external view returns (bool) {
+        if (_unstakeRequests[uuid].owner == address(0)) return false;
+        // Lista gates claims on its bot-advanced confirmation pointer, not on elapsed time. Every request
+        // the adapter creates is a post-upgrade ("new") request, claimable once uuid < nextConfirmedRequestUUID.
+        return uuid < IListaStakeManager(LISTA_STAKE_MANAGER).nextConfirmedRequestUUID();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                        INTERNAL HELPERS
+    // ═══════════════════════════════════════════════════════════════════════
+
     /**
-     * @notice Hands slisBNB to Lista, records uuid → msg.sender, and emits UnstakeRequested.
+     * @notice Hands slisBNB to Lista, records the request (owner/amount/startTime), and emits UnstakeRequested.
      * @param pendleMarket Pendle market address (event context).
      * @param vTokenAmount Amount of vTokens redeemed (event context).
      * @param ptReceived Amount of PT redeemed (event context).
@@ -135,13 +213,25 @@ contract PendlePTSlisBNBVaultAdapter is PendlePTVaultAdapter, IPendlePTSlisBNBVa
         IListaStakeManager(LISTA_STAKE_MANAGER).requestWithdraw(slisBnbAmount);
         IERC20(SLIS_BNB).forceApprove(LISTA_STAKE_MANAGER, 0);
 
-        // The just-created request is the last element of the adapter's request array.
+        // The just-created request is the last element of the adapter's request array. Read it back and
+        // record its actual Lista-recorded fields, so later reads never have to re-scan Lista's array.
         IListaStakeManager.WithdrawalRequest[] memory requests = IListaStakeManager(LISTA_STAKE_MANAGER)
             .getUserWithdrawalRequests(address(this));
-        IListaStakeManager.WithdrawalRequest memory request = requests[requests.length - 1];
+        uint256 idx = requests.length - 1;
+        IListaStakeManager.WithdrawalRequest memory request = requests[idx];
         uuid = request.uuid;
 
-        unstakeOwner[uuid] = msg.sender;
+        // Snapshot the BNB Lista locked for this request now. Lista pays this fixed figure on claim (no
+        // claim-time recompute), so it is the exact amount to forward even if the bot later claims the
+        // request on the adapter's behalf via claimWithdrawFor (see claimUnstaked).
+        (, uint256 amountInBnb) = IListaStakeManager(LISTA_STAKE_MANAGER).getUserRequestStatus(address(this), idx);
+
+        _unstakeRequests[uuid] = UnstakeRequest({
+            owner: msg.sender,
+            amountInSnBnb: request.amountInSnBnb,
+            amountInBnb: amountInBnb,
+            startTime: request.startTime
+        });
         _userUuids[msg.sender].push(uuid);
 
         emit UnstakeRequested(
@@ -155,62 +245,6 @@ contract PendlePTSlisBNBVaultAdapter is PendlePTVaultAdapter, IPendlePTSlisBNBVa
             request.startTime + UNBOND_PERIOD
         );
     }
-
-    /// @inheritdoc IPendlePTSlisBNBVaultAdapter
-    // Intentionally NOT whenNotPaused: funds must never be trapped by an emergency pause.
-    function claimUnstaked(uint256 uuid) external nonReentrant {
-        address user = unstakeOwner[uuid];
-        if (user == address(0)) revert UnstakeRequestNotFound(uuid);
-
-        // Resolve the live index fresh — Lista compacts its array (swap-pop) on every claim.
-        IListaStakeManager.WithdrawalRequest[] memory requests = IListaStakeManager(LISTA_STAKE_MANAGER)
-            .getUserWithdrawalRequests(address(this));
-        uint256 idx = _findRequestIndex(requests, uuid);
-
-        // Effects before interactions (CEI).
-        delete unstakeOwner[uuid];
-        _removeUserUuid(user, uuid);
-
-        // Interaction: claim from Lista (BNB lands on the adapter), then forward to the owner.
-        uint256 balanceBefore = address(this).balance;
-        IListaStakeManager(LISTA_STAKE_MANAGER).claimWithdraw(idx);
-        uint256 bnbOut = address(this).balance - balanceBefore;
-
-        Address.sendValue(payable(user), bnbOut);
-
-        emit UnstakeClaimed(uuid, user, bnbOut);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                          VIEW FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /// @inheritdoc IPendlePTSlisBNBVaultAdapter
-    function getUserUuids(address user) external view returns (uint256[] memory) {
-        return _userUuids[user];
-    }
-
-    /// @inheritdoc IPendlePTSlisBNBVaultAdapter
-    function getUnstakeRequest(
-        uint256 uuid
-    ) external view returns (address user, uint256 amountInSnBnb, uint256 startTime, uint256 claimableAt) {
-        user = unstakeOwner[uuid];
-        IListaStakeManager.WithdrawalRequest[] memory requests = IListaStakeManager(LISTA_STAKE_MANAGER)
-            .getUserWithdrawalRequests(address(this));
-        uint256 length = requests.length;
-        for (uint256 i; i < length; ++i) {
-            if (requests[i].uuid == uuid) {
-                amountInSnBnb = requests[i].amountInSnBnb;
-                startTime = requests[i].startTime;
-                claimableAt = startTime + UNBOND_PERIOD;
-                break;
-            }
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                        INTERNAL HELPERS
-    // ═══════════════════════════════════════════════════════════════════════
 
     /**
      * @notice Redeems PT 1:1 to slisBNB held by this adapter (post-maturity).
@@ -247,26 +281,6 @@ contract PendlePTSlisBNBVaultAdapter is PendlePTVaultAdapter, IPendlePTSlisBNBVa
     }
 
     /**
-     * @notice Finds the index of a uuid within a withdrawal-request array.
-     * @param requests The adapter's live Lista withdrawal requests.
-     * @param uuid The uuid to locate.
-     * @return idx Index of the matching request.
-     * @dev Reverts with UnstakeRequestNotFound if no entry matches (e.g. already claimed on Lista).
-     */
-    function _findRequestIndex(
-        IListaStakeManager.WithdrawalRequest[] memory requests,
-        uint256 uuid
-    ) internal pure returns (uint256 idx) {
-        uint256 length = requests.length;
-        for (uint256 i; i < length; ++i) {
-            if (requests[i].uuid == uuid) {
-                return i;
-            }
-        }
-        revert UnstakeRequestNotFound(uuid);
-    }
-
-    /**
      * @notice Removes a uuid from a user's outstanding list via swap-pop.
      * @param user The owner whose list to mutate.
      * @param uuid The uuid to remove.
@@ -281,5 +295,26 @@ contract PendlePTSlisBNBVaultAdapter is PendlePTVaultAdapter, IPendlePTSlisBNBVa
                 return;
             }
         }
+    }
+
+    /**
+     * @notice Finds the index of a uuid within a withdrawal-request array.
+     * @param requests The adapter's live Lista withdrawal requests.
+     * @param uuid The uuid to locate.
+     * @return found True if a matching request is present (false once Lista has claimed/removed it).
+     * @return idx Index of the matching request (zero when not found).
+     * @dev Returns a flag instead of reverting so claimUnstaked can handle the bot-already-claimed case.
+     */
+    function _findRequestIndex(
+        IListaStakeManager.WithdrawalRequest[] memory requests,
+        uint256 uuid
+    ) internal pure returns (bool found, uint256 idx) {
+        uint256 length = requests.length;
+        for (uint256 i; i < length; ++i) {
+            if (requests[i].uuid == uuid) {
+                return (true, i);
+            }
+        }
+        return (false, 0);
     }
 }

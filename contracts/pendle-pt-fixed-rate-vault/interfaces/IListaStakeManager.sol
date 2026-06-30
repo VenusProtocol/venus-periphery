@@ -5,10 +5,13 @@ pragma solidity 0.8.25;
  * @title IListaStakeManager
  * @author Venus
  * @notice Minimal interface for the Lista DAO StakeManager used to natively unstake slisBNB into BNB.
- * @dev Unstaking is asynchronous: `requestWithdraw` burns slisBNB and enqueues a request that becomes
- *      claimable after the protocol unbond period (~7 days). `claimWithdraw` then sends the BNB to the caller.
- *      Withdrawal requests are stored per-account; `claimWithdraw` indexes into the caller's request array,
- *      and Lista compacts that array on claim (swap-and-pop), so indices are NOT stable across claims.
+ * @dev Unstaking is asynchronous: `requestWithdraw` transfers in slisBNB and enqueues a request. The
+ *      request does NOT become claimable purely by elapsed time — Lista gates `claimWithdraw` on its
+ *      bot-advanced confirmation pointer `nextConfirmedRequestUUID` (a request is claimable once its
+ *      `uuid < nextConfirmedRequestUUID`), which the bot advances only after undelegating and claiming the
+ *      BNB from the beacon chain. The unbond period (~7 days) is therefore an estimate, not the gate.
+ *      `claimWithdraw` sends the BNB to the caller and indexes into the caller's request array, which Lista
+ *      compacts on claim (swap-and-pop), so indices are NOT stable across claims.
  */
 interface IListaStakeManager {
     /**
@@ -50,4 +53,27 @@ interface IListaStakeManager {
      * @return Equivalent BNB amount.
      */
     function convertSnBnbToBnb(uint256 _amountInSlisBnb) external view returns (uint256);
+
+    /**
+     * @notice Confirmation pointer below which "new" withdrawal requests are claimable.
+     * @dev A request is claimable once its `uuid < nextConfirmedRequestUUID`. Advanced only by Lista's bot
+     *      (after beacon-chain undelegation), never by elapsed time. This is the real on-chain claim gate.
+     * @return The next-confirmed request uuid pointer.
+     */
+    function nextConfirmedRequestUUID() external view returns (uint256);
+
+    /**
+     * @notice Status of a specific withdrawal request, including the exact BNB it will pay out.
+     * @dev For a "new" (post-migration) request, `_amount` is the BNB figure Lista locked at request time
+     *      (`convertSnBnbToBnb` at that block), not a claim-time recompute, so it is unaffected by later
+     *      slisBNB appreciation. `_idx` is the position in the account's `getUserWithdrawalRequests` array.
+     * @param _user The account whose request to read.
+     * @param _idx Index into the account's withdrawal request array.
+     * @return _isClaimable Whether the request can be claimed now.
+     * @return _amount BNB amount the request will pay on claim (locked at request time for new requests).
+     */
+    function getUserRequestStatus(
+        address _user,
+        uint256 _idx
+    ) external view returns (bool _isClaimable, uint256 _amount);
 }

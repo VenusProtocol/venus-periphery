@@ -14,6 +14,24 @@ import { IPendlePTVaultAdapter } from "./IPendlePTVaultAdapter.sol";
  */
 interface IPendlePTSlisBNBVaultAdapter is IPendlePTVaultAdapter {
     // ═══════════════════════════════════════════════════════════════════════
+    //                              STRUCTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Recorded data for a Lista unstake request the adapter enqueued.
+     * @param owner Address that requested the unstake and receives the unbonded BNB
+     * @param amountInSnBnb Amount of slisBNB burned for the request (snapshot at request time)
+     * @param amountInBnb BNB amount Lista locked for the request at request time (the exact claim payout)
+     * @param startTime Timestamp the Lista unbond clock started (request block timestamp)
+     */
+    struct UnstakeRequest {
+        address owner;
+        uint256 amountInSnBnb;
+        uint256 amountInBnb;
+        uint256 startTime;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //                              EVENTS
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -43,9 +61,9 @@ interface IPendlePTSlisBNBVaultAdapter is IPendlePTVaultAdapter {
      * @notice Emitted when a matured Lista unstake request is claimed and BNB is forwarded to the owner.
      * @param uuid Lista withdrawal request identifier that was claimed
      * @param user Address of the original owner who receives the native BNB
-     * @param bnbAmount Amount of native BNB forwarded to the user
+     * @param bnbAmount Amount of native BNB forwarded to the user (non-indexed value field, like base events)
      */
-    event UnstakeClaimed(uint256 indexed uuid, address indexed user, uint256 bnbAmount);
+    event UnstakeClaimed(uint256 indexed uuid, address indexed user, uint256 bnbAmount); // solhint-disable-line gas-indexed-events
 
     // ═══════════════════════════════════════════════════════════════════════
     //                           CUSTOM ERRORS
@@ -78,9 +96,13 @@ interface IPendlePTSlisBNBVaultAdapter is IPendlePTVaultAdapter {
     ) external returns (uint256 uuid);
 
     /**
-     * @notice Finalize a matured Lista unstake request and forward native BNB to its owner.
-     * @dev Permissionless — anyone may call once the unbond period has elapsed; BNB always goes to the
-     *      recorded owner, never the caller. Intentionally NOT pausable so funds are never trapped.
+     * @notice Finalize a confirmed Lista unstake request and forward native BNB to its owner.
+     * @dev Permissionless — anyone may call; BNB always goes to the recorded owner, never the caller.
+     *      Not gated by the adapter pause, so an adapter-level pause can never block a claim. This is not an
+     *      unconditional availability guarantee: the underlying Lista `claimWithdraw` is itself pausable and
+     *      gated on bot confirmation, so a Lista-side pause or confirmation delay still postpones the claim.
+     *      Reverts if `uuid` is unknown/already claimed, or if Lista has not yet confirmed the request
+     *      (see `isClaimable`).
      * @param uuid Lista withdrawal request identifier to claim
      */
     function claimUnstaked(uint256 uuid) external;
@@ -98,17 +120,28 @@ interface IPendlePTSlisBNBVaultAdapter is IPendlePTVaultAdapter {
 
     /**
      * @notice Get details for a recorded unstake request.
-     * @dev Scans the adapter's live Lista requests for the uuid; amount/startTime are zero if Lista
-     *      no longer holds the request (e.g. already claimed but not yet cleared).
+     * @dev Reads the adapter's own stored record (set at request time, cleared on claim); all fields are
+     *      zero once the request is claimed or if the uuid is unknown. `claimableAt` is only an off-chain
+     *      estimate (startTime + UNBOND_PERIOD); use `isClaimable` for the real on-chain claim gate.
      * @param uuid Lista withdrawal request identifier
      * @return user Recorded owner of the request
      * @return amountInSnBnb Amount of slisBNB burned for the request
      * @return startTime Timestamp when the unbond period started
-     * @return claimableAt Estimated timestamp when claimable (startTime + UNBOND_PERIOD)
+     * @return claimableAt Estimated timestamp when claimable (startTime + UNBOND_PERIOD); an estimate only
      */
     function getUnstakeRequest(
         uint256 uuid
     ) external view returns (address user, uint256 amountInSnBnb, uint256 startTime, uint256 claimableAt);
+
+    /**
+     * @notice Whether a recorded unstake request is claimable now, per Lista's on-chain confirmation gate.
+     * @dev Reflects Lista's real gate (uuid < nextConfirmedRequestUUID), not the elapsed-time estimate.
+     *      Returns false for unknown/claimed uuids. A true result means `claimUnstaked` should succeed
+     *      (barring a Lista-side pause); the `claimableAt` hint can differ from this in both directions.
+     * @param uuid Lista withdrawal request identifier
+     * @return True if Lista has confirmed the request and it can be claimed
+     */
+    function isClaimable(uint256 uuid) external view returns (bool);
 
     /**
      * @notice Recorded owner of a Lista unstake request uuid (zero if unknown or claimed).
