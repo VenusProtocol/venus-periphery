@@ -3,6 +3,11 @@
 export const BSC_CHAIN_ID = 56;
 export const BLOCK_NUMBER = 83040087;
 
+// Dedicated block for the slisBNB unstake suite. Sits PAST the PT market's maturity (25-Jun-2026),
+// the natural state for the redeem -> unstake -> claim flow. Kept separate from the shared
+// (pre-maturity) BLOCK_NUMBER above, which the index runner and deposit/withdraw specs depend on.
+export const SLISBNB_UNSTAKE_BLOCK = 107230482;
+
 // Pendle ecosystem
 export const PENDLE_ROUTER_V3 = "0x888888888889758F76e7103c6CbF23ABbF58F946";
 export const PENDLE_MARKET = "0x3C1a3D6B69A866444Fe506F7D38a00a1C2D859C5"; // PendleMarketV3 for PT-clisBNBx-25JUN2026
@@ -21,6 +26,10 @@ export const NORMAL_TIMELOCK = "0x939bD8d64c0A9583A7Dcea9933f7b21697ab6396";
 // External protocols
 export const PANCAKE_ROUTER = "0x10ED43C718714eb63d5aA57B78B54704E256024E"; // PancakeSwap Router V2
 export const LISTA_STAKE_MANAGER = "0x1adB950d8bB3dA4bE104211D5AB038628e477fE6"; // ListaDAO StakeManager
+
+// Lista unbond-period estimate passed to the slisBNB adapter constructor. Only feeds the
+// off-chain `claimableAt` hint; the real claim gate is Lista's nextConfirmedRequestUUID.
+export const LISTA_UNBOND_PERIOD = 7 * 24 * 3600; // 7 days
 
 // Lista DAO Oracle (used by DynamicDutyCalculator during SY deposit/redeem)
 export const LISTA_RESILIENT_ORACLE = "0xf3afD82A4071f272F403dC176916141f44E6c750";
