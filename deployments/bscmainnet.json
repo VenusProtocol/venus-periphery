@@ -4111,7 +4111,7 @@
       ]
     },
     "Executor_Implementation": {
-      "address": "0xCA5CA421adF9EadaFf5AFed54ae002E41897D22d",
+      "address": "0x347fBbC71C07496fbBb2fEc5D2a036605F14089D",
       "abi": [
         {
           "inputs": [
@@ -4268,6 +4268,25 @@
             }
           ],
           "name": "CapAdjusted",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            }
+          ],
+          "name": "HaltedWithoutCapCheck",
           "type": "event"
         },
         {
@@ -5656,7 +5675,7 @@
       ]
     },
     "LeverageStrategiesManager_Implementation": {
-      "address": "0x88F896E7667e01E0e8b27a5E39076B020318EF51",
+      "address": "0xB8c418eFf558D7eE517b8f26B5Eb0F4f3c53F5D5",
       "abi": [
         {
           "inputs": [
@@ -6076,6 +6095,31 @@
           "type": "event"
         },
         {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "token",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "to",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "uint256",
+              "name": "amount",
+              "type": "uint256"
+            }
+          ],
+          "name": "TokensSwept",
+          "type": "event"
+        },
+        {
           "inputs": [],
           "name": "COMPTROLLER",
           "outputs": [
@@ -6350,6 +6394,19 @@
             }
           ],
           "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "token",
+              "type": "address"
+            }
+          ],
+          "name": "sweepToken",
+          "outputs": [],
+          "stateMutability": "nonpayable",
           "type": "function"
         },
         {

@@ -3,7 +3,7 @@ import { loadFixture, setBalance } from "@nomicfoundation/hardhat-network-helper
 import { expect } from "chai";
 import { BigNumber, Contract, Signer, Wallet } from "ethers";
 import { parseEther, parseUnits } from "ethers/lib/utils";
-import { ethers, network } from "hardhat";
+import { ethers, network, upgrades } from "hardhat";
 
 import {
   ComptrollerLensInterface,
@@ -3140,6 +3140,292 @@ describe("LeverageStrategiesManager", () => {
 
         const newBorrowBalance = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
         expect(newBorrowBalance).to.be.gt(borrowBalanceAfterEnter);
+      });
+    });
+  });
+
+  describe("Delta-based dust protection", () => {
+    const strandedAmount = parseEther("0.5");
+
+    describe("enterSingleAssetLeverage", () => {
+      it("should not sweep pre-existing collateral balance to initiator", async () => {
+        // Simulate stranded balance (airdrop, accidental transfer)
+        await collateral.transfer(leverageManager.address, strandedAmount);
+
+        const aliceCollateralBefore = await collateral.balanceOf(aliceAddress);
+
+        await leverageManager.connect(alice).enterSingleAssetLeverage(collateralMarket.address, 0, parseEther("1"));
+
+        // Pre-existing balance must remain on the contract, not forwarded to alice
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(strandedAmount);
+        // Alice should not have received the stranded amount
+        expect(await collateral.balanceOf(aliceAddress)).to.equal(aliceCollateralBefore);
+      });
+    });
+
+    describe("enterLeverage", () => {
+      it("should not sweep pre-existing collateral balance to initiator", async () => {
+        await collateral.transfer(leverageManager.address, strandedAmount);
+
+        const aliceCollateralBefore = await collateral.balanceOf(aliceAddress);
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("delta-enter-coll"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .enterLeverage(collateralMarket.address, 0, borrowMarket.address, parseEther("1"), parseEther("1"), swapData);
+
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(strandedAmount);
+        expect(await collateral.balanceOf(aliceAddress)).to.equal(aliceCollateralBefore);
+      });
+
+      it("should not sweep pre-existing borrow balance to initiator", async () => {
+        await borrow.transfer(leverageManager.address, strandedAmount);
+
+        const aliceBorrowBefore = await borrow.balanceOf(aliceAddress);
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("delta-enter-borrow"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .enterLeverage(collateralMarket.address, 0, borrowMarket.address, parseEther("1"), parseEther("1"), swapData);
+
+        // Pre-existing borrow balance stays unchanged — entering leverage produces no borrow dust
+        expect(await borrow.balanceOf(leverageManager.address)).to.equal(strandedAmount);
+        expect(await borrow.balanceOf(aliceAddress)).to.equal(aliceBorrowBefore);
+      });
+    });
+
+    describe("enterLeverageFromBorrow", () => {
+      it("should not sweep pre-existing collateral balance to initiator", async () => {
+        await collateral.transfer(leverageManager.address, strandedAmount);
+
+        const aliceCollateralBefore = await collateral.balanceOf(aliceAddress);
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("delta-fromborrow-coll"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .enterLeverageFromBorrow(
+            collateralMarket.address,
+            borrowMarket.address,
+            0,
+            parseEther("1"),
+            parseEther("1"),
+            swapData,
+          );
+
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(strandedAmount);
+        expect(await collateral.balanceOf(aliceAddress)).to.equal(aliceCollateralBefore);
+      });
+
+      it("should not sweep pre-existing borrow balance to initiator", async () => {
+        await borrow.transfer(leverageManager.address, strandedAmount);
+
+        const aliceBorrowBefore = await borrow.balanceOf(aliceAddress);
+
+        const swapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("delta-fromborrow-borrow"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .enterLeverageFromBorrow(
+            collateralMarket.address,
+            borrowMarket.address,
+            0,
+            parseEther("1"),
+            parseEther("1"),
+            swapData,
+          );
+
+        expect(await borrow.balanceOf(leverageManager.address)).to.equal(strandedAmount);
+        expect(await borrow.balanceOf(aliceAddress)).to.equal(aliceBorrowBefore);
+      });
+    });
+
+    describe("exitLeverage", () => {
+      it("should not consume pre-existing collateral balance in swap", async () => {
+        // Enter a position first
+        const enterSwapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("delta-exit-coll-enter"),
+        );
+        await leverageManager
+          .connect(alice)
+          .enterLeverage(
+            collateralMarket.address,
+            0,
+            borrowMarket.address,
+            parseEther("1"),
+            parseEther("1"),
+            enterSwapData,
+          );
+
+        const borrowDebt = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+
+        // Strand collateral tokens on the contract before exit
+        await collateral.transfer(leverageManager.address, strandedAmount);
+
+        const exitSwapData = await createSwapMulticallData(
+          borrow,
+          leverageManager.address,
+          borrowDebt.add(parseEther("0.1")),
+          admin,
+          ethers.utils.formatBytes32String("delta-exit-coll-exit"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .exitLeverage(collateralMarket.address, parseEther("0.5"), borrowMarket.address, borrowDebt, 0, exitSwapData);
+
+        // With old balanceOf(address(this)) code, the swap would consume strandedAmount too, leaving 0.
+        // With the fix (collateralAmountToRedeem), only the redeemed amount is swapped; stranded balance remains.
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(strandedAmount);
+      });
+
+      it("should not sweep pre-existing borrow balance to initiator", async () => {
+        // Enter a position first
+        const enterSwapData = await createSwapMulticallData(
+          collateral,
+          leverageManager.address,
+          parseEther("1"),
+          admin,
+          ethers.utils.formatBytes32String("delta-exit-enter"),
+        );
+        await leverageManager
+          .connect(alice)
+          .enterLeverage(
+            collateralMarket.address,
+            0,
+            borrowMarket.address,
+            parseEther("1"),
+            parseEther("1"),
+            enterSwapData,
+          );
+
+        const borrowDebt = await borrowMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+
+        // Strand borrow tokens on the contract before exit
+        await borrow.transfer(leverageManager.address, strandedAmount);
+
+        const exitSwapData = await createSwapMulticallData(
+          borrow,
+          leverageManager.address,
+          borrowDebt.add(parseEther("0.1")),
+          admin,
+          ethers.utils.formatBytes32String("delta-exit-borrow"),
+        );
+
+        await leverageManager
+          .connect(alice)
+          .exitLeverage(collateralMarket.address, parseEther("0.5"), borrowMarket.address, borrowDebt, 0, exitSwapData);
+
+        // Core invariant: the stranded pre-existing balance must remain on the contract, not swept to any caller.
+        // With old balance-based code, strandedAmount + operation dust would go to alice.
+        // With delta-based code, only operation dust goes to alice; strandedAmount stays here.
+        expect(await borrow.balanceOf(leverageManager.address)).to.equal(strandedAmount);
+      });
+    });
+
+    describe("exitSingleAssetLeverage", () => {
+      it("should not sweep pre-existing collateral balance to initiator", async () => {
+        // Enter a position first
+        await leverageManager.connect(alice).enterSingleAssetLeverage(collateralMarket.address, 0, parseEther("1"));
+        const borrowDebt = await collateralMarket.callStatic.borrowBalanceCurrent(aliceAddress);
+
+        // Strand collateral tokens on the contract before exit
+        await collateral.transfer(leverageManager.address, strandedAmount);
+        const aliceCollateralBefore = await collateral.balanceOf(aliceAddress);
+
+        await leverageManager.connect(alice).exitSingleAssetLeverage(collateralMarket.address, borrowDebt);
+
+        // Pre-existing collateral balance must remain on the contract
+        expect(await collateral.balanceOf(leverageManager.address)).to.equal(strandedAmount);
+        expect(await collateral.balanceOf(aliceAddress)).to.equal(aliceCollateralBefore);
+      });
+    });
+  });
+
+  describe("sweepToken", () => {
+    // _disableInitializers() fires in the constructor, so owner() == address(0) on direct deploy.
+    // Deploy through a transparent proxy (matching the fork-test pattern) to get admin as owner.
+    let proxy: LeverageStrategiesManager;
+
+    beforeEach(async () => {
+      const Factory = await ethers.getContractFactory("LeverageStrategiesManager");
+      proxy = (await upgrades.deployProxy(Factory, [], {
+        constructorArgs: [comptroller.address, swapHelper.address, vBNBMarket.address],
+        initializer: "initialize",
+        unsafeAllow: ["state-variable-immutable"],
+      })) as LeverageStrategiesManager;
+      await comptroller.setWhiteListFlashLoanAccount(proxy.address, true);
+    });
+
+    describe("Success Cases", () => {
+      it("should transfer the full token balance to owner", async () => {
+        const amount = parseEther("3");
+        await collateral.transfer(proxy.address, amount);
+        const ownerBalanceBefore = await collateral.balanceOf(admin.address);
+
+        await proxy.connect(admin).sweepToken(collateral.address);
+
+        expect(await collateral.balanceOf(proxy.address)).to.equal(0);
+        expect(await collateral.balanceOf(admin.address)).to.equal(ownerBalanceBefore.add(amount));
+      });
+
+      it("should emit TokensSwept event", async () => {
+        const amount = parseEther("2");
+        await collateral.transfer(proxy.address, amount);
+        const owner = await proxy.owner();
+
+        await expect(proxy.connect(admin).sweepToken(collateral.address))
+          .to.emit(proxy, "TokensSwept")
+          .withArgs(collateral.address, owner, amount);
+      });
+
+      it("should do nothing when balance is zero", async () => {
+        expect(await collateral.balanceOf(proxy.address)).to.equal(0);
+
+        const tx = await proxy.connect(admin).sweepToken(collateral.address);
+
+        await expect(tx).to.not.emit(proxy, "TokensSwept");
+        expect(await collateral.balanceOf(proxy.address)).to.equal(0);
+      });
+    });
+
+    describe("Access Control", () => {
+      it("should revert when called by non-owner", async () => {
+        await collateral.transfer(proxy.address, parseEther("1"));
+
+        await expect(proxy.connect(alice).sweepToken(collateral.address)).to.be.revertedWith(
+          "Ownable: caller is not the owner",
+        );
       });
     });
   });

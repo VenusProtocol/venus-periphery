@@ -127,22 +127,21 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
         _checkAndGetConfig(market);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
-        // Fall back to the stored rate if accrual reverts (e.g. IRM bound, reserve transfer failure).
-        // Stored <= current, so the fallback can never false-trigger a pause on a healthy market.
-        uint256 exchangeRate;
-        try IVToken(market).exchangeRateCurrent() returns (uint256 rate) {
-            exchangeRate = rate;
-        } catch {
-            exchangeRate = IVToken(market).exchangeRateStored();
-        }
-        uint256 supplyUnderlying = (IVToken(market).totalSupply() * exchangeRate) / 1e18;
         uint256 supplyCap = comptroller.supplyCaps(market);
 
         // supplyCap == 0 is treated as a misconfiguration (no Venus market is intentionally
         // uncapped in production); halt is permitted so the market can always be frozen.
         // Accidental halt of a genuinely-uncapped market is recoverable via governance VIP,
         // whereas leaving a draining market un-haltable is not.
-        if (supplyCap != 0 && supplyUnderlying < supplyCap) revert CapNotBreached();
+        if (supplyCap != 0) {
+            // The rate can only reject a halt, never gate one: if accrual reverts, fail closed.
+            try IVToken(market).exchangeRateCurrent() returns (uint256 exchangeRate) {
+                uint256 supplyUnderlying = (IVToken(market).totalSupply() * exchangeRate) / 1e18;
+                if (supplyUnderlying < supplyCap) revert CapNotBreached();
+            } catch {
+                emit HaltedWithoutCapCheck(msg.sender, market);
+            }
+        }
 
         EBRAKE.pauseSupply(market);
         EBRAKE.decreaseCF(market, 0);
@@ -156,18 +155,17 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
         _checkAndGetConfig(market);
 
         IComptroller comptroller = IComptroller(address(COMPTROLLER));
-        // Fall back to stored borrows if accrual reverts (e.g. IRM bound, reserve transfer failure).
-        // Stored <= current, so the fallback can never false-trigger a pause on a healthy market.
-        uint256 totalBorrows;
-        try IVToken(market).totalBorrowsCurrent() returns (uint256 b) {
-            totalBorrows = b;
-        } catch {
-            totalBorrows = IVToken(market).totalBorrows();
-        }
         uint256 borrowCap = comptroller.borrowCaps(market);
 
-        // borrowCap == 0 is treated as a misconfiguration — see handleSupplyCapExceeding.
-        if (borrowCap != 0 && totalBorrows < borrowCap) revert CapNotBreached();
+        // borrowCap == 0 means misconfiguration
+        if (borrowCap != 0) {
+            // The borrow total can only reject a halt, never gate one: if accrual reverts, fail closed.
+            try IVToken(market).totalBorrowsCurrent() returns (uint256 totalBorrows) {
+                if (totalBorrows < borrowCap) revert CapNotBreached();
+            } catch {
+                emit HaltedWithoutCapCheck(msg.sender, market);
+            }
+        }
 
         EBRAKE.pauseBorrow(market);
 
