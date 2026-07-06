@@ -1,3 +1,16 @@
+## 1.2.0-dev.10 (2026-07-06)
+
+* Merge branch 'fix/vpd-1241-certik-audit' into feat/vpd-1241-deployments ([79ec979](https://github.com/VenusProtocol/venus-periphery/commit/79ec979))
+* Merge pull request #68 from VenusProtocol/fix/vpd-1241-certik-audit ([53354b2](https://github.com/VenusProtocol/venus-periphery/commit/53354b2)), closes [#68](https://github.com/VenusProtocol/venus-periphery/issues/68)
+* Merge pull request #69 from VenusProtocol/feat/vpd-1241-deployments ([d8a7ae2](https://github.com/VenusProtocol/venus-periphery/commit/d8a7ae2)), closes [#69](https://github.com/VenusProtocol/venus-periphery/issues/69)
+* feat: add LSM deployment ([92638e5](https://github.com/VenusProtocol/venus-periphery/commit/92638e5))
+* feat: redeploy Executor with fail-closed halt on cap-check revert ([e032348](https://github.com/VenusProtocol/venus-periphery/commit/e032348))
+* feat: redeploy LeverageStrategiesManager with sweepToken on bscmainnet ([7ac62c4](https://github.com/VenusProtocol/venus-periphery/commit/7ac62c4))
+* feat: updating deployment files ([f411b22](https://github.com/VenusProtocol/venus-periphery/commit/f411b22))
+* fix: [VLC-18] Dust-Return Sweep Uses Raw Balance Instead Of Operation Deltas ([e9b9ba7](https://github.com/VenusProtocol/venus-periphery/commit/e9b9ba7))
+* fix: [VLC-18] further tightening ([b8ad0b3](https://github.com/VenusProtocol/venus-periphery/commit/b8ad0b3))
+* fix: [VLC-51] Supply-cap emergency halt can be skipped on an exchange-rate-read failure ([39c849c](https://github.com/VenusProtocol/venus-periphery/commit/39c849c))
+
 ## 1.2.0-dev.9 (2026-05-15)
 
 * Merge branch 'develop' into feat/VPD-925 ([0e49f13](https://github.com/VenusProtocol/venus-periphery/commit/0e49f13))
