@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.28;
 
-import { IVToken } from "../Interfaces.sol";
+import { IVToken } from "../Interfaces/IVToken.sol";
 
 /**
  * @title ILeverageStrategiesManager
@@ -80,6 +80,12 @@ interface ILeverageStrategiesManager {
     /// @param token The underlying token address
     /// @param amount The amount of dust transferred
     event DustTransferred(address indexed recipient, address indexed token, uint256 amount);
+
+    /// @notice Emitted when the owner sweeps stranded ERC-20 tokens from the contract
+    /// @param token The token address swept
+    /// @param to The recipient (owner)
+    /// @param amount The amount swept
+    event TokensSwept(address indexed token, address indexed to, uint256 amount);
 
     /// @notice Emitted when a user enters a leveraged position with single collateral asset
     /// @param user The address of the user entering the position
@@ -332,4 +338,11 @@ interface ILeverageStrategiesManager {
      * @custom:error InsufficientFundsToRepayFlashloan if insufficient funds to repay flash loan
      */
     function exitSingleAssetLeverage(IVToken collateralMarket, uint256 collateralAmountToFlashLoan) external;
+
+    /**
+     * @notice Recovers ERC-20 tokens stranded on this contract to the owner.
+     * @param token The ERC-20 token to sweep
+     * @custom:access Restricted to contract owner
+     */
+    function sweepToken(address token) external;
 }

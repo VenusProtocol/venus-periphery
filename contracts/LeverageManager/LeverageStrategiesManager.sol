@@ -8,8 +8,10 @@ import {
     IERC20Upgradeable
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
-import { IVToken, IComptroller, IFlashLoanReceiver } from "../Interfaces.sol";
+import { IFlashLoanReceiver } from "../Interfaces/IFlashLoanReceiver.sol";
 import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
+import { IVToken } from "../Interfaces/IVToken.sol";
+import { IComptroller } from "../Interfaces/IComptroller.sol";
 
 import { ILeverageStrategiesManager } from "./ILeverageStrategiesManager.sol";
 
@@ -103,6 +105,7 @@ contract LeverageStrategiesManager is
         _validateAndEnterMarket(msg.sender, _collateralMarket);
         _checkAccountSafe(msg.sender);
 
+        uint256 collateralBalanceBefore = IERC20Upgradeable(_collateralMarket.underlying()).balanceOf(address(this));
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
 
         operationInitiator = msg.sender;
@@ -131,7 +134,7 @@ contract LeverageStrategiesManager is
             _collateralAmountToFlashLoan
         );
 
-        _transferDustToInitiator(_collateralMarket);
+        _transferDustToInitiator(_collateralMarket, collateralBalanceBefore);
     }
 
     /// @inheritdoc ILeverageStrategiesManager
@@ -156,6 +159,8 @@ contract LeverageStrategiesManager is
         _validateAndEnterMarket(msg.sender, _collateralMarket);
         _checkAccountSafe(msg.sender);
 
+        uint256 collateralBalanceBefore = IERC20Upgradeable(_collateralMarket.underlying()).balanceOf(address(this));
+        uint256 borrowedBalanceBefore = IERC20Upgradeable(_borrowedMarket.underlying()).balanceOf(address(this));
         _transferSeedAmountFromUser(_collateralMarket, msg.sender, _collateralAmountSeed);
 
         operationInitiator = msg.sender;
@@ -187,8 +192,8 @@ contract LeverageStrategiesManager is
             _borrowedAmountToFlashLoan
         );
 
-        _transferDustToInitiator(_collateralMarket);
-        _transferDustToInitiator(_borrowedMarket);
+        _transferDustToInitiator(_collateralMarket, collateralBalanceBefore);
+        _transferDustToInitiator(_borrowedMarket, borrowedBalanceBefore);
     }
 
     /// @inheritdoc ILeverageStrategiesManager
@@ -213,6 +218,8 @@ contract LeverageStrategiesManager is
         _validateAndEnterMarket(msg.sender, _collateralMarket);
         _checkAccountSafe(msg.sender);
 
+        uint256 collateralBalanceBefore = IERC20Upgradeable(_collateralMarket.underlying()).balanceOf(address(this));
+        uint256 borrowedBalanceBefore = IERC20Upgradeable(_borrowedMarket.underlying()).balanceOf(address(this));
         _transferSeedAmountFromUser(_borrowedMarket, msg.sender, _borrowedAmountSeed);
 
         operationInitiator = msg.sender;
@@ -244,8 +251,8 @@ contract LeverageStrategiesManager is
             _borrowedAmountToFlashLoan
         );
 
-        _transferDustToInitiator(_collateralMarket);
-        _transferDustToInitiator(_borrowedMarket);
+        _transferDustToInitiator(_collateralMarket, collateralBalanceBefore);
+        _transferDustToInitiator(_borrowedMarket, borrowedBalanceBefore);
     }
 
     /// @inheritdoc ILeverageStrategiesManager
@@ -263,6 +270,9 @@ contract LeverageStrategiesManager is
         _checkMarketSupported(_borrowedMarket);
 
         _checkUserDelegated();
+
+        uint256 collateralBalanceBefore = IERC20Upgradeable(_collateralMarket.underlying()).balanceOf(address(this));
+        uint256 borrowedBalanceBefore = IERC20Upgradeable(_borrowedMarket.underlying()).balanceOf(address(this));
 
         operationInitiator = msg.sender;
         collateralMarket = _collateralMarket;
@@ -293,8 +303,8 @@ contract LeverageStrategiesManager is
             _borrowedAmountToFlashLoan
         );
 
-        _transferDustToInitiator(_collateralMarket);
-        _transferDustToInitiator(_borrowedMarket);
+        _transferDustToInitiator(_collateralMarket, collateralBalanceBefore);
+        _transferDustToInitiator(_borrowedMarket, borrowedBalanceBefore);
     }
 
     /// @inheritdoc ILeverageStrategiesManager
@@ -302,6 +312,8 @@ contract LeverageStrategiesManager is
         if (_collateralAmountToFlashLoan == 0) revert ZeroFlashLoanAmount();
         _checkMarketSupported(_collateralMarket);
         _checkUserDelegated();
+
+        uint256 collateralBalanceBefore = IERC20Upgradeable(_collateralMarket.underlying()).balanceOf(address(this));
 
         operationInitiator = msg.sender;
         collateralMarket = _collateralMarket;
@@ -324,7 +336,7 @@ contract LeverageStrategiesManager is
 
         emit SingleAssetLeverageExited(msg.sender, _collateralMarket, _collateralAmountToFlashLoan);
 
-        _transferDustToInitiator(_collateralMarket);
+        _transferDustToInitiator(_collateralMarket, collateralBalanceBefore);
     }
 
     /**
@@ -388,6 +400,20 @@ contract LeverageStrategiesManager is
         }
 
         return (true, repayAmounts);
+    }
+
+    /**
+     * @notice Recovers ERC-20 tokens stranded on this contract to the owner.
+     * @param token The ERC-20 token to sweep
+     */
+    function sweepToken(address token) external onlyOwner nonReentrant {
+        IERC20Upgradeable _token = IERC20Upgradeable(token);
+        uint256 balance = _token.balanceOf(address(this));
+        if (balance > 0) {
+            address _owner = owner();
+            _token.safeTransfer(_owner, balance);
+            emit TokensSwept(token, _owner, balance);
+        }
     }
 
     /**
@@ -562,14 +588,16 @@ contract LeverageStrategiesManager is
     ) internal returns (uint256 flashLoanRepayAmount) {
         IERC20Upgradeable borrowedAsset = IERC20Upgradeable(borrowMarket.underlying());
 
+        uint256 repayAmount;
+        uint256 err;
         {
             uint256 borrowedTotalDebtAmount = borrowMarket.borrowBalanceCurrent(onBehalf);
-            uint256 repayAmount = borrowedAssetAmountToRepayFromFlashLoan > borrowedTotalDebtAmount
+            repayAmount = borrowedAssetAmountToRepayFromFlashLoan > borrowedTotalDebtAmount
                 ? borrowedTotalDebtAmount
                 : borrowedAssetAmountToRepayFromFlashLoan;
 
             borrowedAsset.forceApprove(address(borrowMarket), repayAmount);
-            uint256 err = borrowMarket.repayBorrowBehalf(onBehalf, repayAmount);
+            err = borrowMarket.repayBorrowBehalf(onBehalf, repayAmount);
 
             if (err != SUCCESS) {
                 revert RepayBehalfFailed(err);
@@ -587,7 +615,7 @@ contract LeverageStrategiesManager is
                     (MANTISSA_ONE - treasuryPercent)
                 : collateralAmountToRedeem;
 
-            uint256 err = _collateralMarket.redeemUnderlyingBehalf(onBehalf, redeemAmount);
+            err = _collateralMarket.redeemUnderlyingBehalf(onBehalf, redeemAmount);
             if (err != SUCCESS) {
                 revert RedeemBehalfFailed(err);
             }
@@ -595,9 +623,9 @@ contract LeverageStrategiesManager is
 
         IERC20Upgradeable collateralAsset = IERC20Upgradeable(_collateralMarket.underlying());
 
-        _performSwap(
+        uint256 swapOut = _performSwap(
             collateralAsset,
-            collateralAsset.balanceOf(address(this)),
+            collateralAmountToRedeem,
             borrowedAsset,
             minAmountOutAfterSwap,
             swapCallData
@@ -605,7 +633,9 @@ contract LeverageStrategiesManager is
 
         flashLoanRepayAmount = borrowedAssetAmountToRepayFromFlashLoan + borrowedAssetFees;
 
-        if (borrowedAsset.balanceOf(address(this)) < flashLoanRepayAmount) {
+        // swapOut must cover what was spent repaying the user's debt plus the flash loan fee,
+        // ensuring pre-existing stranded tokens are never consumed.
+        if (swapOut < repayAmount + borrowedAssetFees) {
             revert InsufficientFundsToRepayFlashloan();
         }
 
@@ -670,7 +700,9 @@ contract LeverageStrategiesManager is
             revert RedeemBehalfFailed(err);
         }
 
-        if (collateralAsset.balanceOf(address(this)) < flashLoanRepayAmount) {
+        // redeemAmount must cover what was spent repaying the user's debt plus the flash loan fee,
+        // ensuring pre-existing stranded tokens are never consumed.
+        if (redeemAmount < repayAmount + collateralAmountFees) {
             revert InsufficientFundsToRepayFlashloan();
         }
 
@@ -733,17 +765,17 @@ contract LeverageStrategiesManager is
     }
 
     /**
-     * @notice Transfers any remaining dust amounts back to the operation initiator
-     * @dev This function returns small remaining balances to the user who initiated the operation.
-     *      Should be called after leverage operations to ensure no funds are left in the contract.
+     * @notice Transfers only the dust produced by the current operation back to the operation initiator.
+     * @dev Only the balance increase produced by this operation is forwarded; any pre-existing balance is left intact.
      * @param market The vToken market whose underlying asset dust should be transferred
+     * @param balanceBefore The contract's underlying balance snapshot taken before the operation began
      */
-    function _transferDustToInitiator(IVToken market) internal {
+    function _transferDustToInitiator(IVToken market, uint256 balanceBefore) internal {
         IERC20Upgradeable asset = IERC20Upgradeable(market.underlying());
 
-        uint256 dustAmount = asset.balanceOf(address(this));
-        if (dustAmount > 0) {
-            // Cache transient storage read to save gas
+        uint256 balanceAfter = asset.balanceOf(address(this));
+        if (balanceAfter > balanceBefore) {
+            uint256 dustAmount = balanceAfter - balanceBefore;
             address _operationInitiator = operationInitiator;
             asset.safeTransfer(_operationInitiator, dustAmount);
             emit DustTransferred(_operationInitiator, address(asset), dustAmount);
