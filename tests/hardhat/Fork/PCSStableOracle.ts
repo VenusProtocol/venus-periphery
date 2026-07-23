@@ -21,7 +21,7 @@ const LISTA_LISUSD_USDT_POOL = "0x8df7891fb2cb3e98c7ab3cfb4d9a59fbcc63c956";
 const LISUSD = "0x0782b6d8c4551B9760e74c0545a9bCD90bdc41E5";
 const USDT = "0x55d398326f99059fF775485246999027B3197955";
 
-const FORK_BSCMAINNET = (process.env.FORKED_NETWORK ?? "bscmainnet") === "bscmainnet";
+const FORK_BSCMAINNET = process.env.FORKED_NETWORK === "bscmainnet";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // FORK TESTS
