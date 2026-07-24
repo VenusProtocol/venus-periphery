@@ -1,3 +1,11 @@
+## 1.2.0-dev.11 (2026-07-24)
+
+* Merge pull request #72 from VenusProtocol/bot/VDB-31-work-on-jira-ticket-vpd-1641 ([f76646e](https://github.com/VenusProtocol/venus-periphery/commit/f76646e)), closes [#72](https://github.com/VenusProtocol/venus-periphery/issues/72)
+* feat: add PCSStableOracle for PancakeSwap StableSwap / ListaDAO pools ([614afbb](https://github.com/VenusProtocol/venus-periphery/commit/614afbb))
+* feat: deploy PCSStableOracle on bscmainnet ([6768393](https://github.com/VenusProtocol/venus-periphery/commit/6768393))
+* feat: updating deployment files ([5c563d7](https://github.com/VenusProtocol/venus-periphery/commit/5c563d7))
+* test(PCSStableOracle): gate fork test on explicit FORKED_NETWORK=bscmainnet ([7317256](https://github.com/VenusProtocol/venus-periphery/commit/7317256))
+
 ## 1.2.0-dev.10 (2026-07-06)
 
 * Merge branch 'fix/vpd-1241-certik-audit' into feat/vpd-1241-deployments ([79ec979](https://github.com/VenusProtocol/venus-periphery/commit/79ec979))
