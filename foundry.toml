@@ -6,6 +6,7 @@ cache_path = "cache-foundry"
 libs = ["node_modules", "lib"]
 evm_version = "cancun"
 optimizer = true
+fs_permissions = [{ access = "read", path = "./tests/foundry/fork/fixtures" }]
 remappings = [
     "@openzeppelin/=node_modules/@openzeppelin/",
     "@pendle/=node_modules/@pendle/",
