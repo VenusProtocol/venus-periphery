@@ -12,6 +12,7 @@ The first major addition in this repository is the PositionSwapper, a flexible m
 
 - NodeJS - 20.x
 - Solc - v0.8.25 (https://github.com/ethereum/solidity/releases/tag/v0.8.25)
+- Foundry - v1.5.1 (https://book.getfoundry.sh/getting-started/installation), for the Solidity tests
 
 ## Installing
 
@@ -34,6 +35,16 @@ REPORT_GAS=true npx hardhat test
 ```
 
 - To run fork tests add FORK=true, FORKED_NETWORK and one ARCHIVE_NODE var in the .env file.
+
+### Foundry tests
+
+Solidity tests live in `tests/foundry` and use the same `node_modules` dependencies as Hardhat.
+
+```bash
+
+yarn test:forge
+
+```
 
 ## Deployment
 

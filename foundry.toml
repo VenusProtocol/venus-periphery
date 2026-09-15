@@ -1,0 +1,30 @@
+[profile.default]
+src = "contracts"
+test = "tests/foundry"
+out = "out"
+cache_path = "cache-foundry"
+libs = ["node_modules"]
+evm_version = "cancun"
+optimizer = true
+remappings = [
+    "@openzeppelin/=node_modules/@openzeppelin/",
+    "@pendle/=node_modules/@pendle/",
+    "@venusprotocol/=node_modules/@venusprotocol/",
+    "forge-std/=node_modules/forge-std/src/",
+]
+
+# Files with `pragma solidity 0.8.28` compile with via_ir, like the 0.8.28 compiler in hardhat.config.ts.
+# A new 0.8.28 file that fails with "Stack too deep" needs an entry here.
+additional_compiler_profiles = [{ name = "via-ir", via_ir = true }]
+compilation_restrictions = [
+    { paths = "contracts/LeverageManager/ILeverageStrategiesManager.sol", via_ir = true },
+    { paths = "contracts/LeverageManager/LeverageStrategiesManager.sol", via_ir = true },
+    { paths = "contracts/RelativePositionManager/IPositionAccount.sol", via_ir = true },
+    { paths = "contracts/RelativePositionManager/IRelativePositionManager.sol", via_ir = true },
+    { paths = "contracts/RelativePositionManager/PositionAccount.sol", via_ir = true },
+    { paths = "contracts/RelativePositionManager/RelativePositionManager.sol", via_ir = true },
+    { paths = "contracts/SwapHelper/SwapHelper.sol", via_ir = true },
+    { paths = "contracts/SwapRouter/ISwapRouter.sol", via_ir = true },
+    { paths = "contracts/SwapRouter/SwapRouter.sol", via_ir = true },
+    { paths = "contracts/test/MockTarget.sol", via_ir = true },
+]

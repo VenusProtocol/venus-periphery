@@ -3424,6 +3424,7 @@ __metadata:
     eslint-plugin-prettier: 3.4.1
     eslint-plugin-promise: ^5.2.0
     ethers: ^5.7.0
+    forge-std: "github:foundry-rs/forge-std#v1.16.2"
     hardhat: ^2.22.15
     hardhat-dependency-compiler: ^1.2.1
     hardhat-deploy: ^0.12.4
@@ -6522,6 +6523,13 @@ __metadata:
   dependencies:
     is-callable: ^1.2.7
   checksum: 3c986d7e11f4381237cc98baa0a2f87eabe74719eee65ed7bed275163082b940ede19268c61d04c6260e0215983b12f8d885e3c8f9aa8c2113bf07c37051745c
+  languageName: node
+  linkType: hard
+
+"forge-std@github:foundry-rs/forge-std#v1.16.2":
+  version: 1.16.2
+  resolution: "forge-std@https://github.com/foundry-rs/forge-std.git#commit=bf647bd6046f2f7da30d0c2bf435e5c76a780c1b"
+  checksum: f16a77a4c4ccefc47b74bb111fe925deedf1b137f3b70461791f9bdac12840b47ca7c1843e02b504b12749982dce0d28df9bfb03ed187f0be110766db08235ee
   languageName: node
   linkType: hard
 
