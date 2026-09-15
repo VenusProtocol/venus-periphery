@@ -1,0 +1,310 @@
+// SPDX-License-Identifier: BSD-3-Clause
+pragma solidity 0.8.25;
+
+// solhint-disable func-name-mixedcase, ordering, import-path-check, no-empty-blocks
+
+import { Test } from "forge-std/Test.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+import { CollateralGateway } from "../../../contracts/CollateralGateway/CollateralGateway.sol";
+import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollateralGateway.sol";
+import { IVToken } from "../../../contracts/Interfaces/IVToken.sol";
+import { MockERC20 } from "./mocks/MockERC20.sol";
+
+interface IGatewayCallback {
+    function executeOperation(
+        address[] calldata vTokens,
+        uint256[] calldata amounts,
+        uint256[] calldata premiums,
+        address initiator,
+        address onBehalf,
+        bytes calldata param
+    ) external returns (bool, uint256[] memory);
+}
+
+/// @dev Attacker-controlled stand-ins. Every address the gateway accepts is caller-supplied.
+contract EvilComptroller {
+    CollateralGateway public gateway;
+    uint256 public constant TREASURY = 0;
+
+    function setGateway(CollateralGateway r) external {
+        gateway = r;
+    }
+
+    function getHypotheticalAccountLiquidity(
+        address,
+        address,
+        uint256,
+        uint256
+    ) external pure returns (uint256, uint256, uint256) {
+        return (0, 0, 1); // non-zero shortfall forces the flash-loan branch
+    }
+
+    function checkMembership(address, address) external pure returns (bool) {
+        return true;
+    }
+
+    function enterMarketForAccount(address, address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function treasuryPercent() external pure returns (uint256) {
+        return TREASURY;
+    }
+
+    /// @dev Never actually lends. Calls straight back with zero amounts.
+    function executeFlashLoan(
+        address payable,
+        address payable,
+        address[] calldata,
+        uint256[] calldata,
+        bytes calldata
+    ) external {
+        address[] memory t = new address[](1);
+        uint256[] memory a = new uint256[](1);
+        uint256[] memory p = new uint256[](1);
+        t[0] = address(this);
+        IGatewayCallback(address(gateway)).executeOperation(t, a, p, address(gateway), address(gateway), "");
+    }
+}
+
+contract EvilVToken {
+    address public immutable underlying;
+    address public immutable comptroller;
+
+    constructor(address underlying_, address comptroller_) {
+        underlying = underlying_;
+        comptroller = comptroller_;
+    }
+
+    function exchangeRateStored() external pure returns (uint256) {
+        return 1e18;
+    }
+
+    uint256 public flashLoanFeeMantissa;
+
+    function setFlashLoanFee(uint256 mantissa) external {
+        flashLoanFeeMantissa = mantissa;
+    }
+
+    function transferFrom(address, address, uint256) external pure returns (bool) {
+        return true;
+    }
+
+    /// @dev Pushes one wei so the gateway's NothingReceived guard passes.
+    function redeemBehalf(address, uint256) external returns (uint256) {
+        MockERC20(underlying).mint(msg.sender, 1);
+        return 0;
+    }
+
+    function approve(address, uint256) external pure returns (bool) {
+        return true;
+    }
+}
+
+contract EvilHub {
+    address public immutable asset;
+
+    constructor(address asset_) {
+        asset = asset_;
+    }
+
+    function deposit(uint256, address) external pure returns (uint256) {
+        return 1;
+    }
+
+    function approve(address, uint256) external pure returns (bool) {
+        return true;
+    }
+
+    function allowance(address, address) external pure returns (uint256) {
+        return 0;
+    }
+}
+
+contract EvilMarket {
+    address public immutable underlying;
+    mapping(address => uint256) public balanceOf;
+
+    constructor(address underlying_) {
+        underlying = underlying_;
+    }
+
+    function mintBehalf(address receiver, uint256) external returns (uint256) {
+        balanceOf[receiver] += 1;
+        return 0;
+    }
+}
+
+/// @dev Echoes back the exact markets and amounts the gateway recorded, so every callback guard
+///      passes and the body runs. This is the shape the guards do not stop.
+contract EchoingComptroller {
+    CollateralGateway public gateway;
+    uint256 public lastAmount;
+
+    function setGateway(CollateralGateway r) external {
+        gateway = r;
+    }
+
+    function getHypotheticalAccountLiquidity(
+        address,
+        address,
+        uint256,
+        uint256
+    ) external pure returns (uint256, uint256, uint256) {
+        return (0, 0, 1);
+    }
+
+    function checkMembership(address, address) external pure returns (bool) {
+        return true;
+    }
+
+    function enterMarketForAccount(address, address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function treasuryPercent() external pure returns (uint256) {
+        return 0;
+    }
+
+    function executeFlashLoan(
+        address payable,
+        address payable,
+        address[] calldata vTokens,
+        uint256[] calldata amounts,
+        bytes calldata
+    ) external {
+        address[] memory t = new address[](1);
+        uint256[] memory a = new uint256[](1);
+        uint256[] memory p = new uint256[](1);
+        lastAmount = amounts[0];
+        t[0] = vTokens[0];
+        a[0] = amounts[0];
+        IGatewayCallback(address(gateway)).executeOperation(t, a, p, address(gateway), address(gateway), "");
+    }
+}
+
+/// @dev Takes the loan call and returns without ever invoking the callback.
+contract SilentComptroller {
+    function getHypotheticalAccountLiquidity(
+        address,
+        address,
+        uint256,
+        uint256
+    ) external pure returns (uint256, uint256, uint256) {
+        return (0, 0, 1);
+    }
+
+    function checkMembership(address, address) external pure returns (bool) {
+        return true;
+    }
+
+    function enterMarketForAccount(address, address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function treasuryPercent() external pure returns (uint256) {
+        return 0;
+    }
+
+    function executeFlashLoan(
+        address payable,
+        address payable,
+        address[] calldata,
+        uint256[] calldata,
+        bytes calldata
+    ) external {}
+}
+
+contract CollateralGateway_AdversarialTest is Test {
+    CollateralGateway internal gateway;
+    MockERC20 internal usdt;
+    address internal attacker = makeAddr("attacker");
+
+    function setUp() public {
+        gateway = new CollateralGateway();
+        usdt = new MockERC20("Tether", "USDT", 18);
+    }
+
+    /// @dev A caller controlling every address the gateway accepts can still drive the flash-loan
+    ///      callback, but not with arguments the gateway did not ask for. Without that check a
+    ///      zero-amount callback let any caller sweep a stuck balance out of the gateway.
+    /// @dev The gateway pays out change against its own redeem proceeds, so a caller who wires up
+    ///      every address cannot reach a balance the gateway was already holding.
+    function test_echoingCallbackCannotSweepTokensHeldByTheGateway() public {
+        usdt.mint(address(gateway), 1000e18);
+
+        EchoingComptroller comptroller = new EchoingComptroller();
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        gateway.supplyFromCollateral(address(vToken), 1, address(hub), address(market), 0);
+
+        assertEq(usdt.balanceOf(address(gateway)), 1000e18 + 1, "gateway keeps what it held");
+        assertEq(usdt.balanceOf(attacker), 0, "attacker gained nothing");
+    }
+
+    /// @dev The market charges its flash-loan fee on top of the principal, so the principal has to
+    ///      leave room for it inside what the redeem pays out.
+    function test_flashAmountLeavesRoomForTheMarketFee() public {
+        EchoingComptroller comptroller = new EchoingComptroller();
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        vToken.setFlashLoanFee(1e16); // 1%
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        gateway.supplyFromCollateral(address(vToken), 100e18, address(hub), address(market), 0);
+
+        // The redeem pays out 100e18 at the mock's 1:1 rate, so the loan plus its fee must fit in it.
+        uint256 borrowed = comptroller.lastAmount();
+        assertEq(borrowed, 99_009_900_990_099_009_900, "principal scaled down by the fee");
+        assertLe(borrowed + ((borrowed * 1e16) / 1e18), 100e18, "loan plus fee fits inside the redeem");
+    }
+
+    /// @dev A callback whose amounts do not match what the gateway recorded is rejected outright.
+    function test_callbackWithMismatchedAmountsReverts() public {
+        usdt.mint(address(gateway), 1000e18);
+
+        EvilComptroller comptroller = new EvilComptroller();
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        vm.expectRevert(ICollateralGateway.UnexpectedCallback.selector);
+        gateway.supplyFromCollateral(address(vToken), 1, address(hub), address(market), 0);
+
+        assertEq(usdt.balanceOf(address(gateway)), 1000e18, "gateway balance untouched");
+        assertEq(usdt.balanceOf(attacker), 0, "attacker gained nothing");
+    }
+
+    /// @dev The callback is only reachable while a migration is in flight.
+    function test_callbackRevertsOutsideAMigration() public {
+        IVToken[] memory t = new IVToken[](1);
+        uint256[] memory a = new uint256[](1);
+        uint256[] memory p = new uint256[](1);
+
+        vm.prank(attacker);
+        vm.expectRevert(ICollateralGateway.UnexpectedCallback.selector);
+        gateway.executeOperation(t, a, p, address(gateway), address(gateway), "");
+    }
+
+    /// @dev A comptroller that returns without calling back leaves nothing minted, which must fail
+    ///      rather than emit a success with a stale count.
+    function test_flashLoanThatNeverCallsBackReverts() public {
+        SilentComptroller comptroller = new SilentComptroller();
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        vm.expectRevert(ICollateralGateway.UnexpectedCallback.selector);
+        gateway.supplyFromCollateral(address(vToken), 1, address(hub), address(market), 0);
+    }
+}
