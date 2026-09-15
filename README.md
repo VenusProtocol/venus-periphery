@@ -38,9 +38,11 @@ REPORT_GAS=true npx hardhat test
 
 ### Foundry tests
 
-Solidity tests live in `tests/foundry` and use the same `node_modules` dependencies as Hardhat.
+Solidity tests live in `tests/foundry` and use the same `node_modules` dependencies as Hardhat. `forge-std` is a git submodule in `lib`.
 
 ```bash
+
+git submodule update --init
 
 yarn test:forge
 

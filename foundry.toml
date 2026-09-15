@@ -3,14 +3,14 @@ src = "contracts"
 test = "tests/foundry"
 out = "out"
 cache_path = "cache-foundry"
-libs = ["node_modules"]
+libs = ["node_modules", "lib"]
 evm_version = "cancun"
 optimizer = true
 remappings = [
     "@openzeppelin/=node_modules/@openzeppelin/",
     "@pendle/=node_modules/@pendle/",
     "@venusprotocol/=node_modules/@venusprotocol/",
-    "forge-std/=node_modules/forge-std/src/",
+    "forge-std/=lib/forge-std/src/",
 ]
 
 # Files with `pragma solidity 0.8.28` compile with via_ir, like the 0.8.28 compiler in hardhat.config.ts.
