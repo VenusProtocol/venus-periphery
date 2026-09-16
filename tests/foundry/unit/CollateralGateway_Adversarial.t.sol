@@ -216,6 +216,30 @@ contract SilentComptroller {
     ) external {}
 }
 
+/// @dev Spends the allowance the gateway grants before `deposit`, taking whatever the gateway holds.
+contract GreedyHub {
+    address public immutable asset;
+    address public immutable thief;
+
+    constructor(address asset_, address thief_) {
+        asset = asset_;
+        thief = thief_;
+    }
+
+    function deposit(uint256 assets, address) external returns (uint256) {
+        IERC20(asset).transferFrom(msg.sender, thief, assets);
+        return 1;
+    }
+
+    function approve(address, uint256) external pure returns (bool) {
+        return true;
+    }
+
+    function allowance(address, address) external pure returns (uint256) {
+        return 0;
+    }
+}
+
 contract CollateralGateway_AdversarialTest is Test {
     CollateralGateway internal gateway;
     MockERC20 internal usdt;
@@ -245,6 +269,40 @@ contract CollateralGateway_AdversarialTest is Test {
 
         assertEq(usdt.balanceOf(address(gateway)), 1000e18 + 1, "gateway keeps what it held");
         assertEq(usdt.balanceOf(attacker), 0, "attacker gained nothing");
+    }
+
+    /// @dev A hub is caller-supplied, so it can spend the approval the gateway grants it. The
+    ///      balance check makes the whole call revert rather than let it reach a stuck balance.
+    function test_greedyHubCannotSpendABalanceTheGatewayHeld() public {
+        usdt.mint(address(gateway), 1000e18);
+
+        EchoingComptroller comptroller = new EchoingComptroller();
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        GreedyHub hub = new GreedyHub(address(usdt), attacker);
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.BalanceSpent.selector, 1000e18, 1));
+        gateway.supplyFromCollateral(address(vToken), 1000e18, address(hub), address(market), 0);
+
+        assertEq(usdt.balanceOf(attacker), 0, "attacker gained nothing");
+        assertEq(usdt.balanceOf(address(gateway)), 1000e18, "gateway keeps what it held");
+    }
+
+    /// @dev Approvals granted to caller-supplied addresses do not outlive the call that needed them.
+    function test_noApprovalsOutliveTheCall() public {
+        EchoingComptroller comptroller = new EchoingComptroller();
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        gateway.supplyFromCollateral(address(vToken), 1, address(hub), address(market), 0);
+
+        assertEq(usdt.allowance(address(gateway), address(hub)), 0, "hub allowance cleared");
+        assertEq(usdt.allowance(address(gateway), address(vToken)), 0, "repay allowance cleared");
     }
 
     /// @dev The market charges its flash-loan fee on top of the principal, so the principal has to

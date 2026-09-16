@@ -121,6 +121,9 @@ interface ICollateralGateway {
     /// @notice The redeem paid out less than the caller's `minAssets` floor.
     error InsufficientAssets(uint256 assets, uint256 minAssets);
 
+    /// @notice The call ended with less of the underlying in the gateway than it started with.
+    error BalanceSpent(uint256 balanceBefore, uint256 balanceAfter);
+
     /**
      * @notice Deposit `assets` of the Hub's underlying and supply the resulting shares into
      *         `vhMarket`, crediting the market receipts to the caller.

@@ -88,14 +88,17 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         if (vToken == address(0) || hub == address(0) || vhMarket == address(0)) revert ZeroAddress();
         if (vTokenAmount == 0) revert ZeroAmount();
 
-        address marketUnderlying = IVToken(vhMarket).underlying();
-        if (marketUnderlying != hub) revert MarketMismatch(marketUnderlying, hub);
-
         address asset = IHub(hub).asset();
-        address vTokenUnderlying = IVToken(vToken).underlying();
-        if (vTokenUnderlying != asset) revert AssetMismatch(vTokenUnderlying, asset);
+        {
+            address marketUnderlying = IVToken(vhMarket).underlying();
+            if (marketUnderlying != hub) revert MarketMismatch(marketUnderlying, hub);
+
+            address vTokenUnderlying = IVToken(vToken).underlying();
+            if (vTokenUnderlying != asset) revert AssetMismatch(vTokenUnderlying, asset);
+        }
 
         IComptroller comptroller = IVToken(vToken).comptroller();
+        uint256 assetBalanceBefore = IERC20(asset).balanceOf(address(this));
 
         _enterCoreMarket(comptroller, vhMarket);
 
@@ -106,6 +109,8 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
             uint256 assets = _redeemToUnderlying(vToken, vTokenAmount, asset, msg.sender);
             (shares, vTokens) = _depositAndSupply(hub, vhMarket, assets, minShares, msg.sender);
         }
+
+        _requireBalanceKept(asset, assetBalanceBefore);
 
         emit SuppliedFromCollateral(msg.sender, vToken, hub, vhMarket, vTokenAmount, shares, vTokens);
     }
@@ -191,6 +196,14 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         return (true, repayAmounts);
     }
 
+    /// @dev Reverts when the gateway holds less of `asset` than `balanceBefore`. Every address in a
+    ///      migration is caller-supplied, so without this a caller-chosen contract could spend an
+    ///      approval the gateway granted against a balance the gateway was already holding.
+    function _requireBalanceKept(address asset, uint256 balanceBefore) private view {
+        uint256 balanceAfter = IERC20(asset).balanceOf(address(this));
+        if (balanceAfter < balanceBefore) revert BalanceSpent(balanceBefore, balanceAfter);
+    }
+
     /// @dev Borrow the position's worth from Core so the replacement collateral exists before the
     ///      old collateral leaves. The rest of the migration runs inside {executeOperation}.
     function _migrateViaFlashLoan(
@@ -210,6 +223,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         amounts[0] = flashAmount;
 
         comptroller.executeFlashLoan(payable(address(this)), payable(address(this)), markets, amounts, "");
+        IERC20(IHub(hub).asset()).forceApprove(vToken, 0);
 
         shares = _migration.shares;
         vTokens = _migration.vTokens;
@@ -227,8 +241,10 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         uint256 minShares,
         address receiver
     ) private returns (uint256 shares, uint256 vTokens) {
-        IERC20(IHub(hub).asset()).forceApprove(hub, assets);
+        IERC20 asset = IERC20(IHub(hub).asset());
+        asset.forceApprove(hub, assets);
         shares = IHub(hub).deposit(assets, address(this));
+        asset.forceApprove(hub, 0);
         if (shares < minShares) revert InsufficientShares(shares, minShares);
 
         vTokens = _supplyToMarket(hub, vhMarket, shares, receiver);
@@ -267,6 +283,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
         uint256 balanceBefore = IVToken(market).balanceOf(receiver);
         uint256 errorCode = IVToken(market).mintBehalf(receiver, amount);
+        IERC20(token).forceApprove(market, 0);
         if (errorCode != 0) revert VTokenMintFailed(market, errorCode);
 
         vTokens = IVToken(market).balanceOf(receiver) - balanceBefore;
