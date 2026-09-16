@@ -5,6 +5,7 @@ import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IILComptroller } from "../Interfaces/IILComptroller.sol";
 import { IEBrake } from "./IEBrake.sol";
+import { IHub, IYieldGroupNav } from "../Interfaces/IHubLiquidity.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
 /**
@@ -147,6 +148,24 @@ contract EBrake is IEBrake, AccessControlledV8 {
         // `false` is hardcoded — EBrake can only revoke, never grant.
         COMPTROLLER.setWhiteListFlashLoanAccount(account, false);
         emit FlashLoanAccessRevoked(msg.sender, account);
+    }
+
+    /// @inheritdoc IEBrake
+    function pauseHub(address hub) external {
+        _checkAccessAllowed("pauseHub(address)");
+        if (hub == address(0)) revert ZeroAddress();
+
+        IHub(hub).pauseHub();
+        emit HubPaused(msg.sender, hub);
+    }
+
+    /// @inheritdoc IEBrake
+    function pauseResource(address yieldGroup, address resource) external {
+        _checkAccessAllowed("pauseResource(address,address)");
+        if (yieldGroup == address(0) || resource == address(0)) revert ZeroAddress();
+
+        IYieldGroupNav(yieldGroup).pauseResource(resource);
+        emit ResourcePaused(msg.sender, yieldGroup, resource);
     }
 
     /// @inheritdoc IEBrake

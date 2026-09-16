@@ -166,6 +166,17 @@ interface IEBrake {
     /// @param market The market address whose supply cap snapshot was cleared.
     event SupplyCapSnapshotReset(address indexed market);
 
+    /// @notice Emitted when the Liquidity Hub was paused through EBrake.
+    /// @param caller The address that triggered the pause.
+    /// @param hub The Hub that was paused.
+    event HubPaused(address indexed caller, address indexed hub);
+
+    /// @notice Emitted when a YieldGroup resource was paused through EBrake.
+    /// @param caller The address that triggered the pause.
+    /// @param yieldGroup The YieldGroup holding the resource.
+    /// @param resource The resource that was paused.
+    event ResourcePaused(address indexed caller, address indexed yieldGroup, address indexed resource);
+
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════
@@ -292,6 +303,42 @@ interface IEBrake {
      * @param account The account whose flash loan access should be revoked.
      */
     function revokeFlashLoanAccess(address account) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     EMERGENCY ACTIONS — LIQUIDITY HUB
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Pause the Liquidity Hub, halting deposits and redemptions.
+     * @dev Stateless forwarder, like every other action here — EBrake holds the Hub's
+     *      `pauseHub()` ACM role and exposes it behind its own. Tighten-only: unpausing is a
+     *      governance VIP against the Hub directly, never through EBrake.
+     *
+     *      The Hub lives only on BSC, so this is dead code on the other five chains EBrake is
+     *      deployed to. That is deliberate — one implementation everywhere beats divergent ones,
+     *      and an unGRANTed role makes the function unreachable.
+     *
+     *      Idempotent: the Hub's own `pauseHub()` is a silent no-op when already paused. Unlike
+     *      {pauseFlashLoan} this does not suppress its event, because reading the Hub's pause flag
+     *      would cost a second call for no benefit — treat HubPaused as "a pause was requested",
+     *      not "a state change happened".
+     * @param hub The Liquidity Hub to pause.
+     */
+    function pauseHub(address hub) external;
+
+    /**
+     * @notice Pause routing to a single resource inside a YieldGroup.
+     * @dev Stateless forwarder. Reverts if the resource is not registered in that YieldGroup —
+     *      the YieldGroup's own check, not one EBrake adds.
+     *
+     *      Pausing a resource does NOT remove its balance from `totalAssets()`, but does make it
+     *      unreachable for withdrawals. On its own that props up the share price while making the
+     *      position exiters would touch unreachable, so pair it with {pauseHub}. See
+     *      `DeviationSentinel.handleNavDeviation`, which always calls both.
+     * @param yieldGroup The YieldGroup holding the resource.
+     * @param resource The resource to pause.
+     */
+    function pauseResource(address yieldGroup, address resource) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — RISK PARAMETER ADJUSTMENTS
