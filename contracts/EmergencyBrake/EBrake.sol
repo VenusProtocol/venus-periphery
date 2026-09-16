@@ -155,6 +155,8 @@ contract EBrake is IEBrake, AccessControlledV8 {
         _checkAccessAllowed("pauseHub(address)");
         if (hub == address(0)) revert ZeroAddress();
 
+        if (IHub(hub).hubPaused()) return;
+
         IHub(hub).pauseHub();
         emit HubPaused(msg.sender, hub);
     }
@@ -163,6 +165,9 @@ contract EBrake is IEBrake, AccessControlledV8 {
     function pauseResource(address yieldGroup, address resource) external {
         _checkAccessAllowed("pauseResource(address,address)");
         if (yieldGroup == address(0) || resource == address(0)) revert ZeroAddress();
+
+        (, bool paused, ) = IYieldGroupNav(yieldGroup).resourceConfig(resource);
+        if (paused) return;
 
         IYieldGroupNav(yieldGroup).pauseResource(resource);
         emit ResourcePaused(msg.sender, yieldGroup, resource);

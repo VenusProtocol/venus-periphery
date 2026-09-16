@@ -47,6 +47,13 @@ interface IYieldGroupNav {
     /// @param resource Resource to pause.
     function pauseResource(address resource) external;
 
+    /// @notice Per-resource registration / pause state plus the adapter handling it.
+    /// @param resource Address to look up.
+    /// @return registered True iff present in the YieldGroup's resource registry.
+    /// @return paused True iff this resource is paused.
+    /// @return adapter `IResourceAdapter` implementation bound to this resource.
+    function resourceConfig(address resource) external view returns (bool registered, bool paused, address adapter);
+
     /// @notice Where a resource's value stands against its NavGuard band right now.
     /// @dev Never reverts. An unreadable value source reports `observedValue` as zero, and
     ///      `isClamped` is false in that case — which is why HubEBrake gates on `isClamped`

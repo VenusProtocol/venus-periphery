@@ -44,7 +44,12 @@ describe("EBrake — Liquidity Hub forwarders", () => {
     accessControlManager.isAllowedToCall.reset();
     accessControlManager.isAllowedToCall.returns(true);
     hub.pauseHub.reset();
+    hub.hubPaused.reset();
     yieldGroup.pauseResource.reset();
+    yieldGroup.resourceConfig.reset();
+
+    hub.hubPaused.returns(false);
+    yieldGroup.resourceConfig.returns([true, false, ZERO_ADDRESS]);
   });
 
   describe("pauseHub", () => {
@@ -61,6 +66,15 @@ describe("EBrake — Liquidity Hub forwarders", () => {
       accessControlManager.isAllowedToCall.returns(false);
 
       await expect(eBrake.pauseHub(hub.address)).to.be.reverted;
+      expect(hub.pauseHub).to.have.callCount(0);
+    });
+
+    // Idempotent, like pauseFlashLoan: no call and no event, so HubPaused stays a true
+    // state-change signal. Skipping the call also skips the Hub's own ACM hop.
+    it("is a silent no-op when the Hub is already paused", async () => {
+      hub.hubPaused.returns(true);
+
+      await expect(eBrake.pauseHub(hub.address)).to.not.emit(eBrake, "HubPaused");
       expect(hub.pauseHub).to.have.callCount(0);
     });
   });
@@ -84,6 +98,22 @@ describe("EBrake — Liquidity Hub forwarders", () => {
 
       await expect(eBrake.pauseResource(yieldGroup.address, RESOURCE)).to.be.reverted;
       expect(yieldGroup.pauseResource).to.have.callCount(0);
+    });
+
+    it("is a silent no-op when the resource is already paused", async () => {
+      yieldGroup.resourceConfig.returns([true, true, ZERO_ADDRESS]);
+
+      await expect(eBrake.pauseResource(yieldGroup.address, RESOURCE)).to.not.emit(eBrake, "ResourcePaused");
+      expect(yieldGroup.pauseResource).to.have.callCount(0);
+    });
+
+    // The YieldGroup's own ResourceNotRegistered check must still be reached: an unregistered
+    // resource reads back paused == false, so the guard does not swallow it.
+    it("still forwards an unregistered resource to the YieldGroup", async () => {
+      yieldGroup.resourceConfig.returns([false, false, ZERO_ADDRESS]);
+
+      await eBrake.pauseResource(yieldGroup.address, RESOURCE);
+      expect(yieldGroup.pauseResource).to.have.been.calledOnceWith(RESOURCE);
     });
   });
 

@@ -318,10 +318,10 @@ interface IEBrake {
      *      deployed to. That is deliberate — one implementation everywhere beats divergent ones,
      *      and an unGRANTed role makes the function unreachable.
      *
-     *      Idempotent: the Hub's own `pauseHub()` is a silent no-op when already paused. Unlike
-     *      {pauseFlashLoan} this does not suppress its event, because reading the Hub's pause flag
-     *      would cost a second call for no benefit — treat HubPaused as "a pause was requested",
-     *      not "a state change happened".
+     *      Idempotent: if the Hub is already paused the call is a no-op and no event is emitted,
+     *      so HubPaused stays a true state-change signal — the {pauseFlashLoan} pattern. The
+     *      `hubPaused()` read pays for itself, since the Hub's own `pauseHub()` runs its ACM check
+     *      before its idempotency check and a redundant call would pay for that hop too.
      * @param hub The Liquidity Hub to pause.
      */
     function pauseHub(address hub) external;
@@ -330,6 +330,10 @@ interface IEBrake {
      * @notice Pause routing to a single resource inside a YieldGroup.
      * @dev Stateless forwarder. Reverts if the resource is not registered in that YieldGroup —
      *      the YieldGroup's own check, not one EBrake adds.
+     *
+     *      Idempotent: if the resource is already paused the call is a no-op and no event is
+     *      emitted. An unregistered resource reads back `paused == false`, so it still reaches the
+     *      YieldGroup and still reverts there.
      *
      *      Pausing a resource does NOT remove its balance from `totalAssets()`, but does make it
      *      unreachable for withdrawals. On its own that props up the share price while making the
