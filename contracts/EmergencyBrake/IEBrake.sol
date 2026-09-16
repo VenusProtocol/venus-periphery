@@ -60,6 +60,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - Decreases collateral factor (blocks new borrows against asset, does NOT liquidate
  *          existing positions — that requires LT change, which EBrake cannot do)
  *        - Pauses flash loans (blocks flash loan attack vector, no user impact)
+ *        - Pauses the Liquidity Hub and routing to one of its resources (blocks deposits and
+ *          redemptions; existing balances untouched, and emergencyReallocate still works)
  *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.
  *
  *   BSC vs NON-BSC DIFFERENCES:

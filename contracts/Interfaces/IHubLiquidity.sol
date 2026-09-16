@@ -4,9 +4,9 @@ pragma solidity ^0.8.25;
 /**
  * @title IHubLiquidity
  * @author Venus
- * @notice Minimal views and emergency levers HubEBrake needs from the Liquidity Hub.
- * @dev Deliberately not the full `@venusprotocol/liquidity-hub` interfaces — only the five
- *      functions HubEBrake calls, so venus-periphery takes no dependency on that repo.
+ * @notice Minimal views and emergency levers DeviationSentinel and EBrake need from the Liquidity Hub.
+ * @dev Deliberately not the full `@venusprotocol/liquidity-hub` interfaces — only the
+ *      functions those two call, so venus-periphery takes no dependency on that repo.
  *      Signatures must stay byte-identical to the originals; the selectors are what matter.
  */
 interface IHub {
@@ -39,7 +39,7 @@ interface IHub {
 /**
  * @title IYieldGroupNav
  * @author Venus
- * @notice The NavGuard read and the resource pause HubEBrake needs from a YieldGroup.
+ * @notice The NavGuard read and the resource pause DeviationSentinel and EBrake need from a YieldGroup.
  */
 interface IYieldGroupNav {
     /// @notice Pause routing to a specific resource. Existing balance stays counted.
@@ -56,7 +56,7 @@ interface IYieldGroupNav {
 
     /// @notice Where a resource's value stands against its NavGuard band right now.
     /// @dev Never reverts. An unreadable value source reports `observedValue` as zero, and
-    ///      `isClamped` is false in that case — which is why HubEBrake gates on `isClamped`
+    ///      `isClamped` is false in that case — which is why DeviationSentinel gates on `isClamped`
     ///      rather than comparing `observedValue` against the bounds directly.
     /// @param resource Resource to read.
     /// @return observedValue Value the counterparty reports, in asset units; `0` if unreadable.

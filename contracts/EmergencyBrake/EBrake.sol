@@ -12,8 +12,9 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  * @title EBrake — Emergency Brake Contract
  * @author Venus Protocol
  * @notice Emergency action router for Venus Protocol (deployed behind a TransparentUpgradeableProxy).
- *         This contract holds NO detection logic — it only exposes Comptroller emergency
- *         functions behind ACM permissions. See IEBrake for full design documentation.
+ *         This contract holds NO detection logic — it only exposes emergency functions of the
+ *         protocols it routes to, behind ACM permissions. That is the Comptroller, plus the
+ *         Liquidity Hub and its YieldGroups. See IEBrake for full design documentation.
  */
 contract EBrake is IEBrake, AccessControlledV8 {
     /// @notice Snapshot of a market's pre-incident state, captured by EBrake before tightening.
