@@ -42,6 +42,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         address vToken;
         uint256 vTokenAmount;
         address hub;
+        address asset;
         address vhMarket;
         uint256 minShares;
         uint256 flashAmount;
@@ -72,7 +73,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         _enterCoreMarket(IVToken(vhMarket).comptroller(), vhMarket);
 
         uint256 vTokens;
-        (shares, vTokens) = _depositAndSupply(hub, vhMarket, assets, minShares, msg.sender);
+        (shares, vTokens) = _depositAndSupply(hub, address(asset), vhMarket, assets, minShares, msg.sender);
 
         emit SuppliedFromWallet(msg.sender, hub, vhMarket, assets, shares, vTokens);
     }
@@ -107,10 +108,18 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
         uint256 vTokens;
         if (_wouldCauseShortfall(comptroller, vToken, vTokenAmount)) {
-            (shares, vTokens) = _migrateViaFlashLoan(comptroller, vToken, vTokenAmount, hub, vhMarket, minShares);
+            (shares, vTokens) = _migrateViaFlashLoan(
+                comptroller,
+                vToken,
+                vTokenAmount,
+                hub,
+                asset,
+                vhMarket,
+                minShares
+            );
         } else {
             uint256 assets = _redeemToUnderlying(vToken, vTokenAmount, asset, msg.sender);
-            (shares, vTokens) = _depositAndSupply(hub, vhMarket, assets, minShares, msg.sender);
+            (shares, vTokens) = _depositAndSupply(hub, asset, vhMarket, assets, minShares, msg.sender);
         }
 
         _requireBalanceKept(asset, assetBalanceBefore);
@@ -182,9 +191,16 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         if (vTokens.length != 1 || amounts.length != 1 || premiums.length != 1) revert UnexpectedCallback();
         if (address(vTokens[0]) != m.vToken || amounts[0] != m.flashAmount) revert UnexpectedCallback();
 
-        (_migration.shares, _migration.vTokens) = _depositAndSupply(m.hub, m.vhMarket, amounts[0], m.minShares, m.user);
+        address asset = m.asset;
+        (_migration.shares, _migration.vTokens) = _depositAndSupply(
+            m.hub,
+            asset,
+            m.vhMarket,
+            amounts[0],
+            m.minShares,
+            m.user
+        );
 
-        address asset = IHub(m.hub).asset();
         uint256 proceeds = _redeemToUnderlying(m.vToken, m.vTokenAmount, asset, m.user);
 
         repayAmounts = new uint256[](1);
@@ -214,11 +230,12 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         address vToken,
         uint256 vTokenAmount,
         address hub,
+        address asset,
         address vhMarket,
         uint256 minShares
     ) private returns (uint256 shares, uint256 vTokens) {
         uint256 flashAmount = _flashAmount(comptroller, vToken, vTokenAmount);
-        _migration = Migration(msg.sender, vToken, vTokenAmount, hub, vhMarket, minShares, flashAmount, 0, 0);
+        _migration = Migration(msg.sender, vToken, vTokenAmount, hub, asset, vhMarket, minShares, flashAmount, 0, 0);
 
         IVToken[] memory markets = new IVToken[](1);
         uint256[] memory amounts = new uint256[](1);
@@ -226,7 +243,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         amounts[0] = flashAmount;
 
         comptroller.executeFlashLoan(payable(address(this)), payable(address(this)), markets, amounts, "");
-        IERC20(IHub(hub).asset()).forceApprove(vToken, 0);
+        IERC20(asset).forceApprove(vToken, 0);
 
         shares = _migration.shares;
         vTokens = _migration.vTokens;
@@ -239,15 +256,15 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     ///      `receiver`. Returns the shares minted and the market receipts credited.
     function _depositAndSupply(
         address hub,
+        address asset,
         address vhMarket,
         uint256 assets,
         uint256 minShares,
         address receiver
     ) private returns (uint256 shares, uint256 vTokens) {
-        IERC20 asset = IERC20(IHub(hub).asset());
-        asset.forceApprove(hub, assets);
+        IERC20(asset).forceApprove(hub, assets);
         shares = IHub(hub).deposit(assets, address(this));
-        asset.forceApprove(hub, 0);
+        IERC20(asset).forceApprove(hub, 0);
         if (shares < minShares) revert InsufficientShares(shares, minShares);
 
         vTokens = _supplyToMarket(hub, vhMarket, shares, receiver);
