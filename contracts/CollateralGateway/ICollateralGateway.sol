@@ -124,6 +124,9 @@ interface ICollateralGateway {
     /// @notice The call ended with less of the underlying in the gateway than it started with.
     error BalanceSpent(uint256 balanceBefore, uint256 balanceAfter);
 
+    /// @notice The caller holds fewer receipts than the amount they asked to migrate.
+    error InsufficientReceipts(uint256 held, uint256 requested);
+
     /**
      * @notice Deposit `assets` of the Hub's underlying and supply the resulting shares into
      *         `vhMarket`, crediting the market receipts to the caller.

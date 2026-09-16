@@ -25,9 +25,9 @@ import { IHub } from "./IHub.sol";
  *      straight to the caller, and a withdraw pays the caller in the same call. If any leg fails the
  *      whole call reverts and the caller keeps what they started with.
  *
- *      Amounts are read back from the contracts rather than assumed. `deposit` reports the shares
- *      it minted, and `mintBehalf` reports only an error code, so the receipts credited to the user
- *      are measured as a balance delta.
+ *      Redeem and mint amounts are read back from the contracts rather than assumed, because
+ *      `redeemBehalf` and `mintBehalf` report only an error code. A supply from the wallet deposits
+ *      the amount it pulled, since the underlying of a listed market does not charge a transfer fee.
  *
  *      The Hub and its market are supplied per call and validated against each other, since a Hub
  *      share token is exactly what its Core market wraps.
@@ -95,6 +95,9 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
             address vTokenUnderlying = IVToken(vToken).underlying();
             if (vTokenUnderlying != asset) revert AssetMismatch(vTokenUnderlying, asset);
+
+            uint256 held = IVToken(vToken).balanceOf(msg.sender);
+            if (held < vTokenAmount) revert InsufficientReceipts(held, vTokenAmount);
         }
 
         IComptroller comptroller = IVToken(vToken).comptroller();
@@ -323,8 +326,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
         IERC20 underlying = IERC20(IVToken(vToken).underlying());
 
-        // Pull first, then measure. The gateway is a hop the market does not know about, so a
-        // fee-on-transfer underlying arrives short and only what landed can be supplied.
+        // Pull first, then measure, so the market is only ever asked to mint what the gateway holds.
         uint256 balanceBefore = underlying.balanceOf(address(this));
         underlying.safeTransferFrom(msg.sender, address(this), amount);
         uint256 received = underlying.balanceOf(address(this)) - balanceBefore;

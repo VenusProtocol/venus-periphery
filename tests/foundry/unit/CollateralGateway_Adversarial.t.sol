@@ -71,6 +71,15 @@ contract EvilComptroller {
 contract EvilVToken {
     address public immutable underlying;
     address public immutable comptroller;
+    uint256 public held = type(uint256).max;
+
+    function setHeld(uint256 amount) external {
+        held = amount;
+    }
+
+    function balanceOf(address) external view returns (uint256) {
+        return held;
+    }
 
     constructor(address underlying_, address comptroller_) {
         underlying = underlying_;
@@ -269,6 +278,21 @@ contract CollateralGateway_AdversarialTest is Test {
 
         assertEq(usdt.balanceOf(address(gateway)), 1000e18 + 1, "gateway keeps what it held");
         assertEq(usdt.balanceOf(attacker), 0, "attacker gained nothing");
+    }
+
+    /// @dev The caller names the receipt count, so a count they do not hold fails here rather than
+    ///      inside the market, which answers an over-redeem with a bare "math error".
+    function testRevert_supplyFromCollateral_moreReceiptsThanHeld() public {
+        EchoingComptroller comptroller = new EchoingComptroller();
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        vToken.setHeld(5);
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.InsufficientReceipts.selector, 5, 6));
+        gateway.supplyFromCollateral(address(vToken), 6, address(hub), address(market), 0);
     }
 
     /// @dev A hub is caller-supplied, so it can spend the approval the gateway grants it. The
