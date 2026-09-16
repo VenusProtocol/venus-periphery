@@ -1,0 +1,301 @@
+import { FakeContract, smock } from "@defi-wonderland/smock";
+import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import type { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
+import chai from "chai";
+import { ethers, upgrades } from "hardhat";
+
+import type {
+  DeviationSentinel,
+  IAccessControlManagerV8,
+  IEBrake,
+  IHub,
+  IYieldGroupNav,
+  OracleInterface,
+  ResilientOracleInterface,
+} from "../../../typechain";
+
+const { expect } = chai;
+chai.use(smock.matchers);
+
+const RESOURCE = "0x0000000000000000000000000000000000000011";
+const OTHER_RESOURCE = "0x0000000000000000000000000000000000000012";
+const ZERO_ADDRESS = ethers.constants.AddressZero;
+
+// 10% below the band floor, 5% above the band cap.
+const PAUSE_DOWN_BPS = 1_000;
+const PAUSE_UP_BPS = 500;
+
+// Band bounds used throughout: floor 1000, cap 2000.
+// Trips down below 900 (1000 less 10%), trips up above 2100 (2000 plus 5%).
+const MIN = 1_000;
+const MAX = 2_000;
+
+describe("DeviationSentinel — NAV deviation", () => {
+  let deviationSentinel: DeviationSentinel;
+  let accessControlManager: FakeContract<IAccessControlManagerV8>;
+  let eBrake: FakeContract<IEBrake>;
+  let hub: FakeContract<IHub>;
+  let yieldGroup: FakeContract<IYieldGroupNav>;
+  let keeper: SignerWithAddress;
+  let user: SignerWithAddress;
+
+  function registerYieldGroup(registered: boolean) {
+    hub.yieldGroupConfig.returns([0, 0, false, registered]);
+  }
+
+  function navGuardStatus(observed: number, isClamped: boolean) {
+    yieldGroup.navGuardStatus.returns([observed, MIN, MAX, isClamped, isClamped ? MIN : 0]);
+  }
+
+  async function deployFixture() {
+    [, keeper, user] = await ethers.getSigners();
+
+    accessControlManager = await smock.fake<IAccessControlManagerV8>("IAccessControlManagerV8");
+    eBrake = await smock.fake<IEBrake>("IEBrake");
+    hub = await smock.fake<IHub>("IHub");
+    yieldGroup = await smock.fake<IYieldGroupNav>("IYieldGroupNav");
+    const resilientOracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
+    const sentinelOracle = await smock.fake<OracleInterface>("OracleInterface");
+
+    accessControlManager.isAllowedToCall.returns(true);
+
+    const Factory = await ethers.getContractFactory("DeviationSentinel");
+    deviationSentinel = (await upgrades.deployProxy(Factory, [accessControlManager.address], {
+      constructorArgs: [eBrake.address, resilientOracle.address, sentinelOracle.address],
+      unsafeAllow: ["constructor", "internal-function-storage"],
+    })) as DeviationSentinel;
+
+    return { deviationSentinel, accessControlManager, eBrake, hub, yieldGroup, keeper, user };
+  }
+
+  beforeEach(async () => {
+    ({ deviationSentinel, accessControlManager, eBrake, hub, yieldGroup, keeper, user } =
+      await loadFixture(deployFixture));
+
+    // loadFixture restores chain state, but smock fakes are JS-side and keep their stubs and call
+    // history across tests. Reset them so each test starts from the same place.
+    accessControlManager.isAllowedToCall.reset();
+    accessControlManager.isAllowedToCall.returns(true);
+    eBrake.pauseHub.reset();
+    eBrake.pauseResource.reset();
+    hub.yieldGroupConfig.reset();
+    yieldGroup.navGuardStatus.reset();
+
+    await deviationSentinel.setTrustedKeeper(keeper.address, true);
+    await deviationSentinel.setNavConfig(RESOURCE, {
+      pauseUpBps: PAUSE_UP_BPS,
+      pauseDownBps: PAUSE_DOWN_BPS,
+      enabled: true,
+    });
+    registerYieldGroup(true);
+  });
+
+  describe("setNavConfig", () => {
+    it("stores the thresholds and emits", async () => {
+      const config = { pauseUpBps: 100, pauseDownBps: 200, enabled: true };
+
+      await expect(deviationSentinel.setNavConfig(OTHER_RESOURCE, config))
+        .to.emit(deviationSentinel, "NavConfigUpdated")
+        .withArgs(OTHER_RESOURCE, [100, 200, true]);
+
+      const stored = await deviationSentinel.navConfigs(OTHER_RESOURCE);
+      expect(stored.pauseUpBps).to.equal(100);
+      expect(stored.pauseDownBps).to.equal(200);
+      expect(stored.enabled).to.equal(true);
+    });
+
+    it("reverts on a zero resource address", async () => {
+      await expect(
+        deviationSentinel.setNavConfig(ZERO_ADDRESS, { pauseUpBps: 1, pauseDownBps: 1, enabled: true }),
+      ).to.be.revertedWithCustomError(deviationSentinel, "ZeroAddress");
+    });
+
+    it("reverts when either threshold is zero", async () => {
+      await expect(
+        deviationSentinel.setNavConfig(RESOURCE, { pauseUpBps: 0, pauseDownBps: 100, enabled: true }),
+      ).to.be.revertedWithCustomError(deviationSentinel, "ZeroDeviation");
+
+      await expect(
+        deviationSentinel.setNavConfig(RESOURCE, { pauseUpBps: 100, pauseDownBps: 0, enabled: true }),
+      ).to.be.revertedWithCustomError(deviationSentinel, "ZeroDeviation");
+    });
+
+    it("reverts when either threshold exceeds MAX_DEVIATION_BPS", async () => {
+      await expect(
+        deviationSentinel.setNavConfig(RESOURCE, { pauseUpBps: 10_001, pauseDownBps: 100, enabled: true }),
+      ).to.be.revertedWithCustomError(deviationSentinel, "ExceedsMaxDeviation");
+
+      await expect(
+        deviationSentinel.setNavConfig(RESOURCE, { pauseUpBps: 100, pauseDownBps: 10_001, enabled: true }),
+      ).to.be.revertedWithCustomError(deviationSentinel, "ExceedsMaxDeviation");
+    });
+
+    it("is ACM gated", async () => {
+      accessControlManager.isAllowedToCall.returns(false);
+
+      await expect(deviationSentinel.setNavConfig(RESOURCE, { pauseUpBps: 1, pauseDownBps: 1, enabled: true })).to.be
+        .reverted;
+    });
+  });
+
+  describe("setNavMonitoringEnabled", () => {
+    it("toggles without touching the thresholds", async () => {
+      await expect(deviationSentinel.setNavMonitoringEnabled(RESOURCE, false))
+        .to.emit(deviationSentinel, "NavMonitoringStatusChanged")
+        .withArgs(RESOURCE, false);
+
+      const stored = await deviationSentinel.navConfigs(RESOURCE);
+      expect(stored.enabled).to.equal(false);
+      expect(stored.pauseDownBps).to.equal(PAUSE_DOWN_BPS);
+    });
+
+    it("reverts on a zero resource address", async () => {
+      await expect(deviationSentinel.setNavMonitoringEnabled(ZERO_ADDRESS, true)).to.be.revertedWithCustomError(
+        deviationSentinel,
+        "ZeroAddress",
+      );
+    });
+
+    // Otherwise this is a way around setNavConfig's refusal of zero thresholds: a never-configured
+    // resource would go live armed at 0/0, tripping on any clamp at all.
+    it("cannot arm a resource that was never configured", async () => {
+      await expect(deviationSentinel.setNavMonitoringEnabled(OTHER_RESOURCE, true))
+        .to.be.revertedWithCustomError(deviationSentinel, "ResourceNotConfigured")
+        .withArgs(OTHER_RESOURCE);
+
+      const stored = await deviationSentinel.navConfigs(OTHER_RESOURCE);
+      expect(stored.enabled).to.equal(false);
+    });
+
+    it("is ACM gated", async () => {
+      accessControlManager.isAllowedToCall.returns(false);
+
+      await expect(deviationSentinel.setNavMonitoringEnabled(RESOURCE, false)).to.be.reverted;
+    });
+  });
+
+  describe("handleNavDeviation", () => {
+    it("pauses the Hub and the resource through EBrake on a downside breach", async () => {
+      navGuardStatus(800, true);
+
+      await expect(deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE))
+        .to.emit(deviationSentinel, "NavDeviationHandled")
+        .withArgs(hub.address, yieldGroup.address, RESOURCE, 800, MIN, MAX);
+
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
+      expect(eBrake.pauseResource).to.have.been.calledOnceWith(yieldGroup.address, RESOURCE);
+    });
+
+    it("pauses both on an upside breach", async () => {
+      navGuardStatus(2_200, true);
+
+      await expect(deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE))
+        .to.emit(deviationSentinel, "NavDeviationHandled")
+        .withArgs(hub.address, yieldGroup.address, RESOURCE, 2_200, MIN, MAX);
+
+      expect(eBrake.pauseHub).to.have.been.calledOnce;
+      expect(eBrake.pauseResource).to.have.been.calledOnce;
+    });
+
+    it("reverts for a caller that is not a trusted keeper", async () => {
+      navGuardStatus(800, true);
+
+      await expect(
+        deviationSentinel.connect(user).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE),
+      ).to.be.revertedWithCustomError(deviationSentinel, "UnauthorizedKeeper");
+      expect(eBrake.pauseHub).to.have.callCount(0);
+    });
+
+    it("reverts when NAV monitoring is disabled for the resource", async () => {
+      navGuardStatus(800, true);
+      await deviationSentinel.setNavMonitoringEnabled(RESOURCE, false);
+
+      await expect(deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(deviationSentinel, "NavMonitoringDisabled")
+        .withArgs(RESOURCE);
+      expect(eBrake.pauseHub).to.have.callCount(0);
+    });
+
+    it("reverts when the resource was never configured", async () => {
+      navGuardStatus(800, true);
+
+      await expect(
+        deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, OTHER_RESOURCE),
+      )
+        .to.be.revertedWithCustomError(deviationSentinel, "NavMonitoringDisabled")
+        .withArgs(OTHER_RESOURCE);
+    });
+
+    // The spoofed-YieldGroup trap: a fake YieldGroup reporting an invented clamp, paired with the
+    // real Hub address, must not be able to pause the live Hub.
+    it("reverts when the Hub does not list the YieldGroup", async () => {
+      navGuardStatus(800, true);
+      registerYieldGroup(false);
+
+      await expect(deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(deviationSentinel, "YieldGroupNotRegistered")
+        .withArgs(hub.address, yieldGroup.address);
+      expect(eBrake.pauseHub).to.have.callCount(0);
+      expect(eBrake.pauseResource).to.have.callCount(0);
+    });
+
+    it("reverts when the band is not clamping", async () => {
+      navGuardStatus(1_500, false);
+
+      await expect(deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(deviationSentinel, "NavNotClamped")
+        .withArgs(RESOURCE);
+      expect(eBrake.pauseHub).to.have.callCount(0);
+    });
+
+    // The unreadable-adapter trap: navGuardStatus reports a reverting value source as
+    // observedValue == 0 with isClamped false. A bare `observed < min` would read that as a 100%
+    // drop and freeze the Hub on a transient failure.
+    it("does not pause on an unreadable value source reporting zero", async () => {
+      navGuardStatus(0, false);
+
+      await expect(deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(deviationSentinel, "NavNotClamped")
+        .withArgs(RESOURCE);
+      expect(eBrake.pauseHub).to.have.callCount(0);
+      expect(eBrake.pauseResource).to.have.callCount(0);
+    });
+
+    it("leaves a clamp smaller than the threshold alone", async () => {
+      navGuardStatus(950, true);
+
+      await expect(deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(deviationSentinel, "DeviationWithinThreshold")
+        .withArgs(RESOURCE, 950);
+      expect(eBrake.pauseHub).to.have.callCount(0);
+    });
+
+    it("trips exactly at the threshold boundary, not one wei inside it", async () => {
+      // Floor 1000 less 10% is 900: 900 is inside the quiet band, 899 is past it.
+      navGuardStatus(900, true);
+      await expect(
+        deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE),
+      ).to.be.revertedWithCustomError(deviationSentinel, "DeviationWithinThreshold");
+
+      navGuardStatus(899, true);
+      await expect(
+        deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE),
+      ).to.emit(deviationSentinel, "NavDeviationHandled");
+    });
+  });
+
+  describe("existing price-deviation surface", () => {
+    // The NAV addition is append-only; the pre-existing config must still work untouched.
+    it("still stores a token config alongside a NAV config", async () => {
+      await deviationSentinel.setTokenConfig(RESOURCE, { deviation: 10, enabled: true });
+
+      const token = await deviationSentinel.tokenConfigs(RESOURCE);
+      expect(token.deviation).to.equal(10);
+      expect(token.enabled).to.equal(true);
+
+      const nav = await deviationSentinel.navConfigs(RESOURCE);
+      expect(nav.pauseDownBps).to.equal(PAUSE_DOWN_BPS);
+      expect(nav.enabled).to.equal(true);
+    });
+  });
+});
