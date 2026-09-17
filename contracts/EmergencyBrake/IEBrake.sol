@@ -335,7 +335,7 @@ interface IEBrake {
      *
      *      A paused resource still counts toward `totalAssets()` but cannot be withdrawn from, so
      *      pausing it alone props up the share price. Pair it with {pauseHub}, as
-     *      `DeviationSentinel.handleNavDeviation` does.
+     *      `DeviationSentinel.handleNavGuardDeviation` does.
      * @param yieldGroup The YieldGroup holding the resource.
      * @param resource The resource to pause.
      */
