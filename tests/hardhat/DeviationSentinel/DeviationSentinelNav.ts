@@ -284,6 +284,107 @@ describe("DeviationSentinel — NAV deviation", () => {
     });
   });
 
+  describe("checkNavDeviation", () => {
+    // The read-only twin monitoring actually calls. Its job is to agree with handleNavDeviation
+    // on every input and to never revert, so a monitor can call it for anything it discovers.
+
+    it("reports a downside breach with the band that produced it", async () => {
+      navGuardStatus(899, true);
+
+      const result = await deviationSentinel.checkNavDeviation(hub.address, yieldGroup.address, RESOURCE);
+
+      expect(result.hasDeviation).to.equal(true);
+      expect(result.observedValue).to.equal(899);
+      expect(result.minAllowedValue).to.equal(MIN);
+      expect(result.maxAllowedValue).to.equal(MAX);
+    });
+
+    it("reports an upside breach", async () => {
+      navGuardStatus(2_101, true);
+
+      const { hasDeviation } = await deviationSentinel.checkNavDeviation(hub.address, yieldGroup.address, RESOURCE);
+      expect(hasDeviation).to.equal(true);
+    });
+
+    it("agrees with handleNavDeviation on the exact boundary", async () => {
+      // One wei either side of the trip point, through both entrypoints. This is the pair that
+      // catches the arithmetic drifting if the predicate is ever copied again — on chain or off.
+      navGuardStatus(900, true);
+      expect(
+        (await deviationSentinel.checkNavDeviation(hub.address, yieldGroup.address, RESOURCE)).hasDeviation,
+      ).to.equal(false);
+      await expect(
+        deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE),
+      ).to.be.revertedWithCustomError(deviationSentinel, "DeviationWithinThreshold");
+
+      navGuardStatus(899, true);
+      expect(
+        (await deviationSentinel.checkNavDeviation(hub.address, yieldGroup.address, RESOURCE)).hasDeviation,
+      ).to.equal(true);
+      await expect(
+        deviationSentinel.connect(keeper).handleNavDeviation(hub.address, yieldGroup.address, RESOURCE),
+      ).to.emit(deviationSentinel, "NavDeviationHandled");
+    });
+
+    it("returns false for an unarmed resource without reading the Hub or the band", async () => {
+      navGuardStatus(0, true);
+
+      const result = await deviationSentinel.checkNavDeviation(hub.address, yieldGroup.address, OTHER_RESOURCE);
+
+      expect(result.hasDeviation).to.equal(false);
+      expect(hub.yieldGroupConfig).to.not.have.been.called;
+      expect(yieldGroup.navGuardStatus).to.not.have.been.called;
+    });
+
+    it("returns false for a YieldGroup the Hub does not list, without reading its band", async () => {
+      registerYieldGroup(false);
+      navGuardStatus(899, true);
+
+      const { hasDeviation } = await deviationSentinel.checkNavDeviation(hub.address, yieldGroup.address, RESOURCE);
+
+      expect(hasDeviation).to.equal(false);
+      expect(yieldGroup.navGuardStatus).to.not.have.been.called;
+    });
+
+    it("returns false on an unreadable value source, and still hands back what it read", async () => {
+      // observedValue 0, unclamped. A caller comparing the value against the floor itself would
+      // read this as a total loss; the band is returned so an alert can say what was seen.
+      navGuardStatus(0, false);
+
+      const result = await deviationSentinel.checkNavDeviation(hub.address, yieldGroup.address, RESOURCE);
+
+      expect(result.hasDeviation).to.equal(false);
+      expect(result.observedValue).to.equal(0);
+      expect(result.minAllowedValue).to.equal(MIN);
+    });
+
+    it("returns false for a clamp inside the threshold", async () => {
+      navGuardStatus(950, true);
+
+      const { hasDeviation } = await deviationSentinel.checkNavDeviation(hub.address, yieldGroup.address, RESOURCE);
+      expect(hasDeviation).to.equal(false);
+    });
+
+    it("never reverts, whatever it is asked about", async () => {
+      // Monitoring calls this for every resource on every Hub it walks. A revert on an unknown
+      // address would turn a resource nobody configured into a failed sweep.
+      const unknown = await deviationSentinel.checkNavDeviation(ZERO_ADDRESS, ZERO_ADDRESS, OTHER_RESOURCE);
+      expect(unknown.hasDeviation).to.equal(false);
+    });
+
+    it("is callable by anyone and pauses nothing", async () => {
+      navGuardStatus(899, true);
+
+      const { hasDeviation } = await deviationSentinel
+        .connect(user)
+        .checkNavDeviation(hub.address, yieldGroup.address, RESOURCE);
+
+      expect(hasDeviation).to.equal(true);
+      expect(eBrake.pauseHub).to.not.have.been.called;
+      expect(eBrake.pauseResource).to.not.have.been.called;
+    });
+  });
+
   describe("existing price-deviation surface", () => {
     // The NAV addition is append-only; the pre-existing config must still work untouched.
     it("still stores a token config alongside a NAV config", async () => {

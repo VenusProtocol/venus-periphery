@@ -312,35 +312,30 @@ interface IEBrake {
 
     /**
      * @notice Pause the Liquidity Hub, halting deposits and redemptions.
-     * @dev Stateless forwarder, like every other action here — EBrake holds the Hub's
-     *      `pauseHub()` ACM role and exposes it behind its own. Tighten-only: unpausing is a
-     *      governance VIP against the Hub directly, never through EBrake.
+     * @dev Stateless forwarder: EBrake holds the Hub's `pauseHub()` ACM role and exposes it behind
+     *      its own. Tighten-only — unpausing is a VIP against the Hub directly.
      *
-     *      The Hub lives only on BSC, so this is dead code on the other five chains EBrake is
-     *      deployed to. That is deliberate — one implementation everywhere beats divergent ones,
-     *      and an unGRANTed role makes the function unreachable.
+     *      The Hub is BSC-only, so this is unreachable on EBrake's other five chains, where the
+     *      role is simply never granted. One implementation everywhere beats divergent ones.
      *
-     *      Idempotent: if the Hub is already paused the call is a no-op and no event is emitted,
-     *      so HubPaused stays a true state-change signal — the {pauseFlashLoan} pattern. The
-     *      `hubPaused()` read pays for itself, since the Hub's own `pauseHub()` runs its ACM check
-     *      before its idempotency check and a redundant call would pay for that hop too.
+     *      Idempotent: an already-paused Hub is a no-op with no event, so HubPaused stays a true
+     *      state-change signal — same as {pauseFlashLoan}. The `hubPaused()` read pays for itself,
+     *      because the Hub checks ACM before idempotency.
      * @param hub The Liquidity Hub to pause.
      */
     function pauseHub(address hub) external;
 
     /**
      * @notice Pause routing to a single resource inside a YieldGroup.
-     * @dev Stateless forwarder. Reverts if the resource is not registered in that YieldGroup —
-     *      the YieldGroup's own check, not one EBrake adds.
+     * @dev Stateless forwarder. Reverts on a resource the YieldGroup does not list — its check,
+     *      not one EBrake adds.
      *
-     *      Idempotent: if the resource is already paused the call is a no-op and no event is
-     *      emitted. An unregistered resource reads back `paused == false`, so it still reaches the
-     *      YieldGroup and still reverts there.
+     *      Idempotent: an already-paused resource is a no-op with no event. An unregistered one
+     *      reads back `paused == false`, so it still reaches the YieldGroup and reverts there.
      *
-     *      Pausing a resource does NOT remove its balance from `totalAssets()`, but does make it
-     *      unreachable for withdrawals. On its own that props up the share price while making the
-     *      position exiters would touch unreachable, so pair it with {pauseHub}. See
-     *      `DeviationSentinel.handleNavDeviation`, which always calls both.
+     *      A paused resource still counts toward `totalAssets()` but cannot be withdrawn from, so
+     *      pausing it alone props up the share price. Pair it with {pauseHub}, as
+     *      `DeviationSentinel.handleNavDeviation` does.
      * @param yieldGroup The YieldGroup holding the resource.
      * @param resource The resource to pause.
      */

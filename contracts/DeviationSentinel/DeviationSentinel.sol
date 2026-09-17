@@ -32,12 +32,9 @@ contract DeviationSentinel is AccessControlledV8 {
     }
 
     /// @notice Configuration for NAV deviation monitoring on one Liquidity Hub resource
-    /// @dev Thresholds are measured outward from the resource's NavGuard band bounds, not from the
-    ///      band centre. That makes the trigger always, by construction, wider than the band's own
-    ///      `downGapBps`/`upGapBps`, so the two numbers cannot be configured into contradiction.
-    ///      Neither may be zero: a zero would pause the moment that side clamps at all — the most
-    ///      aggressive setting there is, and the opposite of what a zero usually means to whoever
-    ///      writes it. A non-zero `pauseDownBps` doubles as the "configured" marker.
+    /// @dev Thresholds are measured outward from the band's bounds, so the trigger is always wider
+    ///      than the band's own gaps. Neither may be zero — zero would pause the moment that side
+    ///      clamps. A non-zero `pauseDownBps` also marks the resource as configured.
     /// @param pauseUpBps How far above the band's cap the observed value must sit to trip, in bps
     /// @param pauseDownBps How far below the band's floor the observed value must sit to trip, in bps
     /// @param enabled Whether NAV monitoring is enabled for this resource
@@ -120,8 +117,7 @@ contract DeviationSentinel is AccessControlledV8 {
     event NavMonitoringStatusChanged(address indexed resource, bool enabled);
 
     /// @notice Emitted when a NAV deviation is detected and the Hub and resource are both paused
-    /// @dev Which side broke is derivable from the three values: below `minAllowedValue` is a
-    ///      downside breach, above `maxAllowedValue` an upside one.
+    /// @dev Below `minAllowedValue` is a downside breach, above `maxAllowedValue` an upside one.
     /// @param hub The Liquidity Hub that was paused
     /// @param yieldGroup The YieldGroup holding the breaching resource
     /// @param resource The resource whose NAV broke through its band
@@ -162,19 +158,16 @@ contract DeviationSentinel is AccessControlledV8 {
     error NavMonitoringDisabled(address resource);
 
     /// @notice Thrown when the Hub does not list the supplied YieldGroup in its registry
-    /// @dev The check that stops a fabricated YieldGroup — one reporting an invented clamp —
-    ///      from being paired with the real Hub address to pause the live Hub.
+    /// @dev Stops a fake YieldGroup reporting an invented clamp from pausing the real Hub.
     error YieldGroupNotRegistered(address hub, address yieldGroup);
 
     /// @notice Thrown when the resource's NavGuard band is not currently clamping
-    /// @dev Also the guard against an unreadable value source: `navGuardStatus` reports a
-    ///      reverting adapter as `observedValue == 0`, and passes that through unclamped, so
-    ///      `isClamped` is false on such a read and the brake does not fire on a transient failure.
+    /// @dev Also covers an unreadable value source. `navGuardStatus` reports that as
+    ///      `observedValue == 0` and leaves `isClamped` false, so a failed read cannot trip the brake.
     error NavNotClamped(address resource);
 
     /// @notice Thrown when the clamp is real but smaller than the configured pause threshold
-    /// @dev The deliberate quiet band: NAV is clamped, but the move is small enough to let the
-    ///      NavGuard band step down on its own without freezing the Hub.
+    /// @dev Clamped, but small enough to let the band step down on its own.
     error DeviationWithinThreshold(address resource, uint256 observedValue);
 
     modifier onlyKeeper() {
@@ -319,8 +312,8 @@ contract DeviationSentinel is AccessControlledV8 {
         if (resource == address(0)) revert ZeroAddress();
 
         NavDeviationConfig storage config = navConfigs[resource];
-        // Without this, enabling a never-configured resource would arm it at 0/0 — exactly the
-        // hair-trigger setting setNavConfig refuses.
+        // Without this, arming a never-configured resource would set it to 0/0 — the hair
+        // trigger setNavConfig refuses.
         if (config.pauseDownBps == 0) revert ResourceNotConfigured(resource);
 
         config.enabled = enabled;
@@ -328,27 +321,21 @@ contract DeviationSentinel is AccessControlledV8 {
     }
 
     /// @notice Handle a NAV deviation on a Liquidity Hub resource by pausing the Hub and the resource
-    /// @dev Keeper-gated like every other trigger here, but the keeper asserts nothing: the breach is
-    ///      re-derived from Hub and YieldGroup state, so a leaked key can only pause when a real
-    ///      breach already exists.
+    /// @dev Keeper-gated, but the keeper asserts nothing: the breach is re-derived here, so a
+    ///      leaked key can only pause when a real breach exists. Reverts when no action is due, so
+    ///      a keeper that simulates first never pays for a no-op. Monitoring reads
+    ///      `checkNavDeviation` instead of simulating.
     ///
-    ///      Reverts rather than returning quietly when no action is due, so monitoring can simulate
-    ///      with `eth_call` and broadcast only when the transaction will do something.
+    ///      Both pauses fire, not one. Pausing only the resource is worse: it still counts toward
+    ///      `totalAssets()` but can no longer be withdrawn from, so redemptions drain the healthy
+    ///      positions and leave holders a bigger share of the bad one. The Hub pause stops the harm;
+    ///      the resource pause keeps a later `unpauseHub` from routing back into it. Both are
+    ///      idempotent, so a repeat call changes nothing.
     ///
-    ///      Both pauses happen, not just one. Pausing the resource alone would make things worse: a
-    ///      paused resource stays counted in `totalAssets()` but becomes unreachable for
-    ///      withdrawals, so the share price stays propped up while redemptions are served entirely
-    ///      from the healthy positions — leaving remaining holders a larger share of the bad one.
-    ///      The Hub pause is what stops the harm; the resource pause is pre-staging, so governance's
-    ///      later `unpauseHub` cannot route back into the impaired position before someone has
-    ///      decided what it is worth. Both are idempotent at the Hub, so a repeat call changes
-    ///      nothing.
-    ///
-    ///      Recovery is a governance VIP, and the order matters: decide the real value,
-    ///      `setNavGuardSnapshot` to it, then `unpauseHub`. Unpausing without re-anchoring just
-    ///      resumes the same slow step-down.
-    /// @param hub The Liquidity Hub to pause. Needs no validation of its own — EBrake's `pauseHub`
-    ///        runs an ACM check on the Hub, so an address we hold no role on is a no-op.
+    ///      Recovery is a VIP, in this order: value the position, `setNavGuardSnapshot` to it,
+    ///      then `unpauseHub`. Unpausing without re-anchoring resumes the same step-down.
+    /// @param hub The Liquidity Hub to pause. Not validated here: EBrake's `pauseHub` is ACM-checked
+    ///        on the Hub, so an address we hold no role on is a no-op.
     /// @param yieldGroup The YieldGroup holding the resource. Checked against the Hub's registry.
     /// @param resource The resource whose NavGuard band to read
     /// @custom:event Emits NavDeviationHandled with the band context at detection time
@@ -367,15 +354,13 @@ contract DeviationSentinel is AccessControlledV8 {
             yieldGroup
         ).navGuardStatus(resource);
 
-        // Gate on isClamped before comparing magnitude. An unreadable adapter reports
-        // observedValue == 0, which a bare `observedValue < minAllowedValue` would read as a total
-        // loss and act on.
+        // Check isClamped before comparing values: an unreadable adapter reports
+        // observedValue == 0, which a bare comparison would read as a total loss.
         if (!isClamped) revert NavNotClamped(resource);
 
-        bool breached = observedValue <
-            (minAllowedValue * (MAX_DEVIATION_BPS - config.pauseDownBps)) / MAX_DEVIATION_BPS ||
-            observedValue > (maxAllowedValue * (MAX_DEVIATION_BPS + config.pauseUpBps)) / MAX_DEVIATION_BPS;
-        if (!breached) revert DeviationWithinThreshold(resource, observedValue);
+        if (!_isNavBreached(config, observedValue, minAllowedValue, maxAllowedValue)) {
+            revert DeviationWithinThreshold(resource, observedValue);
+        }
 
         EBRAKE.pauseHub(hub);
         EBRAKE.pauseResource(yieldGroup, resource);
@@ -416,5 +401,67 @@ contract DeviationSentinel is AccessControlledV8 {
 
         deviationPercent = (priceDiff * 100) / oraclePrice;
         hasDeviation = deviationPercent >= config.deviation;
+    }
+
+    /// @notice Check whether a Liquidity Hub resource's NAV has broken through its NavGuard band by
+    ///         more than the configured threshold
+    /// @dev The read-only twin of `handleNavDeviation`, shaped like `checkPriceDeviation`. Never
+    ///      reverts, so monitoring can call it for any resource it finds and decide from the
+    ///      return value alone.
+    ///
+    ///      `hasDeviation` is false for every reason not to pause: not armed, YieldGroup not
+    ///      registered, band not clamping, or clamp inside the threshold. To tell those apart,
+    ///      simulate `handleNavDeviation` — it names each one with its own error.
+    ///
+    ///      Shares `_isNavBreached` with `handleNavDeviation`, so this is the same answer the
+    ///      keeper's transaction acts on, not a copy of it.
+    /// @param hub The Liquidity Hub holding the YieldGroup
+    /// @param yieldGroup The YieldGroup holding the resource
+    /// @param resource The resource whose NavGuard band to read
+    /// @return hasDeviation True when a pause is due
+    /// @return observedValue Value the counterparty reports, in asset units; `0` when the band was not read
+    /// @return minAllowedValue The band's floor; `0` when the band was not read
+    /// @return maxAllowedValue The band's cap; `0` when the band was not read
+    function checkNavDeviation(
+        address hub,
+        address yieldGroup,
+        address resource
+    ) public view returns (bool hasDeviation, uint256 observedValue, uint256 minAllowedValue, uint256 maxAllowedValue) {
+        NavDeviationConfig memory config = navConfigs[resource];
+        if (!config.enabled) return (false, 0, 0, 0);
+
+        // Stops a fake YieldGroup reporting an invented clamp from pausing the real Hub.
+        if (!IHub(hub).yieldGroupConfig(yieldGroup).registered) return (false, 0, 0, 0);
+
+        bool isClamped;
+        (observedValue, minAllowedValue, maxAllowedValue, isClamped, ) = IYieldGroupNav(yieldGroup).navGuardStatus(
+            resource
+        );
+
+        // Same isClamped gate as handleNavDeviation: an unreadable adapter reports
+        // observedValue == 0 without clamping, which a bare comparison would read as a total loss.
+        if (!isClamped) return (false, observedValue, minAllowedValue, maxAllowedValue);
+
+        hasDeviation = _isNavBreached(config, observedValue, minAllowedValue, maxAllowedValue);
+    }
+
+    /// @notice Whether an observed value sits far enough outside its band to warrant a pause
+    /// @dev The one definition of the pause predicate, called by both `checkNavDeviation` and
+    ///      `handleNavDeviation` so the two cannot disagree. Assumes the caller has already
+    ///      checked that the band is clamping.
+    /// @param config The resource's thresholds
+    /// @param observedValue Value the counterparty reports
+    /// @param minAllowedValue The band's floor
+    /// @param maxAllowedValue The band's cap
+    /// @return breached True when the value is past the configured threshold on either side
+    function _isNavBreached(
+        NavDeviationConfig memory config,
+        uint256 observedValue,
+        uint256 minAllowedValue,
+        uint256 maxAllowedValue
+    ) private pure returns (bool breached) {
+        return
+            observedValue < (minAllowedValue * (MAX_DEVIATION_BPS - config.pauseDownBps)) / MAX_DEVIATION_BPS ||
+            observedValue > (maxAllowedValue * (MAX_DEVIATION_BPS + config.pauseUpBps)) / MAX_DEVIATION_BPS;
     }
 }

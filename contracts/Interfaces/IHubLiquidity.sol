@@ -5,9 +5,8 @@ pragma solidity ^0.8.25;
  * @title IHubLiquidity
  * @author Venus
  * @notice Minimal views and emergency levers DeviationSentinel and EBrake need from the Liquidity Hub.
- * @dev Deliberately not the full `@venusprotocol/liquidity-hub` interfaces — only the
- *      functions those two call, so venus-periphery takes no dependency on that repo.
- *      Signatures must stay byte-identical to the originals; the selectors are what matter.
+ * @dev Only the functions those two call, so venus-periphery takes no dependency on the
+ *      liquidity-hub repo. Signatures must stay byte-identical — the selectors are what matter.
  */
 interface IHub {
     /// @notice Per-YieldGroup configuration held by the Hub's registry.
@@ -55,9 +54,8 @@ interface IYieldGroupNav {
     function resourceConfig(address resource) external view returns (bool registered, bool paused, address adapter);
 
     /// @notice Where a resource's value stands against its NavGuard band right now.
-    /// @dev Never reverts. An unreadable value source reports `observedValue` as zero, and
-    ///      `isClamped` is false in that case — which is why DeviationSentinel gates on `isClamped`
-    ///      rather than comparing `observedValue` against the bounds directly.
+    /// @dev Never reverts. An unreadable value source reports `observedValue` as zero with
+    ///      `isClamped` false, which is why DeviationSentinel checks `isClamped` first.
     /// @param resource Resource to read.
     /// @return observedValue Value the counterparty reports, in asset units; `0` if unreadable.
     /// @return minAllowedValue Lowest value the band allows right now.
