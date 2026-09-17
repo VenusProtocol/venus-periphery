@@ -32,12 +32,11 @@ contract DeviationSentinel is AccessControlledV8 {
     }
 
     /// @notice Pause thresholds for one Liquidity Hub resource's NavGuard band
-    /// @dev Thresholds are measured outward from the band's bounds, so the trigger is always wider
-    ///      than the band's own gaps. Neither may be zero — zero would pause the moment that side
-    ///      clamps, so a zero on either side means the resource was never configured.
+    /// @dev Measured outward from the band's bounds, so the trigger is always wider than the band's
+    ///      own gaps. A zero on either side means the resource was never configured.
     /// @param pauseUpBps How far above the band's cap the observed value must sit to trip, in bps
     /// @param pauseDownBps How far below the band's floor the observed value must sit to trip, in bps
-    /// @param enabled Whether this resource's band is being watched
+    /// @param enabled Whether this resource's band is being watched. Only `setNavGuardEnabled` writes it.
     struct NavGuardConfig {
         uint16 pauseUpBps;
         uint16 pauseDownBps;
@@ -53,16 +52,18 @@ contract DeviationSentinel is AccessControlledV8 {
     }
 
     /// @notice Why a NavGuard check did or did not call for a pause
-    /// @dev Internal only — `checkNavGuardDeviation` narrows it to a bool, `handleNavGuardDeviation` turns
-    ///      each non-breach into its own error. Ordered so the zero value is a no-action one.
+    /// @dev Internal only — the view narrows it to a bool, the handler turns each non-breach into
+    ///      its own error. Ordered so the zero value is a no-action one.
     /// @param MonitoringDisabled The resource is not armed in `navGuardConfigs`
     /// @param YieldGroupNotRegistered The Hub does not list the supplied YieldGroup
-    /// @param NotClamped The band is not clamping, so there is nothing to measure
+    /// @param ResourceNotRegistered The YieldGroup does not list the supplied resource
+    /// @param NotClamped Nothing measurable: the band is not clamping, or it was never anchored
     /// @param WithinThreshold Clamped, but by less than the configured threshold
     /// @param Breached Clamped past the threshold — a pause is due
     enum NavGuardCheckStatus {
         MonitoringDisabled,
         YieldGroupNotRegistered,
+        ResourceNotRegistered,
         NotClamped,
         WithinThreshold,
         Breached
@@ -72,6 +73,7 @@ contract DeviationSentinel is AccessControlledV8 {
     uint8 public constant MAX_DEVIATION = 100;
 
     /// @notice Basis-point denominator, and the ceiling on either NavGuard pause threshold
+    /// @dev `pauseDownBps` must stay strictly below it — at 10_000 the floor is zero and unreachable.
     uint16 public constant MAX_DEVIATION_BPS = 10_000;
 
     /// @notice Emergency Brake contract for executing pause and CF-zero actions
@@ -92,8 +94,9 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Mapping of trusted keeper addresses
     mapping(address => bool) public trustedKeepers;
 
-    /// @notice Mapping of Liquidity Hub resource addresses to their NavGuard pause thresholds
-    mapping(address => NavGuardConfig) public navGuardConfigs;
+    /// @notice NavGuard pause thresholds, keyed by YieldGroup then resource
+    /// @dev Keyed on the pair: one resource address can appear under two YieldGroups.
+    mapping(address => mapping(address => NavGuardConfig)) public navGuardConfigs;
 
     /// @dev Storage gap for future upgrades. Was 48 before `navGuardConfigs` was appended.
     uint256[47] private __gap;
@@ -121,14 +124,16 @@ contract DeviationSentinel is AccessControlledV8 {
     event DeviationHandled(address indexed market, uint256 oraclePrice, uint256 sentinelPrice, DeviationAction action);
 
     /// @notice Emitted when a resource's NavGuard pause thresholds are updated
+    /// @param yieldGroup The YieldGroup holding the resource
     /// @param resource The Liquidity Hub resource address
-    /// @param config The new thresholds
-    event NavGuardConfigUpdated(address indexed resource, NavGuardConfig config);
+    /// @param config The stored config after the update
+    event NavGuardConfigUpdated(address indexed yieldGroup, address indexed resource, NavGuardConfig config);
 
     /// @notice Emitted when a resource's band starts or stops being watched
+    /// @param yieldGroup The YieldGroup holding the resource
     /// @param resource The Liquidity Hub resource address
     /// @param enabled Whether the band is being watched
-    event NavGuardStatusChanged(address indexed resource, bool enabled);
+    event NavGuardStatusChanged(address indexed yieldGroup, address indexed resource, bool enabled);
 
     /// @notice Emitted when a resource breaks through its NavGuard band and both it and the Hub are paused
     /// @dev Below `minAllowedValue` is a downside breach, above `maxAllowedValue` an upside one.
@@ -166,22 +171,25 @@ contract DeviationSentinel is AccessControlledV8 {
     error TokenMonitoringDisabled();
 
     /// @notice Thrown when a resource has no NavGuard pause thresholds set
-    error ResourceNotConfigured(address resource);
+    error ResourceNotConfigured(address yieldGroup, address resource);
 
     /// @notice Thrown when a resource's NavGuard band is not being watched
-    error NavGuardDisabled(address resource);
+    error NavGuardDisabled(address yieldGroup, address resource);
 
     /// @notice Thrown when the Hub does not list the supplied YieldGroup in its registry
-    /// @dev Stops a fake YieldGroup reporting an invented clamp from pausing the real Hub.
+    /// @dev Catches a stale YieldGroup, not a hostile one: `hub` is caller-supplied too.
     error YieldGroupNotRegistered(address hub, address yieldGroup);
 
-    /// @notice Thrown when the resource's NavGuard band is not currently clamping
-    /// @dev Also covers an unreadable value source. `navGuardStatus` reports that as
-    ///      `observedValue == 0` and leaves `isClamped` false, so a failed read cannot trip the brake.
+    /// @notice Thrown when the YieldGroup does not list the supplied resource in its registry
+    /// @dev Unregistered means zero balance, so it is outside `totalAssets()` and nothing to pause.
+    error ResourceNotRegistered(address yieldGroup, address resource);
+
+    /// @notice Thrown when the resource's NavGuard band holds nothing measurable
+    /// @dev Not clamping, an unreadable source, or a never-anchored `[0, 0]` band.
     error NavGuardNotClamped(address resource);
 
     /// @notice Thrown when the clamp is real but smaller than the configured pause threshold
-    /// @dev Clamped, but small enough to let the band step down on its own.
+    /// @dev Small enough to let the band step down on its own.
     error DeviationWithinThreshold(address resource, uint256 observedValue);
 
     modifier onlyKeeper() {
@@ -295,67 +303,74 @@ contract DeviationSentinel is AccessControlledV8 {
     }
 
     /// @notice Set the NavGuard pause thresholds for a Liquidity Hub resource
-    /// @param resource Address of the resource inside its YieldGroup
-    /// @param config Thresholds and enabled flag
+    /// @dev Thresholds only. `enabled` is owned by `setNavGuardEnabled`, so retuning a threshold
+    ///      cannot silently disarm a resource, nor this role alone arm one.
+    /// @param yieldGroup Address of the YieldGroup holding the resource
+    /// @param resource Address of the resource inside that YieldGroup
+    /// @param pauseUpBps How far above the band's cap the observed value must sit to trip, in bps
+    /// @param pauseDownBps How far below the band's floor the observed value must sit to trip, in bps
     /// @custom:event Emits NavGuardConfigUpdated event
-    /// @custom:error ZeroAddress is thrown when resource address is zero
+    /// @custom:error ZeroAddress is thrown when the YieldGroup or resource address is zero
     /// @custom:error ZeroDeviation is thrown when either threshold is zero
-    /// @custom:error ExceedsMaxDeviation is thrown when either threshold exceeds MAX_DEVIATION_BPS
-    function setNavGuardConfig(address resource, NavGuardConfig calldata config) external {
-        _checkAccessAllowed("setNavGuardConfig(address,(uint16,uint16,bool))");
+    /// @custom:error ExceedsMaxDeviation is thrown when a threshold is out of range
+    function setNavGuardConfig(address yieldGroup, address resource, uint16 pauseUpBps, uint16 pauseDownBps) external {
+        _checkAccessAllowed("setNavGuardConfig(address,address,uint16,uint16)");
 
-        if (resource == address(0)) revert ZeroAddress();
-        if (config.pauseUpBps == 0 || config.pauseDownBps == 0) revert ZeroDeviation();
-        if (config.pauseUpBps > MAX_DEVIATION_BPS || config.pauseDownBps > MAX_DEVIATION_BPS) {
-            revert ExceedsMaxDeviation();
-        }
+        if (yieldGroup == address(0) || resource == address(0)) revert ZeroAddress();
+        if (pauseUpBps == 0 || pauseDownBps == 0) revert ZeroDeviation();
+        if (pauseUpBps > MAX_DEVIATION_BPS || pauseDownBps >= MAX_DEVIATION_BPS) revert ExceedsMaxDeviation();
 
-        navGuardConfigs[resource] = config;
-        emit NavGuardConfigUpdated(resource, config);
+        NavGuardConfig storage config = navGuardConfigs[yieldGroup][resource];
+        config.pauseUpBps = pauseUpBps;
+        config.pauseDownBps = pauseDownBps;
+
+        emit NavGuardConfigUpdated(yieldGroup, resource, config);
     }
 
     /// @notice Start or stop watching a resource's NavGuard band, keeping its thresholds
+    /// @param yieldGroup Address of the YieldGroup holding the resource
     /// @param resource Address of the resource
     /// @param enabled Whether to watch this resource's band
     /// @custom:event Emits NavGuardStatusChanged event
-    /// @custom:error ZeroAddress is thrown when resource address is zero
+    /// @custom:error ZeroAddress is thrown when the YieldGroup or resource address is zero
     /// @custom:error ResourceNotConfigured is thrown when resource has no thresholds set
-    function setNavGuardEnabled(address resource, bool enabled) external {
-        _checkAccessAllowed("setNavGuardEnabled(address,bool)");
+    function setNavGuardEnabled(address yieldGroup, address resource, bool enabled) external {
+        _checkAccessAllowed("setNavGuardEnabled(address,address,bool)");
 
-        if (resource == address(0)) revert ZeroAddress();
+        if (yieldGroup == address(0) || resource == address(0)) revert ZeroAddress();
 
-        NavGuardConfig storage config = navGuardConfigs[resource];
-        if (config.pauseUpBps == 0 || config.pauseDownBps == 0) revert ResourceNotConfigured(resource);
+        NavGuardConfig storage config = navGuardConfigs[yieldGroup][resource];
+        if (config.pauseUpBps == 0 || config.pauseDownBps == 0) revert ResourceNotConfigured(yieldGroup, resource);
 
         config.enabled = enabled;
-        emit NavGuardStatusChanged(resource, enabled);
+        emit NavGuardStatusChanged(yieldGroup, resource, enabled);
     }
 
     /// @notice Handle a NavGuard band breach on a Liquidity Hub resource by pausing the Hub and the resource
-    /// @dev Keeper-gated, but the keeper asserts nothing: the breach is re-derived here, so a
-    ///      leaked key can only pause when a real breach exists. Shares `_checkNavGuardDeviation` with
-    ///      the public view and does nothing but turn its verdict into an error, so the two cannot
-    ///      disagree. Reverts when no action is due, so a keeper that simulates first never pays
-    ///      for a no-op; monitoring reads `checkNavGuardDeviation` instead of simulating.
+    /// @dev Keeper-gated, and reverts when no action is due. Shares `_checkNavGuardDeviation` with
+    ///      the public view, so the two cannot disagree.
     ///
-    ///      Both pauses fire, not one. Pausing only the resource is worse: it still counts toward
-    ///      `totalAssets()` but can no longer be withdrawn from, so redemptions drain the healthy
-    ///      positions and leave holders a bigger share of the bad one. The Hub pause stops the harm;
-    ///      the resource pause keeps a later `unpauseHub` from routing back into it. Both are
-    ///      idempotent, so a repeat call changes nothing.
+    ///      Both pauses fire or neither does. Pausing only the resource is worse: it still counts
+    ///      toward `totalAssets()` but can no longer be withdrawn from, so redemptions drain the
+    ///      healthy positions. The registered check upstream removes the only thing the YieldGroup
+    ///      rejects `pauseResource` for, so the pair is safe unguarded.
     ///
-    ///      Recovery is a VIP, in this order: value the position, `setNavGuardSnapshot` to it,
+    ///      Re-deriving the breach guards against a stale keeper input, not a hostile one — the
+    ///      keeper also names the contracts the verdict comes from. A fabricated `hub`/`yieldGroup`
+    ///      pair reaches spoofed events and a no-arg `pauseHub()` to that address; it cannot touch
+    ///      a real Hub, and EBrake holds no funds. Accepted while the keeper is a protocol EOA.
+    ///
+    ///      Recovery is a VIP: value the position, `setNavGuardSnapshot` to it, `unpauseResource`,
     ///      then `unpauseHub`. Unpausing without re-anchoring resumes the same step-down.
-    /// @param hub The Liquidity Hub to pause. Not validated here: EBrake's `pauseHub` is ACM-checked
-    ///        on the Hub, so an address we hold no role on is a no-op.
-    /// @param yieldGroup The YieldGroup holding the resource. Checked against the Hub's registry.
+    /// @param hub The Liquidity Hub to pause. Not validated — a hub EBrake holds no role on reverts.
+    /// @param yieldGroup The YieldGroup holding the resource. Checked against that Hub's registry.
     /// @param resource The resource whose NavGuard band to read
     /// @custom:event Emits NavGuardDeviationHandled with the band context at detection time
     /// @custom:error UnauthorizedKeeper is thrown when caller is not a trusted keeper
     /// @custom:error NavGuardDisabled is thrown when the resource's band is not being watched
     /// @custom:error YieldGroupNotRegistered is thrown when the Hub does not list the YieldGroup
-    /// @custom:error NavGuardNotClamped is thrown when the band is not currently clamping
+    /// @custom:error ResourceNotRegistered is thrown when the YieldGroup does not list the resource
+    /// @custom:error NavGuardNotClamped is thrown when the band holds nothing measurable
     /// @custom:error DeviationWithinThreshold is thrown when the clamp is below the pause threshold
     function handleNavGuardDeviation(address hub, address yieldGroup, address resource) external onlyKeeper {
         (
@@ -365,8 +380,9 @@ contract DeviationSentinel is AccessControlledV8 {
             uint256 maxAllowedValue
         ) = _checkNavGuardDeviation(hub, yieldGroup, resource);
 
-        if (status == NavGuardCheckStatus.MonitoringDisabled) revert NavGuardDisabled(resource);
+        if (status == NavGuardCheckStatus.MonitoringDisabled) revert NavGuardDisabled(yieldGroup, resource);
         if (status == NavGuardCheckStatus.YieldGroupNotRegistered) revert YieldGroupNotRegistered(hub, yieldGroup);
+        if (status == NavGuardCheckStatus.ResourceNotRegistered) revert ResourceNotRegistered(yieldGroup, resource);
         if (status == NavGuardCheckStatus.NotClamped) revert NavGuardNotClamped(resource);
         if (status == NavGuardCheckStatus.WithinThreshold) revert DeviationWithinThreshold(resource, observedValue);
 
@@ -413,13 +429,11 @@ contract DeviationSentinel is AccessControlledV8 {
 
     /// @notice Check whether a Liquidity Hub resource's NAV has broken through its NavGuard band by
     ///         more than the configured threshold
-    /// @dev The read-only twin of `handleNavGuardDeviation`, shaped like `checkPriceDeviation`. Never
-    ///      reverts, so monitoring can call it for any resource it finds and decide from the
-    ///      return value alone.
+    /// @dev The read-only twin of `handleNavGuardDeviation`. `hasDeviation` is false for every
+    ///      reason not to pause; simulate the handler to tell those apart, it names each one.
     ///
-    ///      `hasDeviation` is false for every reason not to pause: not armed, YieldGroup not
-    ///      registered, band not clamping, or clamp inside the threshold. To tell those apart,
-    ///      simulate `handleNavGuardDeviation` — it names each one with its own error.
+    ///      Not revert-proof: `hub` and `yieldGroup` are caller-supplied, so a non-contract address
+    ///      or a revert inside either propagates. Monitoring should tolerate a failed call.
     /// @param hub The Liquidity Hub holding the YieldGroup
     /// @param yieldGroup The YieldGroup holding the resource
     /// @param resource The resource whose NavGuard band to read
@@ -431,19 +445,19 @@ contract DeviationSentinel is AccessControlledV8 {
         address hub,
         address yieldGroup,
         address resource
-    ) public view returns (bool hasDeviation, uint256 observedValue, uint256 minAllowedValue, uint256 maxAllowedValue) {
+    )
+        external
+        view
+        returns (bool hasDeviation, uint256 observedValue, uint256 minAllowedValue, uint256 maxAllowedValue)
+    {
         NavGuardCheckStatus status;
         (status, observedValue, minAllowedValue, maxAllowedValue) = _checkNavGuardDeviation(hub, yieldGroup, resource);
         hasDeviation = status == NavGuardCheckStatus.Breached;
     }
 
     /// @notice Decide whether a resource's NAV warrants a pause, and why
-    /// @dev The one implementation. `checkNavGuardDeviation` narrows the result to a bool for
-    ///      monitoring; `handleNavGuardDeviation` turns it into an error. Neither repeats the work, so
-    ///      the view can never say breached where the transaction would not.
-    ///
-    ///      Thresholds are measured outward from the band's bounds, so the trigger is always wider
-    ///      than the band's own gaps.
+    /// @dev The one implementation: the view narrows it to a bool, the handler turns it into an
+    ///      error. Neither repeats the work, so they cannot disagree.
     /// @param hub The Liquidity Hub holding the YieldGroup
     /// @param yieldGroup The YieldGroup holding the resource
     /// @param resource The resource whose NavGuard band to read
@@ -460,22 +474,28 @@ contract DeviationSentinel is AccessControlledV8 {
         view
         returns (NavGuardCheckStatus status, uint256 observedValue, uint256 minAllowedValue, uint256 maxAllowedValue)
     {
-        NavGuardConfig memory config = navGuardConfigs[resource];
+        NavGuardConfig memory config = navGuardConfigs[yieldGroup][resource];
         if (!config.enabled) return (NavGuardCheckStatus.MonitoringDisabled, 0, 0, 0);
 
-        // Stops a fake YieldGroup reporting an invented clamp from pausing the real Hub.
         if (!IHub(hub).yieldGroupConfig(yieldGroup).registered) {
             return (NavGuardCheckStatus.YieldGroupNotRegistered, 0, 0, 0);
         }
+
+        // Unregistered means zero balance, so it is outside totalAssets() and cannot harm the Hub.
+        // Also the only thing the YieldGroup rejects pauseResource for.
+        (bool registered, , ) = IYieldGroupNav(yieldGroup).resourceConfig(resource);
+        if (!registered) return (NavGuardCheckStatus.ResourceNotRegistered, 0, 0, 0);
 
         bool isClamped;
         (observedValue, minAllowedValue, maxAllowedValue, isClamped, ) = IYieldGroupNav(yieldGroup).navGuardStatus(
             resource
         );
 
-        // Check isClamped before comparing values: an unreadable adapter reports
-        // observedValue == 0, which a bare comparison would read as a total loss.
-        if (!isClamped) return (NavGuardCheckStatus.NotClamped, observedValue, minAllowedValue, maxAllowedValue);
+        // Both guards exist to stop a zero reading as a breach: an unreadable adapter reports
+        // observedValue == 0, and a never-anchored [0, 0] band gives a zero upside threshold.
+        if (!isClamped || maxAllowedValue == 0) {
+            return (NavGuardCheckStatus.NotClamped, observedValue, minAllowedValue, maxAllowedValue);
+        }
 
         bool breached = observedValue <
             (minAllowedValue * (MAX_DEVIATION_BPS - config.pauseDownBps)) / MAX_DEVIATION_BPS ||

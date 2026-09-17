@@ -77,6 +77,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          calls setCollateralFactor(poolId, market, newCF, LT) which returns uint256 error code
  *        - Supports e-mode pools via poolId > 0
  *        - pauseFlashLoan() — flash loans only exist on Diamond
+ *        - pauseHub(hub), pauseResource(yieldGroup, resource) — the Liquidity Hub is BSC-only
  *        - disablePoolBorrow(poolId, market) — per-pool granular borrow disable, only on Diamond
  *        - revokeFlashLoanAccess(account) — remove a single account from the flash loan
  *          whitelist; flash loan whitelist only exists on Diamond
@@ -90,6 +91,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - No poolId concept — only the core pool exists (other pools are deprecated)
  *        - decreaseCF(market, poolId, newCF) not granted ACM permission (no pool concept on IL)
  *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)
+ *        - pauseHub()/pauseResource() not granted ACM permission (no Liquidity Hub off BSC)
  *        - ACM permission strings have no underscore:
  *          setActionsPaused, setMarketBorrowCaps, setMarketSupplyCaps
  *
