@@ -2,6 +2,7 @@ import { FakeContract, smock } from "@defi-wonderland/smock";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import type { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import chai from "chai";
+import { parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
 import type {
@@ -10,6 +11,7 @@ import type {
   IEBrake,
   IHub,
   IHubRegistry,
+  IVToken,
   IYieldGroupNav,
   OracleInterface,
   ResilientOracleInterface,
@@ -33,6 +35,11 @@ const Status = {
   WithinThreshold: 5,
   Breached: 6,
 };
+
+// The exact strings the two setters ask the ACM for, and therefore the exact strings an onboarding
+// VIP has to grant. A typo costs nothing at compile time and silently grants nothing on chain.
+const SET_CONFIG_ROLE = "setHubNavConfig(address,address,uint16,uint16)";
+const SET_ENABLED_ROLE = "setNavMonitoringEnabled(address,address,bool)";
 
 // Pause thresholds, measured from the centre: 10% down, 5% up.
 const PAUSE_DOWN_BPS = 1_000;
@@ -120,6 +127,8 @@ describe("DeviationSentinel — NavGuard deviation", () => {
     accessControlManager.isAllowedToCall.reset();
     accessControlManager.isAllowedToCall.returns(true);
     eBrake.pauseHub.reset();
+    eBrake.pauseBorrow.reset();
+    eBrake.pauseSupply.reset();
     hubRegistry.isHub.reset();
     hub.yieldGroupConfig.reset();
     yieldGroup.hub.reset();
@@ -154,13 +163,33 @@ describe("DeviationSentinel — NavGuard deviation", () => {
       expect(stored.hub).to.equal(hub.address);
     });
 
-    // The Hub is never passed in. It is read off the YieldGroup, so governance has nothing to
-    // mistype and the keeper later has nothing to choose.
-    it("takes the Hub from the YieldGroup rather than from the caller", async () => {
-      await deviationSentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200);
+    // The Hub is never passed in. Pointed at a second Hub, so passing only because the fixture's
+    // Hub is the one it would have picked anyway is not enough to make this go green.
+    it("stores whichever Hub the YieldGroup names, not the fixture's", async () => {
+      const otherHub = await smock.fake<IHub>("IHub");
+      otherHub.yieldGroupConfig.returns([0, 0, false, true]);
+      yieldGroup.hub.returns(otherHub.address);
 
-      expect(yieldGroup.hub).to.have.been.called;
-      expect(hubRegistry.isHub).to.have.been.calledWith(hub.address);
+      await expect(deviationSentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200))
+        .to.emit(deviationSentinel, "NavGuardConfigUpdated")
+        .withArgs(otherHub.address, yieldGroup.address, OTHER_RESOURCE, [otherHub.address, 100, 200, false]);
+
+      expect((await deviationSentinel.navGuardConfigs(yieldGroup.address, OTHER_RESOURCE)).hub).to.equal(
+        otherHub.address,
+      );
+      expect(hubRegistry.isHub).to.have.been.calledWith(otherHub.address);
+      expect(otherHub.yieldGroupConfig).to.have.been.calledWith(yieldGroup.address);
+    });
+
+    // A retune re-resolves it, so a stored Hub cannot outlive the YieldGroup that named it.
+    it("refreshes the stored Hub on a retune", async () => {
+      const otherHub = await smock.fake<IHub>("IHub");
+      otherHub.yieldGroupConfig.returns([0, 0, false, true]);
+      yieldGroup.hub.returns(otherHub.address);
+
+      await deviationSentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS);
+
+      expect((await deviationSentinel.navGuardConfigs(yieldGroup.address, RESOURCE)).hub).to.equal(otherHub.address);
     });
 
     // A YieldGroup naming a Hub Venus never onboarded. The registry is the only party here that
@@ -288,10 +317,14 @@ describe("DeviationSentinel — NavGuard deviation", () => {
       await expect(deviationSentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 10_000, 100)).to.not.be.reverted;
     });
 
-    it("is ACM gated", async () => {
+    // Pins the ACM string itself rather than just that some check ran. `Unauthorized` carries the
+    // signature the contract asked for, so a drift between it and what a VIP grants fails here.
+    it("asks the ACM for exactly setHubNavConfig(address,address,uint16,uint16)", async () => {
       accessControlManager.isAllowedToCall.returns(false);
 
-      await expect(deviationSentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 1, 1)).to.be.reverted;
+      await expect(deviationSentinel.connect(user).setHubNavConfig(yieldGroup.address, RESOURCE, 1, 1))
+        .to.be.revertedWithCustomError(deviationSentinel, "Unauthorized")
+        .withArgs(user.address, deviationSentinel.address, SET_CONFIG_ROLE);
     });
   });
 
@@ -368,10 +401,12 @@ describe("DeviationSentinel — NavGuard deviation", () => {
       expect(stored.enabled).to.equal(false);
     });
 
-    it("is ACM gated", async () => {
+    it("asks the ACM for exactly setNavMonitoringEnabled(address,address,bool)", async () => {
       accessControlManager.isAllowedToCall.returns(false);
 
-      await expect(deviationSentinel.setNavMonitoringEnabled(yieldGroup.address, RESOURCE, false)).to.be.reverted;
+      await expect(deviationSentinel.connect(user).setNavMonitoringEnabled(yieldGroup.address, RESOURCE, false))
+        .to.be.revertedWithCustomError(deviationSentinel, "Unauthorized")
+        .withArgs(user.address, deviationSentinel.address, SET_ENABLED_ROLE);
     });
   });
 
@@ -393,7 +428,7 @@ describe("DeviationSentinel — NavGuard deviation", () => {
         .to.emit(deviationSentinel, "NavGuardDeviationHandled")
         .withArgs(hub.address, yieldGroup.address, RESOURCE, 2_200, CENTRE, MIN, MAX);
 
-      expect(eBrake.pauseHub).to.have.been.calledOnce;
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
     });
 
     // The Hub that gets paused comes from the config, not from the call. Even a YieldGroup that has
@@ -453,7 +488,7 @@ describe("DeviationSentinel — NavGuard deviation", () => {
 
       await deviationSentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE);
 
-      expect(eBrake.pauseHub).to.have.been.calledOnce;
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
     });
 
     // A zero threshold reads as the tightest trip point there is if it is not tested for first:
@@ -474,7 +509,7 @@ describe("DeviationSentinel — NavGuard deviation", () => {
 
       await deviationSentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE);
 
-      expect(eBrake.pauseHub).to.have.been.calledOnce;
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
     });
 
     it("leaves a value inside the band alone whether or not the Hub is clamping", async () => {
@@ -559,7 +594,24 @@ describe("DeviationSentinel — NavGuard deviation", () => {
       expect(yieldGroup.navGuardStatus).to.not.have.been.called;
     });
 
-    it("trips exactly at the threshold boundary, not one wei inside it", async () => {
+    // The two sides are separate expressions — one subtracts from BPS, the other adds — so the
+    // downside boundary passing says nothing about the upside one.
+    it("trips exactly at the upside boundary, not one wei inside it", async () => {
+      // Centre 1500 plus 5% is 1575: 1575 is inside the quiet band, 1576 is past it.
+      navGuardStatus(1_575, true);
+      await expect(deviationSentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(deviationSentinel, "DeviationWithinThreshold")
+        .withArgs(RESOURCE, 1_575);
+
+      navGuardStatus(1_576, true);
+      await expect(deviationSentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE)).to.emit(
+        deviationSentinel,
+        "NavGuardDeviationHandled",
+      );
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
+    });
+
+    it("trips exactly at the downside boundary, not one wei inside it", async () => {
       // Centre 1500 less 10% is 1350: 1350 is inside the quiet band, 1349 is past it.
       navGuardStatus(1_350, true);
       await expect(
@@ -653,6 +705,17 @@ describe("DeviationSentinel — NavGuard deviation", () => {
       expect(result.minAllowedValue).to.equal(MIN);
     });
 
+    it("reports ResourceNotRegistered without reading the band", async () => {
+      registerResource(false);
+      navGuardStatus(1_349, true);
+
+      const { status, hub: reported } = await deviationSentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE);
+
+      expect(status).to.equal(Status.ResourceNotRegistered);
+      expect(reported).to.equal(hub.address);
+      expect(yieldGroup.navGuardStatus).to.not.have.been.called;
+    });
+
     it("reports WithinThreshold for a break inside the threshold", async () => {
       navGuardStatus(1_400, true);
 
@@ -668,7 +731,7 @@ describe("DeviationSentinel — NavGuard deviation", () => {
     });
 
     it("is callable by anyone and pauses nothing", async () => {
-      navGuardStatus(899, true);
+      navGuardStatus(1_349, true);
 
       const { status } = await deviationSentinel.connect(user).checkNavGuardDeviation(yieldGroup.address, RESOURCE);
 
@@ -677,18 +740,56 @@ describe("DeviationSentinel — NavGuard deviation", () => {
     });
   });
 
-  describe("existing price-deviation surface", () => {
-    // The NAV addition is append-only; the pre-existing config must still work untouched.
-    it("still stores a token config alongside a NAV config", async () => {
-      await deviationSentinel.setTokenConfig(RESOURCE, { deviation: 10, enabled: true });
+  describe("deployment", () => {
+    // Four constructor arguments of the same type in a row. Nothing else in this file would notice
+    // two of them swapped, because a wrong registry still answers isHub and a wrong oracle is never
+    // read on this half.
+    it("stores the Hub registry it was constructed with", async () => {
+      expect(await deviationSentinel.HUB_REGISTRY()).to.equal(hubRegistry.address);
+      expect(await deviationSentinel.EBRAKE()).to.equal(eBrake.address);
+      expect(await deviationSentinel.RESILIENT_ORACLE()).to.equal(resilientOracle.address);
+      expect(await deviationSentinel.SENTINEL_ORACLE()).to.equal(sentinelOracle.address);
+    });
+  });
 
-      const token = await deviationSentinel.tokenConfigs(RESOURCE);
-      expect(token.deviation).to.equal(10);
-      expect(token.enabled).to.equal(true);
+  describe("coexistence with the price-deviation surface", () => {
+    // Both halves run on one deployment and one keeper. Checking that the two config mappings do not
+    // collide proves nothing — Solidity guarantees that — so drive both paths instead and pin that
+    // each reaches its own EBrake lever and leaves the other alone.
+    it("runs both halves on one instance, each hitting its own EBrake lever", async () => {
+      const vToken = await smock.fake<IVToken>("IVToken");
+      const underlying = "0x0000000000000000000000000000000000000021";
+      vToken.underlying.returns(underlying);
+      resilientOracle.getPrice.whenCalledWith(underlying).returns(parseUnits("100", 18));
+      sentinelOracle.getPrice.whenCalledWith(underlying).returns(parseUnits("120", 18));
+      await deviationSentinel.setTokenConfig(underlying, { deviation: 10, enabled: true });
 
-      const nav = await deviationSentinel.navGuardConfigs(yieldGroup.address, RESOURCE);
-      expect(nav.pauseDownBps).to.equal(PAUSE_DOWN_BPS);
-      expect(nav.enabled).to.equal(true);
+      // Sentinel price above oracle price: the price half pauses borrow on that one market.
+      await expect(deviationSentinel.connect(keeper).handleDeviation(vToken.address)).to.emit(
+        deviationSentinel,
+        "DeviationHandled",
+      );
+      expect(eBrake.pauseBorrow).to.have.been.calledOnceWith(vToken.address);
+      expect(eBrake.pauseHub).to.have.callCount(0);
+
+      // The NAV half pauses the whole Hub, and touches no market lever doing it.
+      navGuardStatus(1_349, true);
+      await deviationSentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE);
+
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
+      expect(eBrake.pauseBorrow).to.have.callCount(1);
+      expect(eBrake.pauseSupply).to.have.callCount(0);
+    });
+
+    // One keeper list gates both, so a keeper revoked for one is revoked for the other.
+    it("gates both halves on the same keeper list", async () => {
+      navGuardStatus(1_349, true);
+      await deviationSentinel.setTrustedKeeper(keeper.address, false);
+
+      await expect(
+        deviationSentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE),
+      ).to.be.revertedWithCustomError(deviationSentinel, "UnauthorizedKeeper");
+      expect(eBrake.pauseHub).to.have.callCount(0);
     });
   });
 });

@@ -539,8 +539,10 @@ contract DeviationSentinel is AccessControlledV8 {
 
         hub = config.hub;
 
-        // Both were checked when this pair was configured, but either can be undone afterwards,
-        // and a de-registered resource holds nothing worth freezing a Hub for.
+        // Two of the three checks the setters ran, repeated because either can be undone afterwards
+        // and a de-registered resource holds nothing worth freezing a Hub for. The registry check
+        // is deliberately not among them: a Hub dropped from the registry has usually been replaced
+        // for its asset and still holds the funds it held, so it stays pausable.
         if (!IHub(hub).yieldGroupConfig(yieldGroup).registered) {
             return (NavGuardCheckStatus.YieldGroupNotRegistered, hub, 0, 0, 0, 0);
         }
@@ -586,10 +588,16 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Resolve a YieldGroup's Hub and prove the whole chain down to the resource is live
     /// @dev Three reads, each covering what the one before cannot: the registry vouches for the
     ///      Hub, the Hub for the YieldGroup, and the YieldGroup for the resource.
+    ///
+    ///      What it does not check is that the thresholds clear the Hub's own gaps. Both are
+    ///      measured from the same centre, so a threshold under the gap trips inside the band and
+    ///      freezes the Hub over a value it is not even clamping. Left to the VIP author, because
+    ///      the check cannot be made whole from this side: a band that is not configured yet reads
+    ///      zero gaps, and the Hub can widen its own afterwards with nothing here to notice.
     /// @param yieldGroup YieldGroup to resolve
     /// @param resource Resource that must belong to it
     /// @return hub The Hub that YieldGroup reports to
-    function _requireLiveResource(address yieldGroup, address resource) internal view returns (address hub) {
+    function _requireLiveResource(address yieldGroup, address resource) private view returns (address hub) {
         if (address(HUB_REGISTRY) == address(0)) revert HubRegistryUnavailable();
 
         hub = IYieldGroupNav(yieldGroup).hub();
