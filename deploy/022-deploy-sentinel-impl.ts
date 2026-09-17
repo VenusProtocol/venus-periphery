@@ -25,7 +25,11 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   const resilientOracle = ADDRESSES.preconfiguredAddresses.ResilientOracle;
   const sentinelOracle = await hre.ethers.getContract("SentinelOracle");
 
-  const constructorArgs = [eBrakeAddress, resilientOracle, sentinelOracle.address];
+  // Only BSC runs a Liquidity Hub. Elsewhere the sentinel takes the zero address and its NavGuard
+  // setters revert with HubRegistryUnavailable; the price-deviation half is unaffected.
+  const hubRegistry = ADDRESSES.preconfiguredAddresses.HubRegistry ?? ethers.constants.AddressZero;
+
+  const constructorArgs = [eBrakeAddress, resilientOracle, sentinelOracle.address, hubRegistry];
 
   const result = await deploy("DeviationSentinel_Implementation", {
     contract: "DeviationSentinel",

@@ -5,8 +5,8 @@ pragma solidity ^0.8.25;
  * @title IHubLiquidity
  * @author Venus
  * @notice Minimal views and emergency levers DeviationSentinel and EBrake need from the Liquidity Hub.
- * @dev Only the functions those two call, so venus-periphery takes no dependency on the
- *      liquidity-hub repo. Signatures must stay byte-identical — the selectors are what matter.
+ * @dev Hand-copied so this repo takes no dependency on liquidity-hub. Nothing cross-checks the
+ *      selectors at build time, so a signature that drifts from the Hub's reverts on chain.
  */
 interface IHub {
     /// @notice Per-YieldGroup configuration held by the Hub's registry.
@@ -36,15 +36,54 @@ interface IHub {
 }
 
 /**
+ * @title IHubRegistry
+ * @author Venus
+ * @notice The chain-level Hub directory, as far as DeviationSentinel needs it.
+ * @dev One per chain, and only on chains that run a Liquidity Hub. Governance writes it, so it
+ *      answers whether an address is a Hub Venus onboarded rather than one that claims to be.
+ */
+interface IHubRegistry {
+    /// @notice Whether an address is a registered Hub.
+    /// @param hub Address to check.
+    /// @return registered True iff the registry lists `hub`.
+    function isHub(address hub) external view returns (bool registered);
+}
+
+/**
  * @title IYieldGroupNav
  * @author Venus
- * @notice The NavGuard read and the resource pause DeviationSentinel and EBrake need from a YieldGroup.
+ * @notice The registry and NavGuard reads DeviationSentinel needs from a YieldGroup.
  */
 interface IYieldGroupNav {
-    /// @notice Pause routing to a specific resource. Existing balance stays counted.
-    /// @dev ACM role `"pauseResource(address)"`. Idempotent. Reverts if `resource` is not registered.
-    /// @param resource Resource to pause.
-    function pauseResource(address resource) external;
+    /// @notice A resource's NavGuard band, as stored by the YieldGroup.
+    /// @param anchor Value the two gaps are sized off.
+    /// @param centre Where the band sits: the anchor plus Venus's own deposits since.
+    /// @param anchoredAt When the band last re-anchored.
+    /// @param driftFrom When the drift clock last restarted.
+    /// @param interval Seconds between re-anchors; `0` means no band is configured.
+    /// @param driftBps Annual drift allowance, in basis points.
+    /// @param upGapBps How far above the centre the band reaches, in basis points of the anchor.
+    /// @param downGapBps How far below the centre the band reaches, in basis points of the anchor.
+    /// @param capEnabled Whether the Hub holds its valuation to the cap.
+    /// @param floorEnabled Whether the Hub holds its valuation to the floor.
+    struct NavBand {
+        uint128 anchor;
+        uint128 centre;
+        uint64 anchoredAt;
+        uint64 driftFrom;
+        uint32 interval;
+        uint16 driftBps;
+        uint16 upGapBps;
+        uint16 downGapBps;
+        bool capEnabled;
+        bool floorEnabled;
+    }
+
+    /// @notice The Hub this YieldGroup reports assets to.
+    /// @dev Written once in the YieldGroup's initializer, so DeviationSentinel can derive the Hub
+    ///      from the YieldGroup instead of having a keeper name it.
+    /// @return hubAddress Hub that owns this YieldGroup.
+    function hub() external view returns (address hubAddress);
 
     /// @notice Per-resource registration / pause state plus the adapter handling it.
     /// @param resource Address to look up.
@@ -53,11 +92,27 @@ interface IYieldGroupNav {
     /// @return adapter `IResourceAdapter` implementation bound to this resource.
     function resourceConfig(address resource) external view returns (bool registered, bool paused, address adapter);
 
+    /// @notice The band's own stored numbers for a resource.
+    /// @dev Field order must match the Hub's `NavBand` exactly. `anchor` and `centre` are both
+    ///      `uint128` and adjacent, so a reordering there would decode silently wrong rather than
+    ///      revert — pin this against `INavGuard.NavBand` when upgrading either side.
+    ///
+    ///      `centre` is the stored value, not the drifted one the Hub applies: it is brought up to
+    ///      date on every flow and re-anchor, and accrues `driftBps` in between. At the deployed
+    ///      settings — 8%/yr drift on a 1-day interval — that is about 2 bps of staleness, which is
+    ///      why DeviationSentinel reads it raw rather than re-deriving the live centre.
+    /// @param resource Resource to look up.
+    /// @return band The stored band.
+    function navGuard(address resource) external view returns (NavBand memory band);
+
     /// @notice Where a resource's value stands against its NavGuard band right now.
-    /// @dev Never reverts. An unreadable value source reports `observedValue` as zero with
-    ///      `isClamped` false, which is why DeviationSentinel checks `isClamped` first.
+    /// @dev Never reverts. A zero `observedValue` is ambiguous on purpose: the Hub reads the value
+    ///      source as `(value, readable)` and drops the flag here, so a read that failed and a
+    ///      position the counterparty prices at nothing arrive identically. Neither can be told from
+    ///      the other through this interface, which is why DeviationSentinel treats a zero as no
+    ///      verdict rather than as a total loss.
     /// @param resource Resource to read.
-    /// @return observedValue Value the counterparty reports, in asset units; `0` if unreadable.
+    /// @return observedValue Value the counterparty reports, in asset units; `0` if unreadable or genuinely zero.
     /// @return minAllowedValue Lowest value the band allows right now.
     /// @return maxAllowedValue Highest value the band allows right now.
     /// @return isClamped Whether valuation is currently reporting a bound instead of `observedValue`.

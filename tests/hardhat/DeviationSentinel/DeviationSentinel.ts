@@ -58,7 +58,7 @@ describe("DeviationSentinel", () => {
     // ── Deploy proxy ──
     const Factory = await ethers.getContractFactory("DeviationSentinel");
     deviationSentinel = (await upgrades.deployProxy(Factory, [accessControlManager.address], {
-      constructorArgs: [eBrake.address, resilientOracle.address, sentinelOracle.address],
+      constructorArgs: [eBrake.address, resilientOracle.address, sentinelOracle.address, ZERO_ADDRESS],
       unsafeAllow: ["constructor", "internal-function-storage"],
     })) as DeviationSentinel;
 
@@ -99,7 +99,7 @@ describe("DeviationSentinel", () => {
       const Factory = await ethers.getContractFactory("DeviationSentinel");
       await expect(
         upgrades.deployProxy(Factory, [accessControlManager.address], {
-          constructorArgs: [ZERO_ADDRESS, resilientOracle.address, sentinelOracle.address],
+          constructorArgs: [ZERO_ADDRESS, resilientOracle.address, sentinelOracle.address, ZERO_ADDRESS],
           unsafeAllow: ["constructor", "internal-function-storage"],
         }),
       ).to.be.revertedWithCustomError(deviationSentinel, "ZeroAddress");
@@ -109,7 +109,7 @@ describe("DeviationSentinel", () => {
       const Factory = await ethers.getContractFactory("DeviationSentinel");
       await expect(
         upgrades.deployProxy(Factory, [accessControlManager.address], {
-          constructorArgs: [eBrake.address, ZERO_ADDRESS, sentinelOracle.address],
+          constructorArgs: [eBrake.address, ZERO_ADDRESS, sentinelOracle.address, ZERO_ADDRESS],
           unsafeAllow: ["constructor", "internal-function-storage"],
         }),
       ).to.be.revertedWithCustomError(deviationSentinel, "ZeroAddress");
@@ -119,7 +119,7 @@ describe("DeviationSentinel", () => {
       const Factory = await ethers.getContractFactory("DeviationSentinel");
       await expect(
         upgrades.deployProxy(Factory, [accessControlManager.address], {
-          constructorArgs: [eBrake.address, resilientOracle.address, ZERO_ADDRESS],
+          constructorArgs: [eBrake.address, resilientOracle.address, ZERO_ADDRESS, ZERO_ADDRESS],
           unsafeAllow: ["constructor", "internal-function-storage"],
         }),
       ).to.be.revertedWithCustomError(deviationSentinel, "ZeroAddress");

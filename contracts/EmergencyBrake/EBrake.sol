@@ -5,16 +5,15 @@ import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IILComptroller } from "../Interfaces/IILComptroller.sol";
 import { IEBrake } from "./IEBrake.sol";
-import { IHub, IYieldGroupNav } from "../Interfaces/IHubLiquidity.sol";
+import { IHub } from "../Interfaces/IHubLiquidity.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
 /**
  * @title EBrake — Emergency Brake Contract
  * @author Venus Protocol
  * @notice Emergency action router for Venus Protocol (deployed behind a TransparentUpgradeableProxy).
- *         This contract holds NO detection logic — it only exposes emergency functions of the
- *         protocols it routes to, behind ACM permissions. That is the Comptroller, plus the
- *         Liquidity Hub and its YieldGroups. See IEBrake for full design documentation.
+ *         This contract holds NO detection logic — it only exposes Comptroller and Liquidity Hub
+ *         emergency functions behind ACM permissions. See IEBrake for full design documentation.
  */
 contract EBrake is IEBrake, AccessControlledV8 {
     /// @notice Snapshot of a market's pre-incident state, captured by EBrake before tightening.
@@ -160,18 +159,6 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
         IHub(hub).pauseHub();
         emit HubPaused(msg.sender, hub);
-    }
-
-    /// @inheritdoc IEBrake
-    function pauseResource(address yieldGroup, address resource) external {
-        _checkAccessAllowed("pauseResource(address,address)");
-        if (yieldGroup == address(0) || resource == address(0)) revert ZeroAddress();
-
-        (, bool paused, ) = IYieldGroupNav(yieldGroup).resourceConfig(resource);
-        if (paused) return;
-
-        IYieldGroupNav(yieldGroup).pauseResource(resource);
-        emit ResourcePaused(msg.sender, yieldGroup, resource);
     }
 
     /// @inheritdoc IEBrake

@@ -60,8 +60,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - Decreases collateral factor (blocks new borrows against asset, does NOT liquidate
  *          existing positions — that requires LT change, which EBrake cannot do)
  *        - Pauses flash loans (blocks flash loan attack vector, no user impact)
- *        - Pauses the Liquidity Hub and routing to one of its resources (blocks deposits and
- *          redemptions; existing balances untouched, and emergencyReallocate still works)
+ *        - Pauses the Liquidity Hub (blocks deposits and redemptions; existing balances
+ *          untouched, and emergencyReallocate still works)
  *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.
  *
  *   BSC vs NON-BSC DIFFERENCES:
@@ -77,7 +77,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          calls setCollateralFactor(poolId, market, newCF, LT) which returns uint256 error code
  *        - Supports e-mode pools via poolId > 0
  *        - pauseFlashLoan() — flash loans only exist on Diamond
- *        - pauseHub(hub), pauseResource(yieldGroup, resource) — the Liquidity Hub is BSC-only
+ *        - pauseHub(hub) — the Liquidity Hub is BSC-only
  *        - disablePoolBorrow(poolId, market) — per-pool granular borrow disable, only on Diamond
  *        - revokeFlashLoanAccess(account) — remove a single account from the flash loan
  *          whitelist; flash loan whitelist only exists on Diamond
@@ -91,7 +91,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - No poolId concept — only the core pool exists (other pools are deprecated)
  *        - decreaseCF(market, poolId, newCF) not granted ACM permission (no pool concept on IL)
  *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)
- *        - pauseHub()/pauseResource() not granted ACM permission (no Liquidity Hub off BSC)
+ *        - pauseHub(address) not granted ACM permission (no Liquidity Hub off BSC). Note this is
+ *          EBrake's own role; the role EBrake must hold on the Hub is the Hub's `pauseHub()`.
  *        - ACM permission strings have no underscore:
  *          setActionsPaused, setMarketBorrowCaps, setMarketSupplyCaps
  *
@@ -174,12 +175,6 @@ interface IEBrake {
     /// @param caller The address that triggered the pause.
     /// @param hub The Hub that was paused.
     event HubPaused(address indexed caller, address indexed hub);
-
-    /// @notice Emitted when a YieldGroup resource was paused through EBrake.
-    /// @param caller The address that triggered the pause.
-    /// @param yieldGroup The YieldGroup holding the resource.
-    /// @param resource The resource that was paused.
-    event ResourcePaused(address indexed caller, address indexed yieldGroup, address indexed resource);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
@@ -314,34 +309,12 @@ interface IEBrake {
 
     /**
      * @notice Pause the Liquidity Hub, halting deposits and redemptions.
-     * @dev Stateless forwarder: EBrake holds the Hub's `pauseHub()` ACM role and exposes it behind
-     *      its own. Tighten-only — unpausing is a VIP against the Hub directly.
-     *
-     *      The Hub is BSC-only, so this is unreachable on EBrake's other five chains, where the
-     *      role is simply never granted. One implementation everywhere beats divergent ones.
-     *
-     *      Idempotent: an already-paused Hub is a no-op with no event, so HubPaused stays a true
-     *      state-change signal — same as {pauseFlashLoan}. The `hubPaused()` read pays for itself,
-     *      because the Hub checks ACM before idempotency.
+     * @dev Forwards to the Hub, which EBrake holds the `pauseHub()` ACM role on. Tighten-only —
+     *      unpausing is a VIP against the Hub directly. An already-paused Hub is a no-op with no
+     *      event, so {HubPaused} stays a true state-change signal, as {pauseFlashLoan} does.
      * @param hub The Liquidity Hub to pause.
      */
     function pauseHub(address hub) external;
-
-    /**
-     * @notice Pause routing to a single resource inside a YieldGroup.
-     * @dev Stateless forwarder. Reverts on a resource the YieldGroup does not list — its check,
-     *      not one EBrake adds.
-     *
-     *      Idempotent: an already-paused resource is a no-op with no event. An unregistered one
-     *      reads back `paused == false`, so it still reaches the YieldGroup and reverts there.
-     *
-     *      A paused resource still counts toward `totalAssets()` but cannot be withdrawn from, so
-     *      pausing it alone props up the share price. Pair it with {pauseHub}, as
-     *      `DeviationSentinel.handleNavGuardDeviation` does.
-     * @param yieldGroup The YieldGroup holding the resource.
-     * @param resource The resource to pause.
-     */
-    function pauseResource(address yieldGroup, address resource) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — RISK PARAMETER ADJUSTMENTS
