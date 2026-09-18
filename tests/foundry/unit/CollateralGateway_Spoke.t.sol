@@ -82,10 +82,11 @@ contract CollateralGateway_SpokeTest is Test {
     MockSpokeVToken internal market;
 
     address internal user = address(0xBEEF);
+    address internal owner = makeAddr("owner");
 
     function setUp() public {
         comptroller = new MockSpokeComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.allow(address(gateway));
 
         underlying = new MockERC20("Collateral", "COL", 18);

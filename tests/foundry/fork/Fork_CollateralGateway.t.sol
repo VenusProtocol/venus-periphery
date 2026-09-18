@@ -74,6 +74,7 @@ contract Fork_CollateralGatewayTest is Test {
 
     CollateralGateway internal gateway;
     address internal user = makeAddr("user");
+    address internal owner = makeAddr("owner");
     bool internal forkLive;
 
     function setUp() public {
@@ -82,7 +83,7 @@ contract Fork_CollateralGatewayTest is Test {
         vm.createSelectFork(rpc, FORK_BLOCK);
         forkLive = true;
 
-        gateway = new CollateralGateway(IComptroller(COMPTROLLER));
+        gateway = new CollateralGateway(IComptroller(COMPTROLLER), owner);
 
         _cutInEnterMarketForAccount();
 

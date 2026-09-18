@@ -1,6 +1,6 @@
 # CollateralGateway
 
-Turns an underlying balance into collateral in one call, on the Core pool and on Spoke Pools, and withdraws a vh position back to the wallet. One shared deployment per chain, with no proxy, no admin and no funds held between calls. The Core Comptroller is fixed at construction: every Core function runs against it, every market named in a call has to be listed there, and the Hub is read off the vh market rather than passed in.
+Turns an underlying balance into collateral in one call, on the Core pool and on Spoke Pools, and withdraws a vh position back to the wallet. One shared deployment per chain, with no proxy and no funds held between calls. The owner's only power is sweeping tokens sent to the contract by mistake. The Core Comptroller is fixed at construction: every Core function runs against it, every market named in a call has to be listed there, and the Hub is read off the vh market rather than passed in.
 
 ## How It Works
 
@@ -87,7 +87,7 @@ Until a grant exists, the functions that need it revert.
 npx hardhat deploy --tags collateral-gateway --network bscmainnet
 ```
 
-The constructor takes the Core Comptroller, read from the `Unitroller` deployment, which exists on `bscmainnet` and `bsctestnet`.
+The constructor takes the Core Comptroller, read from the `Unitroller` deployment, which exists on `bscmainnet` and `bsctestnet`, and the owner, which is the NormalTimelock on a live network.
 
 ## Testing
 

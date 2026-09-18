@@ -86,6 +86,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
     CollateralGateway internal gateway;
     address internal user = makeAddr("gatewayUser");
+    address internal owner = makeAddr("owner");
     address internal manual = makeAddr("manualUser");
     bool internal forkLive;
 
@@ -98,7 +99,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
         vm.createSelectFork(rpc, FORK_BLOCK);
         forkLive = true;
 
-        gateway = new CollateralGateway(IComptroller(COMPTROLLER));
+        gateway = new CollateralGateway(IComptroller(COMPTROLLER), owner);
         _cutInEnterMarketForAccount();
     }
 

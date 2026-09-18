@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IFlashLoanReceiver } from "../Interfaces/IFlashLoanReceiver.sol";
@@ -20,7 +21,8 @@ import { IHub } from "./IHub.sol";
  *         caller's behalf. For a Spoke Pool, supply the underlying itself and enable the market as
  *         the caller's collateral in the same call. Runs the Core supply in reverse too: a withdraw
  *         redeems wallet shares before it touches the market.
- * @dev Stateless by design — no proxy, no admin, no funds held between calls. Every call is atomic:
+ * @dev Stateless by design — no proxy and no funds held between calls, with an owner that can only
+ *      sweep tokens sent here by mistake. Every call is atomic:
  *      a supply pulls the underlying, deposits it, supplies the shares and credits the receipts
  *      straight to the caller, and a withdraw pays the caller in the same call. If any leg fails the
  *      whole call reverts and the caller keeps what they started with.
@@ -33,7 +35,7 @@ import { IHub } from "./IHub.sol";
  *      this gateway was deployed against, and the Hub is checked against the market's
  *      `underlying()`, since a Hub share token is exactly what its Core market wraps.
  */
-contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, ReentrancyGuard {
+contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     uint256 private constant EXP_SCALE = 1e18;
@@ -56,9 +58,11 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     uint256 transient _migrationVTokens;
 
     /// @param comptroller The Core Comptroller. Reverts on the zero address.
-    constructor(IComptroller comptroller) {
-        if (address(comptroller) == address(0)) revert ZeroAddress();
+    /// @param owner_ Account that may sweep tokens sent to this contract. Reverts on the zero address.
+    constructor(IComptroller comptroller, address owner_) {
+        if (address(comptroller) == address(0) || owner_ == address(0)) revert ZeroAddress();
         COMPTROLLER = comptroller;
+        _transferOwnership(owner_);
     }
 
     /// @inheritdoc ICollateralGateway
@@ -217,6 +221,17 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         if (proceeds > repayAmounts[0]) IERC20(asset).safeTransfer(user, proceeds - repayAmounts[0]);
 
         return (true, repayAmounts);
+    }
+
+    /// @inheritdoc ICollateralGateway
+    function sweepToken(IERC20 token) external onlyOwner nonReentrant {
+        uint256 balance = token.balanceOf(address(this));
+        if (balance == 0) revert ZeroAmount();
+
+        address recipient = owner();
+        token.safeTransfer(recipient, balance);
+
+        emit TokenSwept(address(token), recipient, balance);
     }
 
     /// @dev Reverts when the gateway holds less of `asset` than `balanceBefore`. Every address in a

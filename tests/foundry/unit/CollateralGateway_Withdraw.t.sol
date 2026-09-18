@@ -106,6 +106,7 @@ contract CollateralGateway_WithdrawTest is Test {
     MockCoreComptroller internal comptroller;
 
     address internal user = address(0xBEEF);
+    address internal owner = makeAddr("owner");
 
     /// @dev 1 vToken frees `exchangeRate / 1e18` shares, so 50 vTokens back 100 shares.
     uint256 internal constant WALLET_SHARES = 40e24;
@@ -114,7 +115,7 @@ contract CollateralGateway_WithdrawTest is Test {
 
     function setUp() public {
         comptroller = new MockCoreComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         usdt = new MockERC20("Tether", "USDT", 18);
         hub = new MockHubVault(address(usdt));
         market = new MockVhMarket(address(hub));

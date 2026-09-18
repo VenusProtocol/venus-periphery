@@ -280,9 +280,10 @@ contract CollateralGateway_AdversarialTest is Test {
     CollateralGateway internal gateway;
     MockERC20 internal usdt;
     address internal attacker = makeAddr("attacker");
+    address internal owner = makeAddr("owner");
 
     function setUp() public {
-        gateway = new CollateralGateway(IComptroller(address(new EchoingComptroller())));
+        gateway = new CollateralGateway(IComptroller(address(new EchoingComptroller())), owner);
         usdt = new MockERC20("Tether", "USDT", 18);
     }
 
@@ -293,7 +294,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      every address cannot reach a balance the gateway was already holding.
     function test_echoingCallbackCannotSweepTokensHeldByTheGateway() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         usdt.mint(address(gateway), 1000e18);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
@@ -311,7 +312,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      inside the market, which answers an over-redeem with a bare "math error".
     function testRevert_supplyFromCollateral_moreReceiptsThanHeld() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         vToken.setHeld(5);
@@ -327,7 +328,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      balance check makes the whole call revert rather than let it reach a stuck balance.
     function test_greedyHubCannotSpendABalanceTheGatewayHeld() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         usdt.mint(address(gateway), 1000e18);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
@@ -345,7 +346,7 @@ contract CollateralGateway_AdversarialTest is Test {
     /// @dev Approvals granted to caller-supplied addresses do not outlive the call that needed them.
     function test_noApprovalsOutliveTheCall() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         EvilHub hub = new EvilHub(address(usdt));
@@ -362,7 +363,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      leave room for it inside what the redeem pays out.
     function test_flashAmountLeavesRoomForTheMarketFee() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         vToken.setFlashLoanFee(1e16); // 1%
@@ -382,7 +383,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      lists before anything else in the call can be trusted.
     function testRevert_supplyFromCollateral_vhMarketNotListed() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         EvilHub hub = new EvilHub(address(usdt));
@@ -397,7 +398,7 @@ contract CollateralGateway_AdversarialTest is Test {
     /// @dev `type(uint256).max` stands for the caller's whole balance, read when the call runs.
     function test_supplyFromCollateral_maxMigratesTheWholeBalance() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         vToken.setHeld(77e18);
@@ -413,7 +414,7 @@ contract CollateralGateway_AdversarialTest is Test {
     /// @dev A caller holding nothing cannot turn the sentinel into a zero-amount call.
     function testRevert_supplyFromCollateral_maxWithNothingHeld() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         vToken.setHeld(0);
@@ -428,7 +429,7 @@ contract CollateralGateway_AdversarialTest is Test {
     /// @dev The source market is caller-supplied too, so it has to be one the Comptroller lists.
     function testRevert_supplyFromCollateral_sourceMarketNotListed() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         EvilHub hub = new EvilHub(address(usdt));
@@ -444,7 +445,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      a stale borrow balance and can miss a shortfall the redeem then rejects.
     function test_theShortfallCheckReadsAccruedState() public {
         EchoingComptroller comptroller = new EchoingComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         EvilHub hub = new EvilHub(address(usdt));
@@ -460,7 +461,7 @@ contract CollateralGateway_AdversarialTest is Test {
     /// @dev A callback whose amounts do not match what the gateway recorded is rejected outright.
     function test_callbackWithMismatchedAmountsReverts() public {
         EvilComptroller comptroller = new EvilComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         comptroller.setGateway(gateway);
         usdt.mint(address(gateway), 1000e18);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
@@ -490,7 +491,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      rather than emit a success with a stale count.
     function test_flashLoanThatNeverCallsBackReverts() public {
         SilentComptroller comptroller = new SilentComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         EvilHub hub = new EvilHub(address(usdt));
         EvilMarket market = new EvilMarket(address(hub));

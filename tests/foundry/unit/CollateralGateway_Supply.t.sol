@@ -93,10 +93,11 @@ contract CollateralGateway_SupplyTest is Test {
     MockCoreComptroller internal comptroller;
 
     address internal user = address(0xBEEF);
+    address internal owner = makeAddr("owner");
 
     function setUp() public {
         comptroller = new MockCoreComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
         usdt = new MockERC20("Tether", "USDT", 18);
         hub = new MockHubVault(address(usdt));
         market = new MockVhMarket(address(hub), address(comptroller));
@@ -129,7 +130,7 @@ contract CollateralGateway_SupplyTest is Test {
     /// @dev The role is granted to the gateway by governance, so without it nothing should move.
     function testRevert_supplyFromWallet_withoutTheRole() public {
         MockCoreComptroller ungranted = new MockCoreComptroller();
-        CollateralGateway closedGateway = new CollateralGateway(IComptroller(address(ungranted)));
+        CollateralGateway closedGateway = new CollateralGateway(IComptroller(address(ungranted)), owner);
         MockVhMarket closedMarket = new MockVhMarket(address(hub), address(ungranted));
         ungranted.list(address(closedMarket));
 
@@ -143,6 +144,34 @@ contract CollateralGateway_SupplyTest is Test {
         closedGateway.supplyFromWallet(100e18, address(closedMarket), 0);
 
         assertEq(usdt.balanceOf(user), 1000e18, "the whole call reverted, so nothing was pulled");
+    }
+
+    // ------------------------------------------------------------------ sweep
+
+    function test_sweepToken_sendsTheWholeBalanceToTheOwner() public {
+        usdt.mint(address(gateway), 5e18);
+
+        vm.expectEmit(true, true, false, true, address(gateway));
+        emit ICollateralGateway.TokenSwept(address(usdt), owner, 5e18);
+        vm.prank(owner);
+        gateway.sweepToken(IERC20(address(usdt)));
+
+        assertEq(usdt.balanceOf(owner), 5e18, "owner received the stray balance");
+        assertEq(usdt.balanceOf(address(gateway)), 0, "nothing left in the gateway");
+    }
+
+    function testRevert_sweepToken_fromANonOwner() public {
+        usdt.mint(address(gateway), 5e18);
+
+        vm.expectRevert("Ownable: caller is not the owner");
+        vm.prank(user);
+        gateway.sweepToken(IERC20(address(usdt)));
+    }
+
+    function testRevert_sweepToken_withNothingToSweep() public {
+        vm.expectRevert(ICollateralGateway.ZeroAmount.selector);
+        vm.prank(owner);
+        gateway.sweepToken(IERC20(address(usdt)));
     }
 
     /// @dev An unlisted market is the caller's own address, and with it the hub and the asset the

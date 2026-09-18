@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity 0.8.28;
 
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 /**
  * @title ICollateralGateway
  * @author Venus
@@ -8,7 +10,7 @@ pragma solidity 0.8.28;
  *         market, so one call turns an underlying balance into Core collateral. Also supplies
  *         directly into Spoke Pool markets, enabling each as the caller's collateral in the same
  *         call, and redeems a Core position back to the underlying in one call.
- * @dev A single immutable, permissionless deployment serves every Hub of one Core Comptroller,
+ * @dev A single immutable deployment serves every Hub of one Core Comptroller,
  *      which is fixed at construction. The Hub and its market are chosen per call: the market must
  *      be listed by that Comptroller, and its `underlying()` must be the Hub itself, since a Hub
  *      share token is what its market wraps.
@@ -122,6 +124,14 @@ interface ICollateralGateway {
     /// @notice The call ended with less of the underlying in the gateway than it started with.
     error BalanceSpent(uint256 balanceBefore, uint256 balanceAfter);
 
+    /**
+     * @notice Emitted when the owner sweeps tokens that were sent to this contract.
+     * @param token Token swept.
+     * @param recipient Account the balance was sent to.
+     * @param amount Amount swept.
+     */
+    event TokenSwept(address indexed token, address indexed recipient, uint256 amount);
+
     /// @notice The caller holds fewer receipts than the amount they asked to migrate.
     error InsufficientReceipts(uint256 held, uint256 requested);
 
@@ -212,6 +222,16 @@ interface ICollateralGateway {
      * full amount pays out less rather than reverting. `minAssets` is the floor on that payout.
      */
     function withdrawPosition(address vhMarket, uint256 shares, uint256 minAssets) external returns (uint256 assets);
+
+    /**
+     * @notice Send the whole balance of `token` held by this contract to the owner.
+     * @dev No leg of this gateway leaves a balance behind, so this only recovers tokens sent here
+     *      by mistake. Reverts when the balance is zero.
+     * @param token Token to sweep.
+     * @custom:access Only the owner.
+     * @custom:event Emits TokenSwept.
+     */
+    function sweepToken(IERC20 token) external;
 
     /**
      * @notice Supply each of `amounts` into the matching market in `vTokens`, crediting the
