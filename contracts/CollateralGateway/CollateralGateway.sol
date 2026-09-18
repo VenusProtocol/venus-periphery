@@ -104,6 +104,8 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
             if (vTokenUnderlying != asset) revert AssetMismatch(vTokenUnderlying, asset);
 
             uint256 held = IVToken(vToken).balanceOf(msg.sender);
+            if (vTokenAmount == type(uint256).max) vTokenAmount = held;
+            if (vTokenAmount == 0) revert ZeroAmount();
             if (held < vTokenAmount) revert InsufficientReceipts(held, vTokenAmount);
         }
 

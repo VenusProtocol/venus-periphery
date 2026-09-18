@@ -158,7 +158,8 @@ interface ICollateralGateway {
      *      Enabling `vhMarket` as collateral rides on the gateway's own
      *      `enterMarketForAccount(address,address)` role instead.
      * @param vToken Core market to redeem from.
-     * @param vTokenAmount Receipts to pull and redeem.
+     * @param vTokenAmount Receipts to pull and redeem. `type(uint256).max` means the caller's whole
+     *        balance of `vToken`, read at execution time.
      * @param vhMarket Core market wrapping the Hub to deposit into.
      * @param minShares Minimum acceptable Hub shares (slippage guard).
      * @return shares Hub shares minted and supplied to the market.

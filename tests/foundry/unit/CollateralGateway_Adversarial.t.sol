@@ -394,6 +394,37 @@ contract CollateralGateway_AdversarialTest is Test {
         gateway.supplyFromCollateral(address(vToken), 1, address(market), 0);
     }
 
+    /// @dev `type(uint256).max` stands for the caller's whole balance, read when the call runs.
+    function test_supplyFromCollateral_maxMigratesTheWholeBalance() public {
+        EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        vToken.setHeld(77e18);
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        gateway.supplyFromCollateral(address(vToken), type(uint256).max, address(market), 0);
+
+        assertEq(comptroller.lastAmount(), 77e18, "the whole balance was migrated");
+    }
+
+    /// @dev A caller holding nothing cannot turn the sentinel into a zero-amount call.
+    function testRevert_supplyFromCollateral_maxWithNothingHeld() public {
+        EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        vToken.setHeld(0);
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        vm.expectRevert(ICollateralGateway.ZeroAmount.selector);
+        gateway.supplyFromCollateral(address(vToken), type(uint256).max, address(market), 0);
+    }
+
     /// @dev The source market is caller-supplied too, so it has to be one the Comptroller lists.
     function testRevert_supplyFromCollateral_sourceMarketNotListed() public {
         EchoingComptroller comptroller = new EchoingComptroller();
