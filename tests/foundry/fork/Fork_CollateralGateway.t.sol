@@ -7,6 +7,7 @@ import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { IComptroller } from "../../../contracts/Interfaces/IComptroller.sol";
+import { IPoolRegistry } from "../../../contracts/Interfaces/IPoolRegistry.sol";
 import { CollateralGateway } from "../../../contracts/CollateralGateway/CollateralGateway.sol";
 import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollateralGateway.sol";
 import { IVToken } from "../../../contracts/Interfaces/IVToken.sol";
@@ -75,15 +76,17 @@ contract Fork_CollateralGatewayTest is Test {
     CollateralGateway internal gateway;
     address internal user = makeAddr("user");
     address internal owner = makeAddr("owner");
+    IPoolRegistry internal registry;
     bool internal forkLive;
 
     function setUp() public {
+        registry = IPoolRegistry(makeAddr("registry"));
         string memory rpc = vm.envOr("ARCHIVE_NODE_bscmainnet", string(""));
         if (bytes(rpc).length == 0) return;
         vm.createSelectFork(rpc, FORK_BLOCK);
         forkLive = true;
 
-        gateway = new CollateralGateway(IComptroller(COMPTROLLER), owner);
+        gateway = new CollateralGateway(IComptroller(COMPTROLLER), registry, owner);
 
         _cutInEnterMarketForAccount();
 

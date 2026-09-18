@@ -8,6 +8,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   console.log(`Deploying CollateralGateway with the account: ${deployer}`);
 
   const comptroller = await deployments.get("Unitroller");
+  const poolRegistry = await deployments.get("PoolRegistry");
   const timelock = await deployments.get("NormalTimelock");
   const owner = network.name === "hardhat" ? deployer : timelock.address;
 
@@ -16,13 +17,13 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     from: deployer,
     log: true,
     deterministicDeployment: false,
-    args: [comptroller.address, owner],
+    args: [comptroller.address, poolRegistry.address, owner],
   });
 
   if (result.newlyDeployed && network.live) {
     await hre.run("verify:verify", {
       address: result.address,
-      constructorArguments: [comptroller.address, owner],
+      constructorArguments: [comptroller.address, poolRegistry.address, owner],
     });
   }
 };

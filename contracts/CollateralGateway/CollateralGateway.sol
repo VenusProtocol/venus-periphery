@@ -9,6 +9,7 @@ import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IFlashLoanReceiver } from "../Interfaces/IFlashLoanReceiver.sol";
 import { IILComptroller } from "../Interfaces/IILComptroller.sol";
+import { IPoolRegistry } from "../Interfaces/IPoolRegistry.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
 import { ICollateralGateway } from "./ICollateralGateway.sol";
 import { IHub } from "./IHub.sol";
@@ -40,6 +41,9 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
     uint256 private constant EXP_SCALE = 1e18;
 
+    /// @notice The Isolated Pools registry every Spoke market in a call is checked against.
+    IPoolRegistry public immutable POOL_REGISTRY;
+
     /// @notice The Core Comptroller that every Core function of this gateway runs against.
     IComptroller public immutable COMPTROLLER;
 
@@ -58,10 +62,15 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     uint256 transient _migrationVTokens;
 
     /// @param comptroller The Core Comptroller. Reverts on the zero address.
+    /// @param poolRegistry The Isolated Pools registry. Reverts on the zero address.
     /// @param owner_ Account that may sweep tokens sent to this contract. Reverts on the zero address.
-    constructor(IComptroller comptroller, address owner_) {
-        if (address(comptroller) == address(0) || owner_ == address(0)) revert ZeroAddress();
+    constructor(IComptroller comptroller, IPoolRegistry poolRegistry, address owner_) {
+        if (address(comptroller) == address(0) || address(poolRegistry) == address(0) || owner_ == address(0)) {
+            revert ZeroAddress();
+        }
+
         COMPTROLLER = comptroller;
+        POOL_REGISTRY = poolRegistry;
         _transferOwnership(owner_);
     }
 
@@ -365,6 +374,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         if (vToken == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
 
+        IILComptroller comptroller = _requireSpokeMarket(vToken);
         IERC20 underlying = IERC20(IVToken(vToken).underlying());
 
         // Pull first, then measure, so the market is only ever asked to mint what the gateway holds.
@@ -373,7 +383,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         uint256 received = underlying.balanceOf(address(this)) - balanceBefore;
 
         uint256 vTokens = _supplyToMarket(address(underlying), vToken, received, msg.sender);
-        _enterSpokeMarket(vToken);
+        comptroller.enterMarketForAccount(msg.sender, vToken);
 
         emit SuppliedToSpoke(msg.sender, vToken, received, vTokens);
     }
@@ -381,7 +391,22 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     /// @dev Enable `vToken` as collateral for the caller. Reverts unless this gateway holds the
     ///      `enterMarketForAccount(address,address)` role on the market's Comptroller.
     function _enterSpokeMarket(address vToken) private {
-        IILComptroller(address(IVToken(vToken).comptroller())).enterMarketForAccount(msg.sender, vToken);
+        _requireSpokeMarket(vToken).enterMarketForAccount(msg.sender, vToken);
+    }
+
+    /// @dev Reverts unless `vToken` is the market its own pool registered for its own underlying,
+    ///      and is still listed there. Returns that pool's Comptroller.
+    ///
+    ///      The registry is the only address here this gateway trusts, so it is what makes the rest
+    ///      of the answer mean anything: a market that names its own Comptroller would otherwise be
+    ///      vouching for itself. The listing check is separate because the registry keeps an entry
+    ///      after `unlistMarket`.
+    function _requireSpokeMarket(address vToken) private view returns (IILComptroller comptroller) {
+        comptroller = IILComptroller(address(IVToken(vToken).comptroller()));
+
+        address registered = POOL_REGISTRY.getVTokenForAsset(address(comptroller), IVToken(vToken).underlying());
+        if (registered != vToken) revert MarketNotRegistered(vToken);
+        if (!comptroller.markets(vToken).isListed) revert MarketNotListed(vToken);
     }
 
     /// @dev Reverts unless `market` is a market of {COMPTROLLER}. Everything else on the Core path

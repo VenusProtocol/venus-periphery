@@ -37,7 +37,7 @@ Receipts are derived from the shares by rounding up, then capped at the caller's
 
 ### Spoke Pools
 
-Spoke markets are entered through `SpokeComptroller.enterMarketForAccount(account, vToken)`, which takes the same arguments in the same order as the Core `enterMarketForAccount`. Each market's Comptroller is read from the market itself, so one call may span pools. The gateway only ever passes `msg.sender` as the account. The amount supplied is measured as a balance delta, so a token that charges a transfer fee supplies only what arrived.
+Spoke markets are entered through `SpokeComptroller.enterMarketForAccount(account, vToken)`, which takes the same arguments in the same order as the Core `enterMarketForAccount`. Each market's Comptroller is read from the market itself, so one call may span pools, and the pair is checked against `PoolRegistry`: the market has to be the one its own pool registered for its own underlying, and still listed there. The registry keeps its entry after `unlistMarket`, which is why the listing is a separate check. The gateway only ever passes `msg.sender` as the account. The amount supplied is measured as a balance delta, so a token that charges a transfer fee supplies only what arrived.
 
 ## Contract Structure
 
@@ -49,7 +49,7 @@ contracts/CollateralGateway/
 └── README.md
 ```
 
-It also uses `IComptroller`, `IILComptroller`, `IVToken` and `IFlashLoanReceiver` from `contracts/Interfaces/`.
+It also uses `IComptroller`, `IILComptroller`, `IPoolRegistry`, `IVToken` and `IFlashLoanReceiver` from `contracts/Interfaces/`.
 
 ## Core Functions
 
@@ -87,7 +87,7 @@ Until a grant exists, the functions that need it revert.
 npx hardhat deploy --tags collateral-gateway --network bscmainnet
 ```
 
-The constructor takes the Core Comptroller, read from the `Unitroller` deployment, which exists on `bscmainnet` and `bsctestnet`, and the owner, which is the NormalTimelock on a live network.
+The constructor takes the Core Comptroller (the `Unitroller` deployment, which exists on `bscmainnet` and `bsctestnet`), the Isolated Pools `PoolRegistry`, and the owner, which is the NormalTimelock on a live network.
 
 ## Testing
 

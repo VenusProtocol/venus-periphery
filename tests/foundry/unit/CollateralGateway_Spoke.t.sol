@@ -8,6 +8,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 import { IComptroller } from "../../../contracts/Interfaces/IComptroller.sol";
+import { IPoolRegistry } from "../../../contracts/Interfaces/IPoolRegistry.sol";
 import { CollateralGateway } from "../../../contracts/CollateralGateway/CollateralGateway.sol";
 import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollateralGateway.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
@@ -17,16 +18,44 @@ import { MockERC20 } from "./mocks/MockERC20.sol";
 contract MockSpokeComptroller {
     error Unauthorized(address caller);
 
+    struct Market {
+        bool isListed;
+        uint256 collateralFactorMantissa;
+        uint256 liquidationThresholdMantissa;
+    }
+
     mapping(address => bool) public allowed;
     mapping(address => mapping(address => bool)) public entered;
+    mapping(address => bool) public unlisted;
 
     function allow(address caller) external {
         allowed[caller] = true;
     }
 
+    function unlist(address vToken) external {
+        unlisted[vToken] = true;
+    }
+
+    function markets(address vToken) external view returns (Market memory) {
+        return Market({ isListed: !unlisted[vToken], collateralFactorMantissa: 0, liquidationThresholdMantissa: 0 });
+    }
+
     function enterMarketForAccount(address account, address vToken) external {
         if (!allowed[msg.sender]) revert Unauthorized(msg.sender);
         entered[account][vToken] = true;
+    }
+}
+
+/// @notice Records the market each pool registered for an asset, as `PoolRegistry.addMarket` does.
+contract MockPoolRegistry {
+    mapping(address => mapping(address => address)) internal _vTokens;
+
+    function register(address comptroller, address asset, address vToken) external {
+        _vTokens[comptroller][asset] = vToken;
+    }
+
+    function getVTokenForAsset(address comptroller, address asset) external view returns (address) {
+        return _vTokens[comptroller][asset];
     }
 }
 
@@ -83,18 +112,44 @@ contract CollateralGateway_SpokeTest is Test {
 
     address internal user = address(0xBEEF);
     address internal owner = makeAddr("owner");
+    IPoolRegistry internal registry;
+
+    MockPoolRegistry internal poolRegistry;
 
     function setUp() public {
+        poolRegistry = new MockPoolRegistry();
+        registry = IPoolRegistry(address(poolRegistry));
         comptroller = new MockSpokeComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), registry, owner);
         comptroller.allow(address(gateway));
 
         underlying = new MockERC20("Collateral", "COL", 18);
         market = new MockSpokeVToken(address(underlying), address(comptroller));
+        poolRegistry.register(address(comptroller), address(underlying), address(market));
 
         underlying.mint(user, 1000e18);
         vm.prank(user);
         underlying.approve(address(gateway), type(uint256).max);
+    }
+
+    /// @dev A market nobody registered is the caller's own contract, so it never gets the tokens.
+    function testRevert_supplyAndEnterSpokeMarkets_marketNotRegistered() public {
+        MockSpokeVToken rogue = new MockSpokeVToken(address(underlying), address(comptroller));
+
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketNotRegistered.selector, address(rogue)));
+        vm.prank(user);
+        gateway.supplyAndEnterSpokeMarkets(_single(address(rogue)), _single(uint256(100e18)));
+
+        assertEq(underlying.balanceOf(user), 1000e18, "nothing was pulled");
+    }
+
+    /// @dev The registry keeps its entry after `unlistMarket`, so the listing is checked separately.
+    function testRevert_enterSpokeMarkets_marketUnlisted() public {
+        comptroller.unlist(address(market));
+
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketNotListed.selector, address(market)));
+        vm.prank(user);
+        gateway.enterSpokeMarkets(_single(address(market)));
     }
 
     function _single(address value) internal pure returns (address[] memory list) {
@@ -132,6 +187,7 @@ contract CollateralGateway_SpokeTest is Test {
     function test_supplyAndEnterSpokeMarkets_suppliesEveryMarketInOneCall() public {
         MockERC20 second = new MockERC20("Other", "OTH", 8);
         MockSpokeVToken secondMarket = new MockSpokeVToken(address(second), address(comptroller));
+        poolRegistry.register(address(comptroller), address(second), address(secondMarket));
         second.mint(user, 50e8);
         vm.prank(user);
         second.approve(address(gateway), type(uint256).max);
@@ -154,6 +210,7 @@ contract CollateralGateway_SpokeTest is Test {
     function test_supplyAndEnterSpokeMarkets_suppliesOnlyWhatReachedTheGateway() public {
         FeeOnTransferERC20 feeToken = new FeeOnTransferERC20();
         MockSpokeVToken feeMarket = new MockSpokeVToken(address(feeToken), address(comptroller));
+        poolRegistry.register(address(comptroller), address(feeToken), address(feeMarket));
         feeToken.mint(user, 100e18);
         vm.prank(user);
         feeToken.approve(address(gateway), type(uint256).max);
@@ -169,6 +226,7 @@ contract CollateralGateway_SpokeTest is Test {
     function testRevert_supplyAndEnterSpokeMarkets_withoutTheRole() public {
         MockSpokeComptroller ungranted = new MockSpokeComptroller();
         MockSpokeVToken closedMarket = new MockSpokeVToken(address(underlying), address(ungranted));
+        poolRegistry.register(address(ungranted), address(underlying), address(closedMarket));
 
         vm.expectRevert(abi.encodeWithSelector(MockSpokeComptroller.Unauthorized.selector, address(gateway)));
         vm.prank(user);

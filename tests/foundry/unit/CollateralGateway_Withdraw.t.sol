@@ -8,6 +8,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 import { IComptroller } from "../../../contracts/Interfaces/IComptroller.sol";
+import { IPoolRegistry } from "../../../contracts/Interfaces/IPoolRegistry.sol";
 import { CollateralGateway } from "../../../contracts/CollateralGateway/CollateralGateway.sol";
 import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollateralGateway.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
@@ -107,6 +108,7 @@ contract CollateralGateway_WithdrawTest is Test {
 
     address internal user = address(0xBEEF);
     address internal owner = makeAddr("owner");
+    IPoolRegistry internal registry;
 
     /// @dev 1 vToken frees `exchangeRate / 1e18` shares, so 50 vTokens back 100 shares.
     uint256 internal constant WALLET_SHARES = 40e24;
@@ -114,8 +116,9 @@ contract CollateralGateway_WithdrawTest is Test {
     uint256 internal constant MARKET_SHARES = 100e24;
 
     function setUp() public {
+        registry = IPoolRegistry(makeAddr("registry"));
         comptroller = new MockCoreComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), registry, owner);
         usdt = new MockERC20("Tether", "USDT", 18);
         hub = new MockHubVault(address(usdt));
         market = new MockVhMarket(address(hub));

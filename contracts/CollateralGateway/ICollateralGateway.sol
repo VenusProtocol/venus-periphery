@@ -138,6 +138,9 @@ interface ICollateralGateway {
     /// @notice The market is not listed by the Comptroller this gateway was deployed against.
     error MarketNotListed(address market);
 
+    /// @notice The Spoke market is not the one its pool registered for its underlying.
+    error MarketNotRegistered(address vToken);
+
     /**
      * @notice Deposit `assets` of the Hub's underlying and supply the resulting shares into
      *         `vhMarket`, crediting the market receipts to the caller.

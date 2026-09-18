@@ -8,6 +8,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 import { IComptroller } from "../../../contracts/Interfaces/IComptroller.sol";
+import { IPoolRegistry } from "../../../contracts/Interfaces/IPoolRegistry.sol";
 import { CollateralGateway } from "../../../contracts/CollateralGateway/CollateralGateway.sol";
 import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollateralGateway.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
@@ -94,10 +95,12 @@ contract CollateralGateway_SupplyTest is Test {
 
     address internal user = address(0xBEEF);
     address internal owner = makeAddr("owner");
+    IPoolRegistry internal registry;
 
     function setUp() public {
+        registry = IPoolRegistry(makeAddr("registry"));
         comptroller = new MockCoreComptroller();
-        gateway = new CollateralGateway(IComptroller(address(comptroller)), owner);
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), registry, owner);
         usdt = new MockERC20("Tether", "USDT", 18);
         hub = new MockHubVault(address(usdt));
         market = new MockVhMarket(address(hub), address(comptroller));
@@ -130,7 +133,7 @@ contract CollateralGateway_SupplyTest is Test {
     /// @dev The role is granted to the gateway by governance, so without it nothing should move.
     function testRevert_supplyFromWallet_withoutTheRole() public {
         MockCoreComptroller ungranted = new MockCoreComptroller();
-        CollateralGateway closedGateway = new CollateralGateway(IComptroller(address(ungranted)), owner);
+        CollateralGateway closedGateway = new CollateralGateway(IComptroller(address(ungranted)), registry, owner);
         MockVhMarket closedMarket = new MockVhMarket(address(hub), address(ungranted));
         ungranted.list(address(closedMarket));
 
