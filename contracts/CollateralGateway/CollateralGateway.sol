@@ -29,8 +29,9 @@ import { IHub } from "./IHub.sol";
  *      `redeemBehalf` and `mintBehalf` report only an error code. A supply from the wallet deposits
  *      the amount it pulled, since the underlying of a listed market does not charge a transfer fee.
  *
- *      The Hub and its market are supplied per call and validated against each other, since a Hub
- *      share token is exactly what its Core market wraps.
+ *      The Hub and its market are supplied per call. The market must be listed by the Comptroller
+ *      this gateway was deployed against, and the Hub is checked against the market's
+ *      `underlying()`, since a Hub share token is exactly what its Core market wraps.
  */
 contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -52,7 +53,16 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
     uint256 private constant EXP_SCALE = 1e18;
 
+    /// @notice The Core Comptroller that every Core function of this gateway runs against.
+    IComptroller public immutable COMPTROLLER;
+
     Migration private _migration;
+
+    /// @param comptroller The Core Comptroller. Reverts on the zero address.
+    constructor(IComptroller comptroller) {
+        if (address(comptroller) == address(0)) revert ZeroAddress();
+        COMPTROLLER = comptroller;
+    }
 
     /// @inheritdoc ICollateralGateway
     function supplyFromWallet(
@@ -64,13 +74,15 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         if (hub == address(0) || vhMarket == address(0)) revert ZeroAddress();
         if (assets == 0) revert ZeroAmount();
 
+        _requireListed(vhMarket);
+
         address marketUnderlying = IVToken(vhMarket).underlying();
         if (marketUnderlying != hub) revert MarketMismatch(marketUnderlying, hub);
 
         IERC20 asset = IERC20(IHub(hub).asset());
         asset.safeTransferFrom(msg.sender, address(this), assets);
 
-        _enterCoreMarket(IVToken(vhMarket).comptroller(), vhMarket);
+        _enterCoreMarket(vhMarket);
 
         uint256 vTokens;
         (shares, vTokens) = _depositAndSupply(hub, address(asset), vhMarket, assets, minShares, msg.sender);
@@ -89,6 +101,8 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         if (vToken == address(0) || hub == address(0) || vhMarket == address(0)) revert ZeroAddress();
         if (vTokenAmount == 0) revert ZeroAmount();
 
+        _requireListed(vhMarket);
+
         address asset = IHub(hub).asset();
         {
             address marketUnderlying = IVToken(vhMarket).underlying();
@@ -101,22 +115,13 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
             if (held < vTokenAmount) revert InsufficientReceipts(held, vTokenAmount);
         }
 
-        IComptroller comptroller = IVToken(vToken).comptroller();
         uint256 assetBalanceBefore = IERC20(asset).balanceOf(address(this));
 
-        _enterCoreMarket(comptroller, vhMarket);
+        _enterCoreMarket(vhMarket);
 
         uint256 vTokens;
-        if (_wouldCauseShortfall(comptroller, vToken, vTokenAmount)) {
-            (shares, vTokens) = _migrateViaFlashLoan(
-                comptroller,
-                vToken,
-                vTokenAmount,
-                hub,
-                asset,
-                vhMarket,
-                minShares
-            );
+        if (_wouldCauseShortfall(vToken, vTokenAmount)) {
+            (shares, vTokens) = _migrateViaFlashLoan(vToken, vTokenAmount, hub, asset, vhMarket, minShares);
         } else {
             uint256 assets = _redeemToUnderlying(vToken, vTokenAmount, asset, msg.sender);
             (shares, vTokens) = _depositAndSupply(hub, asset, vhMarket, assets, minShares, msg.sender);
@@ -187,7 +192,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     ) external override returns (bool success, uint256[] memory repayAmounts) {
         Migration memory m = _migration;
         if (m.user == address(0) || initiator != address(this)) revert UnexpectedCallback();
-        if (msg.sender != address(IVToken(m.vToken).comptroller())) revert UnexpectedCallback();
+        if (msg.sender != address(COMPTROLLER)) revert UnexpectedCallback();
         if (vTokens.length != 1 || amounts.length != 1 || premiums.length != 1) revert UnexpectedCallback();
         if (address(vTokens[0]) != m.vToken || amounts[0] != m.flashAmount) revert UnexpectedCallback();
 
@@ -226,7 +231,6 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     /// @dev Borrow the position's worth from Core so the replacement collateral exists before the
     ///      old collateral leaves. The rest of the migration runs inside {executeOperation}.
     function _migrateViaFlashLoan(
-        IComptroller comptroller,
         address vToken,
         uint256 vTokenAmount,
         address hub,
@@ -234,7 +238,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         address vhMarket,
         uint256 minShares
     ) private returns (uint256 shares, uint256 vTokens) {
-        uint256 flashAmount = _flashAmount(comptroller, vToken, vTokenAmount);
+        uint256 flashAmount = _flashAmount(vToken, vTokenAmount);
         _migration = Migration(msg.sender, vToken, vTokenAmount, hub, asset, vhMarket, minShares, flashAmount, 0, 0);
 
         IVToken[] memory markets = new IVToken[](1);
@@ -242,7 +246,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         markets[0] = IVToken(vToken);
         amounts[0] = flashAmount;
 
-        comptroller.executeFlashLoan(payable(address(this)), payable(address(this)), markets, amounts, "");
+        COMPTROLLER.executeFlashLoan(payable(address(this)), payable(address(this)), markets, amounts, "");
         IERC20(asset).forceApprove(vToken, 0);
 
         shares = _migration.shares;
@@ -360,22 +364,26 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         IILComptroller(address(IVToken(vToken).comptroller())).enterMarketBehalf(vToken, msg.sender);
     }
 
+    /// @dev Reverts unless `vhMarket` is a market of {COMPTROLLER}. Everything else on the Core path
+    ///      is derived from it: the hub is checked against `vhMarket.underlying()` and the asset
+    ///      against the hub, so an unlisted market would leave all three caller-chosen.
+    function _requireListed(address vhMarket) private view {
+        (bool isListed, , ) = COMPTROLLER.markets(vhMarket);
+        if (!isListed) revert MarketNotListed(vhMarket);
+    }
+
     /// @dev Enable `vhMarket` as the caller's collateral, so a supplied position counts from the
     ///      moment it is minted. Reverts unless this gateway holds the
     ///      `enterMarketForAccount(address,address)` role on the market's Comptroller.
-    function _enterCoreMarket(IComptroller comptroller, address vhMarket) private {
-        uint256 errorCode = comptroller.enterMarketForAccount(msg.sender, vhMarket);
+    function _enterCoreMarket(address vhMarket) private {
+        uint256 errorCode = COMPTROLLER.enterMarketForAccount(msg.sender, vhMarket);
         if (errorCode != 0) revert EnterMarketFailed(vhMarket, errorCode);
     }
 
     /// @dev True when removing `vTokenAmount` would leave the caller under water. Asks the
     ///      Comptroller the same question the redeem will ask.
-    function _wouldCauseShortfall(
-        IComptroller comptroller,
-        address vToken,
-        uint256 vTokenAmount
-    ) private view returns (bool) {
-        (uint256 errorCode, , uint256 shortfall) = comptroller.getHypotheticalAccountLiquidity(
+    function _wouldCauseShortfall(address vToken, uint256 vTokenAmount) private view returns (bool) {
+        (uint256 errorCode, , uint256 shortfall) = COMPTROLLER.getHypotheticalAccountLiquidity(
             msg.sender,
             vToken,
             vTokenAmount,
@@ -393,14 +401,10 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     ///      the Comptroller's redeem fee is subtracted here exactly as the market subtracts it, and
     ///      the loan is scaled down by the market's flash-loan fee, which the market then charges on
     ///      the smaller principal. So the redeem inside the callback always covers the repayment.
-    function _flashAmount(
-        IComptroller comptroller,
-        address vToken,
-        uint256 vTokenAmount
-    ) private view returns (uint256) {
+    function _flashAmount(address vToken, uint256 vTokenAmount) private view returns (uint256) {
         uint256 redeemable = (vTokenAmount * IVToken(vToken).exchangeRateStored()) / EXP_SCALE;
 
-        uint256 redeemFee = comptroller.treasuryPercent();
+        uint256 redeemFee = COMPTROLLER.treasuryPercent();
         if (redeemFee != 0) redeemable -= (redeemable * redeemFee) / EXP_SCALE;
 
         uint256 flashFee = IVToken(vToken).flashLoanFeeMantissa();

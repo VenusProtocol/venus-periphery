@@ -8,9 +8,10 @@ pragma solidity 0.8.25;
  *         market, so one call turns an underlying balance into Core collateral. Also supplies
  *         directly into Spoke Pool markets, enabling each as the caller's collateral in the same
  *         call, and redeems a Core position back to the underlying in one call.
- * @dev A single immutable, permissionless deployment serves every Hub. The Hub and its market are
- *      chosen per call and checked against each other: the market's `underlying()` must be the Hub
- *      itself, since a Hub share token is what its market wraps.
+ * @dev A single immutable, permissionless deployment serves every Hub of one Core Comptroller,
+ *      which is fixed at construction. The Hub and its market are chosen per call: the market must
+ *      be listed by that Comptroller, and its `underlying()` must be the Hub itself, since a Hub
+ *      share token is what its market wraps.
  */
 interface ICollateralGateway {
     /**
@@ -126,6 +127,9 @@ interface ICollateralGateway {
 
     /// @notice The caller holds fewer receipts than the amount they asked to migrate.
     error InsufficientReceipts(uint256 held, uint256 requested);
+
+    /// @notice `vhMarket` is not a market of the Comptroller this gateway was deployed against.
+    error MarketNotListed(address vhMarket);
 
     /**
      * @notice Deposit `assets` of the Hub's underlying and supply the resulting shares into

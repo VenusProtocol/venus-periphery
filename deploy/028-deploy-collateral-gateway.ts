@@ -7,18 +7,20 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   const { deployer } = await getNamedAccounts();
   console.log(`Deploying CollateralGateway with the account: ${deployer}`);
 
+  const comptroller = await deployments.get("Unitroller");
+
   const result = await deploy("CollateralGateway", {
     contract: "CollateralGateway",
     from: deployer,
     log: true,
     deterministicDeployment: false,
-    args: [],
+    args: [comptroller.address],
   });
 
   if (result.newlyDeployed && network.live) {
     await hre.run("verify:verify", {
       address: result.address,
-      constructorArguments: [],
+      constructorArguments: [comptroller.address],
     });
   }
 };

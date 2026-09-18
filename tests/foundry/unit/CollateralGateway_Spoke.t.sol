@@ -7,6 +7,7 @@ import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
+import { IComptroller } from "../../../contracts/Interfaces/IComptroller.sol";
 import { CollateralGateway } from "../../../contracts/CollateralGateway/CollateralGateway.sol";
 import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollateralGateway.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
@@ -83,8 +84,8 @@ contract CollateralGateway_SpokeTest is Test {
     address internal user = address(0xBEEF);
 
     function setUp() public {
-        gateway = new CollateralGateway();
         comptroller = new MockSpokeComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         comptroller.allow(address(gateway));
 
         underlying = new MockERC20("Collateral", "COL", 18);

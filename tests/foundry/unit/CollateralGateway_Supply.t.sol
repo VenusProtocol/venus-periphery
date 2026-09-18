@@ -7,6 +7,7 @@ import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
+import { IComptroller } from "../../../contracts/Interfaces/IComptroller.sol";
 import { CollateralGateway } from "../../../contracts/CollateralGateway/CollateralGateway.sol";
 import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollateralGateway.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
@@ -16,6 +17,7 @@ import { MockERC20 } from "./mocks/MockERC20.sol";
 contract MockCoreComptroller {
     mapping(address => bool) public allowed;
     mapping(address => mapping(address => bool)) public entered;
+    mapping(address => bool) public listed;
     uint256 public enterErrorCode;
 
     function allow(address caller) external {
@@ -32,6 +34,14 @@ contract MockCoreComptroller {
 
         entered[account][vToken] = true;
         return 0;
+    }
+
+    function list(address vToken) external {
+        listed[vToken] = true;
+    }
+
+    function markets(address vToken) external view returns (bool, uint256, bool) {
+        return (listed[vToken], 0, false);
     }
 }
 
@@ -85,13 +95,14 @@ contract CollateralGateway_SupplyTest is Test {
     address internal user = address(0xBEEF);
 
     function setUp() public {
-        gateway = new CollateralGateway();
+        comptroller = new MockCoreComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         usdt = new MockERC20("Tether", "USDT", 18);
         hub = new MockHubVault(address(usdt));
-        comptroller = new MockCoreComptroller();
         market = new MockVhMarket(address(hub), address(comptroller));
 
         comptroller.allow(address(gateway));
+        comptroller.list(address(market));
 
         usdt.mint(user, 1000e18);
         vm.prank(user);
@@ -118,15 +129,30 @@ contract CollateralGateway_SupplyTest is Test {
     /// @dev The role is granted to the gateway by governance, so without it nothing should move.
     function testRevert_supplyFromWallet_withoutTheRole() public {
         MockCoreComptroller ungranted = new MockCoreComptroller();
+        CollateralGateway closedGateway = new CollateralGateway(IComptroller(address(ungranted)));
         MockVhMarket closedMarket = new MockVhMarket(address(hub), address(ungranted));
+        ungranted.list(address(closedMarket));
+
+        vm.prank(user);
+        usdt.approve(address(closedGateway), type(uint256).max);
 
         vm.expectRevert(
             abi.encodeWithSelector(ICollateralGateway.EnterMarketFailed.selector, address(closedMarket), 1)
         );
         vm.prank(user);
-        gateway.supplyFromWallet(address(hub), 100e18, address(closedMarket), 0);
+        closedGateway.supplyFromWallet(address(hub), 100e18, address(closedMarket), 0);
 
         assertEq(usdt.balanceOf(user), 1000e18, "the whole call reverted, so nothing was pulled");
+    }
+
+    /// @dev An unlisted market is the caller's own address, and with it the hub and the asset the
+    ///      rest of the call is validated against.
+    function testRevert_supplyFromWallet_whenTheMarketIsNotListed() public {
+        MockVhMarket rogue = new MockVhMarket(address(hub), address(comptroller));
+
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketNotListed.selector, address(rogue)));
+        vm.prank(user);
+        gateway.supplyFromWallet(address(hub), 100e18, address(rogue), 0);
     }
 
     function testRevert_supplyFromWallet_whenTheMarketRefusesTheEntry() public {

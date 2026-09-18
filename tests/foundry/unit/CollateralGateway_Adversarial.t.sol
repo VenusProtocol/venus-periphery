@@ -6,6 +6,7 @@ pragma solidity 0.8.25;
 import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import { IComptroller } from "../../../contracts/Interfaces/IComptroller.sol";
 import { CollateralGateway } from "../../../contracts/CollateralGateway/CollateralGateway.sol";
 import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollateralGateway.sol";
 import { IVToken } from "../../../contracts/Interfaces/IVToken.sol";
@@ -46,6 +47,10 @@ contract EvilComptroller {
 
     function enterMarketForAccount(address, address) external pure returns (uint256) {
         return 0;
+    }
+
+    function markets(address) external pure returns (bool, uint256, bool) {
+        return (true, 0, false);
     }
 
     function treasuryPercent() external pure returns (uint256) {
@@ -172,6 +177,10 @@ contract EchoingComptroller {
         return 0;
     }
 
+    function markets(address) external pure returns (bool, uint256, bool) {
+        return (true, 0, false);
+    }
+
     function treasuryPercent() external pure returns (uint256) {
         return 0;
     }
@@ -210,6 +219,10 @@ contract SilentComptroller {
 
     function enterMarketForAccount(address, address) external pure returns (uint256) {
         return 0;
+    }
+
+    function markets(address) external pure returns (bool, uint256, bool) {
+        return (true, 0, false);
     }
 
     function treasuryPercent() external pure returns (uint256) {
@@ -255,7 +268,7 @@ contract CollateralGateway_AdversarialTest is Test {
     address internal attacker = makeAddr("attacker");
 
     function setUp() public {
-        gateway = new CollateralGateway();
+        gateway = new CollateralGateway(IComptroller(address(new EchoingComptroller())));
         usdt = new MockERC20("Tether", "USDT", 18);
     }
 
@@ -265,10 +278,10 @@ contract CollateralGateway_AdversarialTest is Test {
     /// @dev The gateway pays out change against its own redeem proceeds, so a caller who wires up
     ///      every address cannot reach a balance the gateway was already holding.
     function test_echoingCallbackCannotSweepTokensHeldByTheGateway() public {
-        usdt.mint(address(gateway), 1000e18);
-
         EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         comptroller.setGateway(gateway);
+        usdt.mint(address(gateway), 1000e18);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         EvilHub hub = new EvilHub(address(usdt));
         EvilMarket market = new EvilMarket(address(hub));
@@ -284,6 +297,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      inside the market, which answers an over-redeem with a bare "math error".
     function testRevert_supplyFromCollateral_moreReceiptsThanHeld() public {
         EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         vToken.setHeld(5);
@@ -298,10 +312,10 @@ contract CollateralGateway_AdversarialTest is Test {
     /// @dev A hub is caller-supplied, so it can spend the approval the gateway grants it. The
     ///      balance check makes the whole call revert rather than let it reach a stuck balance.
     function test_greedyHubCannotSpendABalanceTheGatewayHeld() public {
-        usdt.mint(address(gateway), 1000e18);
-
         EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         comptroller.setGateway(gateway);
+        usdt.mint(address(gateway), 1000e18);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         GreedyHub hub = new GreedyHub(address(usdt), attacker);
         EvilMarket market = new EvilMarket(address(hub));
@@ -317,6 +331,7 @@ contract CollateralGateway_AdversarialTest is Test {
     /// @dev Approvals granted to caller-supplied addresses do not outlive the call that needed them.
     function test_noApprovalsOutliveTheCall() public {
         EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         EvilHub hub = new EvilHub(address(usdt));
@@ -333,6 +348,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      leave room for it inside what the redeem pays out.
     function test_flashAmountLeavesRoomForTheMarketFee() public {
         EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         comptroller.setGateway(gateway);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         vToken.setFlashLoanFee(1e16); // 1%
@@ -350,10 +366,10 @@ contract CollateralGateway_AdversarialTest is Test {
 
     /// @dev A callback whose amounts do not match what the gateway recorded is rejected outright.
     function test_callbackWithMismatchedAmountsReverts() public {
-        usdt.mint(address(gateway), 1000e18);
-
         EvilComptroller comptroller = new EvilComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         comptroller.setGateway(gateway);
+        usdt.mint(address(gateway), 1000e18);
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         EvilHub hub = new EvilHub(address(usdt));
         EvilMarket market = new EvilMarket(address(hub));
@@ -381,6 +397,7 @@ contract CollateralGateway_AdversarialTest is Test {
     ///      rather than emit a success with a stale count.
     function test_flashLoanThatNeverCallsBackReverts() public {
         SilentComptroller comptroller = new SilentComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
         EvilHub hub = new EvilHub(address(usdt));
         EvilMarket market = new EvilMarket(address(hub));

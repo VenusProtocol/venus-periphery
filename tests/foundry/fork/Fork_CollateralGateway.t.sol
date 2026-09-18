@@ -6,6 +6,7 @@ pragma solidity 0.8.25;
 import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import { IComptroller } from "../../../contracts/Interfaces/IComptroller.sol";
 import { CollateralGateway } from "../../../contracts/CollateralGateway/CollateralGateway.sol";
 import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollateralGateway.sol";
 import { IVToken } from "../../../contracts/Interfaces/IVToken.sol";
@@ -81,7 +82,7 @@ contract Fork_CollateralGatewayTest is Test {
         vm.createSelectFork(rpc, FORK_BLOCK);
         forkLive = true;
 
-        gateway = new CollateralGateway();
+        gateway = new CollateralGateway(IComptroller(COMPTROLLER));
 
         _cutInEnterMarketForAccount();
 
