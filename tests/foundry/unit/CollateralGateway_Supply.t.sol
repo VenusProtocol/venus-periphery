@@ -111,7 +111,7 @@ contract CollateralGateway_SupplyTest is Test {
 
     function test_supplyFromWallet_entersTheMarketForTheSupplier() public {
         vm.prank(user);
-        gateway.supplyFromWallet(address(hub), 100e18, address(market), 0);
+        gateway.supplyFromWallet(100e18, address(market), 0);
 
         assertGt(market.balanceOf(user), 0, "receipts credited to the supplier");
         assertTrue(comptroller.entered(user, address(market)), "supplier entered");
@@ -120,7 +120,7 @@ contract CollateralGateway_SupplyTest is Test {
 
     function test_supplyFromWallet_leavesNothingInTheGateway() public {
         vm.prank(user);
-        gateway.supplyFromWallet(address(hub), 100e18, address(market), 0);
+        gateway.supplyFromWallet(100e18, address(market), 0);
 
         assertEq(usdt.balanceOf(address(gateway)), 0, "no underlying held");
         assertEq(hub.balanceOf(address(gateway)), 0, "no shares held");
@@ -140,7 +140,7 @@ contract CollateralGateway_SupplyTest is Test {
             abi.encodeWithSelector(ICollateralGateway.EnterMarketFailed.selector, address(closedMarket), 1)
         );
         vm.prank(user);
-        closedGateway.supplyFromWallet(address(hub), 100e18, address(closedMarket), 0);
+        closedGateway.supplyFromWallet(100e18, address(closedMarket), 0);
 
         assertEq(usdt.balanceOf(user), 1000e18, "the whole call reverted, so nothing was pulled");
     }
@@ -152,7 +152,7 @@ contract CollateralGateway_SupplyTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketNotListed.selector, address(rogue)));
         vm.prank(user);
-        gateway.supplyFromWallet(address(hub), 100e18, address(rogue), 0);
+        gateway.supplyFromWallet(100e18, address(rogue), 0);
     }
 
     function testRevert_supplyFromWallet_whenTheMarketRefusesTheEntry() public {
@@ -160,6 +160,6 @@ contract CollateralGateway_SupplyTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.EnterMarketFailed.selector, address(market), 9));
         vm.prank(user);
-        gateway.supplyFromWallet(address(hub), 100e18, address(market), 0);
+        gateway.supplyFromWallet(100e18, address(market), 0);
     }
 }

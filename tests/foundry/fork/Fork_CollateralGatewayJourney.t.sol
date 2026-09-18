@@ -124,7 +124,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
         gas = gasleft();
         vm.prank(user);
-        gateway.supplyFromWallet(HUB_USDT, SUPPLY, VVHUSDT, 0);
+        gateway.supplyFromWallet(SUPPLY, VVHUSDT, 0);
         _tx("gateway.supplyFromWallet", gas);
 
         assertEq(_txCount, 2, "first-time gateway supply is two transactions");
@@ -137,7 +137,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
         gas = gasleft();
         vm.prank(user);
-        gateway.supplyFromWallet(HUB_USDT, SUPPLY, VVHUSDT, 0);
+        gateway.supplyFromWallet(SUPPLY, VVHUSDT, 0);
         _tx("gateway.supplyFromWallet", gas);
 
         assertEq(_txCount, 1, "a repeat gateway supply is one transaction");
@@ -185,7 +185,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
         gas = gasleft();
         vm.prank(user);
-        gateway.supplyFromCollateral(VUSDT, held, HUB_USDT, VVHUSDT, 0);
+        gateway.supplyFromCollateral(VUSDT, held, VVHUSDT, 0);
         _tx("gateway.supplyFromCollateral", gas);
 
         assertEq(_txCount, 2, "first-time gateway migration is two transactions");
@@ -198,7 +198,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
         gas = gasleft();
         vm.prank(user);
-        gateway.supplyFromCollateral(VUSDT, again, HUB_USDT, VVHUSDT, 0);
+        gateway.supplyFromCollateral(VUSDT, again, VVHUSDT, 0);
         _tx("gateway.supplyFromCollateral", gas);
 
         assertEq(_txCount, 1, "a repeat migration is one transaction, the delegate grant still standing");
@@ -236,7 +236,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
         gas = gasleft();
         vm.prank(user);
-        gateway.supplyFromCollateral(VUSDT, held, HUB_USDT, VVHUSDT, 0);
+        gateway.supplyFromCollateral(VUSDT, held, VVHUSDT, 0);
         _tx("gateway.supplyFromCollateral", gas);
 
         (, , uint256 shortfall) = IComptrollerLike(COMPTROLLER).getAccountLiquidity(user);
@@ -275,7 +275,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
         gas = gasleft();
         vm.prank(user);
-        gateway.withdrawPosition(HUB_USDT, VVHUSDT, shares, 0);
+        gateway.withdrawPosition(VVHUSDT, shares, 0);
         _tx("gateway.withdrawPosition", gas);
 
         assertEq(_txCount, 2, "first-time wallet withdraw is two transactions");
@@ -288,7 +288,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
         gas = gasleft();
         vm.prank(user);
-        gateway.withdrawPosition(HUB_USDT, VVHUSDT, shares, 0);
+        gateway.withdrawPosition(VVHUSDT, shares, 0);
         _tx("gateway.withdrawPosition", gas);
 
         assertEq(_txCount, 1, "a repeat wallet withdraw is one transaction");
@@ -326,7 +326,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
         gas = gasleft();
         vm.prank(user);
-        gateway.withdrawPosition(HUB_USDT, VVHUSDT, walletShares + marketShares, 0);
+        gateway.withdrawPosition(VVHUSDT, walletShares + marketShares, 0);
         _tx("gateway.withdrawPosition", gas);
 
         assertEq(_txCount, 3, "first-time split withdraw is three transactions");
@@ -340,7 +340,7 @@ contract Fork_CollateralGatewayJourneyTest is Test {
 
         gas = gasleft();
         vm.prank(user);
-        gateway.withdrawPosition(HUB_USDT, VVHUSDT, walletShares + marketShares, 0);
+        gateway.withdrawPosition(VVHUSDT, walletShares + marketShares, 0);
         _tx("gateway.withdrawPosition", gas);
 
         assertEq(_txCount, 1, "a repeat split withdraw is one transaction");

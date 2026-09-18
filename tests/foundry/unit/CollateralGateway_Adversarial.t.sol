@@ -162,6 +162,11 @@ contract EvilMarket {
 contract EchoingComptroller {
     CollateralGateway public gateway;
     uint256 public lastAmount;
+    mapping(address => bool) public unlisted;
+
+    function unlist(address market) external {
+        unlisted[market] = true;
+    }
 
     function setGateway(CollateralGateway r) external {
         gateway = r;
@@ -186,8 +191,8 @@ contract EchoingComptroller {
         return 0;
     }
 
-    function markets(address) external pure returns (bool, uint256, bool) {
-        return (true, 0, false);
+    function markets(address market) external view returns (bool, uint256, bool) {
+        return (!unlisted[market], 0, false);
     }
 
     function treasuryPercent() external pure returns (uint256) {
@@ -296,7 +301,7 @@ contract CollateralGateway_AdversarialTest is Test {
         EvilMarket market = new EvilMarket(address(hub));
 
         vm.prank(attacker);
-        gateway.supplyFromCollateral(address(vToken), 1, address(hub), address(market), 0);
+        gateway.supplyFromCollateral(address(vToken), 1, address(market), 0);
 
         assertEq(usdt.balanceOf(address(gateway)), 1000e18 + 1, "gateway keeps what it held");
         assertEq(usdt.balanceOf(attacker), 0, "attacker gained nothing");
@@ -315,7 +320,7 @@ contract CollateralGateway_AdversarialTest is Test {
 
         vm.prank(attacker);
         vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.InsufficientReceipts.selector, 5, 6));
-        gateway.supplyFromCollateral(address(vToken), 6, address(hub), address(market), 0);
+        gateway.supplyFromCollateral(address(vToken), 6, address(market), 0);
     }
 
     /// @dev A hub is caller-supplied, so it can spend the approval the gateway grants it. The
@@ -331,7 +336,7 @@ contract CollateralGateway_AdversarialTest is Test {
 
         vm.prank(attacker);
         vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.BalanceSpent.selector, 1000e18, 1));
-        gateway.supplyFromCollateral(address(vToken), 1000e18, address(hub), address(market), 0);
+        gateway.supplyFromCollateral(address(vToken), 1000e18, address(market), 0);
 
         assertEq(usdt.balanceOf(attacker), 0, "attacker gained nothing");
         assertEq(usdt.balanceOf(address(gateway)), 1000e18, "gateway keeps what it held");
@@ -347,7 +352,7 @@ contract CollateralGateway_AdversarialTest is Test {
         EvilMarket market = new EvilMarket(address(hub));
 
         vm.prank(attacker);
-        gateway.supplyFromCollateral(address(vToken), 1, address(hub), address(market), 0);
+        gateway.supplyFromCollateral(address(vToken), 1, address(market), 0);
 
         assertEq(usdt.allowance(address(gateway), address(hub)), 0, "hub allowance cleared");
         assertEq(usdt.allowance(address(gateway), address(vToken)), 0, "repay allowance cleared");
@@ -365,12 +370,43 @@ contract CollateralGateway_AdversarialTest is Test {
         EvilMarket market = new EvilMarket(address(hub));
 
         vm.prank(attacker);
-        gateway.supplyFromCollateral(address(vToken), 100e18, address(hub), address(market), 0);
+        gateway.supplyFromCollateral(address(vToken), 100e18, address(market), 0);
 
         // The redeem pays out 100e18 at the mock's 1:1 rate, so the loan plus its fee must fit in it.
         uint256 borrowed = comptroller.lastAmount();
         assertEq(borrowed, 99_009_900_990_099_009_900, "principal scaled down by the fee");
         assertLe(borrowed + ((borrowed * 1e16) / 1e18), 100e18, "loan plus fee fits inside the redeem");
+    }
+
+    /// @dev The hub and the asset are read off the vh market, so it has to be one the Comptroller
+    ///      lists before anything else in the call can be trusted.
+    function testRevert_supplyFromCollateral_vhMarketNotListed() public {
+        EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+        comptroller.unlist(address(market));
+
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketNotListed.selector, address(market)));
+        gateway.supplyFromCollateral(address(vToken), 1, address(market), 0);
+    }
+
+    /// @dev The source market is caller-supplied too, so it has to be one the Comptroller lists.
+    function testRevert_supplyFromCollateral_sourceMarketNotListed() public {
+        EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+        comptroller.unlist(address(vToken));
+
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketNotListed.selector, address(vToken)));
+        gateway.supplyFromCollateral(address(vToken), 1, address(market), 0);
     }
 
     /// @dev The market's own redeem accrues before it checks liquidity, so asking beforehand reads
@@ -384,7 +420,7 @@ contract CollateralGateway_AdversarialTest is Test {
         EvilMarket market = new EvilMarket(address(hub));
 
         vm.prank(attacker);
-        gateway.supplyFromCollateral(address(vToken), 100e18, address(hub), address(market), 0);
+        gateway.supplyFromCollateral(address(vToken), 100e18, address(market), 0);
 
         assertTrue(vToken.accrued(), "the source market was accrued");
         assertGt(comptroller.lastAmount(), 0, "the shortfall was seen, so the flash path ran");
@@ -402,7 +438,7 @@ contract CollateralGateway_AdversarialTest is Test {
 
         vm.prank(attacker);
         vm.expectRevert(ICollateralGateway.UnexpectedCallback.selector);
-        gateway.supplyFromCollateral(address(vToken), 1, address(hub), address(market), 0);
+        gateway.supplyFromCollateral(address(vToken), 1, address(market), 0);
 
         assertEq(usdt.balanceOf(address(gateway)), 1000e18, "gateway balance untouched");
         assertEq(usdt.balanceOf(attacker), 0, "attacker gained nothing");
@@ -430,6 +466,6 @@ contract CollateralGateway_AdversarialTest is Test {
 
         vm.prank(attacker);
         vm.expectRevert(ICollateralGateway.UnexpectedCallback.selector);
-        gateway.supplyFromCollateral(address(vToken), 1, address(hub), address(market), 0);
+        gateway.supplyFromCollateral(address(vToken), 1, address(market), 0);
     }
 }

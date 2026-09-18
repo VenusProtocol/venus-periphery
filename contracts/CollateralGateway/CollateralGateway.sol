@@ -63,19 +63,16 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
     /// @inheritdoc ICollateralGateway
     function supplyFromWallet(
-        address hub,
         uint256 assets,
         address vhMarket,
         uint256 minShares
     ) external nonReentrant returns (uint256 shares) {
-        if (hub == address(0) || vhMarket == address(0)) revert ZeroAddress();
+        if (vhMarket == address(0)) revert ZeroAddress();
         if (assets == 0) revert ZeroAmount();
 
         _requireListed(vhMarket);
 
-        address marketUnderlying = IVToken(vhMarket).underlying();
-        if (marketUnderlying != hub) revert MarketMismatch(marketUnderlying, hub);
-
+        address hub = IVToken(vhMarket).underlying();
         IERC20 asset = IERC20(IHub(hub).asset());
         asset.safeTransferFrom(msg.sender, address(this), assets);
 
@@ -91,20 +88,18 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     function supplyFromCollateral(
         address vToken,
         uint256 vTokenAmount,
-        address hub,
         address vhMarket,
         uint256 minShares
     ) external nonReentrant returns (uint256 shares) {
-        if (vToken == address(0) || hub == address(0) || vhMarket == address(0)) revert ZeroAddress();
+        if (vToken == address(0) || vhMarket == address(0)) revert ZeroAddress();
         if (vTokenAmount == 0) revert ZeroAmount();
 
         _requireListed(vhMarket);
+        _requireListed(vToken);
 
+        address hub = IVToken(vhMarket).underlying();
         address asset = IHub(hub).asset();
         {
-            address marketUnderlying = IVToken(vhMarket).underlying();
-            if (marketUnderlying != hub) revert MarketMismatch(marketUnderlying, hub);
-
             address vTokenUnderlying = IVToken(vToken).underlying();
             if (vTokenUnderlying != asset) revert AssetMismatch(vTokenUnderlying, asset);
 
@@ -135,16 +130,16 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
     /// @inheritdoc ICollateralGateway
     function withdrawPosition(
-        address hub,
         address vhMarket,
         uint256 shares,
         uint256 minAssets
     ) external nonReentrant returns (uint256 assets) {
-        if (hub == address(0) || vhMarket == address(0)) revert ZeroAddress();
+        if (vhMarket == address(0)) revert ZeroAddress();
         if (shares == 0) revert ZeroAmount();
 
-        address marketUnderlying = IVToken(vhMarket).underlying();
-        if (marketUnderlying != hub) revert MarketMismatch(marketUnderlying, hub);
+        _requireListed(vhMarket);
+
+        address hub = IVToken(vhMarket).underlying();
 
         uint256 walletShares = IERC20(hub).balanceOf(msg.sender);
         if (walletShares > shares) walletShares = shares;
@@ -372,12 +367,12 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         IILComptroller(address(IVToken(vToken).comptroller())).enterMarketForAccount(msg.sender, vToken);
     }
 
-    /// @dev Reverts unless `vhMarket` is a market of {COMPTROLLER}. Everything else on the Core path
-    ///      is derived from it: the hub is checked against `vhMarket.underlying()` and the asset
-    ///      against the hub, so an unlisted market would leave all three caller-chosen.
-    function _requireListed(address vhMarket) private view {
-        (bool isListed, , ) = COMPTROLLER.markets(vhMarket);
-        if (!isListed) revert MarketNotListed(vhMarket);
+    /// @dev Reverts unless `market` is a market of {COMPTROLLER}. Everything else on the Core path
+    ///      is read off the markets named in the call: the hub is `vhMarket.underlying()` and the
+    ///      asset is the hub's, so an unlisted market would leave all three caller-chosen.
+    function _requireListed(address market) private view {
+        (bool isListed, , ) = COMPTROLLER.markets(market);
+        if (!isListed) revert MarketNotListed(market);
     }
 
     /// @dev Enable `vhMarket` as the caller's collateral, so a supplied position counts from the

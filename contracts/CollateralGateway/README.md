@@ -1,6 +1,6 @@
 # CollateralGateway
 
-Turns an underlying balance into collateral in one call, on the Core pool and on Spoke Pools, and withdraws a vh position back to the wallet. One shared deployment per chain, with no proxy, no admin and no funds held between calls. The Core Comptroller is fixed at construction, so every Core function runs against it and a vh market has to be listed there.
+Turns an underlying balance into collateral in one call, on the Core pool and on Spoke Pools, and withdraws a vh position back to the wallet. One shared deployment per chain, with no proxy, no admin and no funds held between calls. The Core Comptroller is fixed at construction: every Core function runs against it, every market named in a call has to be listed there, and the Hub is read off the vh market rather than passed in.
 
 ## How It Works
 
@@ -53,13 +53,13 @@ It also uses `IComptroller`, `IILComptroller`, `IVToken` and `IFlashLoanReceiver
 
 ## Core Functions
 
-| Function                                                               | Starts from                  | Mechanism                                                         |
-| ---------------------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
-| `supplyFromWallet(hub, assets, vhMarket, minShares)`                   | underlying in the wallet     | deposit into the Hub, mint the vh market, enter it                |
-| `supplyFromCollateral(vToken, vTokenAmount, hub, vhMarket, minShares)` | a Core position              | redeem, deposit, mint, enter; flash loan when borrowing           |
-| `withdrawPosition(hub, vhMarket, shares, minAssets)`                   | Hub shares in wallet or Core | spend wallet shares, free the rest from the vh market, Hub redeem |
-| `supplyAndEnterSpokeMarkets(vTokens, amounts)`                         | underlying in the wallet     | mint each Spoke market and enter it                               |
-| `enterSpokeMarkets(vTokens)`                                           | Spoke receipts already held  | enter each Spoke market                                           |
+| Function                                                          | Starts from                  | Mechanism                                                         |
+| ----------------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
+| `supplyFromWallet(assets, vhMarket, minShares)`                   | underlying in the wallet     | deposit into the Hub, mint the vh market, enter it                |
+| `supplyFromCollateral(vToken, vTokenAmount, vhMarket, minShares)` | a Core position              | redeem, deposit, mint, enter; flash loan when borrowing           |
+| `withdrawPosition(vhMarket, shares, minAssets)`                   | Hub shares in wallet or Core | spend wallet shares, free the rest from the vh market, Hub redeem |
+| `supplyAndEnterSpokeMarkets(vTokens, amounts)`                    | underlying in the wallet     | mint each Spoke market and enter it                               |
+| `enterSpokeMarkets(vTokens)`                                      | Spoke receipts already held  | enter each Spoke market                                           |
 
 ## Prerequisites for Users
 

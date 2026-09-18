@@ -85,11 +85,25 @@ contract MockVhMarket {
     }
 }
 
+/// @notice Answers the listing question the gateway asks before it trusts a market.
+contract MockCoreComptroller {
+    mapping(address => bool) public listed;
+
+    function list(address vToken) external {
+        listed[vToken] = true;
+    }
+
+    function markets(address vToken) external view returns (bool, uint256, bool) {
+        return (listed[vToken], 0, false);
+    }
+}
+
 contract CollateralGateway_WithdrawTest is Test {
     CollateralGateway internal gateway;
     MockERC20 internal usdt;
     MockHubVault internal hub;
     MockVhMarket internal market;
+    MockCoreComptroller internal comptroller;
 
     address internal user = address(0xBEEF);
 
@@ -99,10 +113,12 @@ contract CollateralGateway_WithdrawTest is Test {
     uint256 internal constant MARKET_SHARES = 100e24;
 
     function setUp() public {
-        gateway = new CollateralGateway(IComptroller(makeAddr("comptroller")));
+        comptroller = new MockCoreComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
         usdt = new MockERC20("Tether", "USDT", 18);
         hub = new MockHubVault(address(usdt));
         market = new MockVhMarket(address(hub));
+        comptroller.list(address(market));
 
         hub.mint(user, WALLET_SHARES);
         hub.mint(address(market), MARKET_SHARES);
@@ -121,7 +137,7 @@ contract CollateralGateway_WithdrawTest is Test {
         emit ICollateralGateway.PositionWithdrawn(user, address(hub), address(market), shares, 0, shares / 1e6);
 
         vm.prank(user);
-        uint256 assets = gateway.withdrawPosition(address(hub), address(market), shares, 0);
+        uint256 assets = gateway.withdrawPosition(address(market), shares, 0);
 
         assertEq(assets, 30e18, "paid out at the vault rate");
         assertEq(usdt.balanceOf(user), 30e18, "user paid");
@@ -134,7 +150,7 @@ contract CollateralGateway_WithdrawTest is Test {
         market.updateDelegate(address(gateway), false);
 
         vm.prank(user);
-        uint256 assets = gateway.withdrawPosition(address(hub), address(market), 30e24, 0);
+        uint256 assets = gateway.withdrawPosition(address(market), 30e24, 0);
 
         assertEq(assets, 30e18, "the Core leg was never reached");
     }
@@ -143,7 +159,7 @@ contract CollateralGateway_WithdrawTest is Test {
         uint256 shares = WALLET_SHARES + 60e24;
 
         vm.prank(user);
-        uint256 assets = gateway.withdrawPosition(address(hub), address(market), shares, 0);
+        uint256 assets = gateway.withdrawPosition(address(market), shares, 0);
 
         assertEq(assets, shares / 1e6, "both legs paid out");
         assertEq(hub.balanceOf(user), 0, "wallet spent first");
@@ -155,7 +171,7 @@ contract CollateralGateway_WithdrawTest is Test {
         hub.transfer(address(0xDEAD), WALLET_SHARES);
 
         vm.prank(user);
-        uint256 assets = gateway.withdrawPosition(address(hub), address(market), 20e24, 0);
+        uint256 assets = gateway.withdrawPosition(address(market), 20e24, 0);
 
         assertEq(assets, 20e18, "paid entirely out of Core");
         assertEq(market.balanceOf(user), MARKET_VTOKENS - 10e8, "receipts burned for the freed shares");
@@ -167,7 +183,7 @@ contract CollateralGateway_WithdrawTest is Test {
 
         // One wei of shares needs a fraction of a receipt, which has to round up to one.
         vm.prank(user);
-        gateway.withdrawPosition(address(hub), address(market), 1, 0);
+        gateway.withdrawPosition(address(market), 1, 0);
 
         assertEq(market.balanceOf(user), MARKET_VTOKENS - 1, "one receipt burned");
     }
@@ -179,7 +195,7 @@ contract CollateralGateway_WithdrawTest is Test {
         hub.transfer(address(0xDEAD), WALLET_SHARES);
 
         vm.prank(user);
-        uint256 assets = gateway.withdrawPosition(address(hub), address(market), MARKET_SHARES + 1, 0);
+        uint256 assets = gateway.withdrawPosition(address(market), MARKET_SHARES + 1, 0);
 
         assertEq(assets, MARKET_SHARES / 1e6, "paid out the whole position");
         assertEq(market.balanceOf(user), 0, "every receipt burned, and no more");
@@ -187,7 +203,7 @@ contract CollateralGateway_WithdrawTest is Test {
 
     function test_withdrawPosition_leavesNothingInTheGateway() public {
         vm.prank(user);
-        gateway.withdrawPosition(address(hub), address(market), WALLET_SHARES + 20e24, 0);
+        gateway.withdrawPosition(address(market), WALLET_SHARES + 20e24, 0);
 
         assertEq(hub.balanceOf(address(gateway)), 0, "no shares held");
         assertEq(usdt.balanceOf(address(gateway)), 0, "no assets held");
@@ -196,7 +212,7 @@ contract CollateralGateway_WithdrawTest is Test {
     function testRevert_withdrawPosition_belowMinAssets() public {
         vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.InsufficientAssets.selector, 30e18, 31e18));
         vm.prank(user);
-        gateway.withdrawPosition(address(hub), address(market), 30e24, 31e18);
+        gateway.withdrawPosition(address(market), 30e24, 31e18);
     }
 
     function testRevert_withdrawPosition_marketRedeemFeeEatsIntoThePayout() public {
@@ -205,7 +221,7 @@ contract CollateralGateway_WithdrawTest is Test {
         // The Core leg frees 1% less than asked, so the payout misses a floor set on the full amount.
         vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.InsufficientAssets.selector, 99.4e18, 100e18));
         vm.prank(user);
-        gateway.withdrawPosition(address(hub), address(market), WALLET_SHARES + 60e24, 100e18);
+        gateway.withdrawPosition(address(market), WALLET_SHARES + 60e24, 100e18);
     }
 
     function testRevert_withdrawPosition_withoutADelegateGrant() public {
@@ -214,28 +230,27 @@ contract CollateralGateway_WithdrawTest is Test {
 
         vm.expectRevert(MockVhMarket.NotAnApprovedDelegate.selector);
         vm.prank(user);
-        gateway.withdrawPosition(address(hub), address(market), WALLET_SHARES + 20e24, 0);
+        gateway.withdrawPosition(address(market), WALLET_SHARES + 20e24, 0);
     }
 
-    function testRevert_withdrawPosition_marketDoesNotWrapTheHub() public {
-        MockHubVault otherHub = new MockHubVault(address(usdt));
+    /// @dev The hub is read off the market, so an unlisted market would choose it.
+    function testRevert_withdrawPosition_marketNotListed() public {
+        MockVhMarket rogue = new MockVhMarket(address(hub));
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ICollateralGateway.MarketMismatch.selector, address(hub), address(otherHub))
-        );
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketNotListed.selector, address(rogue)));
         vm.prank(user);
-        gateway.withdrawPosition(address(otherHub), address(market), 1e24, 0);
+        gateway.withdrawPosition(address(rogue), 1e24, 0);
     }
 
     function testRevert_withdrawPosition_zeroShares() public {
         vm.expectRevert(ICollateralGateway.ZeroAmount.selector);
         vm.prank(user);
-        gateway.withdrawPosition(address(hub), address(market), 0, 0);
+        gateway.withdrawPosition(address(market), 0, 0);
     }
 
     function testRevert_withdrawPosition_zeroAddress() public {
         vm.expectRevert(ICollateralGateway.ZeroAddress.selector);
         vm.prank(user);
-        gateway.withdrawPosition(address(0), address(market), 1e24, 0);
+        gateway.withdrawPosition(address(0), 1e24, 0);
     }
 }

@@ -85,9 +85,6 @@ interface ICollateralGateway {
     /// @notice A required amount argument was zero.
     error ZeroAmount();
 
-    /// @notice `vhMarket` does not wrap `hub`, so the two cannot be used together.
-    error MarketMismatch(address marketUnderlying, address hub);
-
     /// @notice The Core market returned a non-zero (failure) error code on mint.
     error VTokenMintFailed(address vhMarket, uint256 errorCode);
 
@@ -128,51 +125,45 @@ interface ICollateralGateway {
     /// @notice The caller holds fewer receipts than the amount they asked to migrate.
     error InsufficientReceipts(uint256 held, uint256 requested);
 
-    /// @notice `vhMarket` is not a market of the Comptroller this gateway was deployed against.
-    error MarketNotListed(address vhMarket);
+    /// @notice The market is not listed by the Comptroller this gateway was deployed against.
+    error MarketNotListed(address market);
 
     /**
      * @notice Deposit `assets` of the Hub's underlying and supply the resulting shares into
      *         `vhMarket`, crediting the market receipts to the caller.
-     * @dev Caller must first `approve` this gateway to transfer `assets` of `IHub(hub).asset()`.
-     *      The market is enabled as their collateral in the same call, which needs this gateway to
-     *      hold the `enterMarketForAccount(address,address)` role on the Comptroller.
-     * @param hub Hub to deposit into.
+     * @dev Caller must first `approve` this gateway to transfer `assets` of the Hub's underlying.
+     *      The Hub is `vhMarket.underlying()`. The market is enabled as their collateral in the same
+     *      call, which needs this gateway to hold the `enterMarketForAccount(address,address)` role
+     *      on the Comptroller.
      * @param assets Underlying to pull from the caller and deposit.
-     * @param vhMarket Core market wrapping `hub`.
+     * @param vhMarket Core market wrapping the Hub to deposit into.
      * @param minShares Minimum acceptable Hub shares (slippage guard).
      * @return shares Hub shares minted and supplied to the market.
      *
-     * Reverts if `vhMarket.underlying() != hub`, if the deposit yields fewer than `minShares`, or
+     * Reverts if `vhMarket` is not listed, if the deposit yields fewer than `minShares`, or
      * if the mint fails. A full supply cap reverts inside the Comptroller, so a capped market
      * fails the whole call and the caller keeps their underlying.
      *
      * The receipts count as collateral immediately, so the supply earns Hub yield and borrow power
      * from the same call. Entering a market also makes the position seizable in a liquidation.
      */
-    function supplyFromWallet(
-        address hub,
-        uint256 assets,
-        address vhMarket,
-        uint256 minShares
-    ) external returns (uint256 shares);
+    function supplyFromWallet(uint256 assets, address vhMarket, uint256 minShares) external returns (uint256 shares);
 
     /**
      * @notice Redeem `vTokenAmount` from an existing Core position, deposit the underlying into
-     *         `hub`, and supply the resulting shares into `vhMarket`, crediting the market receipts
-     *         to the caller.
+     *         the Hub `vhMarket` wraps, and supply the resulting shares into `vhMarket`, crediting
+     *         the market receipts to the caller.
      * @dev Caller must first grant this gateway `Comptroller.updateDelegate(gateway, true)`, which
      *      lets it redeem the position where it sits, so no allowance over `vToken` is needed.
      *      Enabling `vhMarket` as collateral rides on the gateway's own
      *      `enterMarketForAccount(address,address)` role instead.
      * @param vToken Core market to redeem from.
      * @param vTokenAmount Receipts to pull and redeem.
-     * @param hub Hub to deposit the redeemed underlying into.
-     * @param vhMarket Core market wrapping `hub`.
+     * @param vhMarket Core market wrapping the Hub to deposit into.
      * @param minShares Minimum acceptable Hub shares (slippage guard).
      * @return shares Hub shares minted and supplied to the market.
      *
-     * Reverts if `vToken.underlying() != IHub(hub).asset()`, if `vhMarket.underlying() != hub`, or
+     * Reverts if either market is not listed, if `vToken.underlying()` is not the Hub's asset, or
      * if the deposit yields fewer than `minShares`.
      *
      * A caller with no borrows migrates directly. A caller whose borrows the remaining position
@@ -191,18 +182,17 @@ interface ICollateralGateway {
     function supplyFromCollateral(
         address vToken,
         uint256 vTokenAmount,
-        address hub,
         address vhMarket,
         uint256 minShares
     ) external returns (uint256 shares);
 
     /**
-     * @notice Redeem `shares` of `hub` back to the caller's wallet, taking whatever the caller
-     *         holds in their wallet first and freeing the rest out of `vhMarket`.
+     * @notice Redeem `shares` of the Hub `vhMarket` wraps back to the caller's wallet, taking
+     *         whatever the caller holds in their wallet first and freeing the rest out of
+     *         `vhMarket`.
      * @dev Caller must first `approve` this gateway for their wallet shares, and grant it
      *      `Comptroller.updateDelegate` if any of `shares` has to come out of `vhMarket`.
-     * @param hub Hub to redeem from.
-     * @param vhMarket Core market wrapping `hub`.
+     * @param vhMarket Core market wrapping the Hub to redeem from.
      * @param shares Hub shares to redeem in total, across both legs.
      * @param minAssets Minimum acceptable underlying (slippage guard).
      * @return assets Underlying paid to the caller.
@@ -220,12 +210,7 @@ interface ICollateralGateway {
      * The Core leg frees at most the receipts the caller holds, so a market that cannot free the
      * full amount pays out less rather than reverting. `minAssets` is the floor on that payout.
      */
-    function withdrawPosition(
-        address hub,
-        address vhMarket,
-        uint256 shares,
-        uint256 minAssets
-    ) external returns (uint256 assets);
+    function withdrawPosition(address vhMarket, uint256 shares, uint256 minAssets) external returns (uint256 assets);
 
     /**
      * @notice Supply each of `amounts` into the matching market in `vTokens`, crediting the

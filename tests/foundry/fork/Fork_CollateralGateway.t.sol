@@ -129,7 +129,7 @@ contract Fork_CollateralGatewayTest is Test {
 
     function test_supplyFromWallet_creditsMarketReceiptsToUser() public onlyFork {
         vm.prank(user);
-        uint256 shares = gateway.supplyFromWallet(HUB_USDT, SUPPLY, VVHUSDT, 0);
+        uint256 shares = gateway.supplyFromWallet(SUPPLY, VVHUSDT, 0);
 
         assertGt(shares, 0, "hub minted shares");
         assertEq(IERC20(USDT).balanceOf(user), 0, "underlying spent");
@@ -139,7 +139,7 @@ contract Fork_CollateralGatewayTest is Test {
 
     function test_supplyFromWallet_leavesNoResidueInTheGateway() public onlyFork {
         vm.prank(user);
-        gateway.supplyFromWallet(HUB_USDT, SUPPLY, VVHUSDT, 0);
+        gateway.supplyFromWallet(SUPPLY, VVHUSDT, 0);
 
         assertEq(IERC20(USDT).balanceOf(address(gateway)), 0, "no underlying left");
         assertEq(IERC20(HUB_USDT).balanceOf(address(gateway)), 0, "no hub shares left");
@@ -152,7 +152,7 @@ contract Fork_CollateralGatewayTest is Test {
         assertEq(liquidityBefore, 0, "no borrow power before the supply");
 
         vm.prank(user);
-        gateway.supplyFromWallet(HUB_USDT, SUPPLY, VVHUSDT, 0);
+        gateway.supplyFromWallet(SUPPLY, VVHUSDT, 0);
 
         assertTrue(IComptrollerLike(COMPTROLLER).checkMembership(user, VVHUSDT), "market entered by the gateway");
         (, uint256 liquidityAfter, ) = IComptrollerLike(COMPTROLLER).getAccountLiquidity(user);
@@ -161,23 +161,20 @@ contract Fork_CollateralGatewayTest is Test {
 
     // ---------------------------------------------------------------- reverts
 
-    function test_supplyFromWallet_revertsOnMarketMismatch() public onlyFork {
+    function test_supplyFromWallet_revertsOnUnlistedMarket() public onlyFork {
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketMismatch.selector, USDT, HUB_USDT));
-        gateway.supplyFromWallet(HUB_USDT, SUPPLY, VUSDT, 0);
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketNotListed.selector, HUB_USDT));
+        gateway.supplyFromWallet(SUPPLY, HUB_USDT, 0);
     }
 
     function test_supplyFromWallet_revertsOnZeroArguments() public onlyFork {
         vm.startPrank(user);
 
         vm.expectRevert(ICollateralGateway.ZeroAddress.selector);
-        gateway.supplyFromWallet(address(0), SUPPLY, VVHUSDT, 0);
-
-        vm.expectRevert(ICollateralGateway.ZeroAddress.selector);
-        gateway.supplyFromWallet(HUB_USDT, SUPPLY, address(0), 0);
+        gateway.supplyFromWallet(SUPPLY, address(0), 0);
 
         vm.expectRevert(ICollateralGateway.ZeroAmount.selector);
-        gateway.supplyFromWallet(HUB_USDT, 0, VVHUSDT, 0);
+        gateway.supplyFromWallet(0, VVHUSDT, 0);
 
         vm.stopPrank();
     }
@@ -185,7 +182,7 @@ contract Fork_CollateralGatewayTest is Test {
     function test_supplyFromWallet_revertsBelowMinShares() public onlyFork {
         vm.prank(user);
         vm.expectRevert();
-        gateway.supplyFromWallet(HUB_USDT, SUPPLY, VVHUSDT, type(uint128).max);
+        gateway.supplyFromWallet(SUPPLY, VVHUSDT, type(uint128).max);
     }
 
     /// @dev A full supply cap reverts inside the Comptroller, so the caller keeps their underlying.
@@ -202,7 +199,7 @@ contract Fork_CollateralGatewayTest is Test {
 
         vm.prank(user);
         vm.expectRevert(bytes("market supply cap reached"));
-        gateway.supplyFromWallet(HUB_USDT, SUPPLY, VVHUSDT, 0);
+        gateway.supplyFromWallet(SUPPLY, VVHUSDT, 0);
 
         assertEq(IERC20(USDT).balanceOf(user), SUPPLY, "caller keeps their underlying");
     }
@@ -227,7 +224,7 @@ contract Fork_CollateralGatewayTest is Test {
         uint256 held = _supplyToCore(SUPPLY);
 
         vm.prank(user);
-        uint256 shares = gateway.supplyFromCollateral(VUSDT, held, HUB_USDT, VVHUSDT, 0);
+        uint256 shares = gateway.supplyFromCollateral(VUSDT, held, VVHUSDT, 0);
 
         assertGt(shares, 0, "hub minted shares");
         assertEq(IVToken(VUSDT).balanceOf(user), 0, "old position fully migrated");
@@ -244,7 +241,7 @@ contract Fork_CollateralGatewayTest is Test {
         // 1000 supplied at CF 0.8 against 700 borrowed leaves 125 USDT of headroom.
         uint256 tenth = held / 10;
         vm.prank(user);
-        gateway.supplyFromCollateral(VUSDT, tenth, HUB_USDT, VVHUSDT, 0);
+        gateway.supplyFromCollateral(VUSDT, tenth, VVHUSDT, 0);
 
         assertEq(IVToken(VUSDT).balanceOf(user), held - tenth, "only the requested slice moved");
         assertGt(IVToken(VVHUSDT).balanceOf(user), 0, "user holds the vh market receipts");
@@ -268,7 +265,7 @@ contract Fork_CollateralGatewayTest is Test {
         uint256 debtBefore = IVBep20Mint(VUSDT).borrowBalanceCurrent(user);
 
         vm.prank(user);
-        gateway.supplyFromCollateral(VUSDT, held, HUB_USDT, VVHUSDT, 0);
+        gateway.supplyFromCollateral(VUSDT, held, VVHUSDT, 0);
 
         (, uint256 liquidityAfter, uint256 shortfallAfter) = IComptrollerLike(COMPTROLLER).getAccountLiquidity(user);
 
@@ -288,7 +285,7 @@ contract Fork_CollateralGatewayTest is Test {
         assertFalse(IComptrollerLike(COMPTROLLER).checkMembership(user, VVHUSDT), "not entered up front");
 
         vm.prank(user);
-        gateway.supplyFromCollateral(VUSDT, held, HUB_USDT, VVHUSDT, 0);
+        gateway.supplyFromCollateral(VUSDT, held, VVHUSDT, 0);
 
         assertTrue(IComptrollerLike(COMPTROLLER).checkMembership(user, VVHUSDT), "gateway entered it");
     }
@@ -301,7 +298,7 @@ contract Fork_CollateralGatewayTest is Test {
 
         vm.prank(user);
         vm.expectRevert();
-        gateway.supplyFromCollateral(VUSDT, held, HUB_USDT, VVHUSDT, 0);
+        gateway.supplyFromCollateral(VUSDT, held, VVHUSDT, 0);
 
         assertEq(IVToken(VUSDT).balanceOf(user), held, "position untouched");
     }
@@ -313,7 +310,7 @@ contract Fork_CollateralGatewayTest is Test {
 
         vm.prank(user);
         vm.expectRevert();
-        gateway.supplyFromCollateral(VUSDT, held, HUB_USDT, VVHUSDT, 0);
+        gateway.supplyFromCollateral(VUSDT, held, VVHUSDT, 0);
 
         assertEq(IVToken(VUSDT).balanceOf(user), held, "position untouched");
     }
@@ -337,7 +334,7 @@ contract Fork_CollateralGatewayTest is Test {
         IERC20(HUB_USDT).approve(address(gateway), type(uint256).max);
 
         uint256 expected = IHubLike(HUB_USDT).previewRedeem(shares);
-        uint256 assets = gateway.withdrawPosition(HUB_USDT, VVHUSDT, shares, expected);
+        uint256 assets = gateway.withdrawPosition(VVHUSDT, shares, expected);
         vm.stopPrank();
 
         assertEq(assets, expected, "paid the previewed amount");
@@ -348,11 +345,11 @@ contract Fork_CollateralGatewayTest is Test {
 
     function test_withdrawPosition_freesTheCorePositionWhenTheWalletIsEmpty() public onlyFork {
         vm.startPrank(user);
-        uint256 shares = gateway.supplyFromWallet(HUB_USDT, SUPPLY, VVHUSDT, 0);
+        uint256 shares = gateway.supplyFromWallet(SUPPLY, VVHUSDT, 0);
         assertEq(IERC20(HUB_USDT).balanceOf(user), 0, "the supply left nothing in the wallet");
 
         IDelegation(COMPTROLLER).updateDelegate(address(gateway), true);
-        uint256 assets = gateway.withdrawPosition(HUB_USDT, VVHUSDT, shares, 0);
+        uint256 assets = gateway.withdrawPosition(VVHUSDT, shares, 0);
         vm.stopPrank();
 
         assertGt(assets, 0, "paid out of Core");
@@ -363,10 +360,10 @@ contract Fork_CollateralGatewayTest is Test {
 
     function test_withdrawPosition_revertsWithoutADelegateGrant() public onlyFork {
         vm.startPrank(user);
-        uint256 shares = gateway.supplyFromWallet(HUB_USDT, SUPPLY, VVHUSDT, 0);
+        uint256 shares = gateway.supplyFromWallet(SUPPLY, VVHUSDT, 0);
 
         vm.expectRevert("not an approved delegate");
-        gateway.withdrawPosition(HUB_USDT, VVHUSDT, shares, 0);
+        gateway.withdrawPosition(VVHUSDT, shares, 0);
         vm.stopPrank();
     }
 
@@ -375,6 +372,6 @@ contract Fork_CollateralGatewayTest is Test {
 
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.AssetMismatch.selector, HUB_USDT, USDT));
-        gateway.supplyFromCollateral(VVHUSDT, held, HUB_USDT, VVHUSDT, 0);
+        gateway.supplyFromCollateral(VVHUSDT, held, VVHUSDT, 0);
     }
 }
