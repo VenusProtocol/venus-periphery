@@ -60,6 +60,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - Decreases collateral factor (blocks new borrows against asset, does NOT liquidate
  *          existing positions — that requires LT change, which EBrake cannot do)
  *        - Pauses flash loans (blocks flash loan attack vector, no user impact)
+ *        - Pauses the Liquidity Hub (blocks deposits and redemptions; existing balances
+ *          untouched, and emergencyReallocate still works)
  *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.
  *
  *   BSC vs NON-BSC DIFFERENCES:
@@ -75,6 +77,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          calls setCollateralFactor(poolId, market, newCF, LT) which returns uint256 error code
  *        - Supports e-mode pools via poolId > 0
  *        - pauseFlashLoan() — flash loans only exist on Diamond
+ *        - pauseHub(hub) — the Liquidity Hub is BSC-only
  *        - disablePoolBorrow(poolId, market) — per-pool granular borrow disable, only on Diamond
  *        - revokeFlashLoanAccess(account) — remove a single account from the flash loan
  *          whitelist; flash loan whitelist only exists on Diamond
@@ -88,6 +91,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - No poolId concept — only the core pool exists (other pools are deprecated)
  *        - decreaseCF(market, poolId, newCF) not granted ACM permission (no pool concept on IL)
  *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)
+ *        - pauseHub(address) not granted ACM permission (no Liquidity Hub off BSC). Note this is
+ *          EBrake's own role; the role EBrake must hold on the Hub is the Hub's `pauseHub()`.
  *        - ACM permission strings have no underscore:
  *          setActionsPaused, setMarketBorrowCaps, setMarketSupplyCaps
  *
@@ -165,6 +170,11 @@ interface IEBrake {
     /// @notice Emitted when a market's supply cap snapshot is reset after governance recovery.
     /// @param market The market address whose supply cap snapshot was cleared.
     event SupplyCapSnapshotReset(address indexed market);
+
+    /// @notice Emitted when the Liquidity Hub was paused through EBrake.
+    /// @param caller The address that triggered the pause.
+    /// @param hub The Hub that was paused.
+    event HubPaused(address indexed caller, address indexed hub);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
@@ -292,6 +302,19 @@ interface IEBrake {
      * @param account The account whose flash loan access should be revoked.
      */
     function revokeFlashLoanAccess(address account) external;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     EMERGENCY ACTIONS — LIQUIDITY HUB
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Pause the Liquidity Hub, halting deposits and redemptions.
+     * @dev Forwards to the Hub, which EBrake holds the `pauseHub()` ACM role on. Tighten-only —
+     *      unpausing is a VIP against the Hub directly. An already-paused Hub is a no-op with no
+     *      event, so {HubPaused} stays a true state-change signal, as {pauseFlashLoan} does.
+     * @param hub The Liquidity Hub to pause.
+     */
+    function pauseHub(address hub) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — RISK PARAMETER ADJUSTMENTS

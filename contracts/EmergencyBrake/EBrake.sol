@@ -5,14 +5,15 @@ import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IILComptroller } from "../Interfaces/IILComptroller.sol";
 import { IEBrake } from "./IEBrake.sol";
+import { IHub } from "../Interfaces/IHubLiquidity.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
 /**
  * @title EBrake — Emergency Brake Contract
  * @author Venus Protocol
  * @notice Emergency action router for Venus Protocol (deployed behind a TransparentUpgradeableProxy).
- *         This contract holds NO detection logic — it only exposes Comptroller emergency
- *         functions behind ACM permissions. See IEBrake for full design documentation.
+ *         This contract holds NO detection logic — it only exposes Comptroller and Liquidity Hub
+ *         emergency functions behind ACM permissions. See IEBrake for full design documentation.
  */
 contract EBrake is IEBrake, AccessControlledV8 {
     /// @notice Snapshot of a market's pre-incident state, captured by EBrake before tightening.
@@ -147,6 +148,17 @@ contract EBrake is IEBrake, AccessControlledV8 {
         // `false` is hardcoded — EBrake can only revoke, never grant.
         COMPTROLLER.setWhiteListFlashLoanAccount(account, false);
         emit FlashLoanAccessRevoked(msg.sender, account);
+    }
+
+    /// @inheritdoc IEBrake
+    function pauseHub(address hub) external {
+        _checkAccessAllowed("pauseHub(address)");
+        if (hub == address(0)) revert ZeroAddress();
+
+        if (IHub(hub).hubPaused()) return;
+
+        IHub(hub).pauseHub();
+        emit HubPaused(msg.sender, hub);
     }
 
     /// @inheritdoc IEBrake
