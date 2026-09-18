@@ -327,36 +327,6 @@ contract DeviationSentinel is AccessControlledV8 {
         emit TokenMonitoringStatusChanged(token, enabled);
     }
 
-    /// @notice Handle price deviation for a market by pausing borrow or zeroing CF and pausing supply
-    /// @dev This contract can only tighten restrictions. Recovery (unpausing, restoring CF) is via governance VIP.
-    /// @param market The vToken market to handle
-    /// @custom:event Emits DeviationHandled with price context and the action taken
-    /// @custom:error UnauthorizedKeeper is thrown when caller is not a trusted keeper
-    /// @custom:error MarketNotConfigured is thrown when market's underlying token has no deviation config
-    /// @custom:error TokenMonitoringDisabled is thrown when monitoring is disabled for the token
-    function handleDeviation(IVToken market) external onlyKeeper {
-        address underlyingToken = market.underlying();
-        DeviationConfig memory config = tokenConfigs[underlyingToken];
-
-        if (config.deviation == 0) revert MarketNotConfigured();
-        if (!config.enabled) revert TokenMonitoringDisabled();
-
-        (bool hasDeviation, uint256 oraclePrice, uint256 sentinelPrice, ) = checkPriceDeviation(market);
-
-        if (!hasDeviation) return;
-
-        DeviationAction action;
-        if (sentinelPrice > oraclePrice) {
-            EBRAKE.pauseBorrow(address(market));
-            action = DeviationAction.BorrowPaused;
-        } else {
-            EBRAKE.decreaseCF(address(market), 0);
-            EBRAKE.pauseSupply(address(market));
-            action = DeviationAction.SupplyPausedAndCFZeroed;
-        }
-        emit DeviationHandled(address(market), oraclePrice, sentinelPrice, action);
-    }
-
     /// @notice Set the NavGuard pause thresholds for a Liquidity Hub resource
     /// @dev Thresholds only: arming is `setNavMonitoringEnabled`, so retuning one cannot arm or disarm
     ///      it. Both are measured from the band's centre, so each has to exceed the Hub's matching
@@ -414,6 +384,36 @@ contract DeviationSentinel is AccessControlledV8 {
 
         config.enabled = enabled;
         emit NavGuardStatusChanged(config.hub, yieldGroup, resource, enabled);
+    }
+
+    /// @notice Handle price deviation for a market by pausing borrow or zeroing CF and pausing supply
+    /// @dev This contract can only tighten restrictions. Recovery (unpausing, restoring CF) is via governance VIP.
+    /// @param market The vToken market to handle
+    /// @custom:event Emits DeviationHandled with price context and the action taken
+    /// @custom:error UnauthorizedKeeper is thrown when caller is not a trusted keeper
+    /// @custom:error MarketNotConfigured is thrown when market's underlying token has no deviation config
+    /// @custom:error TokenMonitoringDisabled is thrown when monitoring is disabled for the token
+    function handleDeviation(IVToken market) external onlyKeeper {
+        address underlyingToken = market.underlying();
+        DeviationConfig memory config = tokenConfigs[underlyingToken];
+
+        if (config.deviation == 0) revert MarketNotConfigured();
+        if (!config.enabled) revert TokenMonitoringDisabled();
+
+        (bool hasDeviation, uint256 oraclePrice, uint256 sentinelPrice, ) = checkPriceDeviation(market);
+
+        if (!hasDeviation) return;
+
+        DeviationAction action;
+        if (sentinelPrice > oraclePrice) {
+            EBRAKE.pauseBorrow(address(market));
+            action = DeviationAction.BorrowPaused;
+        } else {
+            EBRAKE.decreaseCF(address(market), 0);
+            EBRAKE.pauseSupply(address(market));
+            action = DeviationAction.SupplyPausedAndCFZeroed;
+        }
+        emit DeviationHandled(address(market), oraclePrice, sentinelPrice, action);
     }
 
     /// @notice Handle a NavGuard band breach on a Liquidity Hub resource by pausing the Hub
