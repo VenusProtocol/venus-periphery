@@ -95,6 +95,13 @@ contract EvilVToken {
         return 1e18;
     }
 
+    bool public accrued;
+
+    function accrueInterest() external returns (uint256) {
+        accrued = true;
+        return 0;
+    }
+
     uint256 public flashLoanFeeMantissa;
 
     function setFlashLoanFee(uint256 mantissa) external {
@@ -160,13 +167,15 @@ contract EchoingComptroller {
         gateway = r;
     }
 
+    /// @dev Reports the shortfall only once the market has accrued, the way Core's own redeem
+    ///      check sees it, so a caller that asks before accrual gets the stale answer.
     function getHypotheticalAccountLiquidity(
         address,
-        address,
+        address vToken,
         uint256,
         uint256
-    ) external pure returns (uint256, uint256, uint256) {
-        return (0, 0, 1);
+    ) external view returns (uint256, uint256, uint256) {
+        return (0, 0, EvilVToken(vToken).accrued() ? 1 : 0);
     }
 
     function checkMembership(address, address) external pure returns (bool) {
@@ -362,6 +371,23 @@ contract CollateralGateway_AdversarialTest is Test {
         uint256 borrowed = comptroller.lastAmount();
         assertEq(borrowed, 99_009_900_990_099_009_900, "principal scaled down by the fee");
         assertLe(borrowed + ((borrowed * 1e16) / 1e18), 100e18, "loan plus fee fits inside the redeem");
+    }
+
+    /// @dev The market's own redeem accrues before it checks liquidity, so asking beforehand reads
+    ///      a stale borrow balance and can miss a shortfall the redeem then rejects.
+    function test_theShortfallCheckReadsAccruedState() public {
+        EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)));
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+
+        vm.prank(attacker);
+        gateway.supplyFromCollateral(address(vToken), 100e18, address(hub), address(market), 0);
+
+        assertTrue(vToken.accrued(), "the source market was accrued");
+        assertGt(comptroller.lastAmount(), 0, "the shortfall was seen, so the flash path ran");
     }
 
     /// @dev A callback whose amounts do not match what the gateway recorded is rejected outright.

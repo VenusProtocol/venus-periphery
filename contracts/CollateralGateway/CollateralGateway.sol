@@ -117,6 +117,10 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
         uint256 assetBalanceBefore = IERC20(asset).balanceOf(address(this));
 
+        // `redeemBehalf` accrues this market before it runs its own liquidity check, so the check
+        // below has to read the accrued state to reach the same answer.
+        IVToken(vToken).accrueInterest();
+
         _enterCoreMarket(vhMarket);
 
         uint256 vTokens;
@@ -397,10 +401,11 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     /// @dev How much to borrow so that the loan plus its flash-loan fee is covered by what the
     ///      redeem of `vTokenAmount` pays out.
     ///
-    ///      Every input moves in the gateway's favour. The exchange rate only rises between accruals,
-    ///      the Comptroller's redeem fee is subtracted here exactly as the market subtracts it, and
-    ///      the loan is scaled down by the market's flash-loan fee, which the market then charges on
-    ///      the smaller principal. So the redeem inside the callback always covers the repayment.
+    ///      Every input moves in the gateway's favour. The stored exchange rate is read after the
+    ///      entry point accrued the market, the Comptroller's redeem fee is subtracted here exactly
+    ///      as the market subtracts it, and the loan is scaled down by the market's flash-loan fee,
+    ///      which the market then charges on the smaller principal. So the redeem inside the
+    ///      callback always covers the repayment.
     function _flashAmount(address vToken, uint256 vTokenAmount) private view returns (uint256) {
         uint256 redeemable = (vTokenAmount * IVToken(vToken).exchangeRateStored()) / EXP_SCALE;
 
