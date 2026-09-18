@@ -72,6 +72,12 @@ interface IComptroller {
     /// @return uint256 Error code (0 = success).
     function enterMarket(address user, address vToken) external returns (uint256);
 
+    /// @notice Enter a market for an account. The caller needs the ACM permission for `enterMarketForAccount(address,address)`.
+    /// @param account The account to enter the market for.
+    /// @param vToken The vToken market address.
+    /// @return uint256 Error code (0 = success).
+    function enterMarketForAccount(address account, address vToken) external returns (uint256);
+
     /// @notice Check whether an action is paused on a given market.
     /// @param market The vToken market address.
     /// @param action The action to check.
@@ -104,6 +110,21 @@ interface IComptroller {
     /// @return shortfall The account's shortfall.
     function getBorrowingPower(
         address account
+    ) external view returns (uint256 error, uint256 liquidity, uint256 shortfall);
+
+    /// @notice Get an account's liquidity as it would be after redeeming or borrowing in one market.
+    /// @param account The account address.
+    /// @param vTokenModify The vToken market the redeem or borrow applies to.
+    /// @param redeemTokens The amount of vTokens to redeem.
+    /// @param borrowAmount The amount of underlying to borrow.
+    /// @return error Error code (0 = success).
+    /// @return liquidity The account's excess liquidity.
+    /// @return shortfall The account's shortfall.
+    function getHypotheticalAccountLiquidity(
+        address account,
+        address vTokenModify,
+        uint256 redeemTokens,
+        uint256 borrowAmount
     ) external view returns (uint256 error, uint256 liquidity, uint256 shortfall);
 
     /// @notice Get the treasury fee percentage.
