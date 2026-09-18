@@ -239,8 +239,8 @@ interface ICollateralGateway {
      * underlying. Markets may belong to different Spoke Pools, since each one's Comptroller is
      * read from the market itself.
      *
-     * The entering leg calls `SpokeComptroller.enterMarketBehalf`, which is permissioned, so this
-     * gateway has to hold the `enterMarketBehalf(address,address)` role on every Comptroller
+     * The entering leg calls `SpokeComptroller.enterMarketForAccount`, which is permissioned, so this
+     * gateway has to hold the `enterMarketForAccount(address,address)` role on every Comptroller
      * involved. Until governance grants it, this function reverts and users supply and enter in
      * two calls of their own.
      */

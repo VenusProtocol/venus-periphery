@@ -367,9 +367,9 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     }
 
     /// @dev Enable `vToken` as collateral for the caller. Reverts unless this gateway holds the
-    ///      `enterMarketBehalf(address,address)` role on the market's Comptroller.
+    ///      `enterMarketForAccount(address,address)` role on the market's Comptroller.
     function _enterSpokeMarket(address vToken) private {
-        IILComptroller(address(IVToken(vToken).comptroller())).enterMarketBehalf(vToken, msg.sender);
+        IILComptroller(address(IVToken(vToken).comptroller())).enterMarketForAccount(msg.sender, vToken);
     }
 
     /// @dev Reverts unless `vhMarket` is a market of {COMPTROLLER}. Everything else on the Core path

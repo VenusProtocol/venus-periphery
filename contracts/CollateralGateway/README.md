@@ -12,8 +12,8 @@ supplyFromWallet:      USDT ──► Hub.deposit ──► vhUSDT ──► vvh
 supplyFromCollateral:  vUSDT ─► redeemBehalf ──► USDT ──► Hub.deposit ──► vhUSDT ──► vvhUSDT.mintBehalf(user)
                                                                      └─► enterMarketForAccount(user, vvhUSDT)
 withdrawPosition:      transferFrom(user) [+ vvhUSDT.redeemBehalf(user)] ──► Hub.redeem(shares, user, gateway)
-supplyAndEnterSpokeMarkets:  token ──► spokeMarket.mintBehalf(user) ──► enterMarketBehalf(market, user)
-enterSpokeMarkets:           enterMarketBehalf(market, user)
+supplyAndEnterSpokeMarkets:  token ──► spokeMarket.mintBehalf(user) ──► enterMarketForAccount(user, market)
+enterSpokeMarkets:           enterMarketForAccount(user, market)
 ```
 
 `mintBehalf` credits the receipts to the caller, so they never sit in the gateway. Every supply into a Core vh market also enters that market for the caller through `Comptroller.enterMarketForAccount(account, vhMarket)`, so the position is collateral from the same call. Entering a market also makes the position seizable in a liquidation.
@@ -37,7 +37,7 @@ Receipts are derived from the shares by rounding up, then capped at the caller's
 
 ### Spoke Pools
 
-Spoke markets are entered through `SpokeComptroller.enterMarketBehalf(vToken, account)`. Its arguments are the reverse of the Core `enterMarketBehalf(onBehalf, vToken)`. Each market's Comptroller is read from the market itself, so one call may span pools. The gateway only ever passes `msg.sender` as the account. The amount supplied is measured as a balance delta, so a token that charges a transfer fee supplies only what arrived.
+Spoke markets are entered through `SpokeComptroller.enterMarketForAccount(account, vToken)`, which takes the same arguments in the same order as the Core `enterMarketForAccount`. Each market's Comptroller is read from the market itself, so one call may span pools. The gateway only ever passes `msg.sender` as the account. The amount supplied is measured as a balance delta, so a token that charges a transfer fee supplies only what arrived.
 
 ## Contract Structure
 
@@ -72,12 +72,12 @@ The delegate grant is pool wide. It lets the gateway redeem and borrow against e
 
 ## Governance Setup
 
-| Needed for                             | Action                                                                                  | Target               |
-| -------------------------------------- | --------------------------------------------------------------------------------------- | -------------------- |
-| every Core supply                      | MarketFacet with `enterMarketForAccount(address,address)` cut into the Core Comptroller | Core Comptroller     |
-| every Core supply                      | `giveCallPermission(comptroller, "enterMarketForAccount(address,address)", gateway)`    | AccessControlManager |
-| `supplyFromCollateral` while borrowing | `setWhiteListFlashLoanAccount(gateway, true)`                                           | Core Comptroller     |
-| Spoke functions, per Spoke Comptroller | `giveCallPermission(spokeComptroller, "enterMarketBehalf(address,address)", gateway)`   | AccessControlManager |
+| Needed for                             | Action                                                                                    | Target               |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------- |
+| every Core supply                      | MarketFacet with `enterMarketForAccount(address,address)` cut into the Core Comptroller   | Core Comptroller     |
+| every Core supply                      | `giveCallPermission(comptroller, "enterMarketForAccount(address,address)", gateway)`      | AccessControlManager |
+| `supplyFromCollateral` while borrowing | `setWhiteListFlashLoanAccount(gateway, true)`                                             | Core Comptroller     |
+| Spoke functions, per Spoke Comptroller | `giveCallPermission(spokeComptroller, "enterMarketForAccount(address,address)", gateway)` | AccessControlManager |
 
 Until a grant exists, the functions that need it revert.
 

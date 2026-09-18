@@ -13,7 +13,7 @@ import { ICollateralGateway } from "../../../contracts/CollateralGateway/ICollat
 import { MockERC20 } from "./mocks/MockERC20.sol";
 
 /// @notice Records membership and refuses callers that were not granted the role, standing in for
-///         the Access Control Manager check in `SpokeComptroller.enterMarketBehalf`.
+///         the Access Control Manager check in `SpokeComptroller.enterMarketForAccount`.
 contract MockSpokeComptroller {
     error Unauthorized(address caller);
 
@@ -24,7 +24,7 @@ contract MockSpokeComptroller {
         allowed[caller] = true;
     }
 
-    function enterMarketBehalf(address vToken, address account) external {
+    function enterMarketForAccount(address account, address vToken) external {
         if (!allowed[msg.sender]) revert Unauthorized(msg.sender);
         entered[account][vToken] = true;
     }
