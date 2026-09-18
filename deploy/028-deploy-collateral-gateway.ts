@@ -27,3 +27,4 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
 
 export default func;
 func.tags = ["collateral-gateway"];
+func.skip = async hre => hre.network.name === "hardhat";

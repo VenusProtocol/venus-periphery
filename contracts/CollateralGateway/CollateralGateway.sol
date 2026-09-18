@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-pragma solidity 0.8.25;
+pragma solidity 0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -36,27 +36,24 @@ import { IHub } from "./IHub.sol";
 contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    /// @dev Migration in flight, readable by the flash-loan callback. Set for the duration of one
-    ///      `supplyFromCollateral` call and cleared before it returns.
-    struct Migration {
-        address user;
-        address vToken;
-        uint256 vTokenAmount;
-        address hub;
-        address asset;
-        address vhMarket;
-        uint256 minShares;
-        uint256 flashAmount;
-        uint256 shares;
-        uint256 vTokens;
-    }
-
     uint256 private constant EXP_SCALE = 1e18;
 
     /// @notice The Core Comptroller that every Core function of this gateway runs against.
     IComptroller public immutable COMPTROLLER;
 
-    Migration private _migration;
+    /// @dev The migration in flight, readable by the flash-loan callback. Written at the start of
+    ///      one `supplyFromCollateral` call and dropped with the transaction. A zero
+    ///      `_migrationUser` means no migration is in flight.
+    address transient _migrationUser;
+    address transient _migrationVToken;
+    uint256 transient _migrationVTokenAmount;
+    address transient _migrationHub;
+    address transient _migrationAsset;
+    address transient _migrationVhMarket;
+    uint256 transient _migrationMinShares;
+    uint256 transient _migrationFlashAmount;
+    uint256 transient _migrationShares;
+    uint256 transient _migrationVTokens;
 
     /// @param comptroller The Core Comptroller. Reverts on the zero address.
     constructor(IComptroller comptroller) {
@@ -194,23 +191,24 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         address,
         bytes calldata
     ) external override returns (bool success, uint256[] memory repayAmounts) {
-        Migration memory m = _migration;
-        if (m.user == address(0) || initiator != address(this)) revert UnexpectedCallback();
+        address user = _migrationUser;
+        address vToken = _migrationVToken;
+        if (user == address(0) || initiator != address(this)) revert UnexpectedCallback();
         if (msg.sender != address(COMPTROLLER)) revert UnexpectedCallback();
         if (vTokens.length != 1 || amounts.length != 1 || premiums.length != 1) revert UnexpectedCallback();
-        if (address(vTokens[0]) != m.vToken || amounts[0] != m.flashAmount) revert UnexpectedCallback();
+        if (address(vTokens[0]) != vToken || amounts[0] != _migrationFlashAmount) revert UnexpectedCallback();
 
-        address asset = m.asset;
-        (_migration.shares, _migration.vTokens) = _depositAndSupply(
-            m.hub,
+        address asset = _migrationAsset;
+        (_migrationShares, _migrationVTokens) = _depositAndSupply(
+            _migrationHub,
             asset,
-            m.vhMarket,
+            _migrationVhMarket,
             amounts[0],
-            m.minShares,
-            m.user
+            _migrationMinShares,
+            user
         );
 
-        uint256 proceeds = _redeemToUnderlying(m.vToken, m.vTokenAmount, asset, m.user);
+        uint256 proceeds = _redeemToUnderlying(vToken, _migrationVTokenAmount, asset, user);
 
         repayAmounts = new uint256[](1);
         repayAmounts[0] = amounts[0] + premiums[0];
@@ -219,7 +217,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         // Change is measured against this migration's own redeem, never against the balance. Every
         // address here is caller-supplied, so a balance reading would hand a caller anything else
         // the gateway happens to hold.
-        if (proceeds > repayAmounts[0]) IERC20(asset).safeTransfer(m.user, proceeds - repayAmounts[0]);
+        if (proceeds > repayAmounts[0]) IERC20(asset).safeTransfer(user, proceeds - repayAmounts[0]);
 
         return (true, repayAmounts);
     }
@@ -243,7 +241,15 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         uint256 minShares
     ) private returns (uint256 shares, uint256 vTokens) {
         uint256 flashAmount = _flashAmount(vToken, vTokenAmount);
-        _migration = Migration(msg.sender, vToken, vTokenAmount, hub, asset, vhMarket, minShares, flashAmount, 0, 0);
+
+        _migrationUser = msg.sender;
+        _migrationVToken = vToken;
+        _migrationVTokenAmount = vTokenAmount;
+        _migrationHub = hub;
+        _migrationAsset = asset;
+        _migrationVhMarket = vhMarket;
+        _migrationMinShares = minShares;
+        _migrationFlashAmount = flashAmount;
 
         IVToken[] memory markets = new IVToken[](1);
         uint256[] memory amounts = new uint256[](1);
@@ -253,11 +259,9 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         COMPTROLLER.executeFlashLoan(payable(address(this)), payable(address(this)), markets, amounts, "");
         IERC20(asset).forceApprove(vToken, 0);
 
-        shares = _migration.shares;
-        vTokens = _migration.vTokens;
+        shares = _migrationShares;
+        vTokens = _migrationVTokens;
         if (vTokens == 0) revert UnexpectedCallback();
-
-        delete _migration;
     }
 
     /// @dev Deposit `assets` into `hub` and supply the resulting shares to `vhMarket` for

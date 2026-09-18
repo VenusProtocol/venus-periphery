@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-pragma solidity 0.8.25;
+pragma solidity 0.8.28;
 
 // solhint-disable func-name-mixedcase, ordering, import-path-check, avoid-low-level-calls, no-inline-assembly
 // solhint-disable gas-strict-inequalities, immutable-vars-naming, no-empty-blocks, gas-custom-errors
