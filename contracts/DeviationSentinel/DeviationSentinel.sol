@@ -22,6 +22,10 @@ import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contract
  *      CF tightening is performed by calling EBrake.decreaseCF(market, 0) — the most aggressive
  *      sentinel response — which zeros the collateral factor.
  *      Idempotency is handled by EBrake — duplicate calls are no-ops.
+ *
+ *      The NAV monitoring here stands on its own: it reads the band and judges the value against
+ *      its own thresholds, whether or not the Hub is clamping that resource. Those thresholds
+ *      should be set wider than the Hub's own gap, so routine clamping alone never trips a pause.
  */
 contract DeviationSentinel is AccessControlledV8 {
     /// @notice Configuration for price deviation monitoring
@@ -59,9 +63,11 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @param YieldGroupNotRegistered The Hub does not list the supplied YieldGroup
     /// @param ResourceNotRegistered The YieldGroup does not list the supplied resource
     /// @param ObservedValueZero The value source read back zero, so there is nothing to compare
-    /// @param CentreZero The band was closed or never anchored, so there is nothing to compare against
+    /// @param CentreZero The band is closed with the cap off (or the downside unwatched), so the
+    ///        Hub isn't mis-valuing the position — see `checkNavGuardDeviation`
     /// @param WithinThreshold Inside the band, or outside it by less than the configured threshold
-    /// @param Breached Outside the band by more than the threshold — a pause is due
+    /// @param Breached Outside the band by more than the threshold, or a closed band is clamping
+    ///        a real value to zero — either way, a pause is due
     enum NavGuardCheckStatus {
         MonitoringDisabled,
         YieldGroupNotRegistered,
@@ -160,8 +166,9 @@ contract DeviationSentinel is AccessControlledV8 {
 
     /// @notice Emitted when a resource breaks through its NavGuard band and the Hub is paused
     /// @dev `centre` is what the breach was measured against, and the two bounds are the band the
-    ///      Hub was applying at the time. All three raw, so an operator can recompute the trip
-    ///      point from the thresholds rather than trust one this contract derived.
+    ///      Hub was applying at the time. All three raw, so an operator can recompute the ordinary
+    ///      trip point from the thresholds — except when `centre` is 0, where the breach is the
+    ///      band itself being closed on a real value, not a percentage miss.
     /// @param hub The Liquidity Hub that was paused
     /// @param yieldGroup The YieldGroup holding the breaching resource
     /// @param resource The resource whose value broke through its band
@@ -223,8 +230,9 @@ contract DeviationSentinel is AccessControlledV8 {
     ///      published zero. A genuine write-off is a governance action, not a sentinel pause.
     error NavGuardObservedValueZero(address resource);
 
-    /// @notice Thrown when the band has no centre to measure against
-    /// @dev A band closed by a full withdrawal, or one armed on a position that held nothing.
+    /// @notice Thrown when the band is closed but nothing here is actually mis-valued
+    /// @dev The same closed band with the cap armed and the downside watched is a `Breached`
+    ///      pause instead — see `checkNavGuardDeviation`.
     error NavGuardCentreZero(address resource);
 
     /// @notice Thrown when the band is broken by less than the configured pause threshold
@@ -350,17 +358,13 @@ contract DeviationSentinel is AccessControlledV8 {
     }
 
     /// @notice Set the NavGuard pause thresholds for a Liquidity Hub resource
-    /// @dev Thresholds only; `enabled` belongs to `setNavMonitoringEnabled`, so retuning one cannot arm
-    ///      or disarm a resource. The Hub is read off the YieldGroup and checked against the
-    ///      registry, which means the onboarding VIP has to register the YieldGroup with the Hub
-    ///      and the resource with the YieldGroup before this call lands.
+    /// @dev Thresholds only: arming is `setNavMonitoringEnabled`, so retuning one cannot arm or disarm
+    ///      it. Both are measured from the band's centre, so each has to exceed the Hub's matching
+    ///      gap, `upGapBps` or `downGapBps`, or clamping the Hub does routinely trips a pause.
     /// @param yieldGroup Address of the YieldGroup holding the resource
     /// @param resource Address of the resource inside that YieldGroup
-    /// @param pauseUpBps How far above the band's centre the value must sit to trip, in bps. Measured
-    ///        from the centre, so it has to exceed the Hub's own `upGapBps` or routine clamping trips
-    ///        a pause. Zero leaves the upside unwatched.
-    /// @param pauseDownBps How far below the band's centre the value must sit to trip, in bps. Same
-    ///        requirement against `downGapBps`. Zero leaves the downside unwatched.
+    /// @param pauseUpBps How far above the centre the value must sit to trip, in bps; zero leaves it unwatched
+    /// @param pauseDownBps How far below the centre the value must sit to trip, in bps; zero leaves it unwatched
     /// @custom:event Emits NavGuardConfigUpdated event
     /// @custom:error HubRegistryUnavailable is thrown on a chain that runs no Liquidity Hub
     /// @custom:error ZeroAddress is thrown when the YieldGroup or resource address is zero
@@ -388,10 +392,7 @@ contract DeviationSentinel is AccessControlledV8 {
 
     /// @notice Start or stop watching a resource's NavGuard band, keeping its thresholds
     /// @dev Arming re-runs the checks `setHubNavConfig` ran, since a Hub or a resource can be
-    ///      de-registered in between. Disarming runs none, so a dropped pair can still be switched off.
-    ///
-    ///      Deliberately not named `setNavGuardEnabled`: the YieldGroup has one of its own, and a
-    ///      VIP granting one of the two must not read as though it grants the other.
+    ///      de-registered in between. Disarming runs none, so a dropped pair can always be turned off.
     /// @param yieldGroup Address of the YieldGroup holding the resource
     /// @param resource Address of the resource
     /// @param enabled Whether to watch this resource's band
@@ -416,25 +417,18 @@ contract DeviationSentinel is AccessControlledV8 {
     }
 
     /// @notice Handle a NavGuard band breach on a Liquidity Hub resource by pausing the Hub
-    /// @dev Pausing the Hub is the whole remedy: `YieldGroupBase.totalAssets()` sums every
-    ///      registered resource without reading its pause flag, so pausing only the breaching
-    ///      resource would leave the same wrong number priced into deposits and redemptions.
-    ///      Recovery is a governance VIP that re-anchors the band before unpausing, or the next
-    ///      check trips on the same breach.
-    ///
-    ///      Every non-breach status is named by its own error, and the `!= Breached` return behind
-    ///      them is what makes that list safe to be wrong: a status added later and not given an
-    ///      error here falls through to doing nothing rather than to pausing a Hub.
+    /// @dev The whole Hub is paused, not the breaching resource: `YieldGroupBase.totalAssets()` sums
+    ///      every registered resource without reading its pause flag, so pausing just that resource
+    ///      would leave the same wrong number priced into deposits and redemptions.
     /// @param yieldGroup The YieldGroup holding the resource. Checked against its Hub's registry.
     /// @param resource The resource whose NavGuard band to read
     /// @custom:event Emits NavGuardDeviationHandled with the band context at detection time
     /// @custom:error UnauthorizedKeeper is thrown when caller is not a trusted keeper
-    /// @custom:error NavGuardDisabled is thrown when this pair is not being watched
-    /// @custom:error YieldGroupNotRegistered is thrown when the Hub does not list the YieldGroup
-    /// @custom:error ResourceNotRegistered is thrown when the YieldGroup does not list the resource
-    /// @custom:error NavGuardObservedValueZero is thrown when the value source reports zero
-    /// @custom:error NavGuardCentreZero is thrown when the band has no centre to measure against
-    /// @custom:error DeviationWithinThreshold is thrown when the break is below the pause threshold
+    /// @custom:error NavGuardDisabled (pair not watched), YieldGroupNotRegistered (Hub dropped the
+    ///        YieldGroup), ResourceNotRegistered (YieldGroup dropped the resource),
+    ///        NavGuardObservedValueZero (value source reads zero), NavGuardCentreZero (band closed
+    ///        but nothing mis-valued), or DeviationWithinThreshold (break below the threshold) —
+    ///        each is one non-breach status `checkNavGuardDeviation` can return.
     function handleNavGuardDeviation(address yieldGroup, address resource) external onlyKeeper {
         (
             NavGuardCheckStatus status,
@@ -508,17 +502,16 @@ contract DeviationSentinel is AccessControlledV8 {
     ///         more than the configured threshold, and why
     /// @dev `handleNavGuardDeviation` calls this rather than repeating the comparison, so what
     ///      monitoring reads and what the keeper acts on cannot drift apart.
-    ///
     ///      Can revert: `yieldGroup` is caller-supplied, so a non-contract address or a revert
     ///      inside it propagates out. The Hub is not — it comes from the stored config.
     /// @param yieldGroup The YieldGroup holding the resource
     /// @param resource The resource whose NavGuard band to read
     /// @return status Why a pause is or is not due
     /// @return hub The Hub that would be paused, as governance configured it; `0` when unwatched
-    /// @return observedValue Value the counterparty reports, in asset units; `0` when the band was not read
-    /// @return centre What the band says the position is worth; `0` when the band was not read
-    /// @return minAllowedValue The band's floor; `0` when the band was not read
-    /// @return maxAllowedValue The band's cap; `0` when the band was not read
+    /// @return observedValue Value the counterparty reports, in asset units; `0` if unread or empty
+    /// @return centre What the band says the position is worth; `0` if unread or the band is closed
+    /// @return minAllowedValue The band's floor; `0` before it is read, or when the band is closed
+    /// @return maxAllowedValue The band's cap; `0` before it is read, or when the band is closed
     function checkNavGuardDeviation(
         address yieldGroup,
         address resource
@@ -539,10 +532,6 @@ contract DeviationSentinel is AccessControlledV8 {
 
         hub = config.hub;
 
-        // Two of the three checks the setters ran, repeated because either can be undone afterwards
-        // and a de-registered resource holds nothing worth freezing a Hub for. The registry check
-        // is deliberately not among them: a Hub dropped from the registry has usually been replaced
-        // for its asset and still holds the funds it held, so it stays pausable.
         if (!IHub(hub).yieldGroupConfig(yieldGroup).registered) {
             return (NavGuardCheckStatus.YieldGroupNotRegistered, hub, 0, 0, 0, 0);
         }
@@ -550,16 +539,19 @@ contract DeviationSentinel is AccessControlledV8 {
         (bool registered, , ) = IYieldGroupNav(yieldGroup).resourceConfig(resource);
         if (!registered) return (NavGuardCheckStatus.ResourceNotRegistered, hub, 0, 0, 0, 0);
 
-        // `isClamped` is ignored on purpose: it says only whether the Hub is holding its own
-        // valuation to the band, and a side switched off there is exactly when a pause matters most.
         (observedValue, minAllowedValue, maxAllowedValue, , ) = IYieldGroupNav(yieldGroup).navGuardStatus(resource);
 
         // Measured from the centre, not the bounds: the bounds carry the Hub's own gap, so widening
-        // it in the other repo would move this trip point without the thresholds here changing.
-        centre = IYieldGroupNav(yieldGroup).navGuard(resource).centre;
+        // it on the Hub side would move this trip point even though nothing changed here.
+        //
+        // Read raw, not drift-grown: `interval` is kept to about a day, so one interval's drift is
+        // only a couple of bps — well inside the margin `pauseUpBps`/`pauseDownBps` already keep
+        // over the gaps.
+        IYieldGroupNav.NavBand memory band = IYieldGroupNav(yieldGroup).navGuard(resource);
+        centre = band.centre;
 
-        // Two zeros that would otherwise read as a breach, kept apart because they mean different
-        // things: no reading to judge, versus no centre to judge it against.
+        // A zero value sits under any downside trip point, and a zero centre puts both trip points at
+        // zero, so either would read as a breach in the comparison below. Each gets its own status.
         if (observedValue == 0) {
             return (
                 NavGuardCheckStatus.ObservedValueZero,
@@ -571,6 +563,16 @@ contract DeviationSentinel is AccessControlledV8 {
             );
         }
         if (centre == 0) {
+            // The position still holds real value, but this band is closed. With the cap armed,
+            // the Hub's own `_guardedNav` prices this resource at the closed cap — zero — so Hub
+            // NAV understates the position by its full value. With the downside watched too, that
+            // undercount is the breach this sentinel exists to catch.
+            //
+            // With the cap off, or the downside left unwatched, the Hub reports the real value
+            // unclamped, so there is nothing here to flag.
+            if (band.capEnabled && config.pauseDownBps != 0) {
+                return (NavGuardCheckStatus.Breached, hub, observedValue, centre, minAllowedValue, maxAllowedValue);
+            }
             return (NavGuardCheckStatus.CentreZero, hub, observedValue, centre, minAllowedValue, maxAllowedValue);
         }
 
@@ -588,12 +590,6 @@ contract DeviationSentinel is AccessControlledV8 {
     /// @notice Resolve a YieldGroup's Hub and prove the whole chain down to the resource is live
     /// @dev Three reads, each covering what the one before cannot: the registry vouches for the
     ///      Hub, the Hub for the YieldGroup, and the YieldGroup for the resource.
-    ///
-    ///      What it does not check is that the thresholds clear the Hub's own gaps. Both are
-    ///      measured from the same centre, so a threshold under the gap trips inside the band and
-    ///      freezes the Hub over a value it is not even clamping. Left to the VIP author, because
-    ///      the check cannot be made whole from this side: a band that is not configured yet reads
-    ///      zero gaps, and the Hub can widen its own afterwards with nothing here to notice.
     /// @param yieldGroup YieldGroup to resolve
     /// @param resource Resource that must belong to it
     /// @return hub The Hub that YieldGroup reports to

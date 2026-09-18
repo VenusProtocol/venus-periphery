@@ -77,9 +77,9 @@ describe("DeviationSentinel — NavGuard deviation", () => {
   }
 
   // NavBand, in the Hub's field order: anchor, centre, anchoredAt, driftFrom, interval, driftBps,
-  // upGapBps, downGapBps, capEnabled, floorEnabled. Only `centre` is read.
-  function navBand(centre: number) {
-    yieldGroup.navGuard.returns([centre, centre, 0, 0, 86_400, 800, 200, 200, true, true]);
+  // upGapBps, downGapBps, capEnabled, floorEnabled. Only `centre` and `capEnabled` are read.
+  function navBand(centre: number, capEnabled = true) {
+    yieldGroup.navGuard.returns([centre, centre, 0, 0, 86_400, 800, 200, 200, capEnabled, true]);
   }
 
   function navGuardStatus(observed: number, isClamped: boolean) {
@@ -552,10 +552,34 @@ describe("DeviationSentinel — NavGuard deviation", () => {
       expect(eBrake.pauseHub).to.have.callCount(0);
     });
 
-    // A band closed by a full withdrawal, or armed on a position that held nothing, has a zero
-    // centre. Both trip points compute to 0, so an unguarded comparison would call a perfectly
-    // readable 500 a breach and freeze the Hub on sight.
-    it("does not pause on a band with a zero centre", async () => {
+    // A closed band (centre 0) that still reads a real value is the Hub's own `_guardedNav`
+    // clamping this resource down to that closed cap — zero — while the position is genuinely
+    // still worth 500. That understates NAV by the whole position, so it is a breach, not a no-op.
+    it("pauses on a closed band whose cap is clamping a real value to zero", async () => {
+      yieldGroup.navGuardStatus.returns([500, 0, 0, true, 0]);
+      navBand(0);
+
+      await deviationSentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE);
+
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
+    });
+
+    // With the cap off, the same closed band passes the real value straight through the Hub
+    // unclamped, so there is genuinely nothing wrong to flag.
+    it("does not pause on a closed band whose cap is off", async () => {
+      yieldGroup.navGuardStatus.returns([500, 0, 0, false, 0]);
+      navBand(0, false);
+
+      await expect(deviationSentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(deviationSentinel, "NavGuardCentreZero")
+        .withArgs(RESOURCE);
+      expect(eBrake.pauseHub).to.have.callCount(0);
+    });
+
+    // A closed, capped band whose downside was left unwatched is a side governance opted out of —
+    // silently forcing a pause here would override that choice, not fix the blind spot.
+    it("does not pause on a closed, capped band when the downside is unwatched", async () => {
+      await deviationSentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0);
       yieldGroup.navGuardStatus.returns([500, 0, 0, true, 0]);
       navBand(0);
 
@@ -566,15 +590,16 @@ describe("DeviationSentinel — NavGuard deviation", () => {
     });
 
     // The two zeros are different verdicts and must not collapse into one: a zero reading says
-    // nothing about the position, a zero centre says nothing to compare a real reading against.
+    // nothing about the position, a zero centre with the cap off says nothing to compare a real
+    // reading against.
     it("tells a zero reading apart from a zero centre", async () => {
       navGuardStatus(0, false);
       expect((await deviationSentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(
         Status.ObservedValueZero,
       );
 
-      yieldGroup.navGuardStatus.returns([500, 0, 0, true, 0]);
-      navBand(0);
+      yieldGroup.navGuardStatus.returns([500, 0, 0, false, 0]);
+      navBand(0, false);
       expect((await deviationSentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(
         Status.CentreZero,
       );
