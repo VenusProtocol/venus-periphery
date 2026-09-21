@@ -108,6 +108,7 @@ const decoded = txBuilder.transactions.map(tx => ({
 const operationsLabel =
   (metadata.operations ?? (metadata.operation ? [metadata.operation] : [])).join(", ") || "(no ops)";
 
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 describe(`EBrake TX Simulation — [${operationsLabel}] on ${metadata.network} (block ${metadata.blockNumber})`, () => {
   let eBrakeContract: Contract;
   let comptroller: Contract;
