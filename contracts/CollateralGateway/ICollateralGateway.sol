@@ -10,10 +10,10 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *         market, so one call turns an underlying balance into Core collateral. Also supplies
  *         directly into Spoke Pool markets, enabling each as the caller's collateral in the same
  *         call, and redeems a Core position back to the underlying in one call.
- * @dev A single immutable deployment serves every Hub of one Core Comptroller,
- *      which is fixed at construction. The Hub and its market are chosen per call: the market must
- *      be listed by that Comptroller, and its `underlying()` must be the Hub itself, since a Hub
- *      share token is what its market wraps.
+ * @dev A single deployment without a proxy serves every Hub of one Core Comptroller, which is
+ *      fixed at construction. The vh market is chosen per call and must be listed by that
+ *      Comptroller. The Hub is read off it as `underlying()`, since a Hub share token is what its
+ *      market wraps.
  */
 interface ICollateralGateway {
     /**
@@ -40,7 +40,7 @@ interface ICollateralGateway {
      * @param vToken Core market the position was redeemed from.
      * @param hub Hub the underlying was deposited into.
      * @param vhMarket Core market the Hub shares were supplied to.
-     * @param vTokenAmount Receipts pulled from `user` and redeemed.
+     * @param vTokenAmount Receipts redeemed from `user`'s position.
      * @param shares Hub shares minted and supplied on the user's behalf.
      * @param vTokens Market receipts credited to `user`.
      */
@@ -87,8 +87,8 @@ interface ICollateralGateway {
     /// @notice A required amount argument was zero.
     error ZeroAmount();
 
-    /// @notice The Core market returned a non-zero (failure) error code on mint.
-    error VTokenMintFailed(address vhMarket, uint256 errorCode);
+    /// @notice A Core or Spoke market returned a non-zero (failure) error code on mint.
+    error VTokenMintFailed(address market, uint256 errorCode);
 
     /// @notice The mint credited no receipts to the user.
     error NothingMinted();
@@ -108,8 +108,8 @@ interface ICollateralGateway {
     /// @notice The Comptroller refused to enable `vhMarket` as the caller's collateral.
     error EnterMarketFailed(address vhMarket, uint256 errorCode);
 
-    /// @notice The flash-loan callback was invoked outside a migration, or by a caller other than
-    ///         the Comptroller that started one.
+    /// @notice The flash-loan callback was invoked outside a migration, by a caller other than the
+    ///         Comptroller that started one, or with arguments other than the ones requested.
     error UnexpectedCallback();
 
     /// @notice The Comptroller could not price the caller's position.
@@ -135,7 +135,8 @@ interface ICollateralGateway {
     /// @notice The caller holds fewer receipts than the amount they asked to migrate.
     error InsufficientReceipts(uint256 held, uint256 requested);
 
-    /// @notice The market is not listed by the Comptroller this gateway was deployed against.
+    /// @notice The market is not listed by its Comptroller: the Core Comptroller this gateway was
+    ///         deployed against, or the Spoke market's own pool Comptroller.
     error MarketNotListed(address market);
 
     /// @notice The Spoke market is not the one its pool registered for its underlying.
@@ -171,7 +172,7 @@ interface ICollateralGateway {
      *      Enabling `vhMarket` as collateral rides on the gateway's own
      *      `enterMarketForAccount(address,address)` role instead.
      * @param vToken Core market to redeem from.
-     * @param vTokenAmount Receipts to pull and redeem. `type(uint256).max` means the caller's whole
+     * @param vTokenAmount Receipts to redeem. `type(uint256).max` means the caller's whole
      *        balance of `vToken`, read at execution time.
      * @param vhMarket Core market wrapping the Hub to deposit into.
      * @param minShares Minimum acceptable Hub shares (slippage guard).
@@ -207,7 +208,8 @@ interface ICollateralGateway {
      * @dev Caller must first `approve` this gateway for their wallet shares, and grant it
      *      `Comptroller.updateDelegate` if any of `shares` has to come out of `vhMarket`.
      * @param vhMarket Core market wrapping the Hub to redeem from.
-     * @param shares Hub shares to redeem in total, across both legs.
+     * @param shares Hub shares to redeem in total, across both legs. `type(uint256).max` redeems
+     *        the whole wallet balance and every `vhMarket` receipt.
      * @param minAssets Minimum acceptable underlying (slippage guard).
      * @return assets Underlying paid to the caller.
      *
@@ -252,6 +254,9 @@ interface ICollateralGateway {
      * gateway has to hold the `enterMarketForAccount(address,address)` role on every Comptroller
      * involved. Until governance grants it, this function reverts and users supply and enter in
      * two calls of their own.
+     *
+     * Reverts unless each market is the one `PoolRegistry` holds for its pool and underlying, and
+     * is still listed by its pool's Comptroller.
      */
     function supplyAndEnterSpokeMarkets(address[] calldata vTokens, uint256[] calldata amounts) external;
 
@@ -262,7 +267,7 @@ interface ICollateralGateway {
      * For a caller who already holds the receipts, so has nothing left to supply. Entering a
      * market the caller is already in changes nothing rather than reverting.
      *
-     * Carries the same role requirement as {supplyAndEnterSpokeMarkets}.
+     * Carries the same role requirement and market checks as {supplyAndEnterSpokeMarkets}.
      */
     function enterSpokeMarkets(address[] calldata vTokens) external;
 }

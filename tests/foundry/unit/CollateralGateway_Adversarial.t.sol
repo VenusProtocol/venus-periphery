@@ -24,7 +24,8 @@ interface IGatewayCallback {
     ) external returns (bool, uint256[] memory);
 }
 
-/// @dev Attacker-controlled stand-ins. Every address the gateway accepts is caller-supplied.
+/// @dev Attacker-controlled stand-ins. The mock Comptrollers list every market, so the gateway
+///      treats these as it would a listed market that misbehaves.
 contract EvilComptroller {
     CollateralGateway public gateway;
     uint256 public constant TREASURY = 0;
@@ -290,11 +291,9 @@ contract CollateralGateway_AdversarialTest is Test {
         usdt = new MockERC20("Tether", "USDT", 18);
     }
 
-    /// @dev A caller controlling every address the gateway accepts can still drive the flash-loan
-    ///      callback, but not with arguments the gateway did not ask for. Without that check a
-    ///      zero-amount callback let any caller sweep a stuck balance out of the gateway.
-    /// @dev The gateway pays out change against its own redeem proceeds, so a caller who wires up
-    ///      every address cannot reach a balance the gateway was already holding.
+    /// @dev A Comptroller that echoes back the recorded loan passes every callback guard. The
+    ///      gateway still pays change against its own redeem proceeds, so a balance it was already
+    ///      holding stays put.
     function test_echoingCallbackCannotSweepTokensHeldByTheGateway() public {
         EchoingComptroller comptroller = new EchoingComptroller();
         gateway = new CollateralGateway(IComptroller(address(comptroller)), registry, owner);
@@ -327,8 +326,8 @@ contract CollateralGateway_AdversarialTest is Test {
         gateway.supplyFromCollateral(address(vToken), 6, address(market), 0);
     }
 
-    /// @dev A hub is caller-supplied, so it can spend the approval the gateway grants it. The
-    ///      balance check makes the whole call revert rather than let it reach a stuck balance.
+    /// @dev A misbehaving hub can spend the approval the gateway grants it. The balance check makes
+    ///      the whole call revert rather than let it reach a balance the gateway held.
     function test_greedyHubCannotSpendABalanceTheGatewayHeld() public {
         EchoingComptroller comptroller = new EchoingComptroller();
         gateway = new CollateralGateway(IComptroller(address(comptroller)), registry, owner);
@@ -346,7 +345,7 @@ contract CollateralGateway_AdversarialTest is Test {
         assertEq(usdt.balanceOf(address(gateway)), 1000e18, "gateway keeps what it held");
     }
 
-    /// @dev Approvals granted to caller-supplied addresses do not outlive the call that needed them.
+    /// @dev Approvals granted to hubs and markets do not outlive the call that needed them.
     function test_noApprovalsOutliveTheCall() public {
         EchoingComptroller comptroller = new EchoingComptroller();
         gateway = new CollateralGateway(IComptroller(address(comptroller)), registry, owner);

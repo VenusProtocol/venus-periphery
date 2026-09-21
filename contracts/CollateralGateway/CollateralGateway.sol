@@ -22,8 +22,8 @@ import { IHub } from "./IHub.sol";
  *         caller's behalf. For a Spoke Pool, supply the underlying itself and enable the market as
  *         the caller's collateral in the same call. Runs the Core supply in reverse too: a withdraw
  *         redeems wallet shares before it touches the market.
- * @dev Stateless by design — no proxy and no funds held between calls, with an owner that can only
- *      sweep tokens sent here by mistake. Every call is atomic:
+ * @dev No proxy and no funds held between calls. The owner can only sweep tokens sent here by
+ *      mistake. Every call is atomic:
  *      a supply pulls the underlying, deposits it, supplies the shares and credits the receipts
  *      straight to the caller, and a withdraw pays the caller in the same call. If any leg fails the
  *      whole call reverts and the caller keeps what they started with.
@@ -32,9 +32,9 @@ import { IHub } from "./IHub.sol";
  *      `redeemBehalf` and `mintBehalf` report only an error code. A supply from the wallet deposits
  *      the amount it pulled, since the underlying of a listed market does not charge a transfer fee.
  *
- *      The Hub and its market are supplied per call. The market must be listed by the Comptroller
- *      this gateway was deployed against, and the Hub is checked against the market's
- *      `underlying()`, since a Hub share token is exactly what its Core market wraps.
+ *      The vh market is chosen per call and must be listed by the Comptroller this gateway was
+ *      deployed against. The Hub is read off it as `vhMarket.underlying()`, since a Hub share
+ *      token is exactly what its Core market wraps.
  */
 contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
@@ -47,8 +47,8 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     /// @notice The Core Comptroller that every Core function of this gateway runs against.
     IComptroller public immutable COMPTROLLER;
 
-    /// @dev The migration in flight, readable by the flash-loan callback. Written at the start of
-    ///      one `supplyFromCollateral` call and dropped with the transaction. A zero
+    /// @dev The migration in flight, readable by the flash-loan callback. Written just before
+    ///      `supplyFromCollateral` takes a flash loan and dropped with the transaction. A zero
     ///      `_migrationUser` means no migration is in flight.
     address transient _migrationUser;
     address transient _migrationVToken;
@@ -224,9 +224,8 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         repayAmounts[0] = amounts[0] + premiums[0];
         IERC20(asset).forceApprove(address(vTokens[0]), repayAmounts[0]);
 
-        // Change is measured against this migration's own redeem, never against the balance. Every
-        // address here is caller-supplied, so a balance reading would hand a caller anything else
-        // the gateway happens to hold.
+        // Change is this migration's redeem minus the repayment, not the gateway's balance, so
+        // tokens already sitting here, such as a stray transfer awaiting a sweep, never go to a caller.
         if (proceeds > repayAmounts[0]) IERC20(asset).safeTransfer(user, proceeds - repayAmounts[0]);
 
         return (true, repayAmounts);
@@ -243,9 +242,8 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         emit TokenSwept(address(token), recipient, balance);
     }
 
-    /// @dev Reverts when the gateway holds less of `asset` than `balanceBefore`. Every address in a
-    ///      migration is caller-supplied, so without this a caller-chosen contract could spend an
-    ///      approval the gateway granted against a balance the gateway was already holding.
+    /// @dev Reverts when the gateway holds less of `asset` than `balanceBefore`, meaning a market
+    ///      or Hub in this migration spent tokens the gateway held before the call.
     function _requireBalanceKept(address asset, uint256 balanceBefore) private view {
         uint256 balanceAfter = IERC20(asset).balanceOf(address(this));
         if (balanceAfter < balanceBefore) revert BalanceSpent(balanceBefore, balanceAfter);
@@ -347,18 +345,19 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     ///      the shares actually freed, measured as a balance delta because `redeemBehalf` reports
     ///      only an error code.
     ///
-    ///      The vToken count is rounded up, then capped at what the caller holds. Without the cap,
-    ///      redeeming a whole position asks for one receipt more than exists, because the mint that
-    ///      created it rounded down; the market answers that with an underflow, not an error code.
-    ///      A capped or fee-charging market frees less than `shares`, which surfaces to the caller as
-    ///      a smaller payout rather than a silent shortfall, since `minAssets` is checked against the
-    ///      assets the Hub actually pays out.
+    ///      `shares` worth more than the caller's receipts redeems all of them, so
+    ///      `type(uint256).max` empties the position. Otherwise the vToken count is rounded up.
+    ///      Rounding up alone would ask for one receipt more than exists on a whole position,
+    ///      because the mint that created it rounded down; the market answers that with an
+    ///      underflow, not an error code. A capped or fee-charging market frees less than `shares`,
+    ///      which surfaces to the caller as a smaller payout rather than a silent shortfall, since
+    ///      `minAssets` is checked against the assets the Hub actually pays out.
     function _freeFromMarket(address hub, address vhMarket, uint256 shares) private returns (uint256 freedShares) {
         uint256 rate = IVToken(vhMarket).exchangeRateCurrent();
-        uint256 vTokens = ((shares * EXP_SCALE) + rate - 1) / rate;
-
         uint256 balance = IVToken(vhMarket).balanceOf(msg.sender);
-        if (vTokens > balance) vTokens = balance;
+
+        uint256 vTokens = balance;
+        if (shares <= (balance * rate) / EXP_SCALE) vTokens = ((shares * EXP_SCALE) + rate - 1) / rate;
 
         uint256 balanceBefore = IERC20(hub).balanceOf(address(this));
         uint256 errorCode = IVToken(vhMarket).redeemBehalf(msg.sender, vTokens);

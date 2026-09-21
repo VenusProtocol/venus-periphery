@@ -56,7 +56,7 @@ interface IHubLike {
 
 /**
  * @title Fork_CollateralGateway
- * @notice `supplyFromWallet` against the live BNB Chain deployment: the real Hub_USDT vault, the
+ * @notice The gateway against the live BNB Chain deployment: the real Hub_USDT vault, the
  *         real vvhUSDT Core market, and the real Comptroller. Amounts are read back from the
  *         contracts, so assertions hold at any block.
  */

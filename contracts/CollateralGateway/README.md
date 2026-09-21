@@ -33,7 +33,7 @@ The flash loan passes `onBehalf = gateway`, so an unrepaid balance would become 
 
 A vh position sits in two places, the wallet and the Core market. `withdrawPosition` takes one share amount and spends the wallet first, so a withdraw the wallet covers never touches Core. The Core leg redeems on the caller's behalf, so the Comptroller runs its liquidity check against the caller.
 
-Receipts are derived from the shares by rounding up, then capped at the caller's balance. A mint rounds the receipt count down, so without the cap, redeeming a whole position asks for one receipt more than exists and the market underflows. Anything the Core leg cannot free shows up as a smaller payout, which the `minAssets` floor guards.
+A share amount worth more than the caller's receipts redeems all of them, so `type(uint256).max` withdraws the whole position. Otherwise receipts are derived from the shares by rounding up. A mint rounds the receipt count down, so rounding up alone would ask for one receipt more than exists on a whole position and the market would underflow. Anything the Core leg cannot free shows up as a smaller payout, which the `minAssets` floor guards.
 
 ### Spoke Pools
 
@@ -53,13 +53,13 @@ It also uses `IComptroller`, `IILComptroller`, `IPoolRegistry`, `IVToken` and `I
 
 ## Core Functions
 
-| Function                                                          | Starts from                  | Mechanism                                                                                                                  |
-| ----------------------------------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `supplyFromWallet(assets, vhMarket, minShares)`                   | underlying in the wallet     | deposit into the Hub, mint the vh market, enter it                                                                         |
-| `supplyFromCollateral(vToken, vTokenAmount, vhMarket, minShares)` | a Core position              | redeem, deposit, mint, enter; flash loan when borrowing. `vTokenAmount` of `type(uint256).max` migrates the whole position |
-| `withdrawPosition(vhMarket, shares, minAssets)`                   | Hub shares in wallet or Core | spend wallet shares, free the rest from the vh market, Hub redeem                                                          |
-| `supplyAndEnterSpokeMarkets(vTokens, amounts)`                    | underlying in the wallet     | mint each Spoke market and enter it                                                                                        |
-| `enterSpokeMarkets(vTokens)`                                      | Spoke receipts already held  | enter each Spoke market                                                                                                    |
+| Function                                                          | Starts from                  | Mechanism                                                                                                                       |
+| ----------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `supplyFromWallet(assets, vhMarket, minShares)`                   | underlying in the wallet     | deposit into the Hub, mint the vh market, enter it                                                                              |
+| `supplyFromCollateral(vToken, vTokenAmount, vhMarket, minShares)` | a Core position              | redeem, deposit, mint, enter; flash loan when borrowing. `vTokenAmount` of `type(uint256).max` migrates the whole position      |
+| `withdrawPosition(vhMarket, shares, minAssets)`                   | Hub shares in wallet or Core | spend wallet shares, free the rest from the vh market, Hub redeem. `shares` of `type(uint256).max` withdraws the whole position |
+| `supplyAndEnterSpokeMarkets(vTokens, amounts)`                    | underlying in the wallet     | mint each Spoke market and enter it                                                                                             |
+| `enterSpokeMarkets(vTokens)`                                      | Spoke receipts already held  | enter each Spoke market                                                                                                         |
 
 ## Prerequisites for Users
 

@@ -205,6 +205,15 @@ contract CollateralGateway_WithdrawTest is Test {
         assertEq(market.balanceOf(user), 0, "every receipt burned, and no more");
     }
 
+    function test_withdrawPosition_maxRedeemsTheWholePosition() public {
+        vm.prank(user);
+        uint256 assets = gateway.withdrawPosition(address(market), type(uint256).max, 0);
+
+        assertEq(assets, (WALLET_SHARES + MARKET_SHARES) / 1e6, "both legs paid out");
+        assertEq(hub.balanceOf(user), 0, "wallet shares spent");
+        assertEq(market.balanceOf(user), 0, "every receipt burned");
+    }
+
     function test_withdrawPosition_leavesNothingInTheGateway() public {
         vm.prank(user);
         gateway.withdrawPosition(address(market), WALLET_SHARES + 20e24, 0);
