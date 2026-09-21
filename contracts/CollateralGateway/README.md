@@ -20,12 +20,12 @@ enterSpokeMarkets:           enterMarketForAccount(user, market)
 
 ### Two migration paths
 
-`supplyFromCollateral` removes the old collateral before the replacement exists, and the Comptroller evaluates that redeem as though the collateral were already gone. The gateway asks `getHypotheticalAccountLiquidity` first and branches:
+`supplyFromCollateral` removes the old collateral before the replacement exists, and the Comptroller evaluates that redeem as though the collateral were already gone. The gateway asks `getHypotheticalAccountLiquidity` first and branches. A market the caller never entered backs no borrow, and Core skips the liquidity check when redeeming it, so it always takes the direct path:
 
-|                | Condition                                 | Mechanism                                                                                                      |
-| -------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **Direct**     | removing the position leaves no shortfall | redeem, deposit, mint                                                                                          |
-| **Flash loan** | it would leave a shortfall                | borrow the position's worth from Core, mint the replacement collateral, then redeem the old position and repay |
+|                | Condition                                                               | Mechanism                                                                                                      |
+| -------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Direct**     | the market is not entered, or removing the position leaves no shortfall | redeem, deposit, mint                                                                                          |
+| **Flash loan** | the market is entered and removing it would leave a shortfall           | borrow the position's worth from Core, mint the replacement collateral, then redeem the old position and repay |
 
 The flash loan passes `onBehalf = gateway`, so an unrepaid balance would become a borrow on the gateway rather than on the user. The loan is sized off `exchangeRateStored`, net of the Comptroller's redeem fee, then scaled down by the market's flash loan fee so the principal plus that fee still fits inside the redeem.
 
@@ -53,13 +53,13 @@ It also uses `IComptroller`, `IILComptroller`, `IPoolRegistry`, `IVToken` and `I
 
 ## Core Functions
 
-| Function                                                          | Starts from                  | Mechanism                                                                                                                       |
-| ----------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `supplyFromWallet(assets, vhMarket, minShares)`                   | underlying in the wallet     | deposit into the Hub, mint the vh market, enter it                                                                              |
-| `supplyFromCollateral(vToken, vTokenAmount, vhMarket, minShares)` | a Core position              | redeem, deposit, mint, enter; flash loan when borrowing. `vTokenAmount` of `type(uint256).max` migrates the whole position      |
-| `withdrawPosition(vhMarket, shares, minAssets)`                   | Hub shares in wallet or Core | spend wallet shares, free the rest from the vh market, Hub redeem. `shares` of `type(uint256).max` withdraws the whole position |
-| `supplyAndEnterSpokeMarkets(vTokens, amounts)`                    | underlying in the wallet     | mint each Spoke market and enter it                                                                                             |
-| `enterSpokeMarkets(vTokens)`                                      | Spoke receipts already held  | enter each Spoke market                                                                                                         |
+| Function                                                          | Starts from                  | Mechanism                                                                                                                                           |
+| ----------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `supplyFromWallet(assets, vhMarket, minShares)`                   | underlying in the wallet     | deposit into the Hub, mint the vh market, enter it                                                                                                  |
+| `supplyFromCollateral(vToken, vTokenAmount, vhMarket, minShares)` | a Core position              | redeem, deposit, mint, enter; flash loan when the redeem would leave a shortfall. `vTokenAmount` of `type(uint256).max` migrates the whole position |
+| `withdrawPosition(vhMarket, shares, minAssets)`                   | Hub shares in wallet or Core | spend wallet shares, free the rest from the vh market, Hub redeem. `shares` of `type(uint256).max` withdraws the whole position                     |
+| `supplyAndEnterSpokeMarkets(vTokens, amounts)`                    | underlying in the wallet     | mint each Spoke market and enter it                                                                                                                 |
+| `enterSpokeMarkets(vTokens)`                                      | Spoke receipts already held  | enter each Spoke market                                                                                                                             |
 
 ## Prerequisites for Users
 
@@ -72,12 +72,12 @@ The delegate grant is pool wide. It lets the gateway redeem and borrow against e
 
 ## Governance Setup
 
-| Needed for                             | Action                                                                                    | Target               |
-| -------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------- |
-| every Core supply                      | MarketFacet with `enterMarketForAccount(address,address)` cut into the Core Comptroller   | Core Comptroller     |
-| every Core supply                      | `giveCallPermission(comptroller, "enterMarketForAccount(address,address)", gateway)`      | AccessControlManager |
-| `supplyFromCollateral` while borrowing | `setWhiteListFlashLoanAccount(gateway, true)`                                             | Core Comptroller     |
-| Spoke functions, per Spoke Comptroller | `giveCallPermission(spokeComptroller, "enterMarketForAccount(address,address)", gateway)` | AccessControlManager |
+| Needed for                                    | Action                                                                                    | Target               |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------- |
+| every Core supply                             | MarketFacet with `enterMarketForAccount(address,address)` cut into the Core Comptroller   | Core Comptroller     |
+| every Core supply                             | `giveCallPermission(comptroller, "enterMarketForAccount(address,address)", gateway)`      | AccessControlManager |
+| `supplyFromCollateral` on the flash loan path | `setWhiteListFlashLoanAccount(gateway, true)`                                             | Core Comptroller     |
+| Spoke functions, per Spoke Comptroller        | `giveCallPermission(spokeComptroller, "enterMarketForAccount(address,address)", gateway)` | AccessControlManager |
 
 Until a grant exists, the functions that need it revert.
 

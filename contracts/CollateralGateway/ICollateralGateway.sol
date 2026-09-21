@@ -181,10 +181,11 @@ interface ICollateralGateway {
      * Reverts if either market is not listed, if `vToken.underlying()` is not the Hub's asset, or
      * if the deposit yields fewer than `minShares`.
      *
-     * A caller with no borrows migrates directly. A caller whose borrows the remaining position
-     * could not cover goes through a Core flash loan instead, which supplies the replacement
-     * collateral before the old collateral leaves, so any amount up to the full balance moves. That
-     * path additionally requires this gateway to be allow-listed for flash loans.
+     * A caller with no borrows, or whose `vToken` is not entered as collateral, migrates directly.
+     * A caller whose borrows the remaining position could not cover goes through a Core flash loan
+     * instead, which supplies the replacement collateral before the old collateral leaves, so any
+     * amount up to the full balance moves. That path additionally requires this gateway to be
+     * allow-listed for flash loans.
      *
      * The delegate grant is pool wide: it lets this gateway redeem and borrow against any Core
      * position the caller holds, not only the two markets named here. The caller revokes it with

@@ -425,8 +425,11 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     }
 
     /// @dev True when removing `vTokenAmount` would leave the caller under water. Asks the
-    ///      Comptroller the same question the redeem will ask.
+    ///      Comptroller the same question the redeem will ask, so a market the caller never entered
+    ///      is always false: it backs no borrow, and the redeem skips the liquidity check for it.
     function _wouldCauseShortfall(address vToken, uint256 vTokenAmount) private view returns (bool) {
+        if (!COMPTROLLER.checkMembership(msg.sender, IVToken(vToken))) return false;
+
         (uint256 errorCode, , uint256 shortfall) = COMPTROLLER.getHypotheticalAccountLiquidity(
             msg.sender,
             vToken,

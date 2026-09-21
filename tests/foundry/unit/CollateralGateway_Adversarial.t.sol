@@ -165,9 +165,14 @@ contract EchoingComptroller {
     CollateralGateway public gateway;
     uint256 public lastAmount;
     mapping(address => bool) public unlisted;
+    mapping(address => bool) public exited;
 
     function unlist(address market) external {
         unlisted[market] = true;
+    }
+
+    function exit(address market) external {
+        exited[market] = true;
     }
 
     function setGateway(CollateralGateway r) external {
@@ -185,8 +190,8 @@ contract EchoingComptroller {
         return (0, 0, EvilVToken(vToken).accrued() ? 1 : 0);
     }
 
-    function checkMembership(address, address) external pure returns (bool) {
-        return true;
+    function checkMembership(address, address vToken) external view returns (bool) {
+        return !exited[vToken];
     }
 
     function enterMarketForAccount(address, address) external pure returns (uint256) {
@@ -458,6 +463,24 @@ contract CollateralGateway_AdversarialTest is Test {
 
         assertTrue(vToken.accrued(), "the source market was accrued");
         assertGt(comptroller.lastAmount(), 0, "the shortfall was seen, so the flash path ran");
+    }
+
+    /// @dev A market the caller never entered backs no borrow, so its redeem skips the liquidity
+    ///      check. An account already under water elsewhere must still take the direct path.
+    function test_aMarketNotEnteredNeverTakesTheFlashPath() public {
+        EchoingComptroller comptroller = new EchoingComptroller();
+        gateway = new CollateralGateway(IComptroller(address(comptroller)), registry, owner);
+        comptroller.setGateway(gateway);
+        EvilVToken vToken = new EvilVToken(address(usdt), address(comptroller));
+        EvilHub hub = new EvilHub(address(usdt));
+        EvilMarket market = new EvilMarket(address(hub));
+        comptroller.exit(address(vToken));
+
+        vm.prank(attacker);
+        gateway.supplyFromCollateral(address(vToken), 100e18, address(market), 0);
+
+        assertEq(comptroller.lastAmount(), 0, "no flash loan taken");
+        assertEq(market.balanceOf(attacker), 1, "migrated on the direct path");
     }
 
     /// @dev A callback whose amounts do not match what the gateway recorded is rejected outright.
