@@ -4,6 +4,7 @@ import { HardhatRuntimeEnvironment } from "hardhat/types";
 
 import { getConfig, getContractAddressOrNullAddress } from "../helpers/deploymentConfig";
 
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 const func: DeployFunction = async function ({ getNamedAccounts, deployments, network }: HardhatRuntimeEnvironment) {
   const { deploy } = deployments;
   const { deployer } = await getNamedAccounts();
