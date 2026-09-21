@@ -3,16 +3,16 @@ import { expect } from "chai";
 import { BigNumber, Contract } from "ethers";
 import { ethers } from "hardhat";
 
-import bscmainnetAddresses from "../../../deployments/bscmainnet_addresses.json";
-import { DeviationSentinel, ResilientOracle, SentinelOracle, UniswapOracle } from "../../../typechain";
-import { ChainlinkOracle__factory } from "../../../typechain/factories/ChainlinkOracle__factory";
-import { DeviationSentinel__factory } from "../../../typechain/factories/DeviationSentinel__factory";
-import { IAccessControlManagerV8__factory } from "../../../typechain/factories/IAccessControlManagerV8__factory";
-import { PancakeSwapOracle__factory } from "../../../typechain/factories/PancakeSwapOracle__factory";
-import { ResilientOracle__factory } from "../../../typechain/factories/ResilientOracle__factory";
-import { SentinelOracle__factory } from "../../../typechain/factories/SentinelOracle__factory";
-import { UniswapOracle__factory } from "../../../typechain/factories/UniswapOracle__factory";
-import { forking, initMainnetUser } from "./utils";
+import bscmainnetAddresses from "../../../../deployments/bscmainnet_addresses.json";
+import { DeviationSentinel, ResilientOracle, SentinelOracle, UniswapOracle } from "../../../../typechain";
+import { ChainlinkOracle__factory } from "../../../../typechain/factories/ChainlinkOracle__factory";
+import { DeviationSentinel__factory } from "../../../../typechain/factories/DeviationSentinel__factory";
+import { IAccessControlManagerV8__factory } from "../../../../typechain/factories/IAccessControlManagerV8__factory";
+import { PancakeSwapOracle__factory } from "../../../../typechain/factories/PancakeSwapOracle__factory";
+import { ResilientOracle__factory } from "../../../../typechain/factories/ResilientOracle__factory";
+import { SentinelOracle__factory } from "../../../../typechain/factories/SentinelOracle__factory";
+import { UniswapOracle__factory } from "../../../../typechain/factories/UniswapOracle__factory";
+import { forking, initMainnetUser } from "../utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -82,6 +82,7 @@ const COMPTROLLER_ABI = [
 
 // Proxy admin address (from DeviationSentinel_Proxy deployment args)
 const PROXY_ADMIN = "0x6beb6D2695B67FEb73ad4f172E8E2975497187e4";
+const HUB_REGISTRY = "0x6D93Fd479f2d37445CFBe132412e316a0364acc2";
 
 /**
  * Deploy EBrake and upgrade DeviationSentinel proxy to new implementation.
@@ -120,7 +121,12 @@ async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Prom
 
   // Deploy new DeviationSentinel implementation with EBrake
   const SentinelFactory = await ethers.getContractFactory("DeviationSentinel");
-  const newImpl = await SentinelFactory.deploy(eBrake.address, RESILIENT_ORACLE, addresses.SentinelOracle);
+  const newImpl = await SentinelFactory.deploy(
+    eBrake.address,
+    RESILIENT_ORACLE,
+    addresses.SentinelOracle,
+    HUB_REGISTRY,
+  );
 
   // Upgrade proxy via ProxyAdmin contract (owned by timelock)
   const proxyAdminContract = new ethers.Contract(
