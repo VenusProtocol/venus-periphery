@@ -53,6 +53,7 @@ const buildGrants = (
   return grants;
 };
 
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 const func: DeployFunction = async function ({ getNamedAccounts, deployments, network }: HardhatRuntimeEnvironment) {
   const { deployer } = await getNamedAccounts();
   const cfg = EXECUTOR_CONFIG[network.name];
