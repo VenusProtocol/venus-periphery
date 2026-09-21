@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+import { Contract, ethers } from "ethers";
 import hre from "hardhat";
 import { DeployFunction } from "hardhat-deploy/dist/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
@@ -53,7 +53,59 @@ const buildGrants = (
   return grants;
 };
 
-// eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
+// OpenZeppelin's DEFAULT_ADMIN_ROLE is bytes32(0). We still call DEFAULT_ADMIN_ROLE()
+// as a basic ACM-sanity probe, but the role value itself is just zero — don't gate
+// hasRole() on it being non-zero.
+async function readAdminRole(acm: Contract): Promise<string> {
+  try {
+    return await acm.DEFAULT_ADMIN_ROLE();
+  } catch (e) {
+    console.log(`could not read DEFAULT_ADMIN_ROLE: ${(e as Error).message}`);
+    return ethers.constants.HashZero;
+  }
+}
+
+/** Log whether the configured ACM admin actually holds DEFAULT_ADMIN_ROLE. */
+async function reportExpectedAcmAdmin(acm: Contract, adminRole: string, expectedAcmAdmin: string): Promise<void> {
+  try {
+    const isAdmin = await acm.hasRole(adminRole, expectedAcmAdmin);
+    console.log(`Expected ACM admin ${expectedAcmAdmin}: ${isAdmin ? "HOLDS" : "does NOT hold"} DEFAULT_ADMIN_ROLE`);
+    if (!isAdmin) {
+      console.log("Warning: configured expectedAcmAdmin does not hold DEFAULT_ADMIN_ROLE on this ACM");
+    }
+  } catch (e) {
+    console.log(`hasRole check failed for expectedAcmAdmin: ${(e as Error).message}`);
+  }
+}
+
+async function hasAdminRole(acm: Contract, adminRole: string, account: string): Promise<boolean> {
+  try {
+    return await acm.hasRole(adminRole, account);
+  } catch (e) {
+    console.log(`could not check deployer admin role: ${(e as Error).message}`);
+    return false;
+  }
+}
+
+/** Apply each grant the caller does not already hold. */
+async function applyGrants(acm: Contract, grants: Grant[]): Promise<void> {
+  for (const g of grants) {
+    let already = false;
+    try {
+      already = await acm.hasPermission(g.caller, g.target, g.sig);
+    } catch {
+      already = false;
+    }
+    if (already) {
+      console.log(`  skip (already granted): ${g.target} ${g.sig} -> ${g.caller}`);
+      continue;
+    }
+    const tx = await acm.giveCallPermission(g.target, g.sig, g.caller);
+    await tx.wait();
+    console.log(`  granted: ${g.target} ${g.sig} -> ${g.caller}`);
+  }
+}
+
 const func: DeployFunction = async function ({ getNamedAccounts, deployments, network }: HardhatRuntimeEnvironment) {
   const { deployer } = await getNamedAccounts();
   const cfg = EXECUTOR_CONFIG[network.name];
@@ -87,36 +139,13 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   const signer = await hre.ethers.getSigner(deployer);
   const acm = new hre.ethers.Contract(acmAddr, ACM_ABI, signer);
 
-  // OpenZeppelin's DEFAULT_ADMIN_ROLE is bytes32(0). We still call DEFAULT_ADMIN_ROLE()
-  // as a basic ACM-sanity probe, but the role value itself is just zero — don't gate
-  // hasRole() on it being non-zero.
-  let adminRole = ethers.constants.HashZero;
-  try {
-    adminRole = await acm.DEFAULT_ADMIN_ROLE();
-  } catch (e) {
-    console.log(`could not read DEFAULT_ADMIN_ROLE: ${(e as Error).message}`);
-  }
+  const adminRole = await readAdminRole(acm);
 
   if (cfg.expectedAcmAdmin) {
-    try {
-      const isAdmin = await acm.hasRole(adminRole, cfg.expectedAcmAdmin);
-      console.log(
-        `Expected ACM admin ${cfg.expectedAcmAdmin}: ${isAdmin ? "HOLDS" : "does NOT hold"} DEFAULT_ADMIN_ROLE`,
-      );
-      if (!isAdmin) {
-        console.log("Warning: configured expectedAcmAdmin does not hold DEFAULT_ADMIN_ROLE on this ACM");
-      }
-    } catch (e) {
-      console.log(`hasRole check failed for expectedAcmAdmin: ${(e as Error).message}`);
-    }
+    await reportExpectedAcmAdmin(acm, adminRole, cfg.expectedAcmAdmin);
   }
 
-  let deployerIsAdmin = false;
-  try {
-    deployerIsAdmin = await acm.hasRole(adminRole, deployer);
-  } catch (e) {
-    console.log(`could not check deployer admin role: ${(e as Error).message}`);
-  }
+  const deployerIsAdmin = await hasAdminRole(acm, adminRole, deployer);
 
   if (!deployerIsAdmin) {
     console.log(`\nDeployer (${deployer}) is NOT ACM admin on ${network.name}.`);
@@ -130,21 +159,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   }
 
   console.log(`\nDeployer is ACM admin. Granting ${grants.length} permissions...`);
-  for (const g of grants) {
-    let already = false;
-    try {
-      already = await acm.hasPermission(g.caller, g.target, g.sig);
-    } catch {
-      already = false;
-    }
-    if (already) {
-      console.log(`  skip (already granted): ${g.target} ${g.sig} -> ${g.caller}`);
-      continue;
-    }
-    const tx = await acm.giveCallPermission(g.target, g.sig, g.caller);
-    await tx.wait();
-    console.log(`  granted: ${g.target} ${g.sig} -> ${g.caller}`);
-  }
+  await applyGrants(acm, grants);
 };
 
 export default func;
