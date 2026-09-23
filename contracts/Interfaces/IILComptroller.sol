@@ -32,4 +32,9 @@ interface IILComptroller {
     /// @param vToken The vToken market address.
     /// @return market The market metadata.
     function markets(address vToken) external view returns (Market memory market);
+
+    /// @notice Enter a market for an account. The caller needs the ACM permission for `enterMarketForAccount(address,address)`.
+    /// @param account The account to enter the market for.
+    /// @param vToken The vToken market address.
+    function enterMarketForAccount(address account, address vToken) external;
 }
