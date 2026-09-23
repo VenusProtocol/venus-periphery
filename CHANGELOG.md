@@ -1,3 +1,23 @@
+## 1.2.0-dev.12 (2026-09-23)
+
+* Merge pull request #73 from VenusProtocol/chore/foundry-setup ([f964910](https://github.com/VenusProtocol/venus-periphery/commit/f964910)), closes [#73](https://github.com/VenusProtocol/venus-periphery/issues/73)
+* Merge pull request #76 from VenusProtocol/feat/code-complexity-gates ([0fc36d8](https://github.com/VenusProtocol/venus-periphery/commit/0fc36d8)), closes [#76](https://github.com/VenusProtocol/venus-periphery/issues/76)
+* chore: bump eslint to v8 for sonarjs plugin compatibility ([84e974a](https://github.com/VenusProtocol/venus-periphery/commit/84e974a))
+* chore: drop four unused eslint plugins ([d284f23](https://github.com/VenusProtocol/venus-periphery/commit/d284f23))
+* chore: enforce function complexity limits in eslint and sonarjs ([d58fa50](https://github.com/VenusProtocol/venus-periphery/commit/d58fa50))
+* chore: suppress cognitive complexity gate on oracle stale period helper ([ec1654e](https://github.com/VenusProtocol/venus-periphery/commit/ec1654e))
+* chore: suppress complexity gate on getConfig network switch ([8f2e89f](https://github.com/VenusProtocol/venus-periphery/commit/8f2e89f))
+* chore: suppress complexity gates in safe ebrake json generator ([cb9e923](https://github.com/VenusProtocol/venus-periphery/commit/cb9e923))
+* chore: suppress complexity gates on ebrake tx simulation ([7d3c275](https://github.com/VenusProtocol/venus-periphery/commit/7d3c275))
+* chore: suppress complexity gates on executor acm deploy script ([a2ea205](https://github.com/VenusProtocol/venus-periphery/commit/a2ea205))
+* chore: suppress complexity gates on sentinel deploy script ([bf0af94](https://github.com/VenusProtocol/venus-periphery/commit/bf0af94))
+* refactor: extract acm role probes and grant application ([907f197](https://github.com/VenusProtocol/venus-periphery/commit/907f197))
+* refactor: extract proxy deploy and ownership transfer in sentinel deploy ([f79f463](https://github.com/VenusProtocol/venus-periphery/commit/f79f463))
+* refactor: replace getConfig network switch with a keyed lookup ([3fb0ae6](https://github.com/VenusProtocol/venus-periphery/commit/3fb0ae6))
+* build: add foundry config and forge-std alongside hardhat ([3cc3c1f](https://github.com/VenusProtocol/venus-periphery/commit/3cc3c1f))
+* build: vendor forge-std as a git submodule ([988af4e](https://github.com/VenusProtocol/venus-periphery/commit/988af4e))
+* ci: run foundry unit tests in a separate job ([ffbd86b](https://github.com/VenusProtocol/venus-periphery/commit/ffbd86b))
+
 ## 1.2.0-dev.11 (2026-07-24)
 
 * Merge pull request #72 from VenusProtocol/bot/VDB-31-work-on-jira-ticket-vpd-1641 ([f76646e](https://github.com/VenusProtocol/venus-periphery/commit/f76646e)), closes [#72](https://github.com/VenusProtocol/venus-periphery/issues/72)
