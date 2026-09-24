@@ -62,6 +62,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - Pauses flash loans (blocks flash loan attack vector, no user impact)
  *        - Pauses the Liquidity Hub (blocks deposits and redemptions; existing balances
  *          untouched, and emergencyReallocate still works)
+ *        - Pauses a Hub YieldGroup or one of its resources (stops new deposits routing there;
+ *          the balance already there still counts toward NAV)
  *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.
  *
  *   BSC vs NON-BSC DIFFERENCES:
@@ -77,7 +79,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          calls setCollateralFactor(poolId, market, newCF, LT) which returns uint256 error code
  *        - Supports e-mode pools via poolId > 0
  *        - pauseFlashLoan() — flash loans only exist on Diamond
- *        - pauseHub(hub) — the Liquidity Hub is BSC-only
+ *        - pauseHub(hub), pauseHubYieldGroup(yieldGroup), pauseHubResource(yieldGroup, resource)
+ *          — the Liquidity Hub is BSC-only
  *        - disablePoolBorrow(poolId, market) — per-pool granular borrow disable, only on Diamond
  *        - revokeFlashLoanAccess(account) — remove a single account from the flash loan
  *          whitelist; flash loan whitelist only exists on Diamond
@@ -91,8 +94,10 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - No poolId concept — only the core pool exists (other pools are deprecated)
  *        - decreaseCF(market, poolId, newCF) not granted ACM permission (no pool concept on IL)
  *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)
- *        - pauseHub(address) not granted ACM permission (no Liquidity Hub off BSC). Note this is
- *          EBrake's own role; the role EBrake must hold on the Hub is the Hub's `pauseHub()`.
+ *        - pauseHub(address), pauseHubYieldGroup(address) and
+ *          pauseHubResource(address,address) not granted ACM permission (no Liquidity Hub off BSC).
+ *          These are EBrake's own roles; what EBrake must hold on the Hub side is `pauseHub()` and
+ *          `pauseYieldGroup(address)` on the Hub, and `pauseResource(address)` on each YieldGroup.
  *        - ACM permission strings have no underscore:
  *          setActionsPaused, setMarketBorrowCaps, setMarketSupplyCaps
  *
@@ -175,6 +180,18 @@ interface IEBrake {
     /// @param caller The address that triggered the pause.
     /// @param hub The Hub that was paused.
     event HubPaused(address indexed caller, address indexed hub);
+
+    /// @notice Emitted when a Hub YieldGroup was paused through EBrake.
+    /// @param caller The address that triggered the pause.
+    /// @param hub The Hub the YieldGroup belongs to.
+    /// @param yieldGroup The YieldGroup that was paused.
+    event HubYieldGroupPaused(address indexed caller, address indexed hub, address indexed yieldGroup);
+
+    /// @notice Emitted when a resource inside a Hub YieldGroup was paused through EBrake.
+    /// @param caller The address that triggered the pause.
+    /// @param yieldGroup The YieldGroup that holds the resource.
+    /// @param resource The resource that was paused.
+    event HubResourcePaused(address indexed caller, address indexed yieldGroup, address indexed resource);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                              ERRORS
@@ -315,6 +332,31 @@ interface IEBrake {
      * @param hub The Liquidity Hub to pause.
      */
     function pauseHub(address hub) external;
+
+    /**
+     * @notice Stop a Hub routing new deposits to one YieldGroup. The balance already there still
+     *         counts toward NAV, but user withdrawals skip it until governance unpauses it.
+     * @dev Forwards to the Hub the YieldGroup reports through `hub()`, which EBrake holds the
+     *      `pauseYieldGroup(address)` ACM role on. Tighten-only, and an already-paused YieldGroup is
+     *      a no-op with no event, as {pauseHub}. A YieldGroup the Hub never registered reads as
+     *      unpaused, so the Hub's own `YieldGroupNotRegistered` revert comes back to the caller —
+     *      which is also what stops a fake YieldGroup that names a real Hub.
+     * @param yieldGroup The YieldGroup to pause.
+     */
+    function pauseHubYieldGroup(address yieldGroup) external;
+
+    /**
+     * @notice Stop a Hub YieldGroup routing new deposits to one of its resources. The balance
+     *         already there still counts toward NAV.
+     * @dev Forwards to the YieldGroup, which checks `pauseResource(address)` against its own
+     *      address, so EBrake needs that grant on every YieldGroup it should reach. Tighten-only,
+     *      and an already-paused resource is a no-op with no event, as {pauseHub}. A resource the
+     *      YieldGroup never registered reads as unpaused, so its `ResourceNotRegistered` revert
+     *      comes back to the caller.
+     * @param yieldGroup The YieldGroup that holds the resource.
+     * @param resource The resource to pause.
+     */
+    function pauseHubResource(address yieldGroup, address resource) external;
 
     // ═══════════════════════════════════════════════════════════════════════
     //                     EMERGENCY ACTIONS — RISK PARAMETER ADJUSTMENTS

@@ -25,6 +25,12 @@ interface IHub {
     /// @dev ACM role `"pauseHub()"`. Idempotent — pausing an already-paused Hub is a silent no-op.
     function pauseHub() external;
 
+    /// @notice Stop the Hub routing new deposits to a YieldGroup; its balance still counts toward NAV.
+    /// @dev ACM role `"pauseYieldGroup(address)"`. Idempotent, and reverts `YieldGroupNotRegistered`
+    ///      for an address the Hub never registered.
+    /// @param yieldGroup YieldGroup to pause.
+    function pauseYieldGroup(address yieldGroup) external;
+
     /// @notice Read a YieldGroup's registry entry.
     /// @param yieldGroup YieldGroup to read.
     /// @return config Stored configuration; all-zero when never registered.
@@ -52,7 +58,8 @@ interface IHubRegistry {
 /**
  * @title IYieldGroupNav
  * @author Venus
- * @notice The registry and NavGuard reads DeviationSentinel needs from a YieldGroup.
+ * @notice The registry and NavGuard reads DeviationSentinel needs from a YieldGroup, and the
+ *         resource pause EBrake forwards to it.
  */
 interface IYieldGroupNav {
     /// @notice A resource's NavGuard band, as stored by the YieldGroup.
@@ -91,6 +98,12 @@ interface IYieldGroupNav {
     /// @return paused True iff this resource is paused.
     /// @return adapter `IResourceAdapter` implementation bound to this resource.
     function resourceConfig(address resource) external view returns (bool registered, bool paused, address adapter);
+
+    /// @notice Stop the YieldGroup routing new deposits to a resource; its balance still counts.
+    /// @dev ACM role `"pauseResource(address)"`, checked against this YieldGroup's address. Idempotent,
+    ///      and reverts `ResourceNotRegistered` for an address the YieldGroup never registered.
+    /// @param resource Resource to pause.
+    function pauseResource(address resource) external;
 
     /// @notice The band's own stored numbers for a resource.
     /// @dev Field order must match the Hub's `NavBand` exactly. `anchor` and `centre` are both

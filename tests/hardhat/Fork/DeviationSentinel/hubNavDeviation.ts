@@ -111,6 +111,8 @@ const NEW_GRANTS: Grant[] = [
   [SENTINEL, "setNavMonitoringEnabled(address,address,bool)", NORMAL_TIMELOCK],
   [EBRAKE, "pauseHub(address)", SENTINEL],
   [HUB_USDT, "pauseHub()", EBRAKE],
+  [HUB_USDT, "pauseYieldGroup(address)", EBRAKE],
+  [CENTRIFUGE_SOURCE, "pauseResource(address)", EBRAKE],
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -120,7 +122,7 @@ const NEW_GRANTS: Grant[] = [
 type Fixture = Awaited<ReturnType<typeof setUpScenario>>;
 
 async function setUpScenario() {
-  const [, stranger] = await ethers.getSigners();
+  const [, stranger, pauser] = await ethers.getSigners();
   const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseUnits("10"));
   const operator = await initMainnetUser(OPERATOR, parseUnits("10"));
   const keeper = await initMainnetUser(KEEPER, parseUnits("10"));
@@ -152,6 +154,10 @@ async function setUpScenario() {
   for (const [target, signature, account] of NEW_GRANTS) {
     await acm.giveCallPermission(target, signature, account);
   }
+
+  // ── The pauser's own EBrake roles, which a VIP grants to whichever account holds them ──
+  await acm.giveCallPermission(EBRAKE, "pauseHubYieldGroup(address)", pauser.address);
+  await acm.giveCallPermission(EBRAKE, "pauseHubResource(address,address)", pauser.address);
 
   // ── Centrifuge admits the Venus source and pins the fund at par ──
   const cf: FundControls = await connectFund(JTRSY, USDT, CENTRIFUGE_SOURCE);
@@ -192,6 +198,7 @@ async function setUpScenario() {
     hub,
     keeper,
     operator,
+    pauser,
     resilientOracle,
     sentinel,
     sentinelOracle,
@@ -815,6 +822,84 @@ if (FORK_MAINNET) {
           await expect(f.sentinel.connect(f.timelock).setNavMonitoringEnabled(CENTRIFUGE_SOURCE, JTRSY.vault, false))
             .to.emit(f.sentinel, "NavGuardStatusChanged")
             .withArgs(HUB_USDT, CENTRIFUGE_SOURCE, JTRSY.vault, false);
+        });
+      });
+
+      // ═════════════════════════════════════════════════════════════════════
+      // A pauser narrows the pause to one YieldGroup or one resource
+      // ═════════════════════════════════════════════════════════════════════
+
+      describe("a pauser pauses one YieldGroup or one resource through EBrake", () => {
+        // The same leg the fixture used to fund the position, which lands when nothing is paused.
+        const routeIntoFund = (f: Fixture) =>
+          f.hub
+            .connect(f.operator)
+            .reallocate(
+              [{ yieldGroup: CORE_SOURCE, resource: ethers.constants.AddressZero, amount: parseUnits("1000", 18) }],
+              [{ yieldGroup: CENTRIFUGE_SOURCE, resource: JTRSY.vault, amount: parseUnits("1000", 18) }],
+            );
+
+        it("pauses the YieldGroup on the Hub, once, and leaves the Hub itself running", async () => {
+          await expect(f.eBrake.connect(f.pauser).pauseHubYieldGroup(CENTRIFUGE_SOURCE))
+            .to.emit(f.eBrake, "HubYieldGroupPaused")
+            .withArgs(f.pauser.address, HUB_USDT, CENTRIFUGE_SOURCE);
+
+          expect((await f.hub.yieldGroupConfig(CENTRIFUGE_SOURCE)).paused).to.be.true;
+          expect(await f.hub.hubPaused()).to.be.false;
+          await expect(routeIntoFund(f))
+            .to.be.revertedWithCustomError(f.hub, "YieldGroupPaused")
+            .withArgs(CENTRIFUGE_SOURCE);
+
+          await expect(f.eBrake.connect(f.pauser).pauseHubYieldGroup(CENTRIFUGE_SOURCE)).to.not.emit(
+            f.eBrake,
+            "HubYieldGroupPaused",
+          );
+        });
+
+        it("pauses the resource on the YieldGroup, once, and leaves the YieldGroup unpaused", async () => {
+          await expect(f.eBrake.connect(f.pauser).pauseHubResource(CENTRIFUGE_SOURCE, JTRSY.vault))
+            .to.emit(f.eBrake, "HubResourcePaused")
+            .withArgs(f.pauser.address, CENTRIFUGE_SOURCE, JTRSY.vault);
+
+          expect((await f.yieldGroup.resourceConfig(JTRSY.vault)).paused).to.be.true;
+          expect((await f.hub.yieldGroupConfig(CENTRIFUGE_SOURCE)).paused).to.be.false;
+          await expect(routeIntoFund(f))
+            .to.be.revertedWithCustomError(f.yieldGroup, "ResourceIsPaused")
+            .withArgs(JTRSY.vault);
+
+          await expect(f.eBrake.connect(f.pauser).pauseHubResource(CENTRIFUGE_SOURCE, JTRSY.vault)).to.not.emit(
+            f.eBrake,
+            "HubResourcePaused",
+          );
+        });
+
+        // The Hub is read from the YieldGroup, so an address that is not one has no Hub to name.
+        it("reverts on an address that is not a YieldGroup", async () => {
+          await expect(f.eBrake.connect(f.pauser).pauseHubYieldGroup(f.stranger.address)).to.be.reverted;
+          await expect(f.eBrake.connect(f.pauser).pauseHubYieldGroup(USDT)).to.be.reverted;
+        });
+
+        it("surfaces the YieldGroup's own revert for a resource it never registered", async () => {
+          await expect(f.eBrake.connect(f.pauser).pauseHubResource(CENTRIFUGE_SOURCE, f.stranger.address))
+            .to.be.revertedWithCustomError(f.yieldGroup, "ResourceNotRegistered")
+            .withArgs(f.stranger.address);
+        });
+
+        it("does not let a stranger reach either pause, through EBrake or around it", async () => {
+          await expect(
+            f.eBrake.connect(f.stranger).pauseHubYieldGroup(CENTRIFUGE_SOURCE),
+          ).to.be.revertedWithCustomError(f.eBrake, "Unauthorized");
+          await expect(
+            f.eBrake.connect(f.stranger).pauseHubResource(CENTRIFUGE_SOURCE, JTRSY.vault),
+          ).to.be.revertedWithCustomError(f.eBrake, "Unauthorized");
+          await expect(f.hub.connect(f.stranger).pauseYieldGroup(CENTRIFUGE_SOURCE)).to.be.revertedWithCustomError(
+            f.hub,
+            "Unauthorized",
+          );
+          await expect(f.yieldGroup.connect(f.stranger).pauseResource(JTRSY.vault)).to.be.reverted;
+
+          expect((await f.hub.yieldGroupConfig(CENTRIFUGE_SOURCE)).paused).to.be.false;
+          expect((await f.yieldGroup.resourceConfig(JTRSY.vault)).paused).to.be.false;
         });
       });
     });

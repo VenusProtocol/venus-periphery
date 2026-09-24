@@ -5,7 +5,7 @@ import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IILComptroller } from "../Interfaces/IILComptroller.sol";
 import { IEBrake } from "./IEBrake.sol";
-import { IHub } from "../Interfaces/IHubLiquidity.sol";
+import { IHub, IYieldGroupNav } from "../Interfaces/IHubLiquidity.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
 /**
@@ -159,6 +159,30 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
         IHub(hub).pauseHub();
         emit HubPaused(msg.sender, hub);
+    }
+
+    /// @inheritdoc IEBrake
+    function pauseHubYieldGroup(address yieldGroup) external {
+        _checkAccessAllowed("pauseHubYieldGroup(address)");
+        if (yieldGroup == address(0)) revert ZeroAddress();
+
+        address hub = IYieldGroupNav(yieldGroup).hub();
+        if (IHub(hub).yieldGroupConfig(yieldGroup).paused) return;
+
+        IHub(hub).pauseYieldGroup(yieldGroup);
+        emit HubYieldGroupPaused(msg.sender, hub, yieldGroup);
+    }
+
+    /// @inheritdoc IEBrake
+    function pauseHubResource(address yieldGroup, address resource) external {
+        _checkAccessAllowed("pauseHubResource(address,address)");
+        if (yieldGroup == address(0) || resource == address(0)) revert ZeroAddress();
+
+        (, bool paused, ) = IYieldGroupNav(yieldGroup).resourceConfig(resource);
+        if (paused) return;
+
+        IYieldGroupNav(yieldGroup).pauseResource(resource);
+        emit HubResourcePaused(msg.sender, yieldGroup, resource);
     }
 
     /// @inheritdoc IEBrake

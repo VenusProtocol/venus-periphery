@@ -26,6 +26,12 @@ interface IHubFork is IHub {
     /// @notice Thrown by every user-facing flow while the Hub is paused.
     error HubPaused();
 
+    /// @notice Thrown by a deposit or rebalance leg that targets a paused YieldGroup.
+    error YieldGroupPaused(address yieldGroup);
+
+    /// @notice Thrown by the YieldGroup pause levers for an address the Hub never registered.
+    error YieldGroupNotRegistered(address yieldGroup);
+
     /// @notice Thrown by {AccessControlledV8} when the caller holds no role for the function.
     error Unauthorized(address sender, address calledContract, string methodSignature);
 
@@ -69,6 +75,12 @@ interface IYieldGroupCentrifugeFork is IYieldGroupNav {
     /// @notice Thrown by the adapter when a share-holding position has no published price, which
     ///         propagates out of `totalAssets()` and halts every Hub flow.
     error ZeroSharePrice(address resource);
+
+    /// @notice Thrown by a deposit routed straight at a paused resource.
+    error ResourceIsPaused(address resource);
+
+    /// @notice Thrown by the resource pause levers for an address the YieldGroup never registered.
+    error ResourceNotRegistered(address resource);
 
     function setNavGuardRate(
         address resource,
