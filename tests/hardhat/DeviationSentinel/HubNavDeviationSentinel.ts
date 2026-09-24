@@ -32,10 +32,11 @@ const Status = {
   Breached: 6,
 };
 
-// The exact strings the two setters ask the ACM for, and therefore the exact strings an onboarding
+// The exact strings the setters ask the ACM for, and therefore the exact strings an onboarding
 // VIP has to grant. A typo costs nothing at compile time and silently grants nothing on chain.
 const SET_CONFIG_ROLE = "setHubNavConfig(address,address,uint16,uint16)";
 const SET_ENABLED_ROLE = "setNavMonitoringEnabled(address,address,bool)";
+const SET_KEEPER_ROLE = "setTrustedKeeper(address,bool)";
 
 // Pause thresholds, measured from the centre: 10% down, 5% up.
 const PAUSE_DOWN_BPS = 1_000;
@@ -759,6 +760,14 @@ describe("HubNavDeviationSentinel", () => {
   });
 
   describe("setTrustedKeeper", () => {
+    it("trusts a new keeper and emits", async () => {
+      await expect(sentinel.setTrustedKeeper(user.address, true))
+        .to.emit(sentinel, "TrustedKeeperUpdated")
+        .withArgs(user.address, true);
+
+      expect(await sentinel.trustedKeepers(user.address)).to.be.true;
+    });
+
     it("gates the keeper function on the keeper list", async () => {
       navGuardStatus(1_349, true);
       await expect(sentinel.setTrustedKeeper(keeper.address, false))
@@ -776,6 +785,14 @@ describe("HubNavDeviationSentinel", () => {
         sentinel,
         "ZeroAddress",
       );
+    });
+
+    it("asks the ACM for exactly setTrustedKeeper(address,bool)", async () => {
+      accessControlManager.isAllowedToCall.returns(false);
+
+      await expect(sentinel.connect(user).setTrustedKeeper(user.address, true))
+        .to.be.revertedWithCustomError(sentinel, "Unauthorized")
+        .withArgs(user.address, sentinel.address, SET_KEEPER_ROLE);
     });
   });
 });
