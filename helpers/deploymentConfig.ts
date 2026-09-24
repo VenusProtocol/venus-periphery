@@ -101,7 +101,7 @@ export const preconfiguredAddresses = {
     AccessControlManager: governanceBscTestnet.AccessControlManager.address,
     ResilientOracle: oracleBscTestnet.ResilientOracle.address,
     // Liquidity Hub registry, from venus-liquidity-hub. BSC only — every other network leaves this
-    // out and DeviationSentinel takes the zero address, which disables its NavGuard setters.
+    // out, and HubNavDeviationSentinel is not deployed there.
     HubRegistry: "0x5346f648029d1D1d1034e09e8AD7a115f5D7A159",
   },
   bscmainnet: {

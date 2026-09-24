@@ -6,9 +6,9 @@ import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { BigNumber, ContractTransaction } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 
-import { DeviationSentinel, EBrake } from "../../../../typechain";
+import { DeviationSentinel, EBrake, HubNavDeviationSentinel } from "../../../../typechain";
 import { ComptrollerInterface__factory } from "../../../../typechain/factories/ComptrollerInterface__factory";
 import { DeviationSentinel__factory } from "../../../../typechain/factories/DeviationSentinel__factory";
 import { EBrake__factory } from "../../../../typechain/factories/EBrake__factory";
@@ -64,7 +64,7 @@ const NAV_INTERVAL = 86_400;
 const HUB_UP_GAP_BPS = 200;
 const HUB_DOWN_GAP_BPS = 500;
 
-// The sentinel's thresholds, wider than the Hub's on both sides.
+// The Hub NAV sentinel's thresholds, wider than the Hub's on both sides.
 const PAUSE_UP_BPS = 400;
 const PAUSE_DOWN_BPS = 800;
 
@@ -106,10 +106,12 @@ const EXISTING_GRANTS: Grant[] = [
   [COMPTROLLER, "setCollateralFactor(uint96,address,uint256,uint256)", EBRAKE],
 ];
 
-const NEW_GRANTS: Grant[] = [
-  [SENTINEL, "setHubNavConfig(address,address,uint16,uint16)", NORMAL_TIMELOCK],
-  [SENTINEL, "setNavMonitoringEnabled(address,address,bool)", NORMAL_TIMELOCK],
-  [EBRAKE, "pauseHub(address)", SENTINEL],
+// What the onboarding VIP grants, against the freshly deployed Hub NAV sentinel.
+const newGrants = (hubSentinel: string): Grant[] => [
+  [hubSentinel, "setTrustedKeeper(address,bool)", NORMAL_TIMELOCK],
+  [hubSentinel, "setHubNavConfig(address,address,uint16,uint16)", NORMAL_TIMELOCK],
+  [hubSentinel, "setNavMonitoringEnabled(address,address,bool)", NORMAL_TIMELOCK],
+  [EBRAKE, "pauseHub(address)", hubSentinel],
   [HUB_USDT, "pauseHub()", EBRAKE],
   [HUB_USDT, "pauseYieldGroup(address)", EBRAKE],
   [CENTRIFUGE_SOURCE, "pauseResource(address)", EBRAKE],
@@ -137,23 +139,27 @@ async function setUpScenario() {
   const sentinelOracle = SentinelOracle__factory.connect(SENTINEL_ORACLE, timelock);
   const resilientOracle = ResilientOracle__factory.connect(RESILIENT_ORACLE, ethers.provider);
 
-  // ── Upgrade both live proxies to this branch's implementations ──
+  // ── Upgrade the live EBrake to this branch's implementation; the price sentinel is left as is ──
   const eBrakeImpl = await (await ethers.getContractFactory("EBrake")).deploy(COMPTROLLER, false);
-  const sentinelImpl = await (
-    await ethers.getContractFactory("DeviationSentinel")
-  ).deploy(EBRAKE, RESILIENT_ORACLE, SENTINEL_ORACLE, HUB_REGISTRY);
-
   const proxyAdmin = ProxyAdmin__factory.connect(PROXY_ADMIN, timelock);
   await proxyAdmin.upgrade(EBRAKE, eBrakeImpl.address);
-  await proxyAdmin.upgrade(SENTINEL, sentinelImpl.address);
 
-  const sentinel: DeviationSentinel = DeviationSentinel__factory.connect(SENTINEL, keeper);
+  const priceSentinel: DeviationSentinel = DeviationSentinel__factory.connect(SENTINEL, keeper);
   const eBrake: EBrake = EBrake__factory.connect(EBRAKE, keeper);
 
-  // ── The upgrade's VIP grants what the two halves still lack ──
-  for (const [target, signature, account] of NEW_GRANTS) {
+  // ── Deploy the Hub NAV sentinel on its own proxy ──
+  const sentinel = (
+    (await upgrades.deployProxy(await ethers.getContractFactory("HubNavDeviationSentinel", timelock), [ACM], {
+      constructorArgs: [EBRAKE, HUB_REGISTRY],
+      unsafeAllow: ["constructor", "internal-function-storage"],
+    })) as HubNavDeviationSentinel
+  ).connect(keeper);
+
+  // ── The onboarding VIP grants what the new sentinel and the upgraded EBrake need ──
+  for (const [target, signature, account] of newGrants(sentinel.address)) {
     await acm.giveCallPermission(target, signature, account);
   }
+  await sentinel.connect(timelock).setTrustedKeeper(KEEPER, true);
 
   // ── The pauser's own EBrake roles, which a VIP grants to whichever account holds them ──
   await acm.giveCallPermission(EBRAKE, "pauseHubYieldGroup(address)", pauser.address);
@@ -199,6 +205,7 @@ async function setUpScenario() {
     keeper,
     operator,
     pauser,
+    priceSentinel,
     resilientOracle,
     sentinel,
     sentinelOracle,
@@ -242,7 +249,7 @@ async function expectHubPaused(f: Fixture, tx: ContractTransaction, observed: Bi
     .to.emit(f.sentinel, "NavGuardDeviationHandled")
     .withArgs(HUB_USDT, CENTRIFUGE_SOURCE, JTRSY.vault, observed, centre, minAllowedValue, maxAllowedValue)
     .and.to.emit(f.eBrake, "HubPaused")
-    .withArgs(SENTINEL, HUB_USDT);
+    .withArgs(f.sentinel.address, HUB_USDT);
   expect(await f.hub.hubPaused()).to.be.true;
 }
 
@@ -268,14 +275,13 @@ if (FORK_MAINNET) {
       });
 
       // ═════════════════════════════════════════════════════════════════════
-      // The protocol keeps working after the upgrade
+      // The protocol keeps working alongside the new sentinel
       // ═════════════════════════════════════════════════════════════════════
 
-      describe("the upgrade leaves everything that already worked alone", () => {
-        it("still points at the same EBrake, oracles and access control", async () => {
+      describe("the new sentinel and the EBrake upgrade leave everything that already worked alone", () => {
+        it("points at the live EBrake, Hub registry and access control", async () => {
           expect(await f.sentinel.EBRAKE()).to.equal(EBRAKE);
-          expect(await f.sentinel.RESILIENT_ORACLE()).to.equal(RESILIENT_ORACLE);
-          expect(await f.sentinel.SENTINEL_ORACLE()).to.equal(SENTINEL_ORACLE);
+          expect(await f.sentinel.HUB_REGISTRY()).to.equal(HUB_REGISTRY);
           expect(await f.sentinel.accessControlManager()).to.equal(ACM);
           expect(await f.sentinel.owner()).to.equal(NORMAL_TIMELOCK);
           expect(await f.eBrake.COMPTROLLER()).to.equal(COMPTROLLER);
@@ -283,14 +289,7 @@ if (FORK_MAINNET) {
           expect(await f.eBrake.accessControlManager()).to.equal(ACM);
         });
 
-        it("now also knows where to look up a Hub", async () => {
-          expect(await f.sentinel.HUB_REGISTRY()).to.equal(HUB_REGISTRY);
-        });
-
-        it("keeps the market configs and keepers written before the upgrade", async () => {
-          const config = await f.sentinel.tokenConfigs(BTCB);
-          expect(config.deviation).to.equal(10);
-          expect(config.enabled).to.be.true;
+        it("trusts only the keeper governance added, and starts with nothing configured", async () => {
           expect(await f.sentinel.trustedKeepers(KEEPER)).to.be.true;
           expect(await f.sentinel.trustedKeepers(f.stranger.address)).to.be.false;
 
@@ -311,7 +310,7 @@ if (FORK_MAINNET) {
           const oraclePrice = await f.resilientOracle.getUnderlyingPrice(vBTCB);
           await f.sentinelOracle.setDirectPrice(BTCB, oraclePrice.mul(150).div(100));
 
-          await expect(f.sentinel.handleDeviation(vBTCB)).to.emit(f.sentinel, "DeviationHandled");
+          await expect(f.priceSentinel.handleDeviation(vBTCB)).to.emit(f.priceSentinel, "DeviationHandled");
 
           expect(await f.comptroller.actionPaused(vBTCB, BORROW)).to.be.true;
           expect(await f.hub.hubPaused()).to.be.false;
@@ -323,7 +322,7 @@ if (FORK_MAINNET) {
           expect(before.collateralFactorMantissa).to.be.gt(0);
 
           await f.sentinelOracle.setDirectPrice(BTCB, oraclePrice.mul(50).div(100));
-          await f.sentinel.handleDeviation(vBTCB);
+          await f.priceSentinel.handleDeviation(vBTCB);
 
           const after = await f.corePool.poolMarkets(0, vBTCB);
           expect(after.collateralFactorMantissa).to.equal(0);
@@ -780,7 +779,7 @@ if (FORK_MAINNET) {
           await f.hub.connect(f.timelock).unpauseHub();
 
           await fundMovesTo(f, 2_000);
-          await expect(runKeeper(f)).to.emit(f.eBrake, "HubPaused").withArgs(SENTINEL, HUB_USDT);
+          await expect(runKeeper(f)).to.emit(f.eBrake, "HubPaused").withArgs(f.sentinel.address, HUB_USDT);
           expect(await f.hub.hubPaused()).to.be.true;
         });
 

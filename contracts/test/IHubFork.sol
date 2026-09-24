@@ -7,7 +7,7 @@ import { IHub, IYieldGroupNav } from "../Interfaces/IHubLiquidity.sol";
  * @title IHubFork
  * @author Venus
  * @notice The rest of the Liquidity Hub's surface, for fork tests that have to drive the Hub the way
- *         users and governance do rather than only read what DeviationSentinel reads.
+ *         users and governance do rather than only read what HubNavDeviationSentinel reads.
  * @dev Hand-copied from venus-liquidity-hub for the same reason {IHub} is — this repo takes no
  *      dependency on it. Nothing cross-checks the selectors at build time, so a signature that drifts
  *      from the Hub reverts on chain, which is exactly where a fork test catches it.
@@ -68,7 +68,7 @@ interface IHubFork is IHub {
  * @title IYieldGroupCentrifugeFork
  * @author Venus
  * @notice The Centrifuge YieldGroup's governance and keeper surface, on top of the NAV reads
- *         DeviationSentinel already declares in {IYieldGroupNav}.
+ *         HubNavDeviationSentinel already declares in {IYieldGroupNav}.
  * @dev Same hand-copy caveat as {IHubFork}.
  */
 interface IYieldGroupCentrifugeFork is IYieldGroupNav {

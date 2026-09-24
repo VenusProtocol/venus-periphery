@@ -86,10 +86,6 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   const sentinelOracle = await hre.ethers.getContract("SentinelOracle");
   const eBrakeAddress = await getContractAddressOrNullAddress(deployments, "EBrake");
 
-  // Only BSC runs a Liquidity Hub. Elsewhere the sentinel takes the zero address and its NavGuard
-  // setters revert with HubRegistryUnavailable; the price-deviation half is unaffected.
-  const hubRegistry = ADDRESSES.preconfiguredAddresses.HubRegistry ?? hre.ethers.constants.AddressZero;
-
   if (eBrakeAddress === "0x0000000000000000000000000000000000000000") {
     console.log("EBrake not deployed, skipping DeviationSentinel deployment");
     return;
@@ -100,7 +96,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     from: deployer,
     log: true,
     deterministicDeployment: false,
-    args: [eBrakeAddress, resilientOracle, sentinelOracle.address, hubRegistry],
+    args: [eBrakeAddress, resilientOracle, sentinelOracle.address],
     proxy: {
       owner: network.live ? timelock : deployer,
       proxyContract: "OptimizedTransparentProxy",
@@ -114,7 +110,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   if (deviationSentinelResult.newlyDeployed && network.live) {
     await hre.run("verify:verify", {
       address: deviationSentinelResult.implementation,
-      constructorArguments: [eBrakeAddress, resilientOracle, sentinelOracle.address, hubRegistry],
+      constructorArguments: [eBrakeAddress, resilientOracle, sentinelOracle.address],
     });
   }
 

@@ -4,7 +4,7 @@ pragma solidity ^0.8.25;
 /**
  * @title IHubLiquidity
  * @author Venus
- * @notice Minimal views and emergency levers DeviationSentinel and EBrake need from the Liquidity Hub.
+ * @notice Minimal views and emergency levers HubNavDeviationSentinel and EBrake need from the Liquidity Hub.
  * @dev Hand-copied so this repo takes no dependency on liquidity-hub. Nothing cross-checks the
  *      selectors at build time, so a signature that drifts from the Hub's reverts on chain.
  */
@@ -44,7 +44,7 @@ interface IHub {
 /**
  * @title IHubRegistry
  * @author Venus
- * @notice The chain-level Hub directory, as far as DeviationSentinel needs it.
+ * @notice The chain-level Hub directory, as far as HubNavDeviationSentinel needs it.
  * @dev One per chain, and only on chains that run a Liquidity Hub. Governance writes it, so it
  *      answers whether an address is a Hub Venus onboarded rather than one that claims to be.
  */
@@ -58,7 +58,7 @@ interface IHubRegistry {
 /**
  * @title IYieldGroupNav
  * @author Venus
- * @notice The registry and NavGuard reads DeviationSentinel needs from a YieldGroup, and the
+ * @notice The registry and NavGuard reads HubNavDeviationSentinel needs from a YieldGroup, and the
  *         resource pause EBrake forwards to it.
  */
 interface IYieldGroupNav {
@@ -87,7 +87,7 @@ interface IYieldGroupNav {
     }
 
     /// @notice The Hub this YieldGroup reports assets to.
-    /// @dev Written once in the YieldGroup's initializer, so DeviationSentinel can derive the Hub
+    /// @dev Written once in the YieldGroup's initializer, so HubNavDeviationSentinel can derive the Hub
     ///      from the YieldGroup instead of having a keeper name it.
     /// @return hubAddress Hub that owns this YieldGroup.
     function hub() external view returns (address hubAddress);
@@ -118,7 +118,7 @@ interface IYieldGroupNav {
     ///      at 8%/yr that is ~2 bps; left alone for a quarter it is ~200.
     ///
     ///      The error is one-sided: a stale centre is lower than the live one, which lowers both of
-    ///      DeviationSentinel's trip points. The downside gets harder to trip and the upside easier,
+    ///      HubNavDeviationSentinel's trip points. The downside gets harder to trip and the upside easier,
     ///      so a dormant Hub biases toward a false pause rather than a missed one. It takes
     ///      staleness past `pauseUpBps` to matter, which is why the raw read is good enough — but
     ///      size `pauseUpBps` against the dormant case, not the daily one.
@@ -130,7 +130,7 @@ interface IYieldGroupNav {
     /// @dev Never reverts. A zero `observedValue` is ambiguous on purpose: the Hub reads the value
     ///      source as `(value, readable)` and drops the flag here, so a read that failed and a
     ///      position the counterparty prices at nothing arrive identically. Neither can be told from
-    ///      the other through this interface, which is why DeviationSentinel treats a zero as no
+    ///      the other through this interface, which is why HubNavDeviationSentinel treats a zero as no
     ///      verdict rather than as a total loss.
     /// @param resource Resource to read.
     /// @return observedValue Value the counterparty reports, in asset units; `0` if unreadable or genuinely zero.

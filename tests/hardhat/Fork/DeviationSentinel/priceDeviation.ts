@@ -82,7 +82,6 @@ const COMPTROLLER_ABI = [
 
 // Proxy admin address (from DeviationSentinel_Proxy deployment args)
 const PROXY_ADMIN = "0x6beb6D2695B67FEb73ad4f172E8E2975497187e4";
-const HUB_REGISTRY = "0x6D93Fd479f2d37445CFBe132412e316a0364acc2";
 
 /**
  * Deploy EBrake and upgrade DeviationSentinel proxy to new implementation.
@@ -121,12 +120,7 @@ async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Prom
 
   // Deploy new DeviationSentinel implementation with EBrake
   const SentinelFactory = await ethers.getContractFactory("DeviationSentinel");
-  const newImpl = await SentinelFactory.deploy(
-    eBrake.address,
-    RESILIENT_ORACLE,
-    addresses.SentinelOracle,
-    HUB_REGISTRY,
-  );
+  const newImpl = await SentinelFactory.deploy(eBrake.address, RESILIENT_ORACLE, addresses.SentinelOracle);
 
   // Upgrade proxy via ProxyAdmin contract (owned by timelock)
   const proxyAdminContract = new ethers.Contract(
