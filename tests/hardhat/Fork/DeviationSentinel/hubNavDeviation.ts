@@ -2,7 +2,7 @@
 // Liquidity Hub NAV deviation — BSC mainnet fork
 // ═══════════════════════════════════════════════════════════════════════════
 import "@nomicfoundation/hardhat-chai-matchers";
-import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
+import { loadFixture, takeSnapshot, time } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { BigNumber, ContractTransaction } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
@@ -221,8 +221,20 @@ async function setUpScenario() {
 // SCENARIO HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Where the sentinel measures from: the band's own stored centre, read raw. */
+/** The band's stored centre, as last saved on a deposit, redeem or re-anchor. */
 const bandCentre = async (f: Fixture): Promise<BigNumber> => (await f.yieldGroup.navGuard(JTRSY.vault)).centre;
+
+/** Where the sentinel measures from at `timestamp`: the stored centre grown by the drift since `driftFrom`. */
+async function liveCentre(f: Fixture, timestamp: number): Promise<BigNumber> {
+  const band = await f.yieldGroup.navGuard(JTRSY.vault);
+  const elapsed = timestamp - band.driftFrom.toNumber();
+  return band.centre.add(
+    band.centre
+      .mul(band.driftBps)
+      .mul(elapsed)
+      .div(10_000 * 365 * 86_400),
+  );
+}
 
 /** The share price that leaves the position `bps` away from the band's centre, and what it publishes. */
 async function navAwayFromCentre(f: Fixture, bps: number): Promise<{ price: BigNumber; observed: BigNumber }> {
@@ -243,7 +255,9 @@ async function fundMovesTo(f: Fixture, bps: number): Promise<BigNumber> {
 }
 
 /** The keeper's pause, against the band the Hub was applying at the block that paused it. */
-async function expectHubPaused(f: Fixture, tx: ContractTransaction, observed: BigNumber, centre: BigNumber) {
+async function expectHubPaused(f: Fixture, tx: ContractTransaction, observed: BigNumber) {
+  const { timestamp } = await ethers.provider.getBlock((await tx.wait()).blockNumber);
+  const centre = await liveCentre(f, timestamp);
   const { minAllowedValue, maxAllowedValue } = await f.yieldGroup.navGuardStatus(JTRSY.vault);
   await expect(tx)
     .to.emit(f.sentinel, "NavGuardDeviationHandled")
@@ -420,43 +434,48 @@ if (FORK_MAINNET) {
 
         it("pauses the Hub when the fund marks the position up further than any real yield explains", async () => {
           const observed = await fundMovesTo(f, 2_000);
-          const centre = await bandCentre(f);
 
-          await expectHubPaused(f, await runKeeper(f), observed, centre);
+          await expectHubPaused(f, await runKeeper(f), observed);
         });
 
         it("pauses the Hub when the fund marks the position down hard, after it has already mispriced shares", async () => {
           const sharePriceBefore = await f.hub.convertToAssets(parseUnits("1", 18));
           const observed = await fundMovesTo(f, -2_000);
-          const centre = await bandCentre(f);
 
           // The floor clamps what the Hub reports, but not before it has marked every share down.
           expect(await f.hub.convertToAssets(parseUnits("1", 18))).to.be.lt(sharePriceBefore);
 
-          await expectHubPaused(f, await runKeeper(f), observed, centre);
+          await expectHubPaused(f, await runKeeper(f), observed);
         });
 
+        // The centre grows every second, so both keeper calls run at one pinned timestamp, each
+        // from the same snapshot, to measure against the same trip point.
         it("leaves the Hub open at the upside trip point and pauses one step past it", async () => {
-          const centre = await bandCentre(f);
-          const tripPoint = centre.mul(10_000 + PAUSE_UP_BPS).div(10_000);
+          const at = (await time.latest()) + 100;
+          const tripPoint = (await liveCentre(f, at)).mul(10_000 + PAUSE_UP_BPS).div(10_000);
+          const price = tripPoint.mul(f.cf.shareUnit).div(await f.cf.sharesOf());
+          const snapshot = await takeSnapshot();
 
-          const { price } = await navAwayFromCentre(f, PAUSE_UP_BPS);
           await f.cf.publishNav(price);
           expect((await f.yieldGroup.navGuardStatus(JTRSY.vault)).observedValue).to.be.closeTo(
             tripPoint,
             await priceRounding(f),
           );
+          await time.setNextBlockTimestamp(at);
           await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "DeviationWithinThreshold");
 
+          await snapshot.restore();
           await f.cf.publishNav(price.add(1));
           expect((await f.yieldGroup.navGuardStatus(JTRSY.vault)).observedValue).to.be.gt(tripPoint);
+          await time.setNextBlockTimestamp(at);
           await runKeeper(f);
           expect(await f.hub.hubPaused()).to.be.true;
         });
 
         it("leaves the Hub open at the downside trip point and pauses one step past it", async () => {
-          const centre = await bandCentre(f);
-          const tripPoint = centre.mul(10_000 - PAUSE_DOWN_BPS).div(10_000);
+          const at = (await time.latest()) + 100;
+          const tripPoint = (await liveCentre(f, at)).mul(10_000 - PAUSE_DOWN_BPS).div(10_000);
+          const snapshot = await takeSnapshot();
 
           // Land the position exactly on the trip point, then one step below it.
           const shares = await f.cf.sharesOf();
@@ -466,10 +485,13 @@ if (FORK_MAINNET) {
             tripPoint,
             await priceRounding(f),
           );
+          await time.setNextBlockTimestamp(at);
           await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "DeviationWithinThreshold");
 
+          await snapshot.restore();
           await f.cf.publishNav(price.sub(2));
           expect((await f.yieldGroup.navGuardStatus(JTRSY.vault)).observedValue).to.be.lt(tripPoint);
+          await time.setNextBlockTimestamp(at);
           await runKeeper(f);
           expect(await f.hub.hubPaused()).to.be.true;
         });
@@ -558,9 +580,13 @@ if (FORK_MAINNET) {
 
           await time.increase(90 * 86_400);
 
-          // The Hub's band has drifted upward with the published rate; the sentinel's reference has not.
+          // Nothing touched the Hub, so the stored centre has not moved, but the Hub's band has grown
+          // with the drift. The sentinel grows the centre the same way, so it measures from that band.
           expect((await f.yieldGroup.navGuardStatus(JTRSY.vault)).maxAllowedValue).to.be.gt(bandBefore.maxAllowedValue);
           expect(await bandCentre(f)).to.equal(centreBefore);
+          const { centre } = await f.sentinel.checkNavGuardDeviation(CENTRIFUGE_SOURCE, JTRSY.vault);
+          expect(centre).to.be.gt(centreBefore);
+          expect(centre).to.equal(await liveCentre(f, await time.latest()));
 
           await fundMovesTo(f, -2_000);
           await runKeeper(f);
