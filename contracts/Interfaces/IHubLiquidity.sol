@@ -37,6 +37,10 @@ interface IHub {
     /// @return config Stored configuration; all-zero when never registered.
     function yieldGroupConfig(address yieldGroup) external view returns (YieldGroupConfig memory config);
 
+    /// @notice Total assets the Hub reports, with every NavGuard band applied.
+    /// @return total Hub NAV, in asset units.
+    function totalAssets() external view returns (uint256 total);
+
     /// @notice Whether the Hub is currently paused.
     /// @return paused True while the Hub is paused.
     function hubPaused() external view returns (bool paused);

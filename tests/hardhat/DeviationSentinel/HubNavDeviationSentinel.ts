@@ -123,6 +123,7 @@ describe("HubNavDeviationSentinel", () => {
     eBrake.pauseHub.reset();
     hubRegistry.isHub.reset();
     hub.yieldGroupConfig.reset();
+    hub.totalAssets.reset();
     yieldGroup.hub.reset();
     yieldGroup.navGuardStatus.reset();
     yieldGroup.navGuard.reset();
@@ -531,8 +532,9 @@ describe("HubNavDeviationSentinel", () => {
 
     // A closed band (centre 0) that still reads a real value is the Hub's own `_guardedNav`
     // clamping this resource down to that closed cap — zero — while the position is genuinely
-    // still worth 500. That understates NAV by the whole position, so it is a breach, not a no-op.
+    // still worth 500. On a Hub worth 10,000 that is 5% of NAV missing, so it is a breach.
     it("pauses on a closed band whose cap is clamping a real value to zero", async () => {
+      hub.totalAssets.returns(10_000);
       yieldGroup.navGuardStatus.returns([500, 0, 0, true, 0]);
       navBand(0);
 
@@ -564,6 +566,22 @@ describe("HubNavDeviationSentinel", () => {
         .to.be.revertedWithCustomError(sentinel, "NavGuardCentreZero")
         .withArgs(RESOURCE);
       expect(eBrake.pauseHub).to.have.callCount(0);
+    });
+
+    // 1% of a 10,000 Hub is 100. Anyone can leave that much dust in a closed band, for example
+    // with a Centrifuge deposit request made for the YieldGroup, so 100 is ignored and 101 pauses.
+    it("ignores a closed band holding up to 1% of the Hub's NAV, and pauses past it", async () => {
+      hub.totalAssets.returns(10_000);
+      yieldGroup.navGuardStatus.returns([100, 0, 0, true, 0]);
+      navBand(0);
+
+      await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(sentinel, "NavGuardCentreZero")
+        .withArgs(RESOURCE);
+
+      yieldGroup.navGuardStatus.returns([101, 0, 0, true, 0]);
+      await sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE);
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
     });
 
     // The two zeros are different verdicts and must not collapse into one: a zero reading says

@@ -39,11 +39,11 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @param YieldGroupNotRegistered The Hub does not list the supplied YieldGroup
     /// @param ResourceNotRegistered The YieldGroup does not list the supplied resource
     /// @param ObservedValueZero The value source read back zero, so there is nothing to compare
-    /// @param CentreZero The band is closed with the cap off (or the downside unwatched), so the
-    ///        Hub isn't mis-valuing the position — see `checkNavGuardDeviation`
+    /// @param CentreZero The band is closed, but nothing is worth pausing for — see `checkNavGuardDeviation`
     /// @param WithinThreshold Inside the band, or outside it by less than the configured threshold
     /// @param Breached Outside the band by more than the threshold, or a closed band is clamping
-    ///        a real value to zero — either way, a pause is due
+    ///        more than `CLOSED_BAND_MIN_SHORTFALL_BPS` of the Hub's NAV to zero — either way, a
+    ///        pause is due
     enum NavGuardCheckStatus {
         MonitoringDisabled,
         YieldGroupNotRegistered,
@@ -58,6 +58,11 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @dev `pauseDownBps` must stay strictly below it: at 10_000 the downside trip point is 0, and
     ///      nothing is below 0, so that side would never fire. Upward has no such point.
     uint16 public constant MAX_DEVIATION_BPS = 10_000;
+
+    /// @notice Smallest share of Hub NAV a closed band must hide to trigger a pause, in bps
+    /// @dev A closed band values its resource at zero, so whatever it still holds is missing from Hub
+    ///      NAV. Anyone can leave dust there, so under 1% it is not worth freezing the Hub for.
+    uint16 public constant CLOSED_BAND_MIN_SHORTFALL_BPS = 100;
 
     /// @notice Emergency Brake contract the Hub pause is routed through
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
@@ -164,9 +169,10 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     ///      published zero. A genuine write-off is a governance action, not a sentinel pause.
     error NavGuardObservedValueZero(address resource);
 
-    /// @notice Thrown when the band is closed but nothing here is actually mis-valued
-    /// @dev The same closed band with the cap armed and the downside watched is a `Breached`
-    ///      pause instead — see `checkNavGuardDeviation`.
+    /// @notice Thrown when the band is closed but nothing here is mis-valued enough to pause for
+    /// @dev The same closed band with the cap armed, the downside watched and more than
+    ///      `CLOSED_BAND_MIN_SHORTFALL_BPS` of the Hub's NAV left in it is a `Breached` pause
+    ///      instead — see `checkNavGuardDeviation`.
     error NavGuardCentreZero(address resource);
 
     /// @notice Thrown when the band is broken by less than the configured pause threshold
@@ -283,8 +289,8 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @custom:error NavGuardDisabled (pair not watched), YieldGroupNotRegistered (Hub dropped the
     ///        YieldGroup), ResourceNotRegistered (YieldGroup dropped the resource),
     ///        NavGuardObservedValueZero (value source reads zero), NavGuardCentreZero (band closed
-    ///        but nothing mis-valued), or DeviationWithinThreshold (break below the threshold) —
-    ///        each is one non-breach status `checkNavGuardDeviation` can return.
+    ///        with nothing worth pausing for), or DeviationWithinThreshold (break below the
+    ///        threshold) — each is one non-breach status `checkNavGuardDeviation` can return.
     function handleNavGuardDeviation(address yieldGroup, address resource) external onlyKeeper {
         (
             NavGuardCheckStatus status,
@@ -372,8 +378,9 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
             (uint256(MAX_DEVIATION_BPS) * 365 days);
         centre = band.centre + drift;
 
-        // A zero value sits under any downside trip point, and a zero centre puts both trip points at
-        // zero, so either would read as a breach in the comparison below. Each gets its own status.
+        // Two zero cases are handled first, as the percentage check below would pause on either:
+        // - `observedValue` is 0 when unreadable or priced at nothing, which is below every threshold.
+        // - `centre` is 0 after a full exit closes the band, which makes every threshold 0.
         if (observedValue == 0) {
             return (
                 NavGuardCheckStatus.ObservedValueZero,
@@ -385,24 +392,21 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
             );
         }
         if (centre == 0) {
-            // The position still holds real value, but this band is closed. With the cap armed,
-            // the Hub's own `_guardedNav` prices this resource at the closed cap — zero — so Hub
-            // NAV understates the position by its full value. With the downside watched too, that
-            // undercount is the breach this sentinel exists to catch.
-            //
-            // With the cap off, or the downside left unwatched, the Hub reports the real value
-            // unclamped, so there is nothing here to flag.
-            if (band.capEnabled && config.pauseDownBps != 0) {
-                return (NavGuardCheckStatus.Breached, hub, observedValue, centre, minAllowedValue, maxAllowedValue);
-            }
-            return (NavGuardCheckStatus.CentreZero, hub, observedValue, centre, minAllowedValue, maxAllowedValue);
+            // The band is closed but the position still reports a value. With the cap on, the Hub
+            // values it at 0, so Hub NAV is short by `observedValue`. That pauses only if the
+            // downside is watched and the shortfall is over 1% of Hub NAV, so dust cannot freeze the Hub.
+            bool closedBandBreached = band.capEnabled &&
+                config.pauseDownBps != 0 &&
+                observedValue > (IHub(hub).totalAssets() * CLOSED_BAND_MIN_SHORTFALL_BPS) / MAX_DEVIATION_BPS;
+
+            status = closedBandBreached ? NavGuardCheckStatus.Breached : NavGuardCheckStatus.CentreZero;
+            return (status, hub, observedValue, centre, minAllowedValue, maxAllowedValue);
         }
 
         uint256 downTripPoint = (centre * (MAX_DEVIATION_BPS - config.pauseDownBps)) / MAX_DEVIATION_BPS;
         uint256 upTripPoint = (centre * (MAX_DEVIATION_BPS + config.pauseUpBps)) / MAX_DEVIATION_BPS;
 
-        // A zero threshold leaves its side unwatched, so it has to be tested for separately —
-        // read as a trip point it would be the tightest one there is.
+        // A threshold of 0 means that side is off, not that it pauses on any move.
         bool breachedDown = config.pauseDownBps != 0 && observedValue < downTripPoint;
         bool breachedUp = config.pauseUpBps != 0 && observedValue > upTripPoint;
 

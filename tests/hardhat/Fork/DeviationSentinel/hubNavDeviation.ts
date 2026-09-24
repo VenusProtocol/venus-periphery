@@ -657,13 +657,29 @@ if (FORK_MAINNET) {
 
           const { observedValue } = await f.yieldGroup.navGuardStatus(JTRSY.vault);
           expect(observedValue).to.be.gt(0);
-          // Everything left in the fund is invisible to the Hub: only the redeemed cash counts.
+          // Everything left in the fund is invisible to the Hub: only the redeemed cash counts. It is
+          // well over 1% of the Hub's NAV, so it is worth pausing for.
           expect(await f.yieldGroup.totalAssets()).to.equal(await f.usdt.balanceOf(CENTRIFUGE_SOURCE));
+          expect(observedValue).to.be.gt((await f.hub.totalAssets()).div(100));
 
           await expect(runKeeper(f))
             .to.emit(f.sentinel, "NavGuardDeviationHandled")
             .withArgs(HUB_USDT, CENTRIFUGE_SOURCE, JTRSY.vault, observedValue, 0, 0, 0);
           expect(await f.hub.hubPaused()).to.be.true;
+        });
+
+        // Anyone can leave dust in a closed band, for example a 1 wei deposit request made for the
+        // YieldGroup. A share price of 1 wei stands in for that here.
+        it("leaves the Hub open when all a closed band still holds is dust", async () => {
+          await exitAtTheBandsValuation();
+          await f.cf.publishNav(1);
+
+          const { observedValue } = await f.yieldGroup.navGuardStatus(JTRSY.vault);
+          expect(observedValue).to.be.gt(0);
+          expect(observedValue).to.be.lte((await f.hub.totalAssets()).div(100));
+
+          await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "NavGuardCentreZero");
+          expect(await f.hub.hubPaused()).to.be.false;
         });
 
         it("leaves the Hub open when the cap is off, because nothing is being mis-valued", async () => {
