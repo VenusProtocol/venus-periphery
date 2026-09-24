@@ -306,7 +306,7 @@ if (FORK_MAINNET) {
           }
         });
 
-        it("still pauses borrow on a market the sentinel prices above the oracle", async () => {
+        it("still pauses borrow on a market the price sentinel prices above the oracle", async () => {
           const oraclePrice = await f.resilientOracle.getUnderlyingPrice(vBTCB);
           await f.sentinelOracle.setDirectPrice(BTCB, oraclePrice.mul(150).div(100));
 
@@ -316,7 +316,7 @@ if (FORK_MAINNET) {
           expect(await f.hub.hubPaused()).to.be.false;
         });
 
-        it("still zeroes the collateral factor and pauses supply when the sentinel prices below the oracle", async () => {
+        it("still zeroes the collateral factor and pauses supply when the price sentinel prices below the oracle", async () => {
           const oraclePrice = await f.resilientOracle.getUnderlyingPrice(vBTCB);
           const before = await f.corePool.poolMarkets(0, vBTCB);
           expect(before.collateralFactorMantissa).to.be.gt(0);

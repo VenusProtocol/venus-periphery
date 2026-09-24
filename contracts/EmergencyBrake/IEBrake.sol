@@ -62,8 +62,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - Pauses flash loans (blocks flash loan attack vector, no user impact)
  *        - Pauses the Liquidity Hub (blocks deposits and redemptions; existing balances
  *          untouched, and emergencyReallocate still works)
- *        - Pauses a Hub YieldGroup or one of its resources (stops new deposits routing there;
- *          the balance already there still counts toward NAV)
+ *        - Pauses a Hub YieldGroup or one of its resources (stops new deposits routing there, and
+ *          user withdrawals skip it; the balance already there still counts toward NAV)
  *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.
  *
  *   BSC vs NON-BSC DIFFERENCES:
@@ -347,7 +347,8 @@ interface IEBrake {
 
     /**
      * @notice Stop a Hub YieldGroup routing new deposits to one of its resources. The balance
-     *         already there still counts toward NAV.
+     *         already there still counts toward NAV, but user withdrawals skip it until governance
+     *         unpauses it.
      * @dev Forwards to the YieldGroup, which checks `pauseResource(address)` against its own
      *      address, so EBrake needs that grant on every YieldGroup it should reach. Tighten-only,
      *      and an already-paused resource is a no-op with no event, as {pauseHub}. A resource the

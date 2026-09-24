@@ -132,7 +132,7 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @notice Thrown when both thresholds are set to zero
     error ZeroDeviation();
 
-    /// @notice Thrown when a threshold exceeds the maximum allowed
+    /// @notice Thrown when a threshold is out of range
     error ExceedsMaxDeviation();
 
     /// @notice Thrown when a zero address is provided
