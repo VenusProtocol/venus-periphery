@@ -713,10 +713,12 @@ if (FORK_MAINNET) {
           const idle = await f.usdt.balanceOf(CENTRIFUGE_SOURCE);
           expect(idle).to.be.gt(0);
 
+          // The redeemed cash sits idle on the group, not in the vault, so the pull leg names no
+          // resource: a leg naming the vault only reaches what the vault still holds, which is zero.
           await f.hub
             .connect(f.timelock)
             .emergencyReallocate(
-              [{ yieldGroup: CENTRIFUGE_SOURCE, resource: JTRSY.vault, amount: idle }],
+              [{ yieldGroup: CENTRIFUGE_SOURCE, resource: ethers.constants.AddressZero, amount: idle }],
               [{ yieldGroup: CORE_SOURCE, resource: ethers.constants.AddressZero, amount: idle }],
             );
 
