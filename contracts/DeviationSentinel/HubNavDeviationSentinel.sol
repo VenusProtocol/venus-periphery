@@ -330,7 +330,8 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @dev `handleNavGuardDeviation` calls this rather than repeating the comparison, so what
     ///      monitoring reads and what the keeper acts on cannot drift apart.
     ///      Can revert: `yieldGroup` is caller-supplied, so a non-contract address or a revert
-    ///      inside it propagates out. The Hub is not — it comes from the stored config.
+    ///      inside it propagates out. The Hub address is not, but on a closed band this reads
+    ///      `Hub.totalAssets()`, which reverts whenever any YieldGroup's valuation does.
     /// @param yieldGroup The YieldGroup holding the resource
     /// @param resource The resource whose NavGuard band to read
     /// @return status Why a pause is or is not due

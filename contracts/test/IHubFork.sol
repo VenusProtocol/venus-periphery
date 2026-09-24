@@ -55,8 +55,6 @@ interface IHubFork is IHub {
     /// @notice The wind-down lever that stays callable while the Hub is paused.
     function emergencyReallocate(ReallocateLeg[] calldata withdraws, ReallocateLeg[] calldata deposits) external;
 
-    function totalAssets() external view returns (uint256 total);
-
     function convertToAssets(uint256 shares) external view returns (uint256 assets);
 
     function maxDeposit(address receiver) external view returns (uint256 capacity);
