@@ -109,9 +109,9 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
 
     /// @notice Emitted when a resource breaks through its NavGuard band and the Hub is paused
     /// @dev `centre` is what the breach was measured against, and the two bounds are the band the
-    ///      Hub was applying at the time. All three raw, so an operator can recompute the ordinary
-    ///      trip point from the thresholds — except when `centre` is 0, where the breach is the
-    ///      band itself being closed on a real value, not a percentage miss.
+    ///      Hub was applying at the time, all three with drift included. An operator can recompute
+    ///      the ordinary trip point from the thresholds — except when `centre` is 0, where the
+    ///      breach is the band itself being closed on a real value, not a percentage miss.
     /// @param hub The Liquidity Hub that was paused
     /// @param yieldGroup The YieldGroup holding the breaching resource
     /// @param resource The resource whose value broke through its band
@@ -330,7 +330,7 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @return status Why a pause is or is not due
     /// @return hub The Hub that would be paused, as governance configured it; `0` when unwatched
     /// @return observedValue Value the counterparty reports, in asset units; `0` if unread or empty
-    /// @return centre What the band says the position is worth; `0` if unread or the band is closed
+    /// @return centre What the band says the position is worth, drift included; `0` if unread or closed
     /// @return minAllowedValue The band's floor; `0` before it is read, or when the band is closed
     /// @return maxAllowedValue The band's cap; `0` before it is read, or when the band is closed
     function checkNavGuardDeviation(
@@ -362,13 +362,15 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
 
         (observedValue, minAllowedValue, maxAllowedValue, , ) = IYieldGroupNav(yieldGroup).navGuardStatus(resource);
 
-        // Measured from the centre, not the bounds: the bounds carry the Hub's own gap, so widening
-        // it on the Hub side would move this trip point even though nothing changed here.
-        //
-        // Read raw, not drift-grown: the centre is rewritten on every Hub flow, and flows land
-        // about daily, so the drift in between is a couple of bps.
+        // Our pause thresholds are measured from the centre, not the Hub's min and max, because those
+        // include the Hub's own gap and would shift our thresholds whenever that gap is changed.
         IYieldGroupNav.NavBand memory band = IYieldGroupNav(yieldGroup).navGuard(resource);
-        centre = band.centre;
+
+        // The centre grows by `driftBps` a year but is only saved on a deposit, redeem or re-anchor,
+        // so add the growth since `driftFrom`, the same way the Hub's `NavGuard._grown` does.
+        uint256 drift = (uint256(band.centre) * band.driftBps * (block.timestamp - band.driftFrom)) /
+            (uint256(MAX_DEVIATION_BPS) * 365 days);
+        centre = band.centre + drift;
 
         // A zero value sits under any downside trip point, and a zero centre puts both trip points at
         // zero, so either would read as a breach in the comparison below. Each gets its own status.

@@ -1,5 +1,5 @@
 import { FakeContract, smock } from "@defi-wonderland/smock";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 import type { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import chai from "chai";
 import { ethers, upgrades } from "hardhat";
@@ -72,9 +72,10 @@ describe("HubNavDeviationSentinel", () => {
   }
 
   // NavBand, in the Hub's field order: anchor, centre, anchoredAt, driftFrom, interval, driftBps,
-  // upGapBps, downGapBps, capEnabled, floorEnabled. Only `centre` and `capEnabled` are read.
-  function navBand(centre: number, capEnabled = true) {
-    yieldGroup.navGuard.returns([centre, centre, 0, 0, 86_400, 800, 200, 200, capEnabled, true]);
+  // upGapBps, downGapBps, capEnabled, floorEnabled. Only `centre`, `driftFrom`, `driftBps` and
+  // `capEnabled` are read. No drift by default, so the stored centre is the live one.
+  function navBand(centre: number, capEnabled = true, driftFrom = 0, driftBps = 0) {
+    yieldGroup.navGuard.returns([centre, centre, 0, driftFrom, 86_400, driftBps, 200, 200, capEnabled, true]);
   }
 
   function navGuardStatus(observed: number, isClamped: boolean) {
@@ -641,6 +642,17 @@ describe("HubNavDeviationSentinel", () => {
       expect(result.centre).to.equal(CENTRE);
       expect(result.minAllowedValue).to.equal(MIN);
       expect(result.maxAllowedValue).to.equal(MAX);
+    });
+
+    // A year at 8% grows the stored 1500 to 1620, moving the downside pause threshold from 1350
+    // to 1458. So 1400 would pass against the stored centre, but pauses against the grown one.
+    it("grows the centre by the drift since driftFrom", async () => {
+      navGuardStatus(1_400, false);
+      navBand(CENTRE, true, (await time.latest()) - 365 * 86_400, 800);
+
+      const result = await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE);
+      expect(result.centre).to.equal(1_620);
+      expect(result.status).to.equal(Status.Breached);
     });
 
     it("reports an upside breach", async () => {

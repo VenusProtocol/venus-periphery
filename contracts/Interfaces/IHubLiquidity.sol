@@ -112,18 +112,8 @@ interface IYieldGroupNav {
     ///      `uint128` and adjacent, so a reordering there would decode silently wrong rather than
     ///      revert — pin this against `INavGuard.NavBand` when upgrading either side.
     ///
-    ///      `centre` is the stored value, not the drifted one the Hub applies. It is written up to
-    ///      date on every flow and on every re-anchor, and accrues `driftBps` in between, so how
-    ///      stale it runs is set by how often the Hub is touched — not by `interval`. A re-anchor
-    ///      needs `YieldGroup.accrue()`, which is `onlyHub` and reached from `Hub._accrueFees`, so
-    ///      a Hub nobody deposits to or redeems from does not re-anchor on schedule. Touched daily
-    ///      at 8%/yr that is ~2 bps; left alone for a quarter it is ~200.
-    ///
-    ///      The error is one-sided: a stale centre is lower than the live one, which lowers both of
-    ///      HubNavDeviationSentinel's trip points. The downside gets harder to trip and the upside
-    ///      easier, so a dormant Hub biases toward a false pause rather than a missed one. It takes
-    ///      staleness past `pauseUpBps` to matter, which is why the raw read is good enough — but
-    ///      size `pauseUpBps` against the dormant case, not the daily one.
+    ///      `centre` is the value as last saved, on a deposit, redeem or re-anchor. The Hub grows it
+    ///      by `driftBps` a year since `driftFrom`, so a caller wanting the live centre must too.
     /// @param resource Resource to look up.
     /// @return band The stored band.
     function navGuard(address resource) external view returns (NavBand memory band);
