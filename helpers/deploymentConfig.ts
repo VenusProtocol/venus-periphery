@@ -100,11 +100,15 @@ export const preconfiguredAddresses = {
     NormalTimelock: governanceBscTestnet.NormalTimelock.address,
     AccessControlManager: governanceBscTestnet.AccessControlManager.address,
     ResilientOracle: oracleBscTestnet.ResilientOracle.address,
+    // Liquidity Hub registry, from venus-liquidity-hub. BSC only — every other network leaves this
+    // out, and HubNavDeviationSentinel is not deployed there.
+    HubRegistry: "0x5346f648029d1D1d1034e09e8AD7a115f5D7A159",
   },
   bscmainnet: {
     NormalTimelock: governanceBscMainnet.NormalTimelock.address,
     AccessControlManager: governanceBscMainnet.AccessControlManager.address,
     ResilientOracle: oracleBscMainnet.ResilientOracle.address,
+    HubRegistry: "0x6D93Fd479f2d37445CFBe132412e316a0364acc2",
   },
   sepolia: {
     NormalTimelock: governanceSepolia.NormalTimelock.address,
