@@ -544,9 +544,8 @@ contract DeviationSentinel is AccessControlledV8 {
         // Measured from the centre, not the bounds: the bounds carry the Hub's own gap, so widening
         // it on the Hub side would move this trip point even though nothing changed here.
         //
-        // Read raw, not drift-grown: `interval` is kept to about a day, so one interval's drift is
-        // only a couple of bps — well inside the margin `pauseUpBps`/`pauseDownBps` already keep
-        // over the gaps.
+        // Read raw, not drift-grown: the centre is rewritten on every Hub flow, and flows land
+        // about daily, so the drift in between is a couple of bps.
         IYieldGroupNav.NavBand memory band = IYieldGroupNav(yieldGroup).navGuard(resource);
         centre = band.centre;
 
