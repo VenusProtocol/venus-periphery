@@ -132,6 +132,7 @@ contract PositionAccount is Initializable, IPositionAccount {
      * @param relativePositionManager_ Address of the RelativePositionManager contract
      * @param leverageManager_ Address of the LeverageStrategiesManager contract
      * @custom:error ZeroAddress if any of the addresses is zero.
+     * @custom:oz-upgrades-unsafe-allow constructor
      */
     constructor(IComptroller comptroller_, address relativePositionManager_, address leverageManager_) {
         if (
