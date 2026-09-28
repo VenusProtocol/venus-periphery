@@ -102,11 +102,16 @@ forge test --match-path "tests/foundry/unit/CollateralGateway_*"
 # BSC mainnet fork tests at a pinned block, reading ARCHIVE_NODE_bscmainnet from .env
 forge test --match-path "tests/foundry/fork/*"
 
+# BSC testnet fork tests, against the deployed gateway and the executed VIP
+forge test --match-contract Fork_CollateralGatewayTestnet
+
 # Transaction and gas counts per user journey
 forge test --match-contract Fork_CollateralGatewayJourney -vv
 ```
 
-Fork tests skip when `ARCHIVE_NODE_bscmainnet` is unset.
+Fork tests skip when the archive RPC for their network is unset: `ARCHIVE_NODE_bscmainnet` for the mainnet suites, `ARCHIVE_NODE_bsctestnet` for the testnet suite.
+
+The testnet suite runs against the deployed gateway `0xbB3304B6a1eB1d48E1d2EE78eadDadD4024DF358`, so it covers the governance grants as they stand on chain. A source change that has not been redeployed is not covered by it.
 
 ```
 tests/foundry/
@@ -119,6 +124,7 @@ tests/foundry/
 └── fork/
     ├── Fork_CollateralGateway.t.sol         # Live Hub_USDT, vvhUSDT and Core Comptroller
     ├── Fork_CollateralGatewayJourney.t.sol  # Gateway against the manual path
+    ├── Fork_CollateralGatewayTestnet.t.sol  # Every entry point on bsctestnet, deployed gateway
     └── fixtures/MarketFacet.deployed.hex    # MarketFacet with enterMarketForAccount
 ```
 
