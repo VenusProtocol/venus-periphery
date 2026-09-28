@@ -100,6 +100,9 @@ export const preconfiguredAddresses = {
     NormalTimelock: governanceBscTestnet.NormalTimelock.address,
     AccessControlManager: governanceBscTestnet.AccessControlManager.address,
     ResilientOracle: oracleBscTestnet.ResilientOracle.address,
+    // Spoke pools keep a registry of their own, separate from the isolated-pools `PoolRegistry`.
+    // Hardcoded until `@venusprotocol/isolated-pools` publishes the Spoke deployments.
+    SpokePoolRegistry: "0xeAA45288d804971e5a76f33559e629F5b2b1Cb8B",
   },
   bscmainnet: {
     NormalTimelock: governanceBscMainnet.NormalTimelock.address,

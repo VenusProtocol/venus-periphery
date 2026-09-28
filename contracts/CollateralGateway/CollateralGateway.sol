@@ -41,7 +41,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
     uint256 private constant EXP_SCALE = 1e18;
 
-    /// @notice The Isolated Pools registry every Spoke market in a call is checked against.
+    /// @notice The Spoke pool registry every Spoke market in a call is checked against.
     IPoolRegistry public immutable POOL_REGISTRY;
 
     /// @notice The Core Comptroller that every Core function of this gateway runs against.
@@ -62,7 +62,7 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     uint256 transient _migrationVTokens;
 
     /// @param comptroller The Core Comptroller. Reverts on the zero address.
-    /// @param poolRegistry The Isolated Pools registry. Reverts on the zero address.
+    /// @param poolRegistry The registry of the Spoke pools on this chain. Reverts on the zero address.
     /// @param owner_ Account that may sweep tokens sent to this contract. Reverts on the zero address.
     constructor(IComptroller comptroller, IPoolRegistry poolRegistry, address owner_) {
         if (address(comptroller) == address(0) || address(poolRegistry) == address(0) || owner_ == address(0)) {

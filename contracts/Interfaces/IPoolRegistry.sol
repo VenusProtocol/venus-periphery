@@ -3,8 +3,8 @@ pragma solidity ^0.8.25;
 
 /**
  * @title IPoolRegistry
- * @notice Interface for the Isolated Pools registry, which records the market each pool lists for
- *         a given asset.
+ * @notice Interface for a pool registry, which records the market each pool lists for a given
+ *         asset. Spoke pools keep a registry of their own, separate from the Isolated Pools one.
  */
 interface IPoolRegistry {
     /// @notice The market a pool lists for an asset, or the zero address when the pool never
