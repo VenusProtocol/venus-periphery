@@ -37,6 +37,7 @@ const Status = {
 const SET_CONFIG_ROLE = "setHubNavConfig(address,address,uint16,uint16)";
 const SET_ENABLED_ROLE = "setNavMonitoringEnabled(address,address,bool)";
 const SET_KEEPER_ROLE = "setTrustedKeeper(address,bool)";
+const SET_MIN_GAP_ROLE = "setMinHubNavGapBps(uint16)";
 
 // Pause thresholds, measured from the centre: 10% down, 5% up.
 const PAUSE_DOWN_BPS = 1_000;
@@ -584,6 +585,23 @@ describe("HubNavDeviationSentinel", () => {
       expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
     });
 
+    // A redeem takes its amount off the centre but leaves the gap. A centre of 100,000 that gained
+    // 1%, then had 95,950 redeemed, is left at 4,050 against 5,050: a 24.7% move from a 1,000 gap.
+    // On a Hub worth 100,000 that gap is exactly 1% of NAV, so it is ignored, and 1,001 pauses.
+    it("ignores a threshold breach whose gap is up to 1% of the Hub's NAV, and pauses past it", async () => {
+      hub.totalAssets.returns(100_000);
+      yieldGroup.navGuardStatus.returns([5_050, 3_969, 4_131, true, 4_131]);
+      navBand(4_050);
+
+      await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(sentinel, "DeviationWithinThreshold")
+        .withArgs(RESOURCE, 5_050);
+
+      yieldGroup.navGuardStatus.returns([5_051, 3_969, 4_131, true, 4_131]);
+      await sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE);
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
+    });
+
     // The two zeros are different verdicts and must not collapse into one: a zero reading says
     // nothing about the position, a zero centre with the cap off says nothing to compare a real
     // reading against.
@@ -773,6 +791,10 @@ describe("HubNavDeviationSentinel", () => {
       expect(await sentinel.HUB_REGISTRY()).to.equal(hubRegistry.address);
     });
 
+    it("starts the Hub NAV floor at 1%", async () => {
+      expect(await sentinel.minHubNavGapBps()).to.equal(100);
+    });
+
     it("reverts on a zero EBrake or Hub registry", async () => {
       const Factory = await ethers.getContractFactory("HubNavDeviationSentinel");
       for (const constructorArgs of [
@@ -823,6 +845,44 @@ describe("HubNavDeviationSentinel", () => {
       await expect(sentinel.connect(user).setTrustedKeeper(user.address, true))
         .to.be.revertedWithCustomError(sentinel, "Unauthorized")
         .withArgs(user.address, sentinel.address, SET_KEEPER_ROLE);
+    });
+  });
+
+  describe("setMinHubNavGapBps", () => {
+    it("updates the floor and emits the old and new values", async () => {
+      await expect(sentinel.setMinHubNavGapBps(25)).to.emit(sentinel, "MinHubNavGapUpdated").withArgs(100, 25);
+
+      expect(await sentinel.minHubNavGapBps()).to.equal(25);
+    });
+
+    // The same 1,000 gap on a 100,000 Hub: exactly 1%, so the default floor ignores it, and at 0.5%
+    // it pauses. This pins that the check reads the stored floor, not a fixed 1%.
+    it("pauses a gap the default floor ignored once the floor is lowered", async () => {
+      hub.totalAssets.returns(100_000);
+      yieldGroup.navGuardStatus.returns([5_050, 3_969, 4_131, true, 4_131]);
+      navBand(4_050);
+
+      await expect(
+        sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE),
+      ).to.be.revertedWithCustomError(sentinel, "DeviationWithinThreshold");
+
+      await sentinel.setMinHubNavGapBps(50);
+      await sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE);
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
+    });
+
+    it("accepts 100% and reverts above it", async () => {
+      await sentinel.setMinHubNavGapBps(10_000);
+
+      await expect(sentinel.setMinHubNavGapBps(10_001)).to.be.revertedWithCustomError(sentinel, "ExceedsMaxDeviation");
+    });
+
+    it("asks the ACM for exactly setMinHubNavGapBps(uint16)", async () => {
+      accessControlManager.isAllowedToCall.returns(false);
+
+      await expect(sentinel.connect(user).setMinHubNavGapBps(25))
+        .to.be.revertedWithCustomError(sentinel, "Unauthorized")
+        .withArgs(user.address, sentinel.address, SET_MIN_GAP_ROLE);
     });
   });
 });

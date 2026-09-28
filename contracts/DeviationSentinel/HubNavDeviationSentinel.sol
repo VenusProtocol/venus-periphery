@@ -40,10 +40,10 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @param ResourceNotRegistered The YieldGroup does not list the supplied resource
     /// @param ObservedValueZero The value source read back zero, so there is nothing to compare
     /// @param CentreZero The band is closed, but nothing is worth pausing for — see `checkNavGuardDeviation`
-    /// @param WithinThreshold Inside the band, or outside it by less than the configured threshold
-    /// @param Breached Outside the band by more than the threshold, or a closed band is clamping
-    ///        more than `CLOSED_BAND_MIN_SHORTFALL_BPS` of the Hub's NAV to zero — either way, a
-    ///        pause is due
+    /// @param WithinThreshold Not past either threshold, or past one by a gap too small against the
+    ///        Hub's NAV to pause for — see `minHubNavGapBps`
+    /// @param Breached A pause is due: the value is past a threshold, or a closed band is valuing a
+    ///        live position at zero, and the gap is over `minHubNavGapBps` of the Hub's NAV
     enum NavGuardCheckStatus {
         MonitoringDisabled,
         YieldGroupNotRegistered,
@@ -58,11 +58,6 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @dev `pauseDownBps` must stay strictly below it: at 10_000 the downside trip point is 0, and
     ///      nothing is below 0, so that side would never fire. Upward has no such point.
     uint16 public constant MAX_DEVIATION_BPS = 10_000;
-
-    /// @notice Smallest share of Hub NAV a closed band must hide to trigger a pause, in bps
-    /// @dev A closed band values its resource at zero, so whatever it still holds is missing from Hub
-    ///      NAV. Anyone can leave dust there, so under 1% it is not worth freezing the Hub for.
-    uint16 public constant CLOSED_BAND_MIN_SHORTFALL_BPS = 100;
 
     /// @notice Emergency Brake contract the Hub pause is routed through
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
@@ -80,13 +75,30 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     ///      resource under two YieldGroups has two independent bands.
     mapping(address yieldGroup => mapping(address resource => NavGuardConfig config)) public navGuardConfigs;
 
+    /// @notice Smallest gap between the observed value and the centre that can pause the Hub, in bps
+    ///         of the Hub's NAV. Starts at 100, which is 1%.
+    /// @dev Both thresholds are a percentage of the centre, and a redeem takes the amount redeemed off
+    ///      the centre but leaves the gap. So after a partial exit a small gap reads as a large move:
+    ///      a 1,000 gap is 1% of a 100,000 centre, but 24.7% of the 4,050 left after redeeming 95,950.
+    ///      On a Hub worth 1,000,000 that gap is 0.1% of NAV, not worth freezing every deposit and
+    ///      redemption for.
+    ///
+    ///      A closed band is the extreme case. It values its resource at zero, so everything the
+    ///      resource still holds is the gap, and anyone can leave dust there.
+    uint16 public minHubNavGapBps;
+
     /// @dev Storage gap for future upgrades.
-    uint256[48] private __gap;
+    uint256[47] private __gap;
 
     /// @notice Emitted when a keeper's trusted status is updated
     /// @param keeper The keeper address
     /// @param isTrusted Whether the keeper is trusted
     event TrustedKeeperUpdated(address indexed keeper, bool isTrusted);
+
+    /// @notice Emitted when `minHubNavGapBps` is changed
+    /// @param oldBps The previous minimum gap, in bps of the Hub's NAV
+    /// @param newBps The new minimum gap, in bps of the Hub's NAV
+    event MinHubNavGapUpdated(uint16 oldBps, uint16 newBps);
 
     /// @notice Emitted when a resource's NavGuard pause thresholds are updated
     /// @param hub The Liquidity Hub the YieldGroup belongs to
@@ -171,11 +183,12 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
 
     /// @notice Thrown when the band is closed but nothing here is mis-valued enough to pause for
     /// @dev The same closed band with the cap armed, the downside watched and more than
-    ///      `CLOSED_BAND_MIN_SHORTFALL_BPS` of the Hub's NAV left in it is a `Breached` pause
-    ///      instead — see `checkNavGuardDeviation`.
+    ///      `minHubNavGapBps` of the Hub's NAV left in it is a `Breached` pause instead — see
+    ///      `checkNavGuardDeviation`.
     error NavGuardCentreZero(address resource);
 
-    /// @notice Thrown when the band is broken by less than the configured pause threshold
+    /// @notice Thrown when the value is not past a pause threshold, or is past one by a gap no larger
+    ///         than `minHubNavGapBps` of the Hub's NAV
     /// @dev Small enough to let the band step down on its own.
     error DeviationWithinThreshold(address resource, uint256 observedValue);
 
@@ -204,6 +217,7 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @param accessControlManager_ Address of the access control manager
     function initialize(address accessControlManager_) external initializer {
         __AccessControlled_init(accessControlManager_);
+        minHubNavGapBps = 100; // 1% of the Hub's NAV
     }
 
     /// @notice Set trusted status for a keeper
@@ -252,6 +266,27 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
         emit NavGuardConfigUpdated(hub, yieldGroup, resource, config);
     }
 
+    /// @notice Set the smallest gap between the observed value and the centre that can pause the Hub,
+    ///         in bps of the Hub's NAV
+    /// @dev This minimum overrides a resource's own thresholds when the resource is small next to its
+    ///      Hub. At 1% of a Hub worth 4,260,000 it is 42,600, so a 500,000 position has to move over
+    ///      8.5% to pause, whatever its `pauseDownBps` says. Set it below the smallest gap that should
+    ///      still pause: that position with an 8% threshold trips at 40,000, which is 0.94% of the Hub.
+    ///
+    ///      One value applies to every Hub this sentinel watches.
+    /// @param newMinHubNavGapBps The new minimum gap, in bps of the Hub's NAV. At 0 any gap past a
+    ///        threshold pauses, including dust left in a closed band.
+    /// @custom:event Emits MinHubNavGapUpdated event
+    /// @custom:error ExceedsMaxDeviation is thrown when the minimum is above 100% of the Hub's NAV
+    function setMinHubNavGapBps(uint16 newMinHubNavGapBps) external {
+        _checkAccessAllowed("setMinHubNavGapBps(uint16)");
+
+        if (newMinHubNavGapBps > MAX_DEVIATION_BPS) revert ExceedsMaxDeviation();
+
+        emit MinHubNavGapUpdated(minHubNavGapBps, newMinHubNavGapBps);
+        minHubNavGapBps = newMinHubNavGapBps;
+    }
+
     /// @notice Start or stop watching a resource's NavGuard band, keeping its thresholds
     /// @dev Arming re-runs the checks `setHubNavConfig` ran, since a Hub or a resource can be
     ///      de-registered in between. Disarming runs none, so a dropped pair can always be turned off.
@@ -290,7 +325,8 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     ///        YieldGroup), ResourceNotRegistered (YieldGroup dropped the resource),
     ///        NavGuardObservedValueZero (value source reads zero), NavGuardCentreZero (band closed
     ///        with nothing worth pausing for), or DeviationWithinThreshold (break below the
-    ///        threshold) — each is one non-breach status `checkNavGuardDeviation` can return.
+    ///        threshold, or too small against Hub NAV) — each is one non-breach status
+    ///        `checkNavGuardDeviation` can return.
     function handleNavGuardDeviation(address yieldGroup, address resource) external onlyKeeper {
         (
             NavGuardCheckStatus status,
@@ -330,8 +366,10 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @dev `handleNavGuardDeviation` calls this rather than repeating the comparison, so what
     ///      monitoring reads and what the keeper acts on cannot drift apart.
     ///      Can revert: `yieldGroup` is caller-supplied, so a non-contract address or a revert
-    ///      inside it propagates out. The Hub address is not, but on a closed band this reads
-    ///      `Hub.totalAssets()`, which reverts whenever any YieldGroup's valuation does.
+    ///      inside it propagates out. The Hub address is not, but once a threshold is crossed, or on
+    ///      a closed band, this reads `Hub.totalAssets()`, which reverts whenever any YieldGroup's
+    ///      valuation does. Not pausing then costs nothing: every Hub deposit and redemption is
+    ///      priced from that same read, so they revert too.
     /// @param yieldGroup The YieldGroup holding the resource
     /// @param resource The resource whose NavGuard band to read
     /// @return status Why a pause is or is not due
@@ -395,10 +433,11 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
         if (centre == 0) {
             // The band is closed but the position still reports a value. With the cap on, the Hub
             // values it at 0, so Hub NAV is short by `observedValue`. That pauses only if the
-            // downside is watched and the shortfall is over 1% of Hub NAV, so dust cannot freeze the Hub.
+            // downside is watched and the shortfall is over `minHubNavGapBps` of Hub NAV, so dust
+            // cannot freeze the Hub.
             bool closedBandBreached = band.capEnabled &&
                 config.pauseDownBps != 0 &&
-                observedValue > (IHub(hub).totalAssets() * CLOSED_BAND_MIN_SHORTFALL_BPS) / MAX_DEVIATION_BPS;
+                _exceedsMinHubNavGap(hub, observedValue);
 
             status = closedBandBreached ? NavGuardCheckStatus.Breached : NavGuardCheckStatus.CentreZero;
             return (status, hub, observedValue, centre, minAllowedValue, maxAllowedValue);
@@ -411,7 +450,22 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
         bool breachedDown = config.pauseDownBps != 0 && observedValue < downTripPoint;
         bool breachedUp = config.pauseUpBps != 0 && observedValue > upTripPoint;
 
-        status = breachedDown || breachedUp ? NavGuardCheckStatus.Breached : NavGuardCheckStatus.WithinThreshold;
+        // Crossing a threshold is not enough: the gap must also be over `minHubNavGapBps` of the
+        // Hub's NAV, the same test a closed band gets. The side that crossed puts `observedValue`
+        // above or below the centre, so the subtraction cannot underflow.
+        bool breached = (breachedDown || breachedUp) &&
+            _exceedsMinHubNavGap(hub, breachedUp ? observedValue - centre : centre - observedValue);
+
+        status = breached ? NavGuardCheckStatus.Breached : NavGuardCheckStatus.WithinThreshold;
+    }
+
+    /// @notice Whether a gap is big enough, next to the Hub's NAV, to pause the Hub for
+    /// @dev Reverts whenever `Hub.totalAssets()` does.
+    /// @param hub The Hub whose NAV the gap is measured against
+    /// @param gap Distance between the observed value and the centre, in asset units
+    /// @return Whether `gap` is over `minHubNavGapBps` of the Hub's NAV
+    function _exceedsMinHubNavGap(address hub, uint256 gap) private view returns (bool) {
+        return gap > (IHub(hub).totalAssets() * minHubNavGapBps) / MAX_DEVIATION_BPS;
     }
 
     /// @notice Resolve a YieldGroup's Hub and prove the whole chain down to the resource is live
