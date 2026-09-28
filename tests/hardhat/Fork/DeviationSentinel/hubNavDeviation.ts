@@ -68,6 +68,10 @@ const HUB_DOWN_GAP_BPS = 500;
 const PAUSE_UP_BPS = 400;
 const PAUSE_DOWN_BPS = 800;
 
+// The Hub holds about 4.26M at the fork block, so the default 1% floor is about 42.6k, which is past
+// both thresholds on the 500k position (20k up, 40k down). At 0.25% it is about 10.6k, under both.
+const MIN_HUB_NAV_GAP_BPS = 25;
+
 const Status = {
   MonitoringDisabled: 0,
   YieldGroupNotRegistered: 1,
@@ -111,6 +115,7 @@ const newGrants = (hubSentinel: string): Grant[] => [
   [hubSentinel, "setTrustedKeeper(address,bool)", NORMAL_TIMELOCK],
   [hubSentinel, "setHubNavConfig(address,address,uint16,uint16)", NORMAL_TIMELOCK],
   [hubSentinel, "setNavMonitoringEnabled(address,address,bool)", NORMAL_TIMELOCK],
+  [hubSentinel, "setMinHubNavGapBps(uint16)", NORMAL_TIMELOCK],
   [EBRAKE, "pauseHub(address)", hubSentinel],
   [HUB_USDT, "pauseHub()", EBRAKE],
   [HUB_USDT, "pauseYieldGroup(address)", EBRAKE],
@@ -194,6 +199,7 @@ async function setUpScenario() {
   // ── Governance arms the sentinel ──
   await sentinel.connect(timelock).setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, PAUSE_UP_BPS, PAUSE_DOWN_BPS);
   await sentinel.connect(timelock).setNavMonitoringEnabled(CENTRIFUGE_SOURCE, JTRSY.vault, true);
+  await sentinel.connect(timelock).setMinHubNavGapBps(MIN_HUB_NAV_GAP_BPS);
 
   return {
     acm,
@@ -266,6 +272,10 @@ async function expectHubPaused(f: Fixture, tx: ContractTransaction, observed: Bi
     .withArgs(f.sentinel.address, HUB_USDT);
   expect(await f.hub.hubPaused()).to.be.true;
 }
+
+/** The smallest gap that can pause the Hub right now, in asset units. */
+const hubNavFloor = async (f: Fixture): Promise<BigNumber> =>
+  (await f.hub.totalAssets()).mul(MIN_HUB_NAV_GAP_BPS).div(10_000);
 
 const runKeeper = (f: Fixture) => f.sentinel.connect(f.keeper).handleNavGuardDeviation(CENTRIFUGE_SOURCE, JTRSY.vault);
 
@@ -658,9 +668,9 @@ if (FORK_MAINNET) {
           const { observedValue } = await f.yieldGroup.navGuardStatus(JTRSY.vault);
           expect(observedValue).to.be.gt(0);
           // Everything left in the fund is invisible to the Hub: only the redeemed cash counts. It is
-          // well over 1% of the Hub's NAV, so it is worth pausing for.
+          // well over the Hub NAV floor, so it is worth pausing for.
           expect(await f.yieldGroup.totalAssets()).to.equal(await f.usdt.balanceOf(CENTRIFUGE_SOURCE));
-          expect(observedValue).to.be.gt((await f.hub.totalAssets()).div(100));
+          expect(observedValue).to.be.gt(await hubNavFloor(f));
 
           await expect(runKeeper(f))
             .to.emit(f.sentinel, "NavGuardDeviationHandled")
@@ -676,7 +686,7 @@ if (FORK_MAINNET) {
 
           const { observedValue } = await f.yieldGroup.navGuardStatus(JTRSY.vault);
           expect(observedValue).to.be.gt(0);
-          expect(observedValue).to.be.lte((await f.hub.totalAssets()).div(100));
+          expect(observedValue).to.be.lte(await hubNavFloor(f));
 
           await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "NavGuardCentreZero");
           expect(await f.hub.hubPaused()).to.be.false;
