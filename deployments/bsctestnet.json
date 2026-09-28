@@ -3,7 +3,7 @@
   "chainId": "97",
   "contracts": {
     "CollateralGateway": {
-      "address": "0x5DBEed23013f3B325e8fa44b0570152F7F25DD9A",
+      "address": "0xbB3304B6a1eB1d48E1d2EE78eadDadD4024DF358",
       "abi": [
         {
           "inputs": [
