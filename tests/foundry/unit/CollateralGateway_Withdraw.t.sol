@@ -214,6 +214,40 @@ contract CollateralGateway_WithdrawTest is Test {
         assertEq(market.balanceOf(user), 0, "every receipt burned");
     }
 
+    /// @dev A holder with no receipts never needs the Core leg, so neither the delegate grant nor
+    ///      an empty redeem can stop "withdraw everything".
+    function test_withdrawPosition_maxWithOnlyWalletSharesAndNoDelegate() public {
+        address holder = makeAddr("holder");
+        hub.mint(holder, WALLET_SHARES);
+
+        vm.startPrank(holder);
+        hub.approve(address(gateway), type(uint256).max);
+        uint256 assets = gateway.withdrawPosition(address(market), type(uint256).max, 0);
+        vm.stopPrank();
+
+        assertEq(assets, WALLET_SHARES / 1e6, "the wallet leg paid out");
+        assertEq(hub.balanceOf(holder), 0, "wallet shares spent");
+    }
+
+    function test_withdrawPosition_maxWithOnlyWalletSharesAndADelegate() public {
+        address holder = makeAddr("holder");
+        hub.mint(holder, WALLET_SHARES);
+
+        vm.startPrank(holder);
+        hub.approve(address(gateway), type(uint256).max);
+        market.updateDelegate(address(gateway), true);
+        uint256 assets = gateway.withdrawPosition(address(market), type(uint256).max, 0);
+        vm.stopPrank();
+
+        assertEq(assets, WALLET_SHARES / 1e6, "the wallet leg paid out");
+    }
+
+    function testRevert_withdrawPosition_nothingInWalletOrMarket() public {
+        vm.expectRevert(ICollateralGateway.NothingReceived.selector);
+        vm.prank(makeAddr("holder"));
+        gateway.withdrawPosition(address(market), type(uint256).max, 0);
+    }
+
     function test_withdrawPosition_leavesNothingInTheGateway() public {
         vm.prank(user);
         gateway.withdrawPosition(address(market), WALLET_SHARES + 20e24, 0);
