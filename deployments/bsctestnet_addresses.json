@@ -14,6 +14,7 @@
     "LeverageStrategiesManager": "0x5187226337C95c4BE683D37Ffc66D41f5b6cE38f",
     "LeverageStrategiesManager_Implementation": "0xaD740d56dCf8FB0484f4C27CA3356cF1e379cb4e",
     "LeverageStrategiesManager_Proxy": "0x5187226337C95c4BE683D37Ffc66D41f5b6cE38f",
+    "NativeTokenGateway_vWBNB_Core": "0xF34AAfc540Adc827A84736553BD29DE87a117558",
     "PositionAccount": "0xC9A5f1598e434E3E52CE25D7ff290E4CF167ee52",
     "RelativePositionManager": "0x25dbA64B28F93cC40e9cAf9691266043fe1000a2",
     "RelativePositionManager_Implementation": "0x1A7faa1Ce4cD4252A7348c2Fe1Ad0d117e965d57",
