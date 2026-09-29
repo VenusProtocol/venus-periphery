@@ -4,7 +4,6 @@ name: Upgrade safety
 # GITHUB_BASE_REF on pull_request events alone; on a push there is nothing to diff against.
 on:
   pull_request:
-    branches: [main, develop]
 
 jobs:
   upgrade-safety:

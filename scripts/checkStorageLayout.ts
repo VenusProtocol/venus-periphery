@@ -41,19 +41,6 @@ const SKIPPED_NETWORKS = ["bsctestnet", "sepolia", "localhost"];
 /** hardhat-deploy writes the implementation behind a proxy under this suffix. */
 const SUFFIX = "_Implementation.json";
 
-/**
- * Delegated implementations the suffix scan cannot see, keyed by network and named by deployment
- * file. An ERC-1167 clone target has no `_Proxy.json` marker, so nothing in the artifacts tells it
- * apart from an ordinary standalone deployment and it has to be listed by name.
- *
- * The test for belonging here is that something delegatecalls into it, not that it holds state: a
- * standalone deployment is replaced by deploying a fresh one, so its layout is free to change.
- */
-const CUSTOM_DELEGATION: Record<string, string[]> = {
-  // Every position account is a clone of this implementation and delegatecalls into it.
-  bscmainnet: ["PositionAccount"],
-};
-
 const ROOT = path.join(__dirname, "..");
 const BUILD_INFO_DIR = path.join(ROOT, "artifacts", "build-info");
 const ALLOWLIST_PATH = path.join(__dirname, "storage-layout-allowlist.json");
@@ -123,9 +110,9 @@ function assertReferenceIsUsable(): void {
   if (!BASE_REF) {
     if (!process.env.CI) return;
     console.error(
-      "No base ref. GitHub sets GITHUB_BASE_REF on pull_request events only, so this job must be " +
-        "gated on `if: github.event_name == 'pull_request'`. Comparing against the working tree " +
-        "here would compare the branch with itself.\nSet STORAGE_LAYOUT_BASE_REF to pick a ref explicitly.",
+      "No base ref. GitHub sets GITHUB_BASE_REF on pull_request events only, so this workflow must " +
+        "trigger on pull_request, not push. Comparing against the working tree here would compare " +
+        "the branch with itself.\nSet STORAGE_LAYOUT_BASE_REF to pick a ref explicitly.",
     );
     process.exit(1);
   }
@@ -191,14 +178,6 @@ function collectTargets(): Target[] {
     for (const file of fs.readdirSync(dir).filter(f => f.endsWith(SUFFIX))) {
       const key = `${network}/${file.slice(0, -SUFFIX.length)}`;
       targets.push(targetFor(key, path.posix.join("deployments", network, file)));
-    }
-    for (const name of CUSTOM_DELEGATION[network] ?? []) {
-      // Blocked rather than left to readReference, which would report a typo as new and pass it.
-      if (!fs.existsSync(path.join(dir, `${name}.json`))) {
-        targets.push({ key: `${network}/${name}`, blocked: "listed in CUSTOM_DELEGATION but has no deployment file" });
-        continue;
-      }
-      targets.push(targetFor(`${network}/${name}`, path.posix.join("deployments", network, `${name}.json`)));
     }
   }
 
@@ -267,7 +246,7 @@ function check(target: Target, current: Map<string, Layout>): string | undefined
 
 interface Results {
   failures: string[];
-  /** Allowlisted targets that now pass, so their entry has outlived its reason. */
+  /** Allowlist keys whose target now passes or no longer exists, so their entry has outlived its reason. */
   stale: string[];
 }
 
@@ -312,6 +291,7 @@ function classify(targets: Target[], current: Map<string, Layout>, allowlist: Re
       console.log(`  ${verdict.kind.padEnd(9)} ${target.key}${source}`);
     }
   }
+  results.stale.push(...Object.keys(allowlist).filter(key => !targets.some(t => t.key === key)));
   return results;
 }
 
@@ -337,7 +317,7 @@ function main(): void {
 
   if (stale.length > 0) {
     console.log(
-      `\nThese now pass -- delete them from storage-layout-allowlist.json:\n${stale.map(s => `  ${s}`).join("\n")}`,
+      `\nThese pass or match no deployment -- delete them from storage-layout-allowlist.json:\n${stale.map(s => `  ${s}`).join("\n")}`,
     );
   }
   if (verdict === "FAILED") process.exit(1);
