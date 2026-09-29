@@ -1,4 +1,3 @@
-import { contracts as bscmainnet } from "@venusprotocol/governance-contracts/deployments/bscmainnet.json";
 import { ethers } from "hardhat";
 import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
@@ -36,7 +35,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployments, getNamedAccounts } = hre;
   const { deploy } = deployments;
   const { deployer } = await getNamedAccounts();
-  const timelockAddress = bscmainnet.NormalTimelock.address;
+  const timelock = await deployments.get("NormalTimelock");
 
   const vWNativesInfo = getVWNativeTokens(hre.getNetworkName());
   for (const vWNativeInfo of vWNativesInfo) {
@@ -50,7 +49,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     });
 
     const nativeTokenGateway = await ethers.getContract(`NativeTokenGateway_${vWNativeInfo.name}`);
-    const targetOwner = timelockAddress || deployer;
+    const targetOwner = timelock.address;
     if (hre.network.live && (await nativeTokenGateway.owner()) !== targetOwner) {
       const tx = await nativeTokenGateway.transferOwnership(targetOwner);
       await tx.wait();
