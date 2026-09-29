@@ -25,7 +25,7 @@
     "prettier": "prettier --write \"**/*.{js,json,md,sol,ts,yaml,yml}\"",
     "prettier:check": "prettier --check \"**/*.{js,json,md,sol,ts,yaml,yml}\"",
     "prettier:cached": "prettier --write --cache \"**/*.{js,json,md,sol,ts,yaml,yml}\"",
-    "check:upgrade-safety": "openzeppelin-upgrades-core validate artifacts/build-info --exclude \"contracts/test/**/*.sol\" --exclude \"hardhat-deploy/**/*.sol\" --unsafeAllow state-variable-immutable",
+    "check:upgrade-safety": "openzeppelin-upgrades-core validate artifacts/build-info --exclude \"contracts/test/**/*.sol\" --exclude \"hardhat-deploy/**/*.sol\" --exclude \"@venusprotocol/isolated-pools/**/*.sol\" --unsafeAllow state-variable-immutable",
     "check:storage-layout": "hardhat run scripts/checkStorageLayout.ts",
     "check:upgrades": "yarn check:upgrade-safety && yarn check:storage-layout",
     "build": "rm -rf dist && hardhat compile && tsc --declaration",
