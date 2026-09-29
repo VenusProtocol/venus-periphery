@@ -19,7 +19,6 @@ import {
   NativeTokenGateway,
   PoolRegistry,
   PoolRegistry__factory,
-  PriceOracle,
   ResilientOracleInterface,
   VBep20Immutable,
   VToken,
@@ -33,7 +32,7 @@ const { expect } = chai;
 chai.use(smock.matchers);
 
 type GatewayFixtureCore = {
-  oracle: FakeContract<PriceOracle>;
+  oracle: FakeContract<ResilientOracleInterface>;
   accessControl: FakeContract<IAccessControlManagerV8>;
   comptroller: MockContract<ComptrollerHarness>;
   usdt: MockContract<MockToken>;
@@ -90,7 +89,6 @@ async function deployGatewayCore(): Promise<GatewayFixtureCore> {
   accessControl.isAllowedToCall.returns(true);
 
   const closeFactor = parseUnits("6", 17);
-  const liquidationIncentive = parseUnits("1", 18);
 
   const ComptrollerFactory = await smock.mock<ComptrollerHarness__factory>("ComptrollerHarness");
   const comptroller = await ComptrollerFactory.deploy();
@@ -98,14 +96,11 @@ async function deployGatewayCore(): Promise<GatewayFixtureCore> {
   const ComptrollerLensFactory = await smock.mock<ComptrollerLens__factory>("ComptrollerLens");
   const comptrollerLens = await ComptrollerLensFactory.deploy();
 
-  const fakePriceOracle = await smock.fake<PriceOracle>(
-    "@venusprotocol/venus-protocol/contracts/Oracle/PriceOracle.sol:PriceOracle",
-  );
+  const fakePriceOracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
 
   await comptroller._setPriceOracle(fakePriceOracle.address);
   await comptroller._setAccessControl(accessControl.address);
   await comptroller._setCloseFactor(closeFactor);
-  await comptroller._setLiquidationIncentive(liquidationIncentive);
   await comptroller._setComptrollerLens(comptrollerLens.address);
 
   const wethFactory = await ethers.getContractFactory("WrappedNative");
@@ -125,16 +120,23 @@ async function deployGatewayCore(): Promise<GatewayFixtureCore> {
     [vusdt.address, vweth.address],
     [parseUnits("10000", 18), parseUnits("10000", 18)],
   );
-  await comptroller._setCollateralFactor(vusdt.address, parseUnits("5", 17));
-  await comptroller._setCollateralFactor(vweth.address, parseUnits("5", 17));
+  fakePriceOracle.getUnderlyingPrice.whenCalledWith(vusdt.address).returns(parseUnits("1", 18));
+  fakePriceOracle.getUnderlyingPrice.whenCalledWith(vweth.address).returns(parseUnits("1000", 18));
+
+  for (const vToken of [vusdt, vweth]) {
+    await comptroller["setCollateralFactor(address,uint256,uint256)"](
+      vToken.address,
+      parseUnits("5", 17),
+      parseUnits("5", 17),
+    );
+    await comptroller["setLiquidationIncentive(address,uint256)"](vToken.address, parseUnits("1", 18));
+    await comptroller.setIsBorrowAllowed(0, vToken.address, true);
+  }
 
   const nativeTokenGatewayFactory = await ethers.getContractFactory(
     "contracts/Gateway/NativeTokenGateway.sol:NativeTokenGateway",
   );
   const nativeTokenGateway = await nativeTokenGatewayFactory.deploy(vweth.address);
-
-  fakePriceOracle.getUnderlyingPrice.whenCalledWith(vusdt.address).returns(parseUnits("1", 18));
-  fakePriceOracle.getUnderlyingPrice.whenCalledWith(vweth.address).returns(parseUnits("1000", 18));
 
   await usdt.faucet(parseUnits("100000", 18));
   await usdt.transfer(user2.address, parseUnits("10000", 18));
@@ -357,8 +359,6 @@ describe("NativeTokenGateway", () => {
 
     describe("borrowAndUnwrap", () => {
       beforeEach(async () => {
-        await comptroller._setCollateralFactor(vweth.address, parseUnits("5", 17));
-        await comptroller._setCollateralFactor(vusdt.address, parseUnits("5", 17));
         await nativeTokenGateway.connect(user1).wrapAndSupply(await user1.getAddress(), { value: supplyAmount });
       });
 
@@ -384,8 +384,6 @@ describe("NativeTokenGateway", () => {
 
     describe("wrapAndRepay", () => {
       it("should wrap and repay", async () => {
-        await comptroller._setCollateralFactor(vweth.address, parseUnits("5", 17));
-        await comptroller._setCollateralFactor(vusdt.address, parseUnits("5", 17));
         await nativeTokenGateway.connect(user1).wrapAndSupply(await user1.getAddress(), { value: supplyAmount });
         await usdt.connect(user2).approve(vusdt.address, parseUnits("5000", 18));
         await vusdt.connect(user2).mint(parseUnits("5000", 18));

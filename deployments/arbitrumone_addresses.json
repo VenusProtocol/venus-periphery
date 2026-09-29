@@ -1,5 +1,22 @@
 {
   "name": "arbitrumone",
   "chainId": "42161",
-  "addresses": {}
+  "addresses": {
+    "DefaultProxyAdmin": "0x9fa1031e7f9578e9D4A260CF0dF79D4540CD1836",
+    "DeviationSentinel": "0xb4CC54B33d34fD809E8fBD83A066158591ED7Fba",
+    "DeviationSentinel_Implementation": "0xfbF5D98185d0B02f136CD523B3596CcC713CD19a",
+    "DeviationSentinel_Proxy": "0xb4CC54B33d34fD809E8fBD83A066158591ED7Fba",
+    "EBrake": "0xFc4CE7Ca9BB5119705Cfb84d6e4476e8a4032b26",
+    "EBrake_Implementation": "0x99d41774E679588D82C7045324Bde8DfF97773b9",
+    "EBrake_Proxy": "0xFc4CE7Ca9BB5119705Cfb84d6e4476e8a4032b26",
+    "PancakeSwapOracle": "0x3Fd56a3Ad5aC85D1502988323386C68B2ed9366B",
+    "PancakeSwapOracle_Implementation": "0xfF7cc5E5D9EAC50636b080F4ef964f1b07319D7b",
+    "PancakeSwapOracle_Proxy": "0x3Fd56a3Ad5aC85D1502988323386C68B2ed9366B",
+    "SentinelOracle": "0x3563CAbc541a0432C66A64942ffB4070a9726226",
+    "SentinelOracle_Implementation": "0x105bE25abd5D3d940690F7c4524Dd88e876294aa",
+    "SentinelOracle_Proxy": "0x3563CAbc541a0432C66A64942ffB4070a9726226",
+    "UniswapOracle": "0xB6CFbfe6834EF519f002DBc1a8B81Ea437Ca647D",
+    "UniswapOracle_Implementation": "0x59f7a0F122B94a4282f2E374B6D4e15d5123E9dB",
+    "UniswapOracle_Proxy": "0xB6CFbfe6834EF519f002DBc1a8B81Ea437Ca647D"
+  }
 }

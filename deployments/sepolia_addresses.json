@@ -1,5 +1,16 @@
 {
   "name": "sepolia",
   "chainId": "11155111",
-  "addresses": {}
+  "addresses": {
+    "DefaultProxyAdmin": "0x267D57825B19eDB6343970656f9D19445eDebF67",
+    "DeviationSentinel": "0x3a22AA95998a6c5f57e86E24fEA1503452Bdfa39",
+    "DeviationSentinel_Implementation": "0xd549FE682310B47b8FA879c1cE5fb7FB85D42606",
+    "DeviationSentinel_Proxy": "0x3a22AA95998a6c5f57e86E24fEA1503452Bdfa39",
+    "EBrake": "0x44784FBa07b5199a7a21C8A8E4a50c45137227BC",
+    "EBrake_Implementation": "0xcFf74896eA14cA3bf308A6A7243fd5BA48dd886d",
+    "EBrake_Proxy": "0x44784FBa07b5199a7a21C8A8E4a50c45137227BC",
+    "SentinelOracle": "0xb5A87b6738C1cB2f1a1Acae8c49DbE32f8034CA5",
+    "SentinelOracle_Implementation": "0xC99f5544fe6452E0c635EA2F80E09F9484e05114",
+    "SentinelOracle_Proxy": "0xb5A87b6738C1cB2f1a1Acae8c49DbE32f8034CA5"
+  }
 }

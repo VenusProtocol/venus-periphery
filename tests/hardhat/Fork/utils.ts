@@ -83,3 +83,5 @@ export const initMainnetUser = async (user: string, balance: NumberLike) => {
   await setBalance(user, balance);
   return signer;
 };
+
+export const FORK_MAINNET = process.env.FORKED_NETWORK === "bscmainnet";

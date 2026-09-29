@@ -1,15 +1,15 @@
 import "module-alias/register";
 
 import "@nomicfoundation/hardhat-chai-matchers";
-import "@nomicfoundation/hardhat-toolbox";
+import "@nomicfoundation/hardhat-verify";
 import "@nomiclabs/hardhat-ethers";
-import "@nomiclabs/hardhat-etherscan";
 import "@openzeppelin/hardhat-upgrades";
 import "@typechain/hardhat";
 import * as dotenv from "dotenv";
 import "hardhat-dependency-compiler";
 import "hardhat-deploy";
 import "hardhat-gas-reporter";
+import { TASK_TEST } from "hardhat/builtin-tasks/task-names";
 import { HardhatUserConfig, extendConfig, extendEnvironment, task } from "hardhat/config";
 import { HardhatConfig } from "hardhat/types";
 import "solidity-coverage";
@@ -35,6 +35,7 @@ extendEnvironment(hre => {
 
 extendConfig((config: HardhatConfig) => {
   if (process.env.EXPORT !== "true") {
+    console.log("Adding external deployments from venus-protocol and governance-contracts");
     config.external = {
       ...config.external,
       deployments: {
@@ -42,10 +43,12 @@ extendConfig((config: HardhatConfig) => {
         bsctestnet: [
           "node_modules/@venusprotocol/venus-protocol/deployments/bsctestnet",
           "node_modules/@venusprotocol/governance-contracts/deployments/bsctestnet",
+          "node_modules/@venusprotocol/protocol-reserve/deployments/bsctestnet",
         ],
         bscmainnet: [
           "node_modules/@venusprotocol/venus-protocol/deployments/bscmainnet",
           "node_modules/@venusprotocol/governance-contracts/deployments/bscmainnet",
+          "node_modules/@venusprotocol/protocol-reserve/deployments/bscmainnet",
         ],
         unichainmainnet: ["node_modules/@venusprotocol/venus-protocol/deployments/unichainmainnet"],
       },
@@ -54,10 +57,24 @@ extendConfig((config: HardhatConfig) => {
       config.external.deployments!.hardhat = [
         `./deployments/${process.env.HARDHAT_FORK_NETWORK}`,
         `node_modules/@venusprotocol/venus-protocol/deployments/${process.env.HARDHAT_FORK_NETWORK}`,
+        `node_modules/@venusprotocol/governance-contracts/deployments/${process.env.HARDHAT_FORK_NETWORK}`,
       ];
     }
   }
 });
+
+// Override the built-in test task to accept --fork <network>, which sets
+// FORKED_NETWORK so simulateSafeEBrakeTx.ts (and other fork tests) can pick
+// up the correct archive node URL without needing a separate env var.
+task(TASK_TEST)
+  .addOptionalParam("fork", "Fork a live network by name (e.g. bsctestnet, bscmainnet)")
+  .setAction(async (args, _hre, runSuper) => {
+    if (args.fork) {
+      process.env.FORKED_NETWORK = args.fork;
+      process.env.HARDHAT_FORK_NETWORK = args.fork;
+    }
+    return runSuper(args);
+  });
 
 // This is a sample Hardhat task. To learn how to create your own go to
 // https://hardhat.org/guides/create-task.html
@@ -81,6 +98,21 @@ const config: HardhatUserConfig = {
               yul: !process.env.CI,
             },
           },
+          evmVersion: "cancun",
+          outputSelection: {
+            "*": {
+              "*": ["storageLayout"],
+            },
+          },
+        },
+      },
+      {
+        version: "0.8.28",
+        settings: {
+          optimizer: {
+            enabled: true,
+          },
+          viaIR: true,
           evmVersion: "cancun",
           outputSelection: {
             "*": {
@@ -118,6 +150,26 @@ const config: HardhatUserConfig = {
             blockNumber: process.env.HARDHAT_FORK_NUMBER ? parseInt(process.env.HARDHAT_FORK_NUMBER) : undefined,
           }
         : undefined,
+      // Hardhat only knows chain 1 (Ethereum mainnet) by default. All other chains
+      // used in Venus Protocol fork tests must declare their hardfork history here so
+      // that hardhat_reset with a specific blockNumber doesn't throw
+      // "No known hardfork for execution on historical block N in chain with id X".
+      // cancun: 0  →  treat every block on these chains as post-Cancun,
+      // which is consistent with evmVersion: "cancun" in the Solidity compiler settings.
+      chains: {
+        56: { hardforkHistory: { cancun: 0 } }, // BSC mainnet
+        97: { hardforkHistory: { cancun: 0 } }, // BSC testnet
+        204: { hardforkHistory: { cancun: 0 } }, // opBNB mainnet
+        5611: { hardforkHistory: { cancun: 0 } }, // opBNB testnet
+        10: { hardforkHistory: { cancun: 0 } }, // OP mainnet
+        11155420: { hardforkHistory: { cancun: 0 } }, // OP Sepolia
+        42161: { hardforkHistory: { cancun: 0 } }, // Arbitrum One
+        421614: { hardforkHistory: { cancun: 0 } }, // Arbitrum Sepolia
+        8453: { hardforkHistory: { cancun: 0 } }, // Base mainnet
+        84532: { hardforkHistory: { cancun: 0 } }, // Base Sepolia
+        130: { hardforkHistory: { cancun: 0 } }, // Unichain mainnet
+        1301: { hardforkHistory: { cancun: 0 } }, // Unichain Sepolia
+      },
     },
     development: {
       url: "http://127.0.0.1:8545/",
@@ -131,6 +183,9 @@ const config: HardhatUserConfig = {
       tags: ["testnet"],
       gasPrice: 20000000000,
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [`0x${process.env.DEPLOYER_PRIVATE_KEY}`] : [],
+      // accounts: {
+      //   mnemonic: process.env.MNEMONIC || "",
+      // },
     },
     // Mainnet deployments are done through Frame wallet RPC
     bscmainnet: {
@@ -224,40 +279,11 @@ const config: HardhatUserConfig = {
     enabled: process.env.REPORT_GAS !== undefined,
     currency: "USD",
   },
+  sourcify: {
+    enabled: true,
+  },
   etherscan: {
     customChains: [
-      {
-        network: "bsctestnet",
-        chainId: 97,
-        urls: {
-          apiURL: "https://api-testnet.bscscan.com/api",
-          browserURL: "https://testnet.bscscan.com",
-        },
-      },
-      {
-        network: "bscmainnet",
-        chainId: 56,
-        urls: {
-          apiURL: "https://api.bscscan.com/api",
-          browserURL: "https://bscscan.com",
-        },
-      },
-      {
-        network: "sepolia",
-        chainId: 11155111,
-        urls: {
-          apiURL: "https://api-sepolia.etherscan.io/api",
-          browserURL: "https://sepolia.etherscan.io",
-        },
-      },
-      {
-        network: "ethereum",
-        chainId: 1,
-        urls: {
-          apiURL: "https://api.etherscan.io/api",
-          browserURL: "https://etherscan.io",
-        },
-      },
       {
         network: "opbnbtestnet",
         chainId: 5611,
@@ -275,30 +301,6 @@ const config: HardhatUserConfig = {
         },
       },
       {
-        network: "ethereum",
-        chainId: 1,
-        urls: {
-          apiURL: "https://api.etherscan.io/api",
-          browserURL: "https://etherscan.io",
-        },
-      },
-      {
-        network: "arbitrumsepolia",
-        chainId: 421614,
-        urls: {
-          apiURL: `https://api-sepolia.arbiscan.io/api`,
-          browserURL: "https://sepolia.arbiscan.io/",
-        },
-      },
-      {
-        network: "arbitrumone",
-        chainId: 42161,
-        urls: {
-          apiURL: `https://api.arbiscan.io/api/`,
-          browserURL: "https://arbiscan.io/",
-        },
-      },
-      {
         network: "opsepolia",
         chainId: 11155420,
         urls: {
@@ -307,34 +309,10 @@ const config: HardhatUserConfig = {
         },
       },
       {
-        network: "opmainnet",
-        chainId: 10,
-        urls: {
-          apiURL: "https://api-optimistic.etherscan.io/api",
-          browserURL: "https://optimistic.etherscan.io/",
-        },
-      },
-      {
-        network: "basesepolia",
-        chainId: 84532,
-        urls: {
-          apiURL: "https://api-sepolia.basescan.org/api",
-          browserURL: "https://sepolia.basescan.org/",
-        },
-      },
-      {
-        network: "basemainnet",
-        chainId: 8453,
-        urls: {
-          apiURL: "https://api.basescan.org/api",
-          browserURL: "https://basescan.org/",
-        },
-      },
-      {
         network: "unichainsepolia",
         chainId: 1301,
         urls: {
-          apiURL: "https://api-sepolia.uniscan.xyz/api/",
+          apiURL: `https://api-sepolia.uniscan.xyz/api/`,
           browserURL: "https://sepolia.uniscan.xyz/",
         },
       },
@@ -342,27 +320,12 @@ const config: HardhatUserConfig = {
         network: "unichainmainnet",
         chainId: 130,
         urls: {
-          apiURL: "https://api.uniscan.xyz/api/",
+          apiURL: `https://api.uniscan.xyz/api/`,
           browserURL: "https://uniscan.xyz/",
         },
       },
     ],
-    apiKey: {
-      bscmainnet: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      bsctestnet: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      ethereum: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      sepolia: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      opbnbmainnet: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      opbnbtestnet: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      arbitrumone: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      arbitrumsepolia: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      opsepolia: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      opmainnet: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      basesepolia: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      basemainnet: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      unichainsepolia: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-      unichainmainnet: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
-    },
+    apiKey: process.env.ETHERSCAN_API_KEY || "ETHERSCAN_API_KEY",
   },
   paths: {
     tests: "./tests",
@@ -385,6 +348,9 @@ const config: HardhatUserConfig = {
       {
         artifacts: "node_modules/@venusprotocol/venus-protocol/artifacts",
       },
+      {
+        artifacts: "./node_modules/@venusprotocol/governance-contracts/artifacts",
+      },
     ],
   },
   dependencyCompiler: {
@@ -392,6 +358,9 @@ const config: HardhatUserConfig = {
       "hardhat-deploy/solc_0.8/proxy/OptimizedTransparentUpgradeableProxy.sol",
       "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol",
     ],
+  },
+  mocha: {
+    timeout: 200000, // 200 seconds for fork tests
   },
 };
 

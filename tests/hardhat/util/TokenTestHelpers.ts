@@ -84,14 +84,16 @@ export const deployVTokenBeacon = async <VTokenFactory extends AnyVTokenFactory 
   const VToken = await ethers.getContractFactory<VTokenFactory>(kind);
   const vTokenBeacon = (await upgrades.deployBeacon(VToken, {
     constructorArgs: [isTimeBased, blocksPerYear, maxBorrowRateMantissa],
-    unsafeAllow: ["internal-function-storage"],
+    unsafeAllow: ["internal-function-storage", "missing-initializer"],
   })) as UpgradeableBeacon;
   return vTokenBeacon;
 };
 
+// eslint-disable-next-line complexity -- test helper ported from isolated-pools, mostly default-value fallbacks
 const deployVTokenDependencies = async <VTokenFactory extends AnyVTokenFactory = VToken__factory>(
   params: Partial<VTokenParameters>,
   { kind }: { kind: string } = { kind: "VToken" },
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- test helper ported from isolated-pools, mostly default-value fallbacks
 ): Promise<VTokenParameters> => {
   let underlyingName = "SomeMockToken";
   let underlyingSymbol = "MOCK";

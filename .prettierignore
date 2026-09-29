@@ -1,4 +1,5 @@
 node_modules
+lib
 artifacts
 artifacts-zk
 cache
@@ -10,3 +11,4 @@ scenario
 typechain
 contracts/oracle
 CHANGELOG.md
+docs

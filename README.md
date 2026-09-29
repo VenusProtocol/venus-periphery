@@ -4,7 +4,7 @@ Venus Periphery is an extension of the Venus Protocol ecosystem that contains au
 
 # Contracts
 
-The first major addition in this repository is the CollateralSwapper, a flexible module that enables users to swap their supplied collateral from one market to another directly within the Venus ecosystem.
+The first major addition in this repository is the PositionSwapper, a flexible module that enables users to swap their collateral or debt from one market to another directly within the Venus ecosystem.
 
 # Development
 
@@ -12,6 +12,7 @@ The first major addition in this repository is the CollateralSwapper, a flexible
 
 - NodeJS - 20.x
 - Solc - v0.8.25 (https://github.com/ethereum/solidity/releases/tag/v0.8.25)
+- Foundry - v1.5.1 (https://book.getfoundry.sh/getting-started/installation), for the Solidity tests
 
 ## Installing
 
@@ -34,6 +35,18 @@ REPORT_GAS=true npx hardhat test
 ```
 
 - To run fork tests add FORK=true, FORKED_NETWORK and one ARCHIVE_NODE var in the .env file.
+
+### Foundry tests
+
+Solidity tests live in `tests/foundry` and use the same `node_modules` dependencies as Hardhat. `forge-std` is a git submodule in `lib`.
+
+```bash
+
+git submodule update --init
+
+yarn test:forge
+
+```
 
 ## Deployment
 
@@ -71,7 +84,7 @@ $ yarn hardhat export --network <network-name> --export ./deployments/<network-n
 ## Source Code Verification
 
 In order to verify the source code of already deployed contracts, run:
-`npx hardhat etherscan-verify --network <network_name>`
+`npx hardhat verify --network <network-name> <contract-address> <constructor-arg1> <constructor-arg2>`
 
 Make sure you have added `ETHERSCAN_API_KEY` in `.env` file.
 

@@ -1,4 +1,5 @@
-pragma solidity ^0.5.16;
+// SPDX-License-Identifier: BSD-3-Clause
+pragma solidity 0.8.25;
 
 import { ComptrollerHarness } from "@venusprotocol/venus-protocol/contracts/test/ComptrollerHarness.sol";
 import { VToken } from "@venusprotocol/venus-protocol/contracts/Tokens/VTokens/VToken.sol";
