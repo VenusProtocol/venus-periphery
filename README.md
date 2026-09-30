@@ -140,7 +140,7 @@ yarn check:storage-layout
 
 `check:storage-layout` compares against the working tree by default; set `STORAGE_LAYOUT_BASE_REF=origin/develop` to compare against a branch, as CI does.
 
-`check:upgrade-safety` reads every file in `artifacts/build-info`, including ones left by earlier compiles, so an old copy of a contract can fail it after the source is fixed. If it fails on correct code, run `yarn hardhat compile --force` and retry.
+`check:upgrade-safety` reads every file in `artifacts/build-info`, including ones left by earlier compiles, so an old copy of a contract can fail it after the source is fixed. If it fails on correct code, run `yarn check:upgrades:force`, which recompiles from scratch with `--force` and then runs both checks.
 
 ## Documentation
 

@@ -28,6 +28,7 @@
     "check:upgrade-safety": "openzeppelin-upgrades-core validate artifacts/build-info --exclude \"contracts/test/**/*.sol\" --exclude \"hardhat-deploy/**/*.sol\" --exclude \"@venusprotocol/isolated-pools/**/*.sol\" --unsafeAllow state-variable-immutable",
     "check:storage-layout": "hardhat run scripts/checkStorageLayout.ts",
     "check:upgrades": "yarn check:upgrade-safety && yarn check:storage-layout",
+    "check:upgrades:force": "hardhat compile --force && yarn check:upgrades",
     "build": "rm -rf dist && hardhat compile && tsc --declaration",
     "docgen": "hardhat docgen",
     "prepare": "husky install",
