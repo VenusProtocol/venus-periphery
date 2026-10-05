@@ -1,3 +1,13 @@
+## 1.2.0-dev.14 (2026-10-05)
+
+* Merge pull request #77 from VenusProtocol/feat/storage-layout-check ([32c991a](https://github.com/VenusProtocol/venus-periphery/commit/32c991a)), closes [#77](https://github.com/VenusProtocol/venus-periphery/issues/77)
+* feat: add check:upgrades:force script for a clean local check ([8312549](https://github.com/VenusProtocol/venus-periphery/commit/8312549))
+* feat: check storage layout and upgrade safety in ci ([1957471](https://github.com/VenusProtocol/venus-periphery/commit/1957471))
+* fix: drop PositionAccount layout check and fail on orphaned allowlist keys ([8ee1805](https://github.com/VenusProtocol/venus-periphery/commit/8ee1805))
+* fix: exclude test-only isolated-pools imports from upgrade-safety scan ([7af03c0](https://github.com/VenusProtocol/venus-periphery/commit/7af03c0))
+* fix: fail storage layout check on unlisted or missing networks ([b24fb8c](https://github.com/VenusProtocol/venus-periphery/commit/b24fb8c))
+* chore: annotate upgrade-safe constructors on PositionAccount and PendlePTVaultAdapter ([a91026e](https://github.com/VenusProtocol/venus-periphery/commit/a91026e))
+
 ## 1.2.0-dev.13 (2026-09-29)
 
 * Merge branch 'develop' into feat/VPD-113 ([91ce890](https://github.com/VenusProtocol/venus-periphery/commit/91ce890))
