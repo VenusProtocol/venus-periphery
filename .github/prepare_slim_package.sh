@@ -1,8 +1,9 @@
+set -euo pipefail
+
 # Create a slim folder with the minium content we want, and remove unneeded files
 mkdir slim && cp -r artifacts* package.json README.md deployments slim && cd slim
 find deployments -mindepth 1 -depth -not -name "*_addresses.json*" -exec rm -r "{}" +
 find artifacts -mindepth 1 -depth -not -regex "artifacts/contracts.*" -exec rm -r "{}" +
-find artifacts-zk -mindepth 1 -depth -not -regex "artifacts-zk/contracts.*" -exec rm -r "{}" +
 find artifacts -mindepth 1 -depth -regex "artifacts/.*dbg\.json" -exec rm -r "{}" +
 
 # Add "-slim" to the version in the npm package, keeping the tag "-dev" if it exists
