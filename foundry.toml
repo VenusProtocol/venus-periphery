@@ -6,6 +6,7 @@ cache_path = "cache-foundry"
 libs = ["node_modules", "lib"]
 evm_version = "cancun"
 optimizer = true
+fs_permissions = [{ access = "read", path = "./tests/foundry/fork/fixtures" }]
 remappings = [
     "@openzeppelin/=node_modules/@openzeppelin/",
     "@pendle/=node_modules/@pendle/",
@@ -17,6 +18,9 @@ remappings = [
 # A new 0.8.28 file that fails with "Stack too deep" needs an entry here.
 additional_compiler_profiles = [{ name = "via-ir", via_ir = true }]
 compilation_restrictions = [
+    { paths = "contracts/CollateralGateway/CollateralGateway.sol", via_ir = true },
+    { paths = "contracts/CollateralGateway/ICollateralGateway.sol", via_ir = true },
+    { paths = "contracts/CollateralGateway/IHub.sol", via_ir = true },
     { paths = "contracts/LeverageManager/ILeverageStrategiesManager.sol", via_ir = true },
     { paths = "contracts/LeverageManager/LeverageStrategiesManager.sol", via_ir = true },
     { paths = "contracts/RelativePositionManager/IPositionAccount.sol", via_ir = true },
