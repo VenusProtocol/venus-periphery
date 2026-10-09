@@ -32,6 +32,9 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   // All other chains use IL comptroller → isIsolatedPool = true
   const isIsolatedPool = !network.name.startsWith("bsc") && network.name !== "hardhat";
 
+  // Only chains with Spoke pools have a SpokePoolEBrakeHandler (031); elsewhere this is address(0)
+  const spokeHandler = await getContractAddressOrNullAddress(deployments, "SpokePoolEBrakeHandler");
+
   const defaultProxyAdmin = await hre.artifacts.readArtifact(
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
   );
@@ -41,7 +44,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     from: deployer,
     log: true,
     deterministicDeployment: false,
-    args: [comptroller, isIsolatedPool],
+    args: [comptroller, isIsolatedPool, spokeHandler],
     proxy: {
       owner: network.live ? timelock : deployer,
       proxyContract: "OptimizedTransparentUpgradeableProxy",
@@ -62,7 +65,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
       console.log("Verifying EBrake implementation on explorer...");
       await hre.run("verify:verify", {
         address: result.implementation,
-        constructorArguments: [comptroller, isIsolatedPool],
+        constructorArguments: [comptroller, isIsolatedPool, spokeHandler],
       });
     }
   }
