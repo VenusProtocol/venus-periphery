@@ -144,7 +144,7 @@ export function createDeployFixture(config: ExecutorNetworkConfig): () => Promis
     // ── Deploy EBrake proxy ──
     const EBrakeFactory = await ethers.getContractFactory("EBrake");
     const eBrake = (await upgrades.deployProxy(EBrakeFactory, [config.acm], {
-      constructorArgs: [config.comptroller, !config.isCorePool], // isIsolatedPool = !isCorePool
+      constructorArgs: [config.comptroller, !config.isCorePool, ethers.constants.AddressZero], // isIsolatedPool = !isCorePool
       unsafeAllow: ["constructor", "state-variable-immutable"],
       kind: "transparent",
     })) as EBrake;
