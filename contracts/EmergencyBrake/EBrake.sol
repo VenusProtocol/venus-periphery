@@ -4,6 +4,7 @@ pragma solidity ^0.8.25;
 import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IILComptroller } from "../Interfaces/IILComptroller.sol";
+import { IVToken } from "../Interfaces/IVToken.sol";
 import { IEBrake } from "./IEBrake.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 
@@ -36,19 +37,28 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
     /**
      * @notice Venus Core Pool Comptroller
-     * @dev All emergency functions operate directly on this comptroller.
+     * @dev All emergency functions operate directly on this comptroller, except per-market calls
+     *      from SPOKE_HANDLER, which act on the market's own comptroller.
      *      On BSC this is a Diamond proxy; on non-BSC chains it is an IL comptroller
      */
     ICorePoolComptroller public immutable COMPTROLLER;
 
     /**
      * @notice True for IL comptroller (isolated-pools repo), false for Diamond comptroller (venus-protocol repo).
-     * @dev Determines which ABI path decreaseCF(address,uint256) uses internally.
+     * @dev Determines which ABI path decreaseCF(address,uint256) uses for markets of COMPTROLLER.
+     *      Markets of any other comptroller always take the IL path.
      */
     bool public immutable IS_ISOLATED_POOL;
 
+    /**
+     * @notice The SpokePoolEBrakeHandler, or address(0) on chains without Spoke pools.
+     * @dev The only caller whose per-market calls act on market.comptroller() instead of COMPTROLLER.
+     */
+    address public immutable SPOKE_HANDLER;
+
     /// @notice Stored pre-incident market state snapshots, keyed by vToken market address.
-    /// @dev Values are captured at tightening time (first-write-wins) and cleared via resetCFSnapshot() / resetCapSnapshot().
+    /// @dev Values are captured at tightening time (first-write-wins) and cleared via resetCFSnapshot(),
+    ///      resetBorrowCapSnapshot() and resetSupplyCapSnapshot().
     mapping(address => MarketState) public marketStates;
 
     /// @dev Storage gap for future upgrades.
@@ -57,11 +67,13 @@ contract EBrake is IEBrake, AccessControlledV8 {
     /// @custom:oz-upgrades-unsafe-allow constructor
     /// @param corePoolComptroller_ Address of the Venus Comptroller.
     /// @param isIsolatedPool_ True for IL comptroller (isolated-pools), false for Diamond comptroller (venus-protocol).
-    constructor(ICorePoolComptroller corePoolComptroller_, bool isIsolatedPool_) {
+    /// @param spokeHandler_ The SpokePoolEBrakeHandler, or address(0) on chains without Spoke pools.
+    constructor(ICorePoolComptroller corePoolComptroller_, bool isIsolatedPool_, address spokeHandler_) {
         if (address(corePoolComptroller_) == address(0)) revert ZeroAddress();
 
         COMPTROLLER = corePoolComptroller_;
         IS_ISOLATED_POOL = isIsolatedPool_;
+        SPOKE_HANDLER = spokeHandler_;
         _disableInitializers();
     }
 
@@ -81,7 +93,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         for (uint256 i; i < actionsLen; ++i) {
             _validateAction(actions[i]);
         }
-        IComptroller(address(COMPTROLLER)).setActionsPaused(markets, actions, true);
+        IComptroller(_comptrollerOf(markets[0])).setActionsPaused(markets, actions, true);
         emit ActionsPaused(msg.sender, markets, actions);
     }
 
@@ -153,15 +165,16 @@ contract EBrake is IEBrake, AccessControlledV8 {
     function decreaseCF(address market, uint256 newCF) external {
         _checkAccessAllowed("decreaseCF(address,uint256)");
         MarketState storage state = marketStates[market];
-        if (IS_ISOLATED_POOL) {
-            IILComptroller.Market memory m = IILComptroller(address(COMPTROLLER)).markets(market);
+        address comptroller = _comptrollerOf(market);
+        if (!_isCorePool(comptroller)) {
+            IILComptroller.Market memory m = IILComptroller(comptroller).markets(market);
             if (!m.isListed) revert MarketNotListed(0, market);
             if (newCF > m.collateralFactorMantissa) {
                 revert CFExceedsCurrent(market, 0, m.collateralFactorMantissa, newCF);
             }
             if (newCF == m.collateralFactorMantissa) return;
             _snapshotCF(state, 0, m.collateralFactorMantissa, m.liquidationThresholdMantissa);
-            IILComptroller(address(COMPTROLLER)).setCollateralFactor(market, newCF, m.liquidationThresholdMantissa);
+            IILComptroller(comptroller).setCollateralFactor(market, newCF, m.liquidationThresholdMantissa);
             emit CollateralFactorDecreased(msg.sender, market, 0, newCF);
         } else {
             uint96 corePoolId = COMPTROLLER.corePoolId();
@@ -204,7 +217,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         if (marketsLen == 0) revert EmptyArray();
         if (marketsLen != newBorrowCaps.length) revert ArrayLengthMismatch(marketsLen, newBorrowCaps.length);
 
-        IComptroller comptroller = IComptroller(address(COMPTROLLER));
+        IComptroller comptroller = IComptroller(_comptrollerOf(markets[0]));
         bool anyDecreased;
 
         for (uint256 i; i < marketsLen; ++i) {
@@ -238,7 +251,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         if (marketsLen == 0) revert EmptyArray();
         if (marketsLen != newSupplyCaps.length) revert ArrayLengthMismatch(marketsLen, newSupplyCaps.length);
 
-        IComptroller comptroller = IComptroller(address(COMPTROLLER));
+        IComptroller comptroller = IComptroller(_comptrollerOf(markets[0]));
         bool anyDecreased;
 
         for (uint256 i; i < marketsLen; ++i) {
@@ -274,7 +287,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         _checkAccessAllowed("resetCFSnapshot(address)");
 
         MarketState storage state = marketStates[market];
-        if (IS_ISOLATED_POOL) {
+        if (!_isCorePool(_comptrollerOf(market))) {
             delete state.poolCFs[0];
             delete state.poolLTs[0];
         } else {
@@ -350,7 +363,29 @@ contract EBrake is IEBrake, AccessControlledV8 {
         IComptroller.Action[] memory actions = new IComptroller.Action[](1);
         actions[0] = action;
 
-        IComptroller(address(COMPTROLLER)).setActionsPaused(markets, actions, true);
+        IComptroller(_comptrollerOf(market)).setActionsPaused(markets, actions, true);
+    }
+
+    /**
+     * @notice The comptroller to act on: market.comptroller() for SPOKE_HANDLER, COMPTROLLER for every other caller.
+     * @dev SPOKE_HANDLER only forwards markets of registered Spoke comptrollers, one comptroller per batch.
+     * @param market The vToken market address.
+     * @return The comptroller to act on.
+     */
+    function _comptrollerOf(address market) internal view returns (address) {
+        if (msg.sender != SPOKE_HANDLER) return address(COMPTROLLER);
+        return address(IVToken(market).comptroller());
+    }
+
+    /**
+     * @notice Whether the Diamond path (pool ids, per-pool CF/LT) applies to `comptroller`.
+     * @dev True only for COMPTROLLER when it is a Diamond (IS_ISOLATED_POOL = false). Any other comptroller
+     *      is treated as an isolated-pools comptroller with pool id 0, which Spoke comptrollers are.
+     * @param comptroller The comptroller about to be acted on.
+     * @return True for the Diamond path, false for the isolated-pools path.
+     */
+    function _isCorePool(address comptroller) internal view returns (bool) {
+        return !IS_ISOLATED_POOL && comptroller == address(COMPTROLLER);
     }
 
     /**

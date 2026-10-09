@@ -92,7 +92,7 @@ async function deployEBrakeAndUpgradeSentinel(timelock: SignerWithAddress): Prom
 
   // Deploy EBrake behind proxy (BSC = Diamond comptroller, so isIsolatedPool = false)
   const EBrakeFactory = await ethers.getContractFactory("EBrake");
-  const eBrakeImpl = await EBrakeFactory.deploy(COMPTROLLER, false);
+  const eBrakeImpl = await EBrakeFactory.deploy(COMPTROLLER, false, ethers.constants.AddressZero);
 
   const ProxyFactory = await ethers.getContractFactory(
     "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy",

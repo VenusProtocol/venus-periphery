@@ -52,7 +52,11 @@ export function createDeployFixture(config: NetworkConfig): () => Promise<EBrake
     const comptroller = new ethers.Contract(config.comptroller, config.comptrollerAbi, timelock);
 
     const EBrakeFactory = await ethers.getContractFactory("EBrake");
-    const eBrakeImpl = await EBrakeFactory.deploy(config.comptroller, config.isIsolatedPool);
+    const eBrakeImpl = await EBrakeFactory.deploy(
+      config.comptroller,
+      config.isIsolatedPool,
+      ethers.constants.AddressZero,
+    );
 
     const ProxyFactory = await ethers.getContractFactory(
       "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy",
@@ -94,10 +98,9 @@ export function deploymentTests(config: NetworkConfig, get: FixtureGetter): void
     it("should revert deployment with zero comptroller", async () => {
       const { eBrake } = get();
       const F = await ethers.getContractFactory("EBrake");
-      await expect(F.deploy(ethers.constants.AddressZero, config.isIsolatedPool)).to.be.revertedWithCustomError(
-        eBrake,
-        "ZeroAddress",
-      );
+      await expect(
+        F.deploy(ethers.constants.AddressZero, config.isIsolatedPool, ethers.constants.AddressZero),
+      ).to.be.revertedWithCustomError(eBrake, "ZeroAddress");
     });
 
     it("should revert on double initialization", async () => {
