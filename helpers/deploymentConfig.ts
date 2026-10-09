@@ -106,6 +106,7 @@ export const preconfiguredAddresses = {
     NormalTimelock: governanceBscTestnet.NormalTimelock.address,
     AccessControlManager: governanceBscTestnet.AccessControlManager.address,
     ResilientOracle: oracleBscTestnet.ResilientOracle.address,
+    SpokePoolRegistry: "0xeAA45288d804971e5a76f33559e629F5b2b1Cb8B",
   },
   bscmainnet: {
     NormalTimelock: governanceBscMainnet.NormalTimelock.address,
