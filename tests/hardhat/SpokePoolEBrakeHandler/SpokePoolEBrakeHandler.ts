@@ -8,6 +8,7 @@ import { ethers, upgrades } from "hardhat";
 import type {
   IAccessControlManagerV8,
   IEBrake,
+  IILComptroller,
   PoolRegistryInterface,
   SpokePoolEBrakeHandler,
 } from "../../../typechain";
@@ -21,11 +22,12 @@ const CF = parseUnits("0.5", 18);
 const CAP = parseUnits("1000", 18);
 const ZERO_ADDRESS = ethers.constants.AddressZero;
 
-// Comptrollers: two registered in the Spoke PoolRegistry, the Core comptroller, and an unregistered one
-const SPOKE = ethers.Wallet.createRandom().address;
-const OTHER_SPOKE = ethers.Wallet.createRandom().address;
+// Comptrollers outside the Spoke PoolRegistry: the Core comptroller and an unregistered one
 const CORE = ethers.Wallet.createRandom().address;
 const UNREGISTERED = ethers.Wallet.createRandom().address;
+
+const LISTED = { isListed: true, collateralFactorMantissa: 0, liquidationThresholdMantissa: 0 };
+const NOT_LISTED = { isListed: false, collateralFactorMantissa: 0, liquidationThresholdMantissa: 0 };
 
 /** PoolRegistry entry for `comptroller`; an empty one (comptroller 0) means "not registered". */
 const pool = (comptroller: string) => ({
@@ -35,6 +37,13 @@ const pool = (comptroller: string) => ({
   blockPosted: 0,
   timestampPosted: 0,
 });
+
+/** Spoke comptroller that lists every market unless told otherwise. */
+async function fakeSpokeComptroller() {
+  const comptroller = await smock.fake<IILComptroller>("contracts/Interfaces/IILComptroller.sol:IILComptroller");
+  comptroller.markets.returns(LISTED);
+  return comptroller;
+}
 
 async function fakeMarket(comptroller: string) {
   const market = await smock.fake<Contract>("contracts/Interfaces/IVToken.sol:IVToken");
@@ -47,6 +56,8 @@ describe("SpokePoolEBrakeHandler", () => {
   let accessControlManager: FakeContract<IAccessControlManagerV8>;
   let eBrake: FakeContract<IEBrake>;
   let registry: FakeContract<PoolRegistryInterface>;
+  let spoke: FakeContract<IILComptroller>;
+  let otherSpoke: FakeContract<IILComptroller>;
   let spokeMarket: FakeContract<Contract>;
   let spokeMarket2: FakeContract<Contract>;
   let otherSpokeMarket: FakeContract<Contract>;
@@ -64,13 +75,15 @@ describe("SpokePoolEBrakeHandler", () => {
     registry = await smock.fake<PoolRegistryInterface>(
       "@venusprotocol/isolated-pools/contracts/Pool/PoolRegistryInterface.sol:PoolRegistryInterface",
     );
+    spoke = await fakeSpokeComptroller();
+    otherSpoke = await fakeSpokeComptroller();
     registry.getPoolByComptroller.returns(pool(ZERO_ADDRESS));
-    registry.getPoolByComptroller.whenCalledWith(SPOKE).returns(pool(SPOKE));
-    registry.getPoolByComptroller.whenCalledWith(OTHER_SPOKE).returns(pool(OTHER_SPOKE));
+    registry.getPoolByComptroller.whenCalledWith(spoke.address).returns(pool(spoke.address));
+    registry.getPoolByComptroller.whenCalledWith(otherSpoke.address).returns(pool(otherSpoke.address));
 
-    spokeMarket = await fakeMarket(SPOKE);
-    spokeMarket2 = await fakeMarket(SPOKE);
-    otherSpokeMarket = await fakeMarket(OTHER_SPOKE);
+    spokeMarket = await fakeMarket(spoke.address);
+    spokeMarket2 = await fakeMarket(spoke.address);
+    otherSpokeMarket = await fakeMarket(otherSpoke.address);
     coreMarket = await fakeMarket(CORE);
     unregisteredMarket = await fakeMarket(UNREGISTERED);
 
@@ -188,6 +201,14 @@ describe("SpokePoolEBrakeHandler", () => {
           .withArgs(UNREGISTERED);
         expect(eBrakeFunction()).to.not.have.been.called;
       });
+
+      it("should revert with MarketNotListed for a market its Spoke comptroller does not list", async () => {
+        spoke.markets.whenCalledWith(spokeMarket.address).returns(NOT_LISTED);
+        await expect(call(handler, spokeMarket.address))
+          .to.be.revertedWithCustomError(handler, "MarketNotListed")
+          .withArgs(spokeMarket.address);
+        expect(eBrakeFunction()).to.not.have.been.called;
+      });
     });
   }
 
@@ -259,10 +280,18 @@ describe("SpokePoolEBrakeHandler", () => {
       it("should revert with MarketsOnDifferentComptrollers for a mixed batch", async () => {
         await expect(call(handler, [spokeMarket.address, coreMarket.address]))
           .to.be.revertedWithCustomError(handler, "MarketsOnDifferentComptrollers")
-          .withArgs(SPOKE, CORE);
+          .withArgs(spoke.address, CORE);
         await expect(call(handler, [spokeMarket.address, otherSpokeMarket.address]))
           .to.be.revertedWithCustomError(handler, "MarketsOnDifferentComptrollers")
-          .withArgs(SPOKE, OTHER_SPOKE);
+          .withArgs(spoke.address, otherSpoke.address);
+        expect(eBrakeFunction()).to.not.have.been.called;
+      });
+
+      it("should revert with MarketNotListed when a later market is not listed", async () => {
+        spoke.markets.whenCalledWith(spokeMarket2.address).returns(NOT_LISTED);
+        await expect(call(handler, [spokeMarket.address, spokeMarket2.address]))
+          .to.be.revertedWithCustomError(handler, "MarketNotListed")
+          .withArgs(spokeMarket2.address);
         expect(eBrakeFunction()).to.not.have.been.called;
       });
     });

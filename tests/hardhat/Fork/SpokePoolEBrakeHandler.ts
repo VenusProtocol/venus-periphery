@@ -1,3 +1,4 @@
+import { smock } from "@defi-wonderland/smock";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
@@ -257,6 +258,18 @@ if (FORK_TESTNET) {
           await expect(handler.connect(governance).setMarketBorrowCaps([vUSDT_HUB_SPOKE, vUSDT_CORE], [0, 0]))
             .to.be.revertedWithCustomError(handler, "MarketsOnDifferentComptrollers")
             .withArgs(HUB_SPOKE_COMPTROLLER, CORE_COMPTROLLER);
+        });
+
+        it("should reject a market that claims a Spoke comptroller without being listed in it", async () => {
+          const fakeMarket = await smock.fake<Contract>("contracts/Interfaces/IVToken.sol:IVToken");
+          fakeMarket.comptroller.returns(HUB_SPOKE_COMPTROLLER);
+
+          await expect(handler.connect(governance).decreaseCF(fakeMarket.address, 0))
+            .to.be.revertedWithCustomError(handler, "MarketNotListed")
+            .withArgs(fakeMarket.address);
+          await expect(handler.connect(governance).setMarketBorrowCaps([vUSDT_HUB_SPOKE, fakeMarket.address], [0, 0]))
+            .to.be.revertedWithCustomError(handler, "MarketNotListed")
+            .withArgs(fakeMarket.address);
         });
       });
 

@@ -4,6 +4,7 @@ pragma solidity ^0.8.25;
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 import { PoolRegistryInterface } from "@venusprotocol/isolated-pools/contracts/Pool/PoolRegistryInterface.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
+import { IILComptroller } from "../Interfaces/IILComptroller.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
 import { IEBrake } from "./IEBrake.sol";
 
@@ -16,9 +17,9 @@ import { IEBrake } from "./IEBrake.sol";
  *
  *      EBrake acts on market.comptroller() only for calls from its SPOKE_HANDLER, which is this
  *      contract. Before forwarding, every function checks that each market's comptroller is registered
- *      in the Spoke PoolRegistry (`getPoolByComptroller(c).comptroller == c`) and that a batch targets
- *      a single comptroller. EBrake relies on these checks, so this contract cannot reach the home
- *      comptroller or an unregistered one.
+ *      in the Spoke PoolRegistry (`getPoolByComptroller(c).comptroller == c`), that the market is listed
+ *      in it, and that a batch targets a single comptroller. EBrake relies on these checks, so this
+ *      contract cannot reach the home comptroller, an unregistered one or an unlisted market.
  *
  *      EBrake must grant this contract the ACM permission for each forwarded function. EBrake's
  *      own rules (tighten-only, forbidden actions, snapshots) still apply to every call. Snapshot
@@ -51,6 +52,10 @@ contract SpokePoolEBrakeHandler is AccessControlledV8 {
     /// @param expected The comptroller of the first market in the batch.
     /// @param actual The comptroller of the first market that differs from it.
     error MarketsOnDifferentComptrollers(address expected, address actual);
+
+    /// @notice Thrown when a market is not listed in its Spoke comptroller.
+    /// @param market The rejected market.
+    error MarketNotListed(address market);
 
     /// @notice Set the EBrake and Spoke PoolRegistry immutables and lock the implementation.
     /// @param eBrake_ The EBrake proxy.
@@ -149,11 +154,12 @@ contract SpokePoolEBrakeHandler is AccessControlledV8 {
     }
 
     /**
-     * @notice Reverts unless all markets belong to the same registered Spoke comptroller.
+     * @notice Reverts unless all markets are listed in the same registered Spoke comptroller.
      * @dev An empty batch passes here and EBrake rejects it with EmptyArray.
      * @param markets The vToken market addresses.
      * @custom:error NotSpokeComptroller if the first market's comptroller is not a registered Spoke comptroller
      * @custom:error MarketsOnDifferentComptrollers if the markets do not share one comptroller
+     * @custom:error MarketNotListed if a market is not listed in that comptroller
      */
     function _checkSpokeMarkets(address[] calldata markets) internal view {
         uint256 marketsLen = markets.length;
@@ -163,14 +169,16 @@ contract SpokePoolEBrakeHandler is AccessControlledV8 {
         for (uint256 i = 1; i < marketsLen; ++i) {
             address other = address(IVToken(markets[i]).comptroller());
             if (other != comptroller) revert MarketsOnDifferentComptrollers(comptroller, other);
+            _checkListed(comptroller, markets[i]);
         }
     }
 
     /**
-     * @notice Reverts unless the comptroller of `market` is registered in the Spoke PoolRegistry.
+     * @notice Reverts unless `market` is listed in a comptroller registered in the Spoke PoolRegistry.
      * @param market The vToken market address.
      * @return comptroller The Spoke comptroller of `market`.
      * @custom:error NotSpokeComptroller if the comptroller is address(0) or not registered in the Spoke PoolRegistry
+     * @custom:error MarketNotListed if `market` is not listed in that comptroller
      */
     function _checkSpokeMarket(address market) internal view returns (address comptroller) {
         comptroller = address(IVToken(market).comptroller());
@@ -180,5 +188,17 @@ contract SpokePoolEBrakeHandler is AccessControlledV8 {
         ) {
             revert NotSpokeComptroller(comptroller);
         }
+        _checkListed(comptroller, market);
+    }
+
+    /**
+     * @notice Reverts unless `market` is listed in `comptroller`.
+     * @dev A listed market is a vetted vToken, so its comptroller() is the one checked here when EBrake reads it.
+     * @param comptroller The Spoke comptroller.
+     * @param market The vToken market address.
+     * @custom:error MarketNotListed if `market` is not listed in `comptroller`
+     */
+    function _checkListed(address comptroller, address market) internal view {
+        if (!IILComptroller(comptroller).markets(market).isListed) revert MarketNotListed(market);
     }
 }
