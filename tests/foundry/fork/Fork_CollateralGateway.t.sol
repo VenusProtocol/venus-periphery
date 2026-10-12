@@ -366,7 +366,8 @@ contract Fork_CollateralGatewayTest is Test {
         vm.startPrank(user);
         uint256 shares = gateway.supplyFromWallet(SUPPLY, VVHUSDT, 0);
 
-        vm.expectRevert("not an approved delegate");
+        // The Core leg is skipped without the grant, and the wallet holds nothing to pay out.
+        vm.expectRevert(ICollateralGateway.NothingReceived.selector);
         gateway.withdrawPosition(VVHUSDT, shares, 0);
         vm.stopPrank();
     }

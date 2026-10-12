@@ -207,10 +207,11 @@ interface ICollateralGateway {
      *         whatever the caller holds in their wallet first and freeing the rest out of
      *         `vhMarket`.
      * @dev Caller must first `approve` this gateway for their wallet shares, and grant it
-     *      `Comptroller.updateDelegate` if any of `shares` has to come out of `vhMarket`.
+     *      `Comptroller.updateDelegate` if any of `shares` has to come out of `vhMarket`. Without
+     *      that grant the Core leg is skipped and only the wallet leg pays out.
      * @param vhMarket Core market wrapping the Hub to redeem from.
      * @param shares Hub shares to redeem in total, across both legs. `type(uint256).max` redeems
-     *        the whole wallet balance and every `vhMarket` receipt.
+     *        the whole wallet balance, and every `vhMarket` receipt if the delegate grant is set.
      * @param minAssets Minimum acceptable underlying (slippage guard).
      * @return assets Underlying paid to the caller.
      *

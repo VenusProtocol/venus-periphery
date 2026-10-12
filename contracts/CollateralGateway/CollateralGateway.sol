@@ -160,10 +160,15 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         if (walletShares > shares) walletShares = shares;
         if (walletShares != 0) IERC20(hub).safeTransferFrom(msg.sender, address(this), walletShares);
 
-        // A caller with no receipts has nothing to free, and the Core leg would revert on the
-        // delegate check or the empty redeem instead of paying out the wallet leg.
+        // The Core leg runs only with receipts to free and a delegate grant to free them with.
+        // Without either it would revert and take the wallet leg down with it. Receipts alone are
+        // not enough: anyone can mint them to anyone through `mintBehalf`.
         uint256 freedShares;
-        if (walletShares < shares && IVToken(vhMarket).balanceOf(msg.sender) != 0) {
+        if (
+            walletShares < shares &&
+            IVToken(vhMarket).balanceOf(msg.sender) != 0 &&
+            COMPTROLLER.approvedDelegates(msg.sender, address(this))
+        ) {
             freedShares = _freeFromMarket(hub, vhMarket, shares - walletShares);
         }
         if (walletShares + freedShares == 0) revert NothingReceived();

@@ -44,14 +44,15 @@ contract MockVhMarket {
     error NotAnApprovedDelegate();
 
     address public immutable underlying;
+    MockCoreComptroller public immutable comptroller;
 
     mapping(address => uint256) public balanceOf;
-    mapping(address => mapping(address => bool)) public approvedDelegates;
     uint256 public exchangeRate = 2e34;
     uint256 public redeemFeeBps;
 
-    constructor(address underlying_) {
+    constructor(address underlying_, MockCoreComptroller comptroller_) {
         underlying = underlying_;
+        comptroller = comptroller_;
     }
 
     function setExchangeRate(uint256 rate) external {
@@ -60,10 +61,6 @@ contract MockVhMarket {
 
     function setRedeemFeeBps(uint256 bps) external {
         redeemFeeBps = bps;
-    }
-
-    function updateDelegate(address delegate, bool approved) external {
-        approvedDelegates[msg.sender][delegate] = approved;
     }
 
     function mintTo(address account, uint256 vTokens) external {
@@ -75,7 +72,7 @@ contract MockVhMarket {
     }
 
     function redeemBehalf(address redeemer, uint256 redeemTokens) external returns (uint256) {
-        if (!approvedDelegates[redeemer][msg.sender]) revert NotAnApprovedDelegate();
+        if (!comptroller.approvedDelegates(redeemer, msg.sender)) revert NotAnApprovedDelegate();
 
         balanceOf[redeemer] -= redeemTokens;
 
@@ -86,9 +83,15 @@ contract MockVhMarket {
     }
 }
 
-/// @notice Answers the listing question the gateway asks before it trusts a market.
+/// @notice Answers the listing question the gateway asks before it trusts a market, and holds the
+///         delegate grants, as the Core Comptroller does.
 contract MockCoreComptroller {
     mapping(address => bool) public listed;
+    mapping(address => mapping(address => bool)) public approvedDelegates;
+
+    function updateDelegate(address delegate, bool approved) external {
+        approvedDelegates[msg.sender][delegate] = approved;
+    }
 
     function list(address vToken) external {
         listed[vToken] = true;
@@ -121,7 +124,7 @@ contract CollateralGateway_WithdrawTest is Test {
         gateway = new CollateralGateway(IComptroller(address(comptroller)), registry, owner);
         usdt = new MockERC20("Tether", "USDT", 18);
         hub = new MockHubVault(address(usdt));
-        market = new MockVhMarket(address(hub));
+        market = new MockVhMarket(address(hub), comptroller);
         comptroller.list(address(market));
 
         hub.mint(user, WALLET_SHARES);
@@ -130,7 +133,7 @@ contract CollateralGateway_WithdrawTest is Test {
 
         vm.startPrank(user);
         hub.approve(address(gateway), type(uint256).max);
-        market.updateDelegate(address(gateway), true);
+        comptroller.updateDelegate(address(gateway), true);
         vm.stopPrank();
     }
 
@@ -151,7 +154,7 @@ contract CollateralGateway_WithdrawTest is Test {
 
     function test_withdrawPosition_walletCoversItWithoutADelegateGrant() public {
         vm.prank(user);
-        market.updateDelegate(address(gateway), false);
+        comptroller.updateDelegate(address(gateway), false);
 
         vm.prank(user);
         uint256 assets = gateway.withdrawPosition(address(market), 30e24, 0);
@@ -235,11 +238,27 @@ contract CollateralGateway_WithdrawTest is Test {
 
         vm.startPrank(holder);
         hub.approve(address(gateway), type(uint256).max);
-        market.updateDelegate(address(gateway), true);
+        comptroller.updateDelegate(address(gateway), true);
         uint256 assets = gateway.withdrawPosition(address(market), type(uint256).max, 0);
         vm.stopPrank();
 
         assertEq(assets, WALLET_SHARES / 1e6, "the wallet leg paid out");
+    }
+
+    /// @dev Anyone can mint receipts to anyone, so a receipt balance the holder did not create must
+    ///      not pull "withdraw everything" into a Core leg the holder never granted.
+    function test_withdrawPosition_maxIgnoresReceiptsWithoutADelegateGrant() public {
+        address holder = makeAddr("holder");
+        hub.mint(holder, WALLET_SHARES);
+        market.mintTo(holder, 1); // dust from a third party
+
+        vm.startPrank(holder);
+        hub.approve(address(gateway), type(uint256).max);
+        uint256 assets = gateway.withdrawPosition(address(market), type(uint256).max, 0);
+        vm.stopPrank();
+
+        assertEq(assets, WALLET_SHARES / 1e6, "the wallet leg paid out");
+        assertEq(market.balanceOf(holder), 1, "the dust stays in Core");
     }
 
     function testRevert_withdrawPosition_nothingInWalletOrMarket() public {
@@ -271,18 +290,20 @@ contract CollateralGateway_WithdrawTest is Test {
         gateway.withdrawPosition(address(market), WALLET_SHARES + 60e24, 100e18);
     }
 
+    /// @dev Without the grant the Core leg is skipped, so only `minAssets` stops a payout short of
+    ///      the full request.
     function testRevert_withdrawPosition_withoutADelegateGrant() public {
         vm.prank(user);
-        market.updateDelegate(address(gateway), false);
+        comptroller.updateDelegate(address(gateway), false);
 
-        vm.expectRevert(MockVhMarket.NotAnApprovedDelegate.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.InsufficientAssets.selector, 40e18, 60e18));
         vm.prank(user);
-        gateway.withdrawPosition(address(market), WALLET_SHARES + 20e24, 0);
+        gateway.withdrawPosition(address(market), WALLET_SHARES + 20e24, 60e18);
     }
 
     /// @dev The hub is read off the market, so an unlisted market would choose it.
     function testRevert_withdrawPosition_marketNotListed() public {
-        MockVhMarket rogue = new MockVhMarket(address(hub));
+        MockVhMarket rogue = new MockVhMarket(address(hub), comptroller);
 
         vm.expectRevert(abi.encodeWithSelector(ICollateralGateway.MarketNotListed.selector, address(rogue)));
         vm.prank(user);
