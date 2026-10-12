@@ -2,7 +2,7 @@
   "name": "bsctestnet",
   "chainId": "97",
   "addresses": {
-    "CollateralGateway": "0xbB3304B6a1eB1d48E1d2EE78eadDadD4024DF358",
+    "CollateralGateway": "0x26837e144898D2C5c673FE880e21f83469Ad1Bf4",
     "DeviationSentinel": "0x9245d72712548707809D66848e63B8E2B169F3c1",
     "DeviationSentinel_Implementation": "0x455C09D6BA46e7C9f80f29506DcC8E5F8378832a",
     "DeviationSentinel_Proxy": "0x9245d72712548707809D66848e63B8E2B169F3c1",
