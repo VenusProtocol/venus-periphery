@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // EBrake Fork Test — Shared Test Factories
 // ═══════════════════════════════════════════════════════════════════════════
+import { smock } from "@defi-wonderland/smock";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { Contract } from "ethers";
@@ -537,10 +538,10 @@ export function decreaseCFTests(config: NetworkConfig, get: FixtureGetter): void
 
       it("should revert for unlisted market", async () => {
         const { eBrake, whitelistedUser } = get();
+        const unlistedMarket = await smock.fake<Contract>("contracts/Interfaces/IVToken.sol:IVToken");
+        unlistedMarket.comptroller.returns(config.comptroller);
         await expect(
-          eBrake
-            .connect(whitelistedUser)
-            ["decreaseCF(address,uint256)"]("0x0000000000000000000000000000000000000001", 0),
+          eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](unlistedMarket.address, 0),
         ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
       });
     } else {
@@ -584,10 +585,10 @@ export function decreaseCFTests(config: NetworkConfig, get: FixtureGetter): void
 
       it("should revert for unlisted market", async () => {
         const { eBrake, whitelistedUser } = get();
+        const unlistedMarket = await smock.fake<Contract>("contracts/Interfaces/IVToken.sol:IVToken");
+        unlistedMarket.comptroller.returns(config.comptroller);
         await expect(
-          eBrake
-            .connect(whitelistedUser)
-            ["decreaseCF(address,uint256)"]("0x0000000000000000000000000000000000000001", 0),
+          eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](unlistedMarket.address, 0),
         ).to.be.revertedWithCustomError(eBrake, "MarketNotListed");
       });
     }
