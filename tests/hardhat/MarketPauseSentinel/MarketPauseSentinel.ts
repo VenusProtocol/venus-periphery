@@ -12,15 +12,15 @@ import type {
   IEBrake,
   IPauseManager,
   IVToken,
+  MarketPauseSentinel,
   PoolRegistryInterface,
-  TokenPauseSentinel,
 } from "../../../typechain";
 
 const { expect } = chai;
 chai.use(smock.matchers);
 
-describe("TokenPauseSentinel", () => {
-  let sentinel: TokenPauseSentinel;
+describe("MarketPauseSentinel", () => {
+  let sentinel: MarketPauseSentinel;
   let pauseManager: FakeContract<IPauseManager>;
   let accessControlManager: FakeContract<IAccessControlManagerV8>;
   let eBrake: FakeContract<IEBrake>;
@@ -108,7 +108,7 @@ describe("TokenPauseSentinel", () => {
   }
 
   /**
-   * Deploys the TokenPauseSentinel behind an upgradeable proxy, wired to fake ACM, EBrake, Spoke PoolRegistry
+   * Deploys the MarketPauseSentinel behind an upgradeable proxy, wired to fake ACM, EBrake, Spoke PoolRegistry
    * and vTokens, fake bStock tokens exposing pauseManager(), and a fake PauseManager.
    */
   async function deployFixture() {
@@ -129,11 +129,11 @@ describe("TokenPauseSentinel", () => {
     spcxb = await smock.fake<IBStockToken>("IBStockToken");
     pauseManager = await smock.fake<IPauseManager>("contracts/Interfaces/IPauseManager.sol:IPauseManager");
 
-    const Factory = await ethers.getContractFactory("TokenPauseSentinel");
+    const Factory = await ethers.getContractFactory("MarketPauseSentinel");
     sentinel = (await upgrades.deployProxy(Factory, [accessControlManager.address], {
       constructorArgs: [eBrake.address, coreComptroller.address, registry.address],
       unsafeAllow: ["constructor", "internal-function-storage"],
-    })) as TokenPauseSentinel;
+    })) as MarketPauseSentinel;
 
     return {
       sentinel,
@@ -205,7 +205,7 @@ describe("TokenPauseSentinel", () => {
     });
 
     it("should revert with ZeroAddress when eBrake_ or comptroller_ is the zero address", async () => {
-      const Factory = await ethers.getContractFactory("TokenPauseSentinel");
+      const Factory = await ethers.getContractFactory("MarketPauseSentinel");
       await expect(
         Factory.deploy(ZERO_ADDRESS, coreComptroller.address, registry.address),
       ).to.be.revertedWithCustomError(sentinel, "ZeroAddress");
@@ -216,7 +216,7 @@ describe("TokenPauseSentinel", () => {
     });
 
     it("should accept a zero Spoke PoolRegistry (chains without Spoke pools)", async () => {
-      const Factory = await ethers.getContractFactory("TokenPauseSentinel");
+      const Factory = await ethers.getContractFactory("MarketPauseSentinel");
       const implementation = await Factory.deploy(eBrake.address, coreComptroller.address, ZERO_ADDRESS);
       expect(await implementation.SPOKE_POOL_REGISTRY()).to.equal(ZERO_ADDRESS);
     });
@@ -228,7 +228,7 @@ describe("TokenPauseSentinel", () => {
     });
 
     it("should disable initializers on the implementation", async () => {
-      const Factory = await ethers.getContractFactory("TokenPauseSentinel");
+      const Factory = await ethers.getContractFactory("MarketPauseSentinel");
       const implementation = await Factory.deploy(eBrake.address, coreComptroller.address, registry.address);
       await expect(implementation.initialize(accessControlManager.address)).to.be.revertedWith(
         "Initializable: contract is already initialized",
@@ -420,11 +420,11 @@ describe("TokenPauseSentinel", () => {
       });
 
       it("should reject Spoke markets but accept Core markets when the Spoke PoolRegistry is address(0)", async () => {
-        const Factory = await ethers.getContractFactory("TokenPauseSentinel");
+        const Factory = await ethers.getContractFactory("MarketPauseSentinel");
         const sentinelWithoutSpoke = (await upgrades.deployProxy(Factory, [accessControlManager.address], {
           constructorArgs: [eBrake.address, coreComptroller.address, ZERO_ADDRESS],
           unsafeAllow: ["constructor", "internal-function-storage"],
-        })) as TokenPauseSentinel;
+        })) as MarketPauseSentinel;
 
         await expect(sentinelWithoutSpoke.setMarketMonitored(vTSLAB.address, true))
           .to.be.revertedWithCustomError(sentinelWithoutSpoke, "MarketNotSupported")

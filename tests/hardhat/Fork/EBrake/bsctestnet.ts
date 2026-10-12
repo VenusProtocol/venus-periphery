@@ -29,11 +29,13 @@ const vNVDAB_HUB_SPOKE = "0x41A860F11Ddb71ed7d3063aE43dF0e9741B4eed3"; // CF 0.5
 const vUSDT_HUB_SPOKE = "0xC88bAF0bA49a98F15A00182752f6d10bd3932F6a"; // non-zero caps, nothing paused
 const vUSDC_HUB_SPOKE = "0xD05514217FD359659aE7da7740e79C11947eBB32";
 const vUSDT_QA_SPOKE = "0x1AEf50b005089AeA10DE70b83250C55d6A9E9848";
-const vUSDT_CORE = "0xb7526572FFE56AB9D7489838Bf2E18e3323b441A";
+const vUSDT_CORE = "0xb7526572FFE56AB9D7489838Bf2E18e3323b441A"; // CF 0.75 in pool 0, also in e-mode pools 5-12
 const vUSDT_DEFI = "0x80CC30811e362aC9aB857C3d7875CbcCc0b65750";
 
 const NVDAB_CF = parseUnits("0.5", 18);
 const NVDAB_LT = parseUnits("0.6", 18);
+const USDT_CORE_CF = parseUnits("0.75", 18);
+const USDT_CORE_EMODE_POOL = 5;
 
 // Granted to EBrake on each Spoke comptroller; the isolated-pools comptroller checks uint256[] for pauses
 const SPOKE_COMPTROLLER_FUNCTIONS = [
@@ -103,6 +105,7 @@ async function deployFixture() {
   }
   // The live EBrake holds this grant on the Core comptroller
   await acm.giveCallPermission(CORE_COMPTROLLER, "_setActionsPaused(address[],uint8[],bool)", eBrake.address);
+  await acm.giveCallPermission(CORE_COMPTROLLER, "setCollateralFactor(uint96,address,uint256,uint256)", eBrake.address);
 
   const hubSpoke = new ethers.Contract(HUB_SPOKE_COMPTROLLER, SPOKE_COMPTROLLER_ABI, ethers.provider);
   const qaSpoke = new ethers.Contract(QA_SPOKE_COMPTROLLER, SPOKE_COMPTROLLER_ABI, ethers.provider);
@@ -232,6 +235,19 @@ if (FORK_TESTNET) {
           expect(snapshotAfter.lt).to.equal(0);
           expect((await eBrake.marketStates(vUSDT_HUB_SPOKE)).supplyCapSnapshotted).to.equal(false);
         });
+
+        it("should reset a Core market across its pools without touching a Spoke market's snapshot", async () => {
+          await eBrake.connect(governance)["decreaseCF(address,uint256)"](vUSDT_CORE, 0);
+          await eBrake.connect(governance)["decreaseCF(address,uint256)"](vNVDAB_HUB_SPOKE, 0);
+          expect((await eBrake.getMarketCFSnapshot(vUSDT_CORE, 0)).cf).to.equal(USDT_CORE_CF);
+          expect((await eBrake.getMarketCFSnapshot(vUSDT_CORE, USDT_CORE_EMODE_POOL)).cf).to.be.gt(0);
+
+          await eBrake.connect(governance).resetCFSnapshot(vUSDT_CORE);
+
+          expect((await eBrake.getMarketCFSnapshot(vUSDT_CORE, 0)).cf).to.equal(0);
+          expect((await eBrake.getMarketCFSnapshot(vUSDT_CORE, USDT_CORE_EMODE_POOL)).cf).to.equal(0);
+          expect((await eBrake.getMarketCFSnapshot(vNVDAB_HUB_SPOKE, 0)).cf).to.equal(NVDAB_CF);
+        });
       });
 
       describe("comptroller routing", () => {
@@ -253,6 +269,12 @@ if (FORK_TESTNET) {
           await expect(eBrake.connect(governance)["decreaseCF(address,uint256)"](fakeMarket.address, 0))
             .to.be.revertedWithCustomError(eBrake, "MarketNotListed")
             .withArgs(0, fakeMarket.address);
+        });
+
+        it("should revert when a market's comptroller() reverts", async () => {
+          const brokenMarket = await smock.fake<Contract>("contracts/Interfaces/IVToken.sol:IVToken");
+          brokenMarket.comptroller.reverts();
+          await expect(eBrake.connect(governance).pauseSupply(brokenMarket.address)).to.be.reverted;
         });
 
         it("should reject a pause batch that mixes Spoke comptrollers", async () => {

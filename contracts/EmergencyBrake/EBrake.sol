@@ -86,7 +86,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         for (uint256 i; i < actionsLen; ++i) {
             _validateAction(actions[i]);
         }
-        IComptroller(_comptrollerOfMarkets(markets)).setActionsPaused(markets, actions, true);
+        IComptroller(_ensureSameComptroller(markets)).setActionsPaused(markets, actions, true);
         emit ActionsPaused(msg.sender, markets, actions);
     }
 
@@ -194,7 +194,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         _checkAccessAllowed("decreaseCF(address,uint256)");
         MarketState storage state = marketStates[market];
         address comptroller = address(IVToken(market).comptroller());
-        if (!_isCorePool(comptroller)) {
+        if (_isIsolatedPool(comptroller)) {
             IILComptroller.Market memory m = IILComptroller(comptroller).markets(market);
             if (!m.isListed) revert MarketNotListed(0, market);
             if (newCF > m.collateralFactorMantissa) {
@@ -245,7 +245,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         if (marketsLen == 0) revert EmptyArray();
         if (marketsLen != newBorrowCaps.length) revert ArrayLengthMismatch(marketsLen, newBorrowCaps.length);
 
-        IComptroller comptroller = IComptroller(_comptrollerOfMarkets(markets));
+        IComptroller comptroller = IComptroller(_ensureSameComptroller(markets));
         bool anyDecreased;
 
         for (uint256 i; i < marketsLen; ++i) {
@@ -279,7 +279,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         if (marketsLen == 0) revert EmptyArray();
         if (marketsLen != newSupplyCaps.length) revert ArrayLengthMismatch(marketsLen, newSupplyCaps.length);
 
-        IComptroller comptroller = IComptroller(_comptrollerOfMarkets(markets));
+        IComptroller comptroller = IComptroller(_ensureSameComptroller(markets));
         bool anyDecreased;
 
         for (uint256 i; i < marketsLen; ++i) {
@@ -315,7 +315,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
         _checkAccessAllowed("resetCFSnapshot(address)");
 
         MarketState storage state = marketStates[market];
-        if (IS_ISOLATED_POOL) {
+        if (_isIsolatedPool(address(IVToken(market).comptroller()))) {
             delete state.poolCFs[0];
             delete state.poolLTs[0];
         } else {
@@ -395,12 +395,12 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /**
-     * @notice The comptroller to act on for a batch: that of its first market, which every market must share.
+     * @notice Ensure every market of a batch shares one comptroller, and return it.
      * @param markets The vToken market addresses, at least one.
      * @return comptroller The comptroller to act on.
      * @custom:error MarketsOnDifferentComptrollers if a market's comptroller differs from the first market's
      */
-    function _comptrollerOfMarkets(address[] calldata markets) internal view returns (address comptroller) {
+    function _ensureSameComptroller(address[] calldata markets) internal view returns (address comptroller) {
         comptroller = address(IVToken(markets[0]).comptroller());
         uint256 marketsLen = markets.length;
         for (uint256 i = 1; i < marketsLen; ++i) {
@@ -410,14 +410,14 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /**
-     * @notice Whether the Diamond path (pool ids, per-pool CF/LT) applies to `comptroller`.
-     * @dev True only for COMPTROLLER when it is a Diamond (IS_ISOLATED_POOL = false). Any other comptroller
+     * @notice Whether the isolated-pools path (pool id 0) applies to `comptroller`.
+     * @dev False only for COMPTROLLER when it is a Diamond (IS_ISOLATED_POOL = false). Any other comptroller
      *      is treated as an isolated-pools comptroller with pool id 0, which Spoke comptrollers are.
      * @param comptroller The comptroller about to be acted on.
-     * @return True for the Diamond path, false for the isolated-pools path.
+     * @return True for the isolated-pools path, false for the Diamond path.
      */
-    function _isCorePool(address comptroller) internal view returns (bool) {
-        return !IS_ISOLATED_POOL && comptroller == address(COMPTROLLER);
+    function _isIsolatedPool(address comptroller) internal view returns (bool) {
+        return IS_ISOLATED_POOL || comptroller != address(COMPTROLLER);
     }
 
     /**

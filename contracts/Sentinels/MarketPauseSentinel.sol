@@ -11,7 +11,7 @@ import { IPauseManager } from "../Interfaces/IPauseManager.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
 
 /**
- * @title TokenPauseSentinel
+ * @title MarketPauseSentinel
  * @author Venus
  * @notice Keeper-driven sentinel that tightens monitored markets through EBrake when their underlying token
  *         reports a condition that blocks its transfers. bStocks (tokenized equity) are handled by
@@ -28,7 +28,7 @@ import { IVToken } from "../Interfaces/IVToken.sol";
  *        calls EBrake.resetCFSnapshot().
  *      - handleBStockPause is called by trusted keepers; EBrake makes repeat calls no-ops.
  */
-contract TokenPauseSentinel is AccessControlledV8 {
+contract MarketPauseSentinel is AccessControlledV8 {
     /// @notice Emergency Brake contract used to zero the collateral factor
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IEBrake public immutable EBRAKE;

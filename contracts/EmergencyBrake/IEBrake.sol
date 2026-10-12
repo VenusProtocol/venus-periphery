@@ -124,7 +124,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          MarketsOnDifferentComptrollers.
  *      Each ACM permission on EBrake covers every comptroller EBrake reaches. Callers that should only act on
  *      some pools check the market themselves.
- *      resetCFSnapshot clears pool id 0 on both paths.
+ *      resetCFSnapshot picks its path the same way as decreaseCF(address,uint256).
  *      The Diamond-only functions (pauseFlashLoan, disablePoolBorrow, revokeFlashLoanAccess,
  *      decreaseCF(address,uint96,uint256)) only ever act on COMPTROLLER.
  *      Snapshots are keyed by market address, so Core and Spoke markets never share an entry.
@@ -448,6 +448,8 @@ interface IEBrake {
      * @dev Called by governance as part of a recovery VIP after restoring collateral factors.
      *      Clears per-pool CF/LT values so that future EBrake actions can capture fresh
      *      pre-incident values. Does not touch cap snapshots.
+     *      For a market of COMPTROLLER on the Diamond it clears pool ids corePoolId to lastPoolId; for any other
+     *      market, pool id 0.
      * @param market The vToken market address whose CF snapshot should be cleared.
      */
     function resetCFSnapshot(address market) external;

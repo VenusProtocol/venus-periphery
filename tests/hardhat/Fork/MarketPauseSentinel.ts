@@ -6,11 +6,9 @@ import { BigNumber, Contract, ContractTransaction } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
-import bscmainnetAddresses from "../../../deployments/bscmainnet_addresses.json";
-import { EBrake, IAccessControlManagerV8, IBStockToken, IPauseManager, TokenPauseSentinel } from "../../../typechain";
-import { EBrake__factory } from "../../../typechain/factories/EBrake__factory";
+import { EBrake, IAccessControlManagerV8, IBStockToken, IPauseManager, MarketPauseSentinel } from "../../../typechain";
 import { IAccessControlManagerV8__factory } from "../../../typechain/factories/IAccessControlManagerV8__factory";
-import { TokenPauseSentinel__factory } from "../../../typechain/factories/TokenPauseSentinel__factory";
+import { MarketPauseSentinel__factory } from "../../../typechain/factories/MarketPauseSentinel__factory";
 import { FORK_MAINNET, forking, initMainnetUser } from "./utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -20,8 +18,6 @@ import { FORK_MAINNET, forking, initMainnetUser } from "./utils";
 // All four bStock markets are listed in the core pool at this block
 const FORK_BLOCK = 126600000;
 
-const { addresses } = bscmainnetAddresses;
-const EBRAKE = addresses.EBrake;
 const COMPTROLLER = "0xfd36e2c2a6789db23113685031d7f16329158384";
 const NORMAL_TIMELOCK = "0x939bD8d64c0A9583A7Dcea9933f7b21697ab6396";
 const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
@@ -183,7 +179,7 @@ async function cfDecreases(eBrake: EBrake, tx: Promise<ContractTransaction>): Pr
 }
 
 /** Names of the events the sentinel emitted in `tx`, in order. */
-async function sentinelEvents(sentinel: TokenPauseSentinel, tx: Promise<ContractTransaction>): Promise<string[]> {
+async function sentinelEvents(sentinel: MarketPauseSentinel, tx: Promise<ContractTransaction>): Promise<string[]> {
   const receipt = await (await tx).wait();
   return receipt.logs
     .filter(log => log.address.toLowerCase() === sentinel.address.toLowerCase())
@@ -204,7 +200,7 @@ function weightedCollateralValue(factor: BigNumber, exchangeRate: BigNumber, pri
 // ═══════════════════════════════════════════════════════════════════════════
 
 type Fixture = {
-  sentinel: TokenPauseSentinel;
+  sentinel: MarketPauseSentinel;
   eBrake: EBrake;
   comptroller: Contract;
   pauseManager: Contract;
@@ -215,9 +211,9 @@ type Fixture = {
 };
 
 /**
- * Deploys TokenPauseSentinel against the live EBrake and performs what the VIP would do: grant decreaseCF on
- * EBrake, grant setTrustedKeeper and setMarketMonitored to the timelock, trust the keeper and register the four
- * bStock markets.
+ * Deploys EBrake and MarketPauseSentinel from the repo and performs what the VIPs would do: grant EBrake the Core
+ * comptroller's setCollateralFactor, grant decreaseCF on EBrake, grant setTrustedKeeper and setMarketMonitored to
+ * the timelock, trust the keeper and register the four bStock markets.
  * It also lists vTSLAB and vNVDAB in a new e-mode pool so the e-mode path of EBrake.decreaseCF is exercised.
  */
 async function deployFixture(): Promise<Fixture> {
@@ -225,21 +221,27 @@ async function deployFixture(): Promise<Fixture> {
   const timelock = await initMainnetUser(NORMAL_TIMELOCK, parseUnits("10"));
   const acm = IAccessControlManagerV8__factory.connect(ACM, timelock);
   const comptroller = new ethers.Contract(COMPTROLLER, COMPTROLLER_ABI, timelock);
-  const eBrake = EBrake__factory.connect(EBRAKE, timelock);
+  const eBrake = (
+    (await upgrades.deployProxy(await ethers.getContractFactory("EBrake", deployer), [ACM], {
+      constructorArgs: [COMPTROLLER, false],
+      unsafeAllow: ["constructor", "state-variable-immutable"],
+    })) as EBrake
+  ).connect(timelock);
+  await acm.giveCallPermission(COMPTROLLER, "setCollateralFactor(uint96,address,uint256,uint256)", eBrake.address);
 
   // Deploy the sentinel behind a transparent proxy administered by the DefaultProxyAdmin
-  const SentinelFactory = await ethers.getContractFactory("TokenPauseSentinel", deployer);
-  const implementation = await SentinelFactory.deploy(EBRAKE, COMPTROLLER, ethers.constants.AddressZero);
+  const SentinelFactory = await ethers.getContractFactory("MarketPauseSentinel", deployer);
+  const implementation = await SentinelFactory.deploy(eBrake.address, COMPTROLLER, ethers.constants.AddressZero);
   const ProxyFactory = await ethers.getContractFactory(
     "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy",
     deployer,
   );
   const initData = implementation.interface.encodeFunctionData("initialize", [ACM]);
   const proxy = await ProxyFactory.deploy(implementation.address, DEFAULT_PROXY_ADMIN, initData);
-  const sentinel = TokenPauseSentinel__factory.connect(proxy.address, timelock);
+  const sentinel = MarketPauseSentinel__factory.connect(proxy.address, timelock);
 
   // VIP: permissions, keeper and market registration
-  await acm.giveCallPermission(EBRAKE, DECREASE_CF, sentinel.address);
+  await acm.giveCallPermission(eBrake.address, DECREASE_CF, sentinel.address);
   await acm.giveCallPermission(sentinel.address, SET_TRUSTED_KEEPER, NORMAL_TIMELOCK);
   await acm.giveCallPermission(sentinel.address, SET_MARKET_MONITORED, NORMAL_TIMELOCK);
   await sentinel.setTrustedKeeper(keeper.address, true);
@@ -274,8 +276,8 @@ async function deployFixture(): Promise<Fixture> {
 
 if (FORK_MAINNET) {
   forking(FORK_BLOCK, () => {
-    describe("TokenPauseSentinel Fork Tests (BSC Mainnet)", () => {
-      let sentinel: TokenPauseSentinel;
+    describe("MarketPauseSentinel Fork Tests (BSC Mainnet)", () => {
+      let sentinel: MarketPauseSentinel;
       let eBrake: EBrake;
       let comptroller: Contract;
       let pauseManager: Contract;
@@ -295,7 +297,7 @@ if (FORK_MAINNET) {
 
       describe("1. Setup", () => {
         it("should point at the live Core EBrake and comptroller", async () => {
-          expect(await sentinel.EBRAKE()).to.equal(EBRAKE);
+          expect(await sentinel.EBRAKE()).to.equal(eBrake.address);
           expect(await sentinel.COMPTROLLER()).to.equal(ethers.utils.getAddress(COMPTROLLER));
           expect(await eBrake.IS_ISOLATED_POOL()).to.equal(false);
           expect(await eBrake.COMPTROLLER()).to.equal(ethers.utils.getAddress(COMPTROLLER));
@@ -415,11 +417,11 @@ if (FORK_MAINNET) {
 
         it("should revert with EBrake's Unauthorized when the sentinel lacks the decreaseCF permission", async () => {
           const before = await readPoolStates(comptroller, vTSLAB);
-          await acm.revokeCallPermission(EBRAKE, DECREASE_CF, sentinel.address);
+          await acm.revokeCallPermission(eBrake.address, DECREASE_CF, sentinel.address);
           await pauseManager.pauseToken(TSLAB);
           await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB))
             .to.be.revertedWithCustomError(eBrake, "Unauthorized")
-            .withArgs(sentinel.address, EBRAKE, DECREASE_CF);
+            .withArgs(sentinel.address, eBrake.address, DECREASE_CF);
           await expectUntouched(eBrake, comptroller, vTSLAB, before);
         });
       });
@@ -582,7 +584,7 @@ if (FORK_MAINNET) {
 
         it("should keep an earlier EBrake snapshot (first write wins)", async () => {
           // An earlier EBrake caller lowered vSPCXB's CF, snapshotting the original value
-          await acm.giveCallPermission(EBRAKE, DECREASE_CF, NORMAL_TIMELOCK);
+          await acm.giveCallPermission(eBrake.address, DECREASE_CF, NORMAL_TIMELOCK);
           await eBrake[DECREASE_CF](vSPCXB, parseUnits("0.3", 18));
           expect((await comptroller.poolMarkets(0, vSPCXB)).collateralFactorMantissa).to.equal(parseUnits("0.3", 18));
 
@@ -617,7 +619,7 @@ if (FORK_MAINNET) {
             );
             await comptroller.setCollateralFactor(poolId, vTSLAB, snapshot.cf, snapshot.lt);
           }
-          await acm.giveCallPermission(EBRAKE, RESET_CF_SNAPSHOT, NORMAL_TIMELOCK);
+          await acm.giveCallPermission(eBrake.address, RESET_CF_SNAPSHOT, NORMAL_TIMELOCK);
           await eBrake.resetCFSnapshot(vTSLAB);
           await expectUntouched(eBrake, comptroller, vTSLAB, original);
           expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vTSLAB))).to.deep.equal([]);
@@ -771,7 +773,7 @@ const SPOKE_COMPTROLLER_ABI = [
 ];
 
 type SpokeFixture = {
-  sentinel: TokenPauseSentinel;
+  sentinel: MarketPauseSentinel;
   eBrake: EBrake;
   hubSpoke: Contract;
   pauseManager: FakeContract<IPauseManager>;
@@ -780,7 +782,7 @@ type SpokeFixture = {
 };
 
 /**
- * Deploys EBrake and TokenPauseSentinel (with the Spoke PoolRegistry) from the repo and makes the grants a VIP
+ * Deploys EBrake and MarketPauseSentinel (with the Spoke PoolRegistry) from the repo and makes the grants a VIP
  * would make. The testnet NVDAB is a mock without pauseManager(), so a fake bStock pointing to a fake PauseManager
  * takes its place.
  */
@@ -795,10 +797,10 @@ async function deploySpokeFixture(): Promise<SpokeFixture> {
     constructorArgs: [TESTNET_CORE_COMPTROLLER, false],
   })) as EBrake;
   const sentinel = (
-    (await upgrades.deployProxy(await ethers.getContractFactory("TokenPauseSentinel"), [TESTNET_ACM], {
+    (await upgrades.deployProxy(await ethers.getContractFactory("MarketPauseSentinel"), [TESTNET_ACM], {
       ...deployOptions,
       constructorArgs: [eBrake.address, TESTNET_CORE_COMPTROLLER, SPOKE_POOL_REGISTRY],
-    })) as TokenPauseSentinel
+    })) as MarketPauseSentinel
   ).connect(timelock);
 
   await acm.giveCallPermission(HUB_SPOKE_COMPTROLLER, "setCollateralFactor(address,uint256,uint256)", eBrake.address);
@@ -824,8 +826,8 @@ async function deploySpokeFixture(): Promise<SpokeFixture> {
 
 if (FORK_TESTNET) {
   forking(TESTNET_FORK_BLOCK, () => {
-    describe("TokenPauseSentinel Fork Tests (bsctestnet, Spoke pools)", () => {
-      let sentinel: TokenPauseSentinel;
+    describe("MarketPauseSentinel Fork Tests (bsctestnet, Spoke pools)", () => {
+      let sentinel: MarketPauseSentinel;
       let eBrake: EBrake;
       let hubSpoke: Contract;
       let pauseManager: FakeContract<IPauseManager>;

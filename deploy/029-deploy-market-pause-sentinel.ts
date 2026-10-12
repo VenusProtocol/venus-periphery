@@ -21,7 +21,7 @@ async function verify(address: string | undefined, constructorArguments: unknown
 }
 
 /**
- * Deploys TokenPauseSentinel (wired to EBrake, the Core pool comptroller and the network's Spoke PoolRegistry, if any)
+ * Deploys MarketPauseSentinel (wired to EBrake, the Core pool comptroller and the network's Spoke PoolRegistry, if any)
  * behind a transparent proxy owned by DefaultProxyAdmin.
  *
  * The VIP grants the sentinel EBrake's `decreaseCF(address,uint256)`, grants `setMarketMonitored(address,bool)`
@@ -32,7 +32,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   const { deployer } = await getNamedAccounts();
   // On a local fork, `network.name` is "hardhat"; getNetworkName() returns the forked network
   const networkName = hre.getNetworkName();
-  console.log(`Deploying TokenPauseSentinel on ${networkName} with the account: ${deployer}`);
+  console.log(`Deploying MarketPauseSentinel on ${networkName} with the account: ${deployer}`);
   const ADDRESSES = await getConfig(networkName);
 
   const accessControlManager = ADDRESSES.preconfiguredAddresses.AccessControlManager;
@@ -40,12 +40,12 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
 
   const eBrake = await getContractAddressOrNullAddress(deployments, "EBrake");
   if (eBrake === ethers.constants.AddressZero) {
-    console.log("EBrake not deployed, skipping TokenPauseSentinel deployment");
+    console.log("EBrake not deployed, skipping MarketPauseSentinel deployment");
     return;
   }
   const comptroller = await getContractAddressOrNullAddress(deployments, "Unitroller");
   if (comptroller === ethers.constants.AddressZero) {
-    console.log("Unitroller not deployed, skipping TokenPauseSentinel deployment");
+    console.log("Unitroller not deployed, skipping MarketPauseSentinel deployment");
     return;
   }
 
@@ -53,14 +53,15 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
   );
 
+  // TODO: update spokePoolRegistry address once deployed on the respective chain
   const spokePoolRegistry = ADDRESSES.preconfiguredAddresses.SpokePoolRegistry ?? ethers.constants.AddressZero;
 
   const constructorArgs = [eBrake, comptroller, spokePoolRegistry];
   console.log(
-    `TokenPauseSentinel constructor args: EBrake ${eBrake}, Comptroller ${comptroller}, SpokePoolRegistry ${spokePoolRegistry}`,
+    `MarketPauseSentinel constructor args: EBrake ${eBrake}, Comptroller ${comptroller}, SpokePoolRegistry ${spokePoolRegistry}`,
   );
-  const result = await deploy("TokenPauseSentinel", {
-    contract: "TokenPauseSentinel",
+  const result = await deploy("MarketPauseSentinel", {
+    contract: "MarketPauseSentinel",
     from: deployer,
     log: true,
     deterministicDeployment: false,
@@ -80,19 +81,19 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   });
 
   if (result.newlyDeployed && network.live) {
-    console.log(`TokenPauseSentinel proxy deployed at: ${result.address}`);
+    console.log(`MarketPauseSentinel proxy deployed at: ${result.address}`);
     await verify(result.implementation, constructorArgs);
   }
 
-  const sentinel = await hre.ethers.getContract("TokenPauseSentinel");
+  const sentinel = await hre.ethers.getContract("MarketPauseSentinel");
   if (network.live && (await sentinel.owner()) === deployer && (await sentinel.pendingOwner()) !== timelock) {
     await sentinel.transferOwnership(timelock);
-    console.log(`TokenPauseSentinel ownership transferred to timelock: ${timelock}`);
+    console.log(`MarketPauseSentinel ownership transferred to timelock: ${timelock}`);
   }
 };
 
 export default func;
-func.tags = ["token-pause-sentinel"];
+func.tags = ["market-pause-sentinel"];
 // No `dependencies = ["ebrake"]`: EBrake is already live and only its address is needed.
 // Depending on the "ebrake" tag would re-run 021, which redeploys EBrake if the local bytecode differs.
 func.skip = async (hre: HardhatRuntimeEnvironment) => !SUPPORTED_NETWORKS.includes(hre.getNetworkName());
