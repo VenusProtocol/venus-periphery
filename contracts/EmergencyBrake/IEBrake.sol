@@ -69,11 +69,11 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *
  *   BSC vs NON-BSC DIFFERENCES:
  *
- *      The IS_ISOLATED_POOL immutable determines which comptroller ABI is used for COMPTROLLER
+ *      The IS_REMOTE_CHAIN immutable determines which comptroller ABI is used for COMPTROLLER
  *      (see OTHER COMPTROLLERS for markets of other comptrollers).
  *      It is set at deployment and cannot be changed.
  *
- *      BSC (BNB Chain) — Diamond Comptroller (IS_ISOLATED_POOL = false):
+ *      BSC (BNB Chain) — Diamond Comptroller (IS_REMOTE_CHAIN = false):
  *        - decreaseCF(market, newCF) — for markets of COMPTROLLER, iterates corePoolId to lastPoolId,
  *          applies newCF only to pools where currentCF > newCF; silently skips pools already at or
  *          below newCF.
@@ -90,7 +90,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *        - ACM permission strings use underscore prefix:
  *          _setActionsPaused, _setMarketBorrowCaps, _setMarketSupplyCaps
  *
- *      Non-BSC chains — IL Comptroller (IS_ISOLATED_POOL = true):
+ *      Non-BSC chains — IL Comptroller (IS_REMOTE_CHAIN = true):
  *        - decreaseCF(market, newCF) — uses markets() (3-value return) to read LT,
  *          calls setCollateralFactor(market, newCF, LT) which returns void (no error code).
  *          Reverts if newCF > currentCF.
@@ -114,7 +114,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *      decreaseCF(address,uint256), setMarketBorrowCaps, setMarketSupplyCaps) act on market.comptroller(),
  *      whoever the caller is.
  *        - For a market of a comptroller other than COMPTROLLER (Spoke pools run the isolated-pools
- *          codebase), decreaseCF(address,uint256) uses the IL ABI with pool id 0, whatever IS_ISOLATED_POOL
+ *          codebase), decreaseCF(address,uint256) uses the IL ABI with pool id 0, whatever IS_REMOTE_CHAIN
  *          says. The pause and cap functions have the same ABI on both comptroller types.
  *        - EBrake can only act on a comptroller once governance grants EBrake these ACM permissions on it
  *          (no underscore prefix, uint256[] actions): setActionsPaused(address[],uint256[],bool),
@@ -253,9 +253,9 @@ interface IEBrake {
     /// @param requestedCap The new cap value that was rejected.
     error CapExceedsCurrent(address market, uint256 currentCap, uint256 requestedCap);
 
-    /// @notice Thrown when a function is called that is not supported on IL (isolated-pool) comptrollers.
+    /// @notice Thrown when a function is called that is not supported on remote chains (IS_REMOTE_CHAIN).
     ///         Pool ID is a Diamond-only concept — this function should never be ACM-granted on IL chains.
-    error NotSupportedOnIsolatedPool();
+    error NotSupportedOnRemoteChain();
 
     /// @notice Thrown when the requested collateral factor exceeds the current CF on the comptroller.
     ///         EBrake can only tighten CF — newCF must be <= currentCF.
@@ -396,11 +396,11 @@ interface IEBrake {
      *         Liquidation threshold is left unchanged.
      *         Blocks/limits new borrows against the asset. Does NOT make existing positions liquidatable —
      *         that would require lowering LT, which this contract cannot do.
-     * @dev On the Diamond (markets of COMPTROLLER, IS_ISOLATED_POOL=false): iterates corePoolId to lastPoolId;
+     * @dev On the Diamond (markets of COMPTROLLER, IS_REMOTE_CHAIN=false): iterates corePoolId to lastPoolId;
      *      applies `newCF` only to pools where currentCF > newCF (silently skips pools already
      *      at or below newCF and unlisted pools). Never reverts due to CF comparison — use the
      *      per-pool overload if you need strict enforcement on a specific pool.
-     *      On an IL comptroller (IS_ISOLATED_POOL=true, or a market of another comptroller such as a
+     *      On an IL comptroller (IS_REMOTE_CHAIN=true, or a market of another comptroller such as a
      *      Spoke pool): applies to the single market entry with pool id 0 and
      *      reverts with CFExceedsCurrent if newCF > currentCF.
      * @param market The vToken market address whose CF should be decreased.
@@ -413,7 +413,7 @@ interface IEBrake {
      * @notice Decrease collateral factor to `newCF` for a market in a specific pool.
      *         Same safety guarantees as decreaseCF(address,uint256) — LT is left unchanged.
      * @dev Only meaningful on Diamond comptroller (BSC) where multiple pools exist.
-     *      Reverts with NotSupportedOnIsolatedPool on IL chains — ACM must not grant this permission there.
+     *      Reverts with NotSupportedOnRemoteChain on IL chains — ACM must not grant this permission there.
      *      Reverts with CFExceedsCurrent if newCF > current CF in the targeted pool.
      * @param market The vToken market address whose CF should be decreased.
      * @param poolId The pool ID (0 for core pool, >0 for e-mode pools).

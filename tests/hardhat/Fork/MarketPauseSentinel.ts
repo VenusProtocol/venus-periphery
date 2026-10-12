@@ -299,7 +299,7 @@ if (FORK_MAINNET) {
         it("should point at the live Core EBrake and comptroller", async () => {
           expect(await sentinel.EBRAKE()).to.equal(eBrake.address);
           expect(await sentinel.COMPTROLLER()).to.equal(ethers.utils.getAddress(COMPTROLLER));
-          expect(await eBrake.IS_ISOLATED_POOL()).to.equal(false);
+          expect(await eBrake.IS_REMOTE_CHAIN()).to.equal(false);
           expect(await eBrake.COMPTROLLER()).to.equal(ethers.utils.getAddress(COMPTROLLER));
         });
 

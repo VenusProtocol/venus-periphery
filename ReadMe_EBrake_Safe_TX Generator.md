@@ -85,7 +85,7 @@ EBrake deployment status is maintained in `deployments/<network>/EBrake.json`. Q
 | basemainnet     | 8453     | ✅       | Isolated Lending                              |
 | basesepolia     | 84532    | ✅       | Isolated Lending                              |
 
-Pool-specific operations (`decrease_cf_pool`, `pause_flash_loan`, `revoke_flash_loan`, `disable_pool_borrow`) are only shown in the generator when `IS_ISOLATED_POOL === false` (i.e. BSC core diamond).
+Pool-specific operations (`decrease_cf_pool`, `pause_flash_loan`, `revoke_flash_loan`, `disable_pool_borrow`) are only shown in the generator when `IS_REMOTE_CHAIN === false` (i.e. BSC core diamond).
 
 ---
 

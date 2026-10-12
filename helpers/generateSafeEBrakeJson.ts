@@ -91,7 +91,7 @@ export async function retry<T = any>(fn: () => Promise<T>, retries = 3, delayMs 
 const OUTPUT_DIR = path.resolve(__dirname, "data");
 
 const EBRAKE_ABI = [
-  "function IS_ISOLATED_POOL() view returns (bool)",
+  "function IS_REMOTE_CHAIN() view returns (bool)",
   "function COMPTROLLER() view returns (address)",
   "function pauseActions(address[],uint8[])",
   "function pauseSupply(address)",
@@ -207,7 +207,7 @@ export interface EBrakeStep {
 export interface EBrakeBatchInput {
   eBrakeAddress: string;
   comptrollerAddress: string;
-  isIsolatedPool: boolean;
+  isRemoteChain: boolean;
   network: string;
   chainId: number;
   safeAddress: string;
@@ -354,8 +354,8 @@ const fetchSymbol = async (vToken: string): Promise<string> => {
   }
 };
 
-const fetchAllMarkets = async (comptroller: string, isIsolatedPool: boolean): Promise<string[]> => {
-  const abi = isIsolatedPool ? IL_COMPTROLLER_QUERY_ABI : BSC_COMPTROLLER_QUERY_ABI;
+const fetchAllMarkets = async (comptroller: string, isRemoteChain: boolean): Promise<string[]> => {
+  const abi = isRemoteChain ? IL_COMPTROLLER_QUERY_ABI : BSC_COMPTROLLER_QUERY_ABI;
   const contract = new ethers.Contract(comptroller, abi, ethers.provider);
   const allMarkets: string[] = await retry(() => contract.getAllMarkets());
   console.log(`Found ${allMarkets.length} market(s) on comptroller.`);
@@ -364,11 +364,11 @@ const fetchAllMarkets = async (comptroller: string, isIsolatedPool: boolean): Pr
 
 const filterListedAndFetchSymbols = async (
   comptroller: string,
-  isIsolatedPool: boolean,
+  isRemoteChain: boolean,
   markets: string[],
   logUnlisted: boolean,
 ): Promise<{ addresses: string[]; symbols: Map<string, string> }> => {
-  const abi = isIsolatedPool ? IL_COMPTROLLER_QUERY_ABI : BSC_COMPTROLLER_QUERY_ABI;
+  const abi = isRemoteChain ? IL_COMPTROLLER_QUERY_ABI : BSC_COMPTROLLER_QUERY_ABI;
   const contract = new ethers.Contract(comptroller, abi, ethers.provider);
   console.log(`Checking ${markets.length} market(s)...`);
   const results = await Promise.all(
@@ -398,10 +398,10 @@ const filterListedAndFetchSymbols = async (
 const fetchCurrentCF = async (
   comptroller: string,
   vToken: string,
-  isIsolatedPool: boolean,
+  isRemoteChain: boolean,
   poolId?: number,
 ): Promise<{ cf: BigNumber; lt: BigNumber }> => {
-  if (isIsolatedPool) {
+  if (isRemoteChain) {
     const contract = new ethers.Contract(comptroller, IL_COMPTROLLER_QUERY_ABI, ethers.provider);
     const data = await retry(() => contract.markets(vToken));
     return { cf: data.collateralFactorMantissa, lt: data.liquidationThresholdMantissa };
@@ -416,9 +416,9 @@ const fetchCurrentCF = async (
 const fetchCurrentCaps = async (
   comptroller: string,
   vToken: string,
-  isIsolatedPool: boolean,
+  isRemoteChain: boolean,
 ): Promise<{ borrowCap: BigNumber; supplyCap: BigNumber }> => {
-  const abi = isIsolatedPool ? IL_COMPTROLLER_QUERY_ABI : BSC_COMPTROLLER_QUERY_ABI;
+  const abi = isRemoteChain ? IL_COMPTROLLER_QUERY_ABI : BSC_COMPTROLLER_QUERY_ABI;
   const contract = new ethers.Contract(comptroller, abi, ethers.provider);
   const [borrowCap, supplyCap] = await Promise.all([
     retry(() => contract.borrowCaps(vToken)),
@@ -431,10 +431,10 @@ const fetchCurrentCaps = async (
 
 type NetworkMarkets = Record<string, string>; // symbol → vTokenAddress
 
-const buildMarketsFromChain = async (comptroller: string, isIsolatedPool: boolean): Promise<NetworkMarkets> => {
+const buildMarketsFromChain = async (comptroller: string, isRemoteChain: boolean): Promise<NetworkMarkets> => {
   console.log("\nQuerying comptroller for all markets...");
-  const allMarkets = await fetchAllMarkets(comptroller, isIsolatedPool);
-  const { addresses, symbols } = await filterListedAndFetchSymbols(comptroller, isIsolatedPool, allMarkets, false);
+  const allMarkets = await fetchAllMarkets(comptroller, isRemoteChain);
+  const { addresses, symbols } = await filterListedAndFetchSymbols(comptroller, isRemoteChain, allMarkets, false);
   const markets: NetworkMarkets = {};
   const collisions: string[] = [];
   for (const addr of addresses) {
@@ -557,7 +557,7 @@ const pickPoolIds = async (sym: string, available: number[]): Promise<number[]> 
 const selectMarkets = async (
   ctx: StepContext,
 ): Promise<{ marketAddresses: string[]; symbols: Map<string, string> }> => {
-  const { comptrollerAddress: comptroller, isIsolatedPool } = ctx;
+  const { comptrollerAddress: comptroller, isRemoteChain } = ctx;
   const marketMode = await pickOne("How to load markets?", [
     "Enter addresses manually in CLI",
     "Select by name (auto-fetch all listed markets on first use, cached for this run)",
@@ -568,7 +568,7 @@ const selectMarkets = async (
 
   if (marketMode.startsWith("Enter")) {
     const entered = await pickValidAddresses("Enter market addresses (comma-separated):");
-    const result = await filterListedAndFetchSymbols(comptroller, isIsolatedPool, entered, true);
+    const result = await filterListedAndFetchSymbols(comptroller, isRemoteChain, entered, true);
     marketAddresses = result.addresses;
     symbols = result.symbols;
     console.log(`\nUsing ${marketAddresses.length} address(es):`);
@@ -576,7 +576,7 @@ const selectMarkets = async (
   } else {
     let networkMarkets = ctx.marketsCache;
     if (!networkMarkets) {
-      networkMarkets = await buildMarketsFromChain(comptroller, isIsolatedPool);
+      networkMarkets = await buildMarketsFromChain(comptroller, isRemoteChain);
       ctx.marketsCache = networkMarkets;
     } else {
       console.log(`Reusing ${Object.keys(networkMarkets).length} market(s) fetched earlier in this run.`);
@@ -730,7 +730,7 @@ const pickBscMarketsFanOut = async (
 
 interface StepContext {
   comptrollerAddress: string;
-  isIsolatedPool: boolean;
+  isRemoteChain: boolean;
   // In-memory caches shared across steps in a single run. Reset every invocation
   // of the script, so multi-step batches don't refetch while avoiding any
   // persisted cross-network staleness.
@@ -1183,7 +1183,7 @@ const gatherPerPoolValues = async (
 
 // Collect the per-operation inputs (markets, actions, CFs, caps, etc.) for a single step.
 const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise<EBrakeStep> => {
-  const { comptrollerAddress, isIsolatedPool } = ctx;
+  const { comptrollerAddress, isRemoteChain } = ctx;
   let marketAddresses: string[] = [];
   let symbols = new Map<string, string>();
   let pauseActions: number[] | undefined;
@@ -1240,7 +1240,7 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
         defaultFilename: "cf_values.json",
         fetchCurrent: async m => {
           try {
-            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isIsolatedPool);
+            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isRemoteChain);
             return cf.toString();
           } catch {
             return "(not listed)";
@@ -1254,7 +1254,7 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
         defaultFilename: "cf_values_per_pool.json",
         fetchCurrent: async (m, pid) => {
           try {
-            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isIsolatedPool, pid);
+            const { cf } = await fetchCurrentCF(comptrollerAddress, m, isRemoteChain, pid);
             return cf.toString();
           } catch {
             return "(not listed)";
@@ -1266,7 +1266,7 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
         kind: "borrow cap",
         defaultFilename: "borrow_caps.json",
         fetchCurrent: async m => {
-          const { borrowCap } = await fetchCurrentCaps(comptrollerAddress, m, isIsolatedPool);
+          const { borrowCap } = await fetchCurrentCaps(comptrollerAddress, m, isRemoteChain);
           return borrowCap.toString();
         },
       });
@@ -1275,7 +1275,7 @@ const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise
         kind: "supply cap",
         defaultFilename: "supply_caps.json",
         fetchCurrent: async m => {
-          const { supplyCap } = await fetchCurrentCaps(comptrollerAddress, m, isIsolatedPool);
+          const { supplyCap } = await fetchCurrentCaps(comptrollerAddress, m, isRemoteChain);
           return supplyCap.toString();
         },
       });
@@ -1309,21 +1309,22 @@ export const gatherInput = async (): Promise<EBrakeBatchInput> => {
   // 1. Resolve EBrake address + probe
   const eBrakeAddress = await getEBrakeAddress(networkName);
   const eBrake = new ethers.Contract(eBrakeAddress, EBRAKE_ABI, ethers.provider);
-  const [isIsolatedPool, comptrollerAddress]: [boolean, string] = await Promise.all([
-    retry(() => eBrake.IS_ISOLATED_POOL()),
+  const [isRemoteChain, comptrollerAddress]: [boolean, string] = await Promise.all([
+    // EBrake implementations deployed before IS_REMOTE_CHAIN expose the flag as IS_ISOLATED_POOL()
+    retry(() => eBrake.IS_REMOTE_CHAIN().catch(() => eBrake.IS_ISOLATED_POOL())),
     retry(() => eBrake.COMPTROLLER()),
   ]);
-  console.log(`  IS_ISOLATED_POOL: ${isIsolatedPool}`);
+  console.log(`  IS_REMOTE_CHAIN:  ${isRemoteChain}`);
   console.log(`  COMPTROLLER:      ${comptrollerAddress}\n`);
 
-  // 2. Operation menu — BSC-only options shown only when !isIsolatedPool
+  // 2. Operation menu — BSC-only options shown only when !isRemoteChain
   const operationChoices: { label: string; value: EBrakeOperation }[] = [
     { label: "Pause actions on markets (pauseActions)", value: "pause_actions" },
     { label: "Decrease collateral factor — all pools (decreaseCF)", value: "decrease_cf" },
     { label: "Decrease borrow caps (setMarketBorrowCaps)", value: "set_borrow_caps" },
     { label: "Decrease supply caps (setMarketSupplyCaps)", value: "set_supply_caps" },
   ];
-  if (!isIsolatedPool) {
+  if (!isRemoteChain) {
     operationChoices.push(
       { label: "[BSC] Decrease CF — specific pool (decreaseCF with poolId)", value: "decrease_cf_pool" },
       { label: "[BSC] Pause flash loans (pauseFlashLoan)", value: "pause_flash_loan" },
@@ -1342,7 +1343,7 @@ export const gatherInput = async (): Promise<EBrakeBatchInput> => {
   const selectedOps = selectedIndices.map(i => operationChoices[parseInt(i, 10) - 1].value);
 
   // 4. Iterate selected operations, collecting per-step inputs.
-  const ctx: StepContext = { comptrollerAddress, isIsolatedPool };
+  const ctx: StepContext = { comptrollerAddress, isRemoteChain };
   const steps: EBrakeStep[] = [];
   for (let i = 0; i < selectedOps.length; i++) {
     const op = selectedOps[i];
@@ -1357,7 +1358,7 @@ export const gatherInput = async (): Promise<EBrakeBatchInput> => {
   return {
     eBrakeAddress,
     comptrollerAddress,
-    isIsolatedPool,
+    isRemoteChain,
     network: networkName,
     chainId,
     steps,

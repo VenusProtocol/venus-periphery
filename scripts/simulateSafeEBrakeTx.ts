@@ -36,7 +36,7 @@ import * as path from "path";
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
 
 const EBRAKE_ABI = [
-  "function IS_ISOLATED_POOL() view returns (bool)",
+  "function IS_REMOTE_CHAIN() view returns (bool)",
   "function pauseActions(address[],uint8[])",
   "function pauseFlashLoan()",
   "function revokeFlashLoanAccess(address)",
@@ -111,7 +111,7 @@ const operationsLabel =
 describe(`EBrake TX Simulation — [${operationsLabel}] on ${metadata.network} (block ${metadata.blockNumber})`, () => {
   let eBrakeContract: Contract;
   let comptroller: Contract;
-  let isIsolatedPool: boolean;
+  let isRemoteChain: boolean;
 
   before(async () => {
     // --fork <network> sets FORKED_NETWORK via the hardhat.config.ts task override.
@@ -138,7 +138,8 @@ describe(`EBrake TX Simulation — [${operationsLabel}] on ${metadata.network} (
     });
 
     eBrakeContract = new ethers.Contract(metadata.eBrakeAddress, EBRAKE_ABI, ethers.provider);
-    isIsolatedPool = await eBrakeContract.IS_ISOLATED_POOL();
+    // EBrake implementations deployed before IS_REMOTE_CHAIN expose the flag as IS_ISOLATED_POOL()
+    isRemoteChain = await eBrakeContract.IS_REMOTE_CHAIN().catch(() => eBrakeContract.IS_ISOLATED_POOL());
     comptroller = new ethers.Contract(metadata.comptrollerAddress, COMPTROLLER_READ_ABI, ethers.provider);
 
     console.log(`\nNetwork:      ${metadata.network}`);
@@ -147,7 +148,7 @@ describe(`EBrake TX Simulation — [${operationsLabel}] on ${metadata.network} (
     console.log(`EBrake:       ${metadata.eBrakeAddress}`);
     console.log(`Comptroller:  ${metadata.comptrollerAddress}`);
     console.log(`Safe:         ${txBuilder.meta.createdFromSafeAddress}`);
-    console.log(`IS_ISOLATED:  ${isIsolatedPool}`);
+    console.log(`IS_REMOTE_CHAIN:  ${isRemoteChain}`);
     console.log(`Transactions: ${txBuilder.transactions.length}`);
   });
 
@@ -204,7 +205,7 @@ describe(`EBrake TX Simulation — [${operationsLabel}] on ${metadata.network} (
       const [vToken, newCF] = parsed.args as [string, BigNumber];
       const sym = metadata.symbols[vToken] || vToken;
       it(`${sym} (${vToken}) CF should be decreased to ${newCF}`, async () => {
-        if (isIsolatedPool) {
+        if (isRemoteChain) {
           const market = await comptroller.markets(vToken);
           expect(market.collateralFactorMantissa.toString()).to.equal(newCF.toString());
         } else {

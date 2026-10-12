@@ -87,9 +87,9 @@ export function deploymentTests(config: NetworkConfig, get: FixtureGetter): void
       expect((await eBrake.COMPTROLLER()).toLowerCase()).to.equal(config.comptroller.toLowerCase());
     });
 
-    it("should set IS_ISOLATED_POOL immutable correctly", async () => {
+    it("should set IS_REMOTE_CHAIN immutable correctly", async () => {
       const { eBrake } = get();
-      expect(await eBrake.IS_ISOLATED_POOL()).to.equal(config.isIsolatedPool);
+      expect(await eBrake.IS_REMOTE_CHAIN()).to.equal(config.isIsolatedPool);
     });
 
     it("should revert deployment with zero comptroller", async () => {
@@ -529,11 +529,11 @@ export function decreaseCFTests(config: NetworkConfig, get: FixtureGetter): void
         ).to.be.revertedWithCustomError(eBrake, "CFExceedsCurrent");
       });
 
-      it("should revert with NotSupportedOnIsolatedPool for decreaseCF(address,uint96,uint256)", async () => {
+      it("should revert with NotSupportedOnRemoteChain for decreaseCF(address,uint96,uint256)", async () => {
         const { eBrake, whitelistedUser } = get();
         await expect(
           eBrake.connect(whitelistedUser)["decreaseCF(address,uint96,uint256)"](config.vToken1, 0, 0),
-        ).to.be.revertedWithCustomError(eBrake, "NotSupportedOnIsolatedPool");
+        ).to.be.revertedWithCustomError(eBrake, "NotSupportedOnRemoteChain");
       });
 
       it("should revert for unlisted market", async () => {

@@ -45,11 +45,12 @@ contract EBrake is IEBrake, AccessControlledV8 {
     ICorePoolComptroller public immutable COMPTROLLER;
 
     /**
-     * @notice True for IL comptroller (isolated-pools repo), false for Diamond comptroller (venus-protocol repo).
+     * @notice True on chains other than BSC, where COMPTROLLER is an isolated-pools (IL) comptroller; false on BSC,
+     *         where COMPTROLLER is the Diamond (venus-protocol repo).
      * @dev Determines which ABI path decreaseCF(address,uint256) uses for markets of COMPTROLLER.
      *      Markets of any other comptroller always take the IL path.
      */
-    bool public immutable IS_ISOLATED_POOL;
+    bool public immutable IS_REMOTE_CHAIN;
 
     /// @notice Stored pre-incident market state snapshots, keyed by vToken market address.
     /// @dev Values are captured at tightening time (first-write-wins) and cleared via resetCFSnapshot(),
@@ -61,12 +62,12 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     /// @param corePoolComptroller_ Address of the Venus Comptroller.
-    /// @param isIsolatedPool_ True for IL comptroller (isolated-pools), false for Diamond comptroller (venus-protocol).
-    constructor(ICorePoolComptroller corePoolComptroller_, bool isIsolatedPool_) {
+    /// @param isRemoteChain_ True on chains other than BSC (COMPTROLLER is an IL comptroller), false on BSC (Diamond).
+    constructor(ICorePoolComptroller corePoolComptroller_, bool isRemoteChain_) {
         if (address(corePoolComptroller_) == address(0)) revert ZeroAddress();
 
         COMPTROLLER = corePoolComptroller_;
-        IS_ISOLATED_POOL = isIsolatedPool_;
+        IS_REMOTE_CHAIN = isRemoteChain_;
         _disableInitializers();
     }
 
@@ -226,7 +227,7 @@ contract EBrake is IEBrake, AccessControlledV8 {
     /// @inheritdoc IEBrake
     function decreaseCF(address market, uint96 poolId, uint256 newCF) external {
         _checkAccessAllowed("decreaseCF(address,uint96,uint256)");
-        if (IS_ISOLATED_POOL) revert NotSupportedOnIsolatedPool();
+        if (IS_REMOTE_CHAIN) revert NotSupportedOnRemoteChain();
         (bool isListed, uint256 currentCF, , uint256 currentLT, , , ) = COMPTROLLER.poolMarkets(poolId, market);
         if (!isListed) revert MarketNotListed(poolId, market);
         if (newCF > currentCF) revert CFExceedsCurrent(market, poolId, currentCF, newCF);
@@ -411,13 +412,13 @@ contract EBrake is IEBrake, AccessControlledV8 {
 
     /**
      * @notice Whether the isolated-pools path (pool id 0) applies to `comptroller`.
-     * @dev False only for COMPTROLLER when it is a Diamond (IS_ISOLATED_POOL = false). Any other comptroller
+     * @dev False only for COMPTROLLER when it is a Diamond (IS_REMOTE_CHAIN = false). Any other comptroller
      *      is treated as an isolated-pools comptroller with pool id 0, which Spoke comptrollers are.
      * @param comptroller The comptroller about to be acted on.
      * @return True for the isolated-pools path, false for the Diamond path.
      */
     function _isIsolatedPool(address comptroller) internal view returns (bool) {
-        return IS_ISOLATED_POOL || comptroller != address(COMPTROLLER);
+        return IS_REMOTE_CHAIN || comptroller != address(COMPTROLLER);
     }
 
     /**
