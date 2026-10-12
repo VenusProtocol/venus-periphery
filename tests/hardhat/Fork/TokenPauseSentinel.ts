@@ -435,12 +435,12 @@ if (FORK_MAINNET) {
       // ═════════════════════════════════════════════════════════════════════
 
       describe("3. Token not paused", () => {
-        it("should revert handleBStockPause with TokenNotPaused for every bStock market and change nothing", async () => {
-          for (const { vToken, underlying } of BSTOCK_MARKETS) {
+        it("should make handleBStockPause do nothing for every bStock market", async () => {
+          for (const { vToken } of BSTOCK_MARKETS) {
             const before = await readPoolStates(comptroller, vToken);
-            await expect(sentinel.connect(keeper).handleBStockPause(vToken))
-              .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-              .withArgs(vToken, underlying);
+            expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vToken))).to.deep.equal(
+              [],
+            );
             await expectUntouched(eBrake, comptroller, vToken, before);
           }
         });
@@ -477,10 +477,8 @@ if (FORK_MAINNET) {
             [sentinel.address, vTSLAB, 0, 0],
             [sentinel.address, vTSLAB, emodePoolId, 0],
           ]);
-          await expect(tx)
-            .to.emit(sentinel, "PauseBrakeApplied")
-            .withArgs(vTSLAB, TSLAB, keeper.address, PAUSE_MANAGER);
-          expect(await sentinelEvents(sentinel, tx)).to.deep.equal(["PauseBrakeApplied"]);
+          await expect(tx).to.emit(sentinel, "BStockPauseHandled").withArgs(vTSLAB, TSLAB, PAUSE_MANAGER);
+          expect(await sentinelEvents(sentinel, tx)).to.deep.equal(["BStockPauseHandled"]);
           await expectCFZeroed(eBrake, comptroller, vTSLAB, before);
 
           const core = await eBrake.getMarketCFSnapshot(vTSLAB, 0);
@@ -496,15 +494,15 @@ if (FORK_MAINNET) {
           await pauseManager.pauseToken(TSLAB);
           await sentinel.connect(keeper).handleBStockPause(vTSLAB);
 
-          for (const [i, { vToken, underlying }] of others.entries()) {
+          for (const [i, { vToken }] of others.entries()) {
             await expectUntouched(eBrake, comptroller, vToken, before[i]);
-            await expect(sentinel.connect(keeper).handleBStockPause(vToken))
-              .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-              .withArgs(vToken, underlying);
+            expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vToken))).to.deep.equal(
+              [],
+            );
           }
         });
 
-        it("should make a second call a no-op in EBrake while still emitting PauseBrakeApplied", async () => {
+        it("should make a second call a no-op in EBrake while still emitting BStockPauseHandled", async () => {
           const before = await readPoolStates(comptroller, vTSLAB);
           await pauseManager.pauseToken(TSLAB);
           await sentinel.connect(keeper).handleBStockPause(vTSLAB);
@@ -512,22 +510,20 @@ if (FORK_MAINNET) {
 
           const tx = sentinel.connect(keeper).handleBStockPause(vTSLAB);
           expect(await cfDecreases(eBrake, tx)).to.deep.equal([]);
-          expect(await sentinelEvents(sentinel, tx)).to.deep.equal(["PauseBrakeApplied"]);
+          expect(await sentinelEvents(sentinel, tx)).to.deep.equal(["BStockPauseHandled"]);
 
           expect(await readPoolStates(comptroller, vTSLAB)).to.deep.equal(afterFirst);
           await expectCFZeroed(eBrake, comptroller, vTSLAB, before);
         });
 
-        it("should revert again after unpauseToken, without restoring CF or touching the snapshot", async () => {
+        it("should do nothing after unpauseToken, without restoring CF or touching the snapshot", async () => {
           const before = await readPoolStates(comptroller, vTSLAB);
           await pauseManager.pauseToken(TSLAB);
           await sentinel.connect(keeper).handleBStockPause(vTSLAB);
 
           await pauseManager.unpauseToken(TSLAB);
           expect(await pauseManager.isTokenPaused(TSLAB)).to.equal(false);
-          await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB))
-            .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-            .withArgs(vTSLAB, TSLAB);
+          expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vTSLAB))).to.deep.equal([]);
 
           // CF is restored by governance VIP from the EBrake snapshot, not by the sentinel
           await expectCFZeroed(eBrake, comptroller, vTSLAB, before);
@@ -549,9 +545,7 @@ if (FORK_MAINNET) {
             expect(await pauseManager.isTokenPaused(underlying)).to.equal(true);
 
             const tx = sentinel.connect(keeper).handleBStockPause(vToken);
-            await expect(tx)
-              .to.emit(sentinel, "PauseBrakeApplied")
-              .withArgs(vToken, underlying, keeper.address, PAUSE_MANAGER);
+            await expect(tx).to.emit(sentinel, "BStockPauseHandled").withArgs(vToken, underlying, PAUSE_MANAGER);
             expect(await cfDecreases(eBrake, tx)).to.deep.equal(
               listedPools(before[i]).map(poolId => [sentinel.address, vToken, poolId, 0]),
             );
@@ -559,14 +553,14 @@ if (FORK_MAINNET) {
           }
         });
 
-        it("should revert again for all four after unpauseAllTokens", async () => {
+        it("should do nothing for all four after unpauseAllTokens", async () => {
           await pauseManager.pauseAllTokens();
           await pauseManager.unpauseAllTokens();
 
-          for (const { vToken, underlying } of BSTOCK_MARKETS) {
-            await expect(sentinel.connect(keeper).handleBStockPause(vToken))
-              .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-              .withArgs(vToken, underlying);
+          for (const { vToken } of BSTOCK_MARKETS) {
+            expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vToken))).to.deep.equal(
+              [],
+            );
           }
         });
       });
@@ -632,9 +626,7 @@ if (FORK_MAINNET) {
           await acm.giveCallPermission(EBRAKE, RESET_CF_SNAPSHOT, NORMAL_TIMELOCK);
           await eBrake.resetCFSnapshot(vTSLAB);
           await expectUntouched(eBrake, comptroller, vTSLAB, original);
-          await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB))
-            .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-            .withArgs(vTSLAB, TSLAB);
+          expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vTSLAB))).to.deep.equal([]);
 
           // Second incident brakes again and takes a fresh snapshot
           await pauseManager.pauseToken(TSLAB);
@@ -737,9 +729,7 @@ if (FORK_MAINNET) {
           await expect(tslab.transfer(keeper.address, 1)).to.be.revertedWithCustomError(tslab, "TokenPaused");
 
           const tx = sentinel.connect(keeper).handleBStockPause(vTSLAB);
-          await expect(tx)
-            .to.emit(sentinel, "PauseBrakeApplied")
-            .withArgs(vTSLAB, TSLAB, keeper.address, newPauseManager.address);
+          await expect(tx).to.emit(sentinel, "BStockPauseHandled").withArgs(vTSLAB, TSLAB, newPauseManager.address);
           expect(await cfDecreases(eBrake, tx)).to.deep.equal(
             listedPools(before).map(poolId => [sentinel.address, vTSLAB, poolId, 0]),
           );
@@ -758,9 +748,7 @@ if (FORK_MAINNET) {
           await tslab.transfer(keeper.address, 1);
           expect(await tslab.balanceOf(keeper.address)).to.equal(balanceBefore.add(1));
 
-          await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB))
-            .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-            .withArgs(vTSLAB, TSLAB);
+          expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vTSLAB))).to.deep.equal([]);
           await expectUntouched(eBrake, comptroller, vTSLAB, before);
         });
       });

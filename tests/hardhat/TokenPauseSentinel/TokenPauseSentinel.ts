@@ -588,16 +588,16 @@ describe("TokenPauseSentinel", () => {
         setPaused(pauseManager, TSLAB, true);
         await sentinel.setTrustedKeeper(otherKeeper.address, true);
         await expect(sentinel.connect(otherKeeper).handleBStockPause(vTSLAB.address))
-          .to.emit(sentinel, "PauseBrakeApplied")
-          .withArgs(vTSLAB.address, TSLAB, otherKeeper.address, pauseManager.address);
+          .to.emit(sentinel, "BStockPauseHandled")
+          .withArgs(vTSLAB.address, TSLAB, pauseManager.address);
       });
 
       it("should gate on trusted keepers only, without an ACM check", async () => {
         setPaused(pauseManager, TSLAB, true);
         accessControlManager.isAllowedToCall.returns(false);
         await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))
-          .to.emit(sentinel, "PauseBrakeApplied")
-          .withArgs(vTSLAB.address, TSLAB, keeper.address, pauseManager.address);
+          .to.emit(sentinel, "BStockPauseHandled")
+          .withArgs(vTSLAB.address, TSLAB, pauseManager.address);
         expect(accessControlManager.isAllowedToCall).to.not.have.been.called;
       });
     });
@@ -621,30 +621,24 @@ describe("TokenPauseSentinel", () => {
         expect(decreaseCF()).to.not.have.been.called;
       });
 
-      it("should revert with TokenNotPaused when the underlying is not paused", async () => {
-        await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))
-          .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-          .withArgs(vTSLAB.address, TSLAB);
+      it("should do nothing when the underlying is not paused", async () => {
+        expect(await emittedEvents(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))).to.deep.equal([]);
         expect(pauseManager.isTokenPaused).to.have.been.calledOnceWith(TSLAB);
         expect(decreaseCF()).to.not.have.been.called;
       });
 
-      it("should revert with TokenNotPaused when only a different token is paused", async () => {
+      it("should do nothing when only a different token is paused", async () => {
         setPaused(pauseManager, NVDAB, true);
-        await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))
-          .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-          .withArgs(vTSLAB.address, TSLAB);
+        expect(await emittedEvents(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))).to.deep.equal([]);
         expect(decreaseCF()).to.not.have.been.called;
       });
 
-      it("should revert with TokenNotPaused again after the token is unpaused", async () => {
+      it("should do nothing again after the token is unpaused", async () => {
         setPaused(pauseManager, TSLAB, true);
         await sentinel.connect(keeper).handleBStockPause(vTSLAB.address);
 
         setPaused(pauseManager, TSLAB, false);
-        await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))
-          .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-          .withArgs(vTSLAB.address, TSLAB);
+        expect(await emittedEvents(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))).to.deep.equal([]);
         expect(decreaseCF()).to.have.been.calledOnce;
       });
     });
@@ -723,12 +717,10 @@ describe("TokenPauseSentinel", () => {
         expect(pauseManager.isTokenPaused).to.have.been.calledOnceWith(TSLAB);
       });
 
-      it("should emit exactly one PauseBrakeApplied(market, underlying, caller, pauseManager)", async () => {
+      it("should emit exactly one BStockPauseHandled(market, underlying, caller, pauseManager)", async () => {
         const tx = sentinel.connect(keeper).handleBStockPause(vTSLAB.address);
-        await expect(tx)
-          .to.emit(sentinel, "PauseBrakeApplied")
-          .withArgs(vTSLAB.address, TSLAB, keeper.address, pauseManager.address);
-        expect(await emittedEvents(tx)).to.deep.equal(["PauseBrakeApplied"]);
+        await expect(tx).to.emit(sentinel, "BStockPauseHandled").withArgs(vTSLAB.address, TSLAB, pauseManager.address);
+        expect(await emittedEvents(tx)).to.deep.equal(["BStockPauseHandled"]);
       });
 
       it("should not change any sentinel state", async () => {
@@ -740,9 +732,7 @@ describe("TokenPauseSentinel", () => {
       it("should not act on other monitored markets", async () => {
         await sentinel.connect(keeper).handleBStockPause(vTSLAB.address);
         expect(decreaseCF()).to.not.have.been.calledWith(vNVDAB.address, 0);
-        await expect(sentinel.connect(keeper).handleBStockPause(vNVDAB.address))
-          .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-          .withArgs(vNVDAB.address, NVDAB);
+        expect(await emittedEvents(sentinel.connect(keeper).handleBStockPause(vNVDAB.address))).to.deep.equal([]);
       });
 
       it("should forward every repeat call to EBrake (EBrake makes them no-ops)", async () => {
@@ -760,11 +750,11 @@ describe("TokenPauseSentinel", () => {
         setPaused(pauseManager, NVDAB, true);
 
         await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))
-          .to.emit(sentinel, "PauseBrakeApplied")
-          .withArgs(vTSLAB.address, TSLAB, keeper.address, pauseManager.address);
+          .to.emit(sentinel, "BStockPauseHandled")
+          .withArgs(vTSLAB.address, TSLAB, pauseManager.address);
         await expect(sentinel.connect(keeper).handleBStockPause(vNVDAB.address))
-          .to.emit(sentinel, "PauseBrakeApplied")
-          .withArgs(vNVDAB.address, NVDAB, keeper.address, pauseManager.address);
+          .to.emit(sentinel, "BStockPauseHandled")
+          .withArgs(vNVDAB.address, NVDAB, pauseManager.address);
 
         expect(decreaseCF()).to.have.been.calledTwice;
         expect(decreaseCF().getCall(0).args).to.deep.equal([vTSLAB.address, ethers.constants.Zero]);
@@ -792,8 +782,8 @@ describe("TokenPauseSentinel", () => {
       it("should zero CF when the token's new PauseManager pauses it", async () => {
         setPaused(otherPauseManager, TSLAB, true);
         await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))
-          .to.emit(sentinel, "PauseBrakeApplied")
-          .withArgs(vTSLAB.address, TSLAB, keeper.address, otherPauseManager.address);
+          .to.emit(sentinel, "BStockPauseHandled")
+          .withArgs(vTSLAB.address, TSLAB, otherPauseManager.address);
         expect(otherPauseManager.isTokenPaused).to.have.been.calledOnceWith(TSLAB);
         expect(pauseManager.isTokenPaused).to.not.have.been.called;
         expect(decreaseCF()).to.have.been.calledOnceWith(vTSLAB.address, 0);
@@ -801,9 +791,7 @@ describe("TokenPauseSentinel", () => {
 
       it("should ignore a pause on the old PauseManager the token no longer checks", async () => {
         setPaused(pauseManager, TSLAB, true);
-        await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))
-          .to.be.revertedWithCustomError(sentinel, "TokenNotPaused")
-          .withArgs(vTSLAB.address, TSLAB);
+        expect(await emittedEvents(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))).to.deep.equal([]);
         expect(pauseManager.isTokenPaused).to.not.have.been.called;
         expect(decreaseCF()).to.not.have.been.called;
       });
@@ -811,8 +799,8 @@ describe("TokenPauseSentinel", () => {
       it("should keep using the original PauseManager for the other tokens", async () => {
         setPaused(pauseManager, NVDAB, true);
         await expect(sentinel.connect(keeper).handleBStockPause(vNVDAB.address))
-          .to.emit(sentinel, "PauseBrakeApplied")
-          .withArgs(vNVDAB.address, NVDAB, keeper.address, pauseManager.address);
+          .to.emit(sentinel, "BStockPauseHandled")
+          .withArgs(vNVDAB.address, NVDAB, pauseManager.address);
         expect(otherPauseManager.isTokenPaused).to.not.have.been.called;
       });
     });

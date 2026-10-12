@@ -60,18 +60,12 @@ contract TokenPauseSentinel is AccessControlledV8 {
     event MarketMonitoringUpdated(address indexed market, bool monitored);
 
     /// @notice Emitted when handleBStockPause asks EBrake to zero the CF of a market whose underlying token is paused
-    /// @dev Emitted on every successful handleBStockPause call, including repeat calls on a market whose CF
-    ///      is already zero (EBrake then makes no change and emits no CollateralFactorDecreased event)
+    /// @dev Emitted on every handleBStockPause call that finds the token paused, including repeat calls on a
+    ///      market whose CF is already zero (EBrake then makes no change and emits no CollateralFactorDecreased event)
     /// @param market The vToken market address
     /// @param underlying The paused underlying token
-    /// @param caller The keeper that called handleBStockPause
     /// @param pauseManager The PauseManager that reported the underlying token as paused
-    event PauseBrakeApplied(
-        address indexed market,
-        address indexed underlying,
-        address indexed caller,
-        address pauseManager
-    );
+    event BStockPauseHandled(address indexed market, address indexed underlying, address pauseManager);
 
     /// @notice Thrown when a zero address is provided
     error ZeroAddress();
@@ -87,11 +81,6 @@ contract TokenPauseSentinel is AccessControlledV8 {
     /// @notice Thrown when handleBStockPause is called for a market that is not monitored
     /// @param market The vToken market address
     error MarketNotMonitored(address market);
-
-    /// @notice Thrown when handleBStockPause is called while the market's underlying token is not paused
-    /// @param market The vToken market address
-    /// @param underlying The underlying token of the market
-    error TokenNotPaused(address market, address underlying);
 
     /// @notice Restricts a function to trusted keepers
     modifier onlyKeeper() {
@@ -172,26 +161,26 @@ contract TokenPauseSentinel is AccessControlledV8 {
      * @notice Zero the collateral factor of a monitored market while its underlying token is paused
      * @dev Calls EBrake.decreaseCF(market, 0), which zeroes CF in the market's pool (on the BSC Core pool, also
      *      in every e-mode pool the market is listed in), keeps LT and snapshots the previous CF/LT. Repeat calls
-     *      are no-ops in EBrake. The pause is read through checkBStockPause.
+     *      are no-ops in EBrake. The pause is read through checkBStockPause; while the token is not paused the
+     *      call does nothing.
      *      Reverts if the underlying token does not expose pauseManager().
      * @param market The vToken market address
      * @custom:access Only trusted keepers
-     * @custom:event Emits PauseBrakeApplied
+     * @custom:event Emits BStockPauseHandled when the token is paused
      * @custom:error UnauthorizedKeeper if the caller is not a trusted keeper
      * @custom:error MarketNotMonitored if the market is not monitored
      * @custom:error MarketNotSupported if the underlying token has no PauseManager
-     * @custom:error TokenNotPaused if the token's PauseManager does not report the underlying token as paused
      */
     function handleBStockPause(address market) external onlyKeeper {
         if (!isMarketMonitored[market]) revert MarketNotMonitored(market);
 
         (bool isPaused, address underlying, address pauseManager) = checkBStockPause(market);
         if (pauseManager == address(0)) revert MarketNotSupported(market);
-        if (!isPaused) revert TokenNotPaused(market, underlying);
+        if (!isPaused) return;
 
         EBRAKE.decreaseCF(market, 0);
 
-        emit PauseBrakeApplied(market, underlying, msg.sender, pauseManager);
+        emit BStockPauseHandled(market, underlying, pauseManager);
     }
 
     /**
