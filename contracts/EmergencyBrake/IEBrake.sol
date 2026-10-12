@@ -74,8 +74,9 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *      It is set at deployment and cannot be changed.
  *
  *      BSC (BNB Chain) — Diamond Comptroller (IS_ISOLATED_POOL = false):
- *        - decreaseCF(market, newCF) — iterates corePoolId to lastPoolId, applies newCF only to
- *          pools where currentCF > newCF; silently skips pools already at or below newCF.
+ *        - decreaseCF(market, newCF) — for markets of COMPTROLLER, iterates corePoolId to lastPoolId,
+ *          applies newCF only to pools where currentCF > newCF; silently skips pools already at or
+ *          below newCF.
  *        - decreaseCF(market, poolId, newCF) — targets a single pool (e.g. multisig use)
  *        - Uses poolMarkets() (7-value return) to read LT,
  *          calls setCollateralFactor(poolId, market, newCF, LT) which returns uint256 error code

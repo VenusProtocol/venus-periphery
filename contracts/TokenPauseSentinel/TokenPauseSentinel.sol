@@ -14,12 +14,13 @@ import { IVToken } from "../Interfaces/IVToken.sol";
  * @title TokenPauseSentinel
  * @author Venus
  * @notice Keeper-driven sentinel that tightens monitored markets through EBrake when their underlying token
- *         reports a condition that blocks liquidations. bStocks (tokenized equity) are handled by
+ *         reports a condition that blocks its transfers. bStocks (tokenized equity) are handled by
  *         handleBStockPause, which zeroes the collateral factor (CF) while the issuer's PauseManager reports the
  *         token as paused.
- * @dev A paused bStock cannot be transferred, so liquidations against it fail or cannot be exited. Zeroing CF
- *      stops new debt against the collateral, while the liquidation threshold (LT) is left unchanged so existing
- *      positions are not pushed into liquidation.
+ * @dev A paused bStock cannot be transferred. Liquidations still seize its vTokens, but no one can redeem them
+ *      for the bStock until the pause ends, so liquidators cannot exit. Zeroing CF stops new debt against the
+ *      collateral, while the liquidation threshold (LT) is left unchanged so existing positions are not pushed
+ *      into liquidation.
  *      - Markets of COMPTROLLER (the Core pool) or of a Spoke pool registered in SPOKE_POOL_REGISTRY.
  *      - The pause is read from the PauseManager the token itself points to (pauseManager()), which is the
  *        one the token checks before every transfer.
