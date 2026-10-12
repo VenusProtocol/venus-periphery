@@ -87,6 +87,11 @@ interface IComptroller {
         address vToken
     ) external view returns (bool isListed, uint256 collateralFactorMantissa, bool isComped);
 
+    /// @notice Check whether a market is listed in the comptroller.
+    /// @param vToken The vToken market address.
+    /// @return bool True if the market is listed.
+    function isMarketListed(address vToken) external view returns (bool);
+
     /// @notice Get the price oracle used by the comptroller.
     /// @return ResilientOracleInterface The oracle contract.
     function oracle() external view returns (ResilientOracleInterface);

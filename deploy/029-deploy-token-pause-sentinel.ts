@@ -1,0 +1,98 @@
+import { ethers } from "ethers";
+import hre from "hardhat";
+import { DeployFunction } from "hardhat-deploy/dist/types";
+import { HardhatRuntimeEnvironment } from "hardhat/types";
+
+import { getConfig, getContractAddressOrNullAddress } from "../helpers/deploymentConfig";
+
+/**
+ * bStocks are only listed on BNB Chain. bsctestnet is left out: its bStocks are mock tokens
+ * without a pauseManager() pointer, so none of them could be monitored.
+ */
+const SUPPORTED_NETWORKS = ["bscmainnet"];
+
+/** Verify a contract on the explorer without failing the deployment (e.g. on a local fork). */
+async function verify(address: string | undefined, constructorArguments: unknown[]): Promise<void> {
+  try {
+    await hre.run("verify:verify", { address, constructorArguments });
+  } catch (e) {
+    console.log(`verify failed: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Deploys TokenPauseSentinel (wired to EBrake, the Core pool comptroller and the network's Spoke PoolRegistry, if any)
+ * behind a transparent proxy owned by DefaultProxyAdmin.
+ *
+ * The VIP grants the sentinel EBrake's `decreaseCF(address,uint256)`, grants `setMarketMonitored(address,bool,bool)`
+ * and registers the monitored markets. This script does neither.
+ */
+const func: DeployFunction = async function ({ getNamedAccounts, deployments, network }: HardhatRuntimeEnvironment) {
+  const { deploy } = deployments;
+  const { deployer } = await getNamedAccounts();
+  // On a local fork, `network.name` is "hardhat"; getNetworkName() returns the forked network
+  const networkName = hre.getNetworkName();
+  console.log(`Deploying TokenPauseSentinel on ${networkName} with the account: ${deployer}`);
+  const ADDRESSES = await getConfig(networkName);
+
+  const accessControlManager = ADDRESSES.preconfiguredAddresses.AccessControlManager;
+  const timelock = ADDRESSES.preconfiguredAddresses.NormalTimelock;
+
+  const eBrake = await getContractAddressOrNullAddress(deployments, "EBrake");
+  if (eBrake === ethers.constants.AddressZero) {
+    console.log("EBrake not deployed, skipping TokenPauseSentinel deployment");
+    return;
+  }
+  const comptroller = await getContractAddressOrNullAddress(deployments, "Unitroller");
+  if (comptroller === ethers.constants.AddressZero) {
+    console.log("Unitroller not deployed, skipping TokenPauseSentinel deployment");
+    return;
+  }
+
+  const defaultProxyAdmin = await hre.artifacts.readArtifact(
+    "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
+  );
+
+  const spokePoolRegistry = ADDRESSES.preconfiguredAddresses.SpokePoolRegistry ?? ethers.constants.AddressZero;
+
+  const constructorArgs = [eBrake, comptroller, spokePoolRegistry];
+  console.log(
+    `TokenPauseSentinel constructor args: EBrake ${eBrake}, Comptroller ${comptroller}, SpokePoolRegistry ${spokePoolRegistry}`,
+  );
+  const result = await deploy("TokenPauseSentinel", {
+    contract: "TokenPauseSentinel",
+    from: deployer,
+    log: true,
+    deterministicDeployment: false,
+    args: constructorArgs,
+    proxy: {
+      owner: network.live ? timelock : deployer,
+      proxyContract: "OptimizedTransparentUpgradeableProxy",
+      execute: {
+        methodName: "initialize",
+        args: [accessControlManager],
+      },
+      viaAdminContract: {
+        name: "DefaultProxyAdmin",
+        artifact: defaultProxyAdmin,
+      },
+    },
+  });
+
+  if (result.newlyDeployed && network.live) {
+    console.log(`TokenPauseSentinel proxy deployed at: ${result.address}`);
+    await verify(result.implementation, constructorArgs);
+  }
+
+  const sentinel = await hre.ethers.getContract("TokenPauseSentinel");
+  if (network.live && (await sentinel.owner()) === deployer && (await sentinel.pendingOwner()) !== timelock) {
+    await sentinel.transferOwnership(timelock);
+    console.log(`TokenPauseSentinel ownership transferred to timelock: ${timelock}`);
+  }
+};
+
+export default func;
+func.tags = ["token-pause-sentinel"];
+// No `dependencies = ["ebrake"]`: EBrake is already live and only its address is needed.
+// Depending on the "ebrake" tag would re-run 021, which redeploys EBrake if the local bytecode differs.
+func.skip = async (hre: HardhatRuntimeEnvironment) => !SUPPORTED_NETWORKS.includes(hre.getNetworkName());
