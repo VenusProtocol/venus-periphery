@@ -46,7 +46,7 @@ describe("TokenPauseSentinel", () => {
   // A comptroller that is neither the Core pool comptroller nor registered in the Spoke PoolRegistry
   const OTHER_COMPTROLLER = ethers.utils.getAddress("0x0000000000000000000000000000000000000c03");
   const SET_TRUSTED_KEEPER = "setTrustedKeeper(address,bool)";
-  const SET_MARKET_MONITORED = "setMarketMonitored(address,bool,bool)";
+  const SET_MARKET_MONITORED = "setMarketMonitored(address,bool)";
 
   /** Sets the pause state a fake PauseManager reports for a token. */
   const setPaused = (manager: FakeContract<IPauseManager>, token: string, paused: boolean) =>
@@ -303,13 +303,13 @@ describe("TokenPauseSentinel", () => {
   describe("setMarketMonitored", () => {
     describe("access control", () => {
       it("should check the ACM exactly once with the caller and the function signature", async () => {
-        await sentinel.connect(user).setMarketMonitored(vTSLAB.address, true, false);
+        await sentinel.connect(user).setMarketMonitored(vTSLAB.address, true);
         expect(accessControlManager.isAllowedToCall).to.have.been.calledOnceWith(user.address, SET_MARKET_MONITORED);
       });
 
       it("should revert with Unauthorized when adding without ACM permission", async () => {
         accessControlManager.isAllowedToCall.returns(false);
-        await expect(sentinel.connect(user).setMarketMonitored(vTSLAB.address, true, false))
+        await expect(sentinel.connect(user).setMarketMonitored(vTSLAB.address, true))
           .to.be.revertedWithCustomError(sentinel, "Unauthorized")
           .withArgs(user.address, sentinel.address, SET_MARKET_MONITORED);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
@@ -317,9 +317,9 @@ describe("TokenPauseSentinel", () => {
       });
 
       it("should revert with Unauthorized when removing without ACM permission", async () => {
-        await sentinel.setMarketMonitored(vTSLAB.address, true, false);
+        await sentinel.setMarketMonitored(vTSLAB.address, true);
         accessControlManager.isAllowedToCall.returns(false);
-        await expect(sentinel.connect(user).setMarketMonitored(vTSLAB.address, false, false))
+        await expect(sentinel.connect(user).setMarketMonitored(vTSLAB.address, false))
           .to.be.revertedWithCustomError(sentinel, "Unauthorized")
           .withArgs(user.address, sentinel.address, SET_MARKET_MONITORED);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(true);
@@ -328,7 +328,7 @@ describe("TokenPauseSentinel", () => {
 
     describe("adding", () => {
       it("should monitor the market and emit exactly one MarketMonitoringUpdated(market, true)", async () => {
-        const tx = sentinel.setMarketMonitored(vTSLAB.address, true, false);
+        const tx = sentinel.setMarketMonitored(vTSLAB.address, true);
         await expect(tx).to.emit(sentinel, "MarketMonitoringUpdated").withArgs(vTSLAB.address, true);
         expect(await emittedEvents(tx)).to.deep.equal(["MarketMonitoringUpdated"]);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(true);
@@ -336,14 +336,14 @@ describe("TokenPauseSentinel", () => {
       });
 
       it("should not read the market's underlying or its PauseManager", async () => {
-        await sentinel.setMarketMonitored(vTSLAB.address, true, false);
+        await sentinel.setMarketMonitored(vTSLAB.address, true);
         expect(vTSLAB.underlying).to.not.have.been.called;
         expect(tslab.pauseManager).to.not.have.been.called;
         expect(pauseManager.isTokenPaused).to.not.have.been.called;
       });
 
       it("should revert with ZeroAddress when market is address(0)", async () => {
-        await expect(sentinel.setMarketMonitored(ZERO_ADDRESS, true, false)).to.be.revertedWithCustomError(
+        await expect(sentinel.setMarketMonitored(ZERO_ADDRESS, true)).to.be.revertedWithCustomError(
           sentinel,
           "ZeroAddress",
         );
@@ -351,38 +351,37 @@ describe("TokenPauseSentinel", () => {
       });
 
       it("should accept adding a market that is already monitored and emit again", async () => {
-        await sentinel.setMarketMonitored(vTSLAB.address, true, false);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, false))
+        await sentinel.setMarketMonitored(vTSLAB.address, true);
+        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
           .to.emit(sentinel, "MarketMonitoringUpdated")
           .withArgs(vTSLAB.address, true);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(true);
       });
     });
 
-    describe("Core pool (isSpokePool = false)", () => {
-      it("should accept a market listed in the Core pool comptroller without querying the Spoke PoolRegistry", async () => {
-        await sentinel.setMarketMonitored(vTSLAB.address, true, false);
+    describe("Core pool market", () => {
+      it("should accept a market of the Core pool comptroller without querying the Spoke PoolRegistry", async () => {
+        await sentinel.setMarketMonitored(vTSLAB.address, true);
         expect(coreComptroller.isMarketListed).to.have.been.calledOnceWith(vTSLAB.address);
         expect(registry.getPoolByComptroller).to.not.have.been.called;
-        expect(vTSLAB.comptroller).to.not.have.been.called;
       });
 
       it("should revert with MarketNotSupported for a market not listed in the Core pool comptroller", async () => {
         coreComptroller.isMarketListed.whenCalledWith(vTSLAB.address).returns(false);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, false))
+        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
           .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
           .withArgs(vTSLAB.address);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
       });
     });
 
-    describe("Spoke pool (isSpokePool = true)", () => {
+    describe("Spoke pool market", () => {
       beforeEach(() => {
         vTSLAB.comptroller.returns(spokeComptroller.address);
       });
 
       it("should accept a market listed in a comptroller registered in the Spoke PoolRegistry", async () => {
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, true))
+        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
           .to.emit(sentinel, "MarketMonitoringUpdated")
           .withArgs(vTSLAB.address, true);
         expect(registry.getPoolByComptroller).to.have.been.calledOnceWith(spokeComptroller.address);
@@ -392,14 +391,14 @@ describe("TokenPauseSentinel", () => {
 
       it("should revert with MarketNotSupported for a market not listed in its Spoke comptroller", async () => {
         spokeComptroller.isMarketListed.returns(false);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, true))
+        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
           .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
           .withArgs(vTSLAB.address);
       });
 
       it("should revert with MarketNotSupported for a market of an unregistered comptroller", async () => {
         vTSLAB.comptroller.returns(OTHER_COMPTROLLER);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, true))
+        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
           .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
           .withArgs(vTSLAB.address);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
@@ -408,28 +407,14 @@ describe("TokenPauseSentinel", () => {
       it("should revert with MarketNotSupported when the registry entry names a different comptroller", async () => {
         vTSLAB.comptroller.returns(OTHER_COMPTROLLER);
         registry.getPoolByComptroller.whenCalledWith(OTHER_COMPTROLLER).returns(pool(spokeComptroller.address));
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, true))
+        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
           .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
           .withArgs(vTSLAB.address);
       });
 
       it("should revert with MarketNotSupported for a market reporting the zero comptroller", async () => {
         vTSLAB.comptroller.returns(ZERO_ADDRESS);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, true))
-          .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
-          .withArgs(vTSLAB.address);
-      });
-
-      it("should revert with MarketNotSupported for a Core market flagged as Spoke", async () => {
-        vTSLAB.comptroller.returns(coreComptroller.address);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, true))
-          .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
-          .withArgs(vTSLAB.address);
-      });
-
-      it("should revert with MarketNotSupported for a Spoke market flagged as Core", async () => {
-        coreComptroller.isMarketListed.whenCalledWith(vTSLAB.address).returns(false);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, false))
+        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
           .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
           .withArgs(vTSLAB.address);
       });
@@ -441,23 +426,23 @@ describe("TokenPauseSentinel", () => {
           unsafeAllow: ["constructor", "internal-function-storage"],
         })) as TokenPauseSentinel;
 
-        await expect(sentinelWithoutSpoke.setMarketMonitored(vTSLAB.address, true, true))
+        await expect(sentinelWithoutSpoke.setMarketMonitored(vTSLAB.address, true))
           .to.be.revertedWithCustomError(sentinelWithoutSpoke, "MarketNotSupported")
           .withArgs(vTSLAB.address);
-        await sentinelWithoutSpoke.setMarketMonitored(vNVDAB.address, true, false);
+        await sentinelWithoutSpoke.setMarketMonitored(vNVDAB.address, true);
         expect(await sentinelWithoutSpoke.isMarketMonitored(vNVDAB.address)).to.equal(true);
       });
     });
 
     describe("removing", () => {
       beforeEach(async () => {
-        await sentinel.setMarketMonitored(vTSLAB.address, true, false);
-        await sentinel.setMarketMonitored(vNVDAB.address, true, false);
+        await sentinel.setMarketMonitored(vTSLAB.address, true);
+        await sentinel.setMarketMonitored(vNVDAB.address, true);
         primeFakes();
       });
 
       it("should stop monitoring the market and emit exactly one MarketMonitoringUpdated(market, false)", async () => {
-        const tx = sentinel.setMarketMonitored(vTSLAB.address, false, false);
+        const tx = sentinel.setMarketMonitored(vTSLAB.address, false);
         await expect(tx).to.emit(sentinel, "MarketMonitoringUpdated").withArgs(vTSLAB.address, false);
         expect(await emittedEvents(tx)).to.deep.equal(["MarketMonitoringUpdated"]);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
@@ -468,7 +453,7 @@ describe("TokenPauseSentinel", () => {
         vTSLAB.underlying.reverts();
         vTSLAB.comptroller.reverts();
         tslab.pauseManager.reverts();
-        await sentinel.setMarketMonitored(vTSLAB.address, false, false);
+        await sentinel.setMarketMonitored(vTSLAB.address, false);
         expect(vTSLAB.underlying).to.not.have.been.called;
         expect(vTSLAB.comptroller).to.not.have.been.called;
         expect(tslab.pauseManager).to.not.have.been.called;
@@ -477,22 +462,22 @@ describe("TokenPauseSentinel", () => {
       });
 
       it("should allow adding the market back", async () => {
-        await sentinel.setMarketMonitored(vTSLAB.address, false, false);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true, false))
+        await sentinel.setMarketMonitored(vTSLAB.address, false);
+        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
           .to.emit(sentinel, "MarketMonitoringUpdated")
           .withArgs(vTSLAB.address, true);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(true);
       });
 
       it("should accept removing a market that is not monitored and emit", async () => {
-        await expect(sentinel.setMarketMonitored(vSPCXB.address, false, false))
+        await expect(sentinel.setMarketMonitored(vSPCXB.address, false))
           .to.emit(sentinel, "MarketMonitoringUpdated")
           .withArgs(vSPCXB.address, false);
         expect(await sentinel.isMarketMonitored(vSPCXB.address)).to.equal(false);
       });
 
       it("should revert with ZeroAddress when market is address(0)", async () => {
-        await expect(sentinel.setMarketMonitored(ZERO_ADDRESS, false, false)).to.be.revertedWithCustomError(
+        await expect(sentinel.setMarketMonitored(ZERO_ADDRESS, false)).to.be.revertedWithCustomError(
           sentinel,
           "ZeroAddress",
         );
@@ -506,7 +491,7 @@ describe("TokenPauseSentinel", () => {
 
   describe("checkBStockPause", () => {
     beforeEach(async () => {
-      await sentinel.setMarketMonitored(vTSLAB.address, true, false);
+      await sentinel.setMarketMonitored(vTSLAB.address, true);
       primeFakes();
     });
 
@@ -550,8 +535,8 @@ describe("TokenPauseSentinel", () => {
   describe("handleBStockPause", () => {
     beforeEach(async () => {
       await sentinel.setTrustedKeeper(keeper.address, true);
-      await sentinel.setMarketMonitored(vTSLAB.address, true, false);
-      await sentinel.setMarketMonitored(vNVDAB.address, true, false);
+      await sentinel.setMarketMonitored(vTSLAB.address, true);
+      await sentinel.setMarketMonitored(vNVDAB.address, true);
       // Drop the calls made by the setup above so call assertions only see handleBStockPause
       primeFakes();
     });
@@ -614,7 +599,7 @@ describe("TokenPauseSentinel", () => {
 
       it("should revert with MarketNotMonitored after the market is removed, even while paused", async () => {
         setPaused(pauseManager, TSLAB, true);
-        await sentinel.setMarketMonitored(vTSLAB.address, false, false);
+        await sentinel.setMarketMonitored(vTSLAB.address, false);
         await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))
           .to.be.revertedWithCustomError(sentinel, "MarketNotMonitored")
           .withArgs(vTSLAB.address);

@@ -4,10 +4,10 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { BigNumber, Contract, ContractTransaction } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 
 import bscmainnetAddresses from "../../../deployments/bscmainnet_addresses.json";
-import { EBrake, IAccessControlManagerV8, IPauseManager, TokenPauseSentinel } from "../../../typechain";
+import { EBrake, IAccessControlManagerV8, IBStockToken, IPauseManager, TokenPauseSentinel } from "../../../typechain";
 import { EBrake__factory } from "../../../typechain/factories/EBrake__factory";
 import { IAccessControlManagerV8__factory } from "../../../typechain/factories/IAccessControlManagerV8__factory";
 import { TokenPauseSentinel__factory } from "../../../typechain/factories/TokenPauseSentinel__factory";
@@ -64,7 +64,7 @@ const MANTISSA_ONE = parseUnits("1", 18);
 const DECREASE_CF = "decreaseCF(address,uint256)";
 const RESET_CF_SNAPSHOT = "resetCFSnapshot(address)";
 const SET_TRUSTED_KEEPER = "setTrustedKeeper(address,bool)";
-const SET_MARKET_MONITORED = "setMarketMonitored(address,bool,bool)";
+const SET_MARKET_MONITORED = "setMarketMonitored(address,bool)";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ABIs
@@ -244,7 +244,7 @@ async function deployFixture(): Promise<Fixture> {
   await acm.giveCallPermission(sentinel.address, SET_MARKET_MONITORED, NORMAL_TIMELOCK);
   await sentinel.setTrustedKeeper(keeper.address, true);
   for (const { vToken } of BSTOCK_MARKETS) {
-    await sentinel.setMarketMonitored(vToken, true, false);
+    await sentinel.setMarketMonitored(vToken, true);
   }
 
   // Simulated e-mode pool containing vTSLAB and vNVDAB
@@ -361,22 +361,16 @@ if (FORK_MAINNET) {
         });
 
         it("should reject setMarketMonitored from an account without the ACM permission", async () => {
-          await expect(sentinel.connect(outsider).setMarketMonitored(vTSLAB, false, false))
+          await expect(sentinel.connect(outsider).setMarketMonitored(vTSLAB, false))
             .to.be.revertedWithCustomError(sentinel, "Unauthorized")
             .withArgs(outsider.address, sentinel.address, SET_MARKET_MONITORED);
           expect(await sentinel.isMarketMonitored(vTSLAB)).to.equal(true);
         });
 
         it("should monitor a non-bStock Core market but not brake it (USDT has no pauseManager())", async () => {
-          await sentinel.setMarketMonitored(vUSDT, true, false);
+          await sentinel.setMarketMonitored(vUSDT, true);
           expect(await sentinel.isMarketMonitored(vUSDT)).to.equal(true);
           await expect(sentinel.connect(keeper).handleBStockPause(vUSDT)).to.be.revertedWithoutReason();
-        });
-
-        it("should refuse a Core market flagged as Spoke, since this deployment has no Spoke PoolRegistry", async () => {
-          await expect(sentinel.setMarketMonitored(vUSDT, true, true))
-            .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
-            .withArgs(vUSDT);
         });
 
         it("should reject handleBStockPause from a caller that is not a trusted keeper", async () => {
@@ -410,7 +404,7 @@ if (FORK_MAINNET) {
         it("should reject handleBStockPause for a market removed from monitoring while its token is paused", async () => {
           const before = await readPoolStates(comptroller, vTSLAB);
           await pauseManager.pauseToken(TSLAB);
-          await expect(sentinel.setMarketMonitored(vTSLAB, false, false))
+          await expect(sentinel.setMarketMonitored(vTSLAB, false))
             .to.emit(sentinel, "MarketMonitoringUpdated")
             .withArgs(vTSLAB, false);
           await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB))
@@ -751,6 +745,134 @@ if (FORK_MAINNET) {
           expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vTSLAB))).to.deep.equal([]);
           await expectUntouched(eBrake, comptroller, vTSLAB, before);
         });
+      });
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPOKE POOLS (BSC Testnet)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const FORK_TESTNET = process.env.FORKED_NETWORK === "bsctestnet";
+const TESTNET_FORK_BLOCK = 135747000;
+
+const TESTNET_ACM = "0x45f8a08F534f34A97187626E05d4b6648Eeaa9AA";
+const TESTNET_TIMELOCK = "0xce10739590001705F7FF231611ba4A48B2820327"; // ACM admin
+const TESTNET_CORE_COMPTROLLER = "0x94d1820b2D1c7c7452A163983Dc888CEC546b77D";
+const SPOKE_POOL_REGISTRY = "0xeAA45288d804971e5a76f33559e629F5b2b1Cb8B";
+const HUB_SPOKE_COMPTROLLER = "0x11960c84d6c4F2a978a12372721C3A6A88C78f4c";
+const vNVDAB_HUB_SPOKE = "0x41A860F11Ddb71ed7d3063aE43dF0e9741B4eed3";
+const vUSDT_DEFI = "0x80CC30811e362aC9aB857C3d7875CbcCc0b65750"; // isolated pool outside the Spoke registry
+const HUB_NVDAB = { cf: parseUnits("0.5"), lt: parseUnits("0.6") };
+
+const SPOKE_COMPTROLLER_ABI = [
+  "function markets(address vToken) view returns (bool isListed, uint256 collateralFactorMantissa, uint256 liquidationThresholdMantissa)",
+];
+
+type SpokeFixture = {
+  sentinel: TokenPauseSentinel;
+  eBrake: EBrake;
+  hubSpoke: Contract;
+  pauseManager: FakeContract<IPauseManager>;
+  nvdab: string;
+  keeper: SignerWithAddress;
+};
+
+/**
+ * Deploys EBrake and TokenPauseSentinel (with the Spoke PoolRegistry) from the repo and makes the grants a VIP
+ * would make. The testnet NVDAB is a mock without pauseManager(), so a fake bStock pointing to a fake PauseManager
+ * takes its place.
+ */
+async function deploySpokeFixture(): Promise<SpokeFixture> {
+  const [, keeper] = await ethers.getSigners();
+  const timelock = await initMainnetUser(TESTNET_TIMELOCK, parseUnits("10"));
+  const acm = IAccessControlManagerV8__factory.connect(TESTNET_ACM, timelock);
+  const deployOptions = { unsafeAllow: ["constructor", "state-variable-immutable"] as const };
+
+  const eBrake = (await upgrades.deployProxy(await ethers.getContractFactory("EBrake"), [TESTNET_ACM], {
+    ...deployOptions,
+    constructorArgs: [TESTNET_CORE_COMPTROLLER, false],
+  })) as EBrake;
+  const sentinel = (
+    (await upgrades.deployProxy(await ethers.getContractFactory("TokenPauseSentinel"), [TESTNET_ACM], {
+      ...deployOptions,
+      constructorArgs: [eBrake.address, TESTNET_CORE_COMPTROLLER, SPOKE_POOL_REGISTRY],
+    })) as TokenPauseSentinel
+  ).connect(timelock);
+
+  await acm.giveCallPermission(HUB_SPOKE_COMPTROLLER, "setCollateralFactor(address,uint256,uint256)", eBrake.address);
+  await acm.giveCallPermission(eBrake.address, DECREASE_CF, sentinel.address);
+  await acm.giveCallPermission(sentinel.address, SET_TRUSTED_KEEPER, TESTNET_TIMELOCK);
+  await acm.giveCallPermission(sentinel.address, SET_MARKET_MONITORED, TESTNET_TIMELOCK);
+  await sentinel.setTrustedKeeper(keeper.address, true);
+
+  const hubSpoke = new ethers.Contract(HUB_SPOKE_COMPTROLLER, SPOKE_COMPTROLLER_ABI, ethers.provider);
+  const nvdab: string = await new ethers.Contract(
+    vNVDAB_HUB_SPOKE,
+    ["function underlying() view returns (address)"],
+    ethers.provider,
+  ).underlying();
+  const pauseManager = await smock.fake<IPauseManager>("contracts/Interfaces/IPauseManager.sol:IPauseManager");
+  const token = await smock.fake<IBStockToken>("contracts/Interfaces/IBStockToken.sol:IBStockToken", {
+    address: nvdab,
+  });
+  token.pauseManager.returns(pauseManager.address);
+
+  return { sentinel, eBrake, hubSpoke, pauseManager, nvdab, keeper };
+}
+
+if (FORK_TESTNET) {
+  forking(TESTNET_FORK_BLOCK, () => {
+    describe("TokenPauseSentinel Fork Tests (bsctestnet, Spoke pools)", () => {
+      let sentinel: TokenPauseSentinel;
+      let eBrake: EBrake;
+      let hubSpoke: Contract;
+      let pauseManager: FakeContract<IPauseManager>;
+      let nvdab: string;
+      let keeper: SignerWithAddress;
+
+      beforeEach(async () => {
+        ({ sentinel, eBrake, hubSpoke, pauseManager, nvdab, keeper } = await loadFixture(deploySpokeFixture));
+        pauseManager.isTokenPaused.reset();
+      });
+
+      it("should monitor a market of a comptroller registered in the Spoke PoolRegistry", async () => {
+        await expect(sentinel.setMarketMonitored(vNVDAB_HUB_SPOKE, true))
+          .to.emit(sentinel, "MarketMonitoringUpdated")
+          .withArgs(vNVDAB_HUB_SPOKE, true);
+        expect(await sentinel.isMarketMonitored(vNVDAB_HUB_SPOKE)).to.equal(true);
+      });
+
+      it("should refuse a market of an isolated pool outside the Spoke PoolRegistry", async () => {
+        await expect(sentinel.setMarketMonitored(vUSDT_DEFI, true))
+          .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
+          .withArgs(vUSDT_DEFI);
+      });
+
+      it("should zero CF on the Spoke comptroller while the token is paused, keeping LT and snapshotting both", async () => {
+        await sentinel.setMarketMonitored(vNVDAB_HUB_SPOKE, true);
+        pauseManager.isTokenPaused.whenCalledWith(nvdab).returns(true);
+
+        const tx = sentinel.connect(keeper).handleBStockPause(vNVDAB_HUB_SPOKE);
+        expect(await cfDecreases(eBrake, tx)).to.deep.equal([[sentinel.address, vNVDAB_HUB_SPOKE, 0, 0]]);
+        await expect(tx)
+          .to.emit(sentinel, "BStockPauseHandled")
+          .withArgs(vNVDAB_HUB_SPOKE, nvdab, pauseManager.address);
+
+        const market = await hubSpoke.markets(vNVDAB_HUB_SPOKE);
+        expect([market.collateralFactorMantissa, market.liquidationThresholdMantissa]).to.deep.equal([0, HUB_NVDAB.lt]);
+        const snapshot = await eBrake.getMarketCFSnapshot(vNVDAB_HUB_SPOKE, 0);
+        expect([snapshot.cf, snapshot.lt]).to.deep.equal([HUB_NVDAB.cf, HUB_NVDAB.lt]);
+      });
+
+      it("should do nothing while the token is not paused", async () => {
+        await sentinel.setMarketMonitored(vNVDAB_HUB_SPOKE, true);
+
+        expect(
+          await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vNVDAB_HUB_SPOKE)),
+        ).to.deep.equal([]);
+        expect((await hubSpoke.markets(vNVDAB_HUB_SPOKE)).collateralFactorMantissa).to.equal(HUB_NVDAB.cf);
       });
     });
   });

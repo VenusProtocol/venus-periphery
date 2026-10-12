@@ -133,24 +133,27 @@ contract TokenPauseSentinel is AccessControlledV8 {
 
     /**
      * @notice Add a market to, or remove it from, the monitored markets
-     * @dev Adding checks the market's pool: a Spoke market must be listed in a comptroller registered in
-     *      SPOKE_POOL_REGISTRY, any other market must be listed in COMPTROLLER (the Core pool).
+     * @dev Adding checks the pool the market's comptroller() names: a market of COMPTROLLER (the Core pool) must be
+     *      listed there, any other market must be listed in a comptroller registered in SPOKE_POOL_REGISTRY.
      *      The market's underlying token is not checked here; each handler checks the token it needs.
      * @param market The vToken market address
      * @param monitored True to add the market, false to remove it
-     * @param isSpokePool True if the market is in a Spoke pool, false if it is in the Core pool; ignored when removing
      * @custom:access Controlled by AccessControlManager
      * @custom:event Emits MarketMonitoringUpdated
      * @custom:error ZeroAddress if market is the zero address
-     * @custom:error MarketNotSupported if, when adding, the market is not listed in the pool isSpokePool names
+     * @custom:error MarketNotSupported if, when adding, the market is not listed in the Core pool or a registered Spoke
+     *               pool
      */
-    function setMarketMonitored(address market, bool monitored, bool isSpokePool) external {
-        _checkAccessAllowed("setMarketMonitored(address,bool,bool)");
+    function setMarketMonitored(address market, bool monitored) external {
+        _checkAccessAllowed("setMarketMonitored(address,bool)");
 
         if (market == address(0)) revert ZeroAddress();
 
         if (monitored) {
-            bool supported = isSpokePool ? _isSpokeMarket(market) : COMPTROLLER.isMarketListed(market);
+            address comptroller = address(IVToken(market).comptroller());
+            bool supported = comptroller == address(COMPTROLLER)
+                ? COMPTROLLER.isMarketListed(market)
+                : _isSpokeMarket(market, comptroller);
             if (!supported) revert MarketNotSupported(market);
         }
 
@@ -211,12 +214,12 @@ contract TokenPauseSentinel is AccessControlledV8 {
     }
 
     /**
-     * @notice Whether `market` is listed in a comptroller registered in SPOKE_POOL_REGISTRY
+     * @notice Whether `market` is listed in `comptroller` and `comptroller` is registered in SPOKE_POOL_REGISTRY
      * @param market The vToken market address
+     * @param comptroller The comptroller the market reports
      * @return True if `market` is a listed market of a registered Spoke pool
      */
-    function _isSpokeMarket(address market) internal view returns (bool) {
-        address comptroller = address(IVToken(market).comptroller());
+    function _isSpokeMarket(address market, address comptroller) internal view returns (bool) {
         return
             address(SPOKE_POOL_REGISTRY) != address(0) &&
             comptroller != address(0) &&

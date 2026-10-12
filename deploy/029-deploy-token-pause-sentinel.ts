@@ -24,7 +24,7 @@ async function verify(address: string | undefined, constructorArguments: unknown
  * Deploys TokenPauseSentinel (wired to EBrake, the Core pool comptroller and the network's Spoke PoolRegistry, if any)
  * behind a transparent proxy owned by DefaultProxyAdmin.
  *
- * The VIP grants the sentinel EBrake's `decreaseCF(address,uint256)`, grants `setMarketMonitored(address,bool,bool)`
+ * The VIP grants the sentinel EBrake's `decreaseCF(address,uint256)`, grants `setMarketMonitored(address,bool)`
  * and registers the monitored markets. This script does neither.
  */
 const func: DeployFunction = async function ({ getNamedAccounts, deployments, network }: HardhatRuntimeEnvironment) {
