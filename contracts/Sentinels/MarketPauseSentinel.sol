@@ -2,11 +2,8 @@
 pragma solidity ^0.8.25;
 
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
-import { PoolRegistryInterface } from "@venusprotocol/isolated-pools/contracts/Pool/PoolRegistryInterface.sol";
 import { IEBrake } from "../EmergencyBrake/IEBrake.sol";
 import { IBStockToken } from "../Interfaces/IBStockToken.sol";
-import { IComptroller } from "../Interfaces/IComptroller.sol";
-import { ICorePoolComptroller } from "../Interfaces/ICorePoolComptroller.sol";
 import { IPauseManager } from "../Interfaces/IPauseManager.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
 
@@ -21,7 +18,7 @@ import { IVToken } from "../Interfaces/IVToken.sol";
  *      for the bStock until the pause ends, so liquidators cannot exit. Zeroing CF stops new debt against the
  *      collateral, while the liquidation threshold (LT) is left unchanged so existing positions are not pushed
  *      into liquidation.
- *      - Markets of COMPTROLLER (the Core pool) or of a Spoke pool registered in SPOKE_POOL_REGISTRY.
+ *      - Any market EBrake can act on: EBrake acts on the market's own comptroller and checks the listing there.
  *      - The pause is read from the PauseManager the token itself points to (pauseManager()), which is the
  *        one the token checks before every transfer.
  *      - Tighten-only: CF is restored by a governance VIP that reads EBrake.getMarketCFSnapshot() and then
@@ -32,14 +29,6 @@ contract MarketPauseSentinel is AccessControlledV8 {
     /// @notice Emergency Brake contract used to zero the collateral factor
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IEBrake public immutable EBRAKE;
-
-    /// @notice Core pool comptroller whose markets may be monitored (Diamond on BSC, isolated-pools elsewhere)
-    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
-    ICorePoolComptroller public immutable COMPTROLLER;
-
-    /// @notice Spoke PoolRegistry whose markets may be monitored, or address(0) on chains without Spoke pools
-    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
-    PoolRegistryInterface public immutable SPOKE_POOL_REGISTRY;
 
     /// @notice Whether a keeper is trusted to call handleBStockPause
     mapping(address => bool) public trustedKeepers;
@@ -74,8 +63,7 @@ contract MarketPauseSentinel is AccessControlledV8 {
     /// @notice Thrown when handleBStockPause is called by an address that is not a trusted keeper
     error UnauthorizedKeeper();
 
-    /// @notice Thrown when adding a market outside the Core pool and the registered Spoke pools, or when braking a
-    ///         market whose underlying token has no PauseManager
+    /// @notice Thrown when braking a market whose underlying token has no PauseManager
     /// @param market The vToken market address
     error MarketNotSupported(address market);
 
@@ -90,19 +78,14 @@ contract MarketPauseSentinel is AccessControlledV8 {
     }
 
     /**
-     * @notice Sets EBrake, the Core pool comptroller and the Spoke PoolRegistry and disables initializers on the
-     *         implementation
+     * @notice Sets EBrake and disables initializers on the implementation
      * @param eBrake_ Address of the EBrake contract
-     * @param comptroller_ Address of the Core pool comptroller
-     * @param spokePoolRegistry_ Address of the Spoke PoolRegistry, or address(0) on chains without Spoke pools
-     * @custom:error ZeroAddress if eBrake_ or comptroller_ is the zero address
+     * @custom:error ZeroAddress if eBrake_ is the zero address
      * @custom:oz-upgrades-unsafe-allow constructor
      */
-    constructor(IEBrake eBrake_, ICorePoolComptroller comptroller_, PoolRegistryInterface spokePoolRegistry_) {
-        if (address(eBrake_) == address(0) || address(comptroller_) == address(0)) revert ZeroAddress();
+    constructor(IEBrake eBrake_) {
+        if (address(eBrake_) == address(0)) revert ZeroAddress();
         EBRAKE = eBrake_;
-        COMPTROLLER = comptroller_;
-        SPOKE_POOL_REGISTRY = spokePoolRegistry_;
         _disableInitializers();
     }
 
@@ -133,29 +116,18 @@ contract MarketPauseSentinel is AccessControlledV8 {
 
     /**
      * @notice Add a market to, or remove it from, the monitored markets
-     * @dev Adding checks the pool the market's comptroller() names: a market of COMPTROLLER (the Core pool) must be
-     *      listed there, any other market must be listed in a comptroller registered in SPOKE_POOL_REGISTRY.
-     *      The market's underlying token is not checked here; each handler checks the token it needs.
+     * @dev The market is not checked here: EBrake checks its listing when it zeroes CF, and each handler checks
+     *      the token it needs.
      * @param market The vToken market address
      * @param monitored True to add the market, false to remove it
      * @custom:access Controlled by AccessControlManager
      * @custom:event Emits MarketMonitoringUpdated
      * @custom:error ZeroAddress if market is the zero address
-     * @custom:error MarketNotSupported if, when adding, the market is not listed in the Core pool or a registered Spoke
-     *               pool
      */
     function setMarketMonitored(address market, bool monitored) external {
         _checkAccessAllowed("setMarketMonitored(address,bool)");
 
         if (market == address(0)) revert ZeroAddress();
-
-        if (monitored) {
-            address comptroller = address(IVToken(market).comptroller());
-            bool supported = comptroller == address(COMPTROLLER)
-                ? COMPTROLLER.isMarketListed(market)
-                : _isSpokeMarket(market, comptroller);
-            if (!supported) revert MarketNotSupported(market);
-        }
 
         isMarketMonitored[market] = monitored;
         emit MarketMonitoringUpdated(market, monitored);
@@ -211,19 +183,5 @@ contract MarketPauseSentinel is AccessControlledV8 {
         if (pauseManager == address(0)) return (false, underlying, address(0));
 
         isPaused = IPauseManager(pauseManager).isTokenPaused(underlying);
-    }
-
-    /**
-     * @notice Whether `market` is listed in `comptroller` and `comptroller` is registered in SPOKE_POOL_REGISTRY
-     * @param market The vToken market address
-     * @param comptroller The comptroller the market reports
-     * @return True if `market` is a listed market of a registered Spoke pool
-     */
-    function _isSpokeMarket(address market, address comptroller) internal view returns (bool) {
-        return
-            address(SPOKE_POOL_REGISTRY) != address(0) &&
-            comptroller != address(0) &&
-            SPOKE_POOL_REGISTRY.getPoolByComptroller(comptroller).comptroller == comptroller &&
-            IComptroller(comptroller).isMarketListed(market);
     }
 }

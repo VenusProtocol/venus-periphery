@@ -8,12 +8,10 @@ import { ethers, upgrades } from "hardhat";
 import type {
   IAccessControlManagerV8,
   IBStockToken,
-  IComptroller,
   IEBrake,
   IPauseManager,
   IVToken,
   MarketPauseSentinel,
-  PoolRegistryInterface,
 } from "../../../typechain";
 
 const { expect } = chai;
@@ -24,9 +22,6 @@ describe("MarketPauseSentinel", () => {
   let pauseManager: FakeContract<IPauseManager>;
   let accessControlManager: FakeContract<IAccessControlManagerV8>;
   let eBrake: FakeContract<IEBrake>;
-  let registry: FakeContract<PoolRegistryInterface>;
-  let coreComptroller: FakeContract<IComptroller>;
-  let spokeComptroller: FakeContract<IComptroller>;
   let vTSLAB: FakeContract<IVToken>;
   let vNVDAB: FakeContract<IVToken>;
   let vSPCXB: FakeContract<IVToken>;
@@ -43,23 +38,12 @@ describe("MarketPauseSentinel", () => {
   let NVDAB: string;
   let SPCXB: string;
   const ZERO_ADDRESS = ethers.constants.AddressZero;
-  // A comptroller that is neither the Core pool comptroller nor registered in the Spoke PoolRegistry
-  const OTHER_COMPTROLLER = ethers.utils.getAddress("0x0000000000000000000000000000000000000c03");
   const SET_TRUSTED_KEEPER = "setTrustedKeeper(address,bool)";
   const SET_MARKET_MONITORED = "setMarketMonitored(address,bool)";
 
   /** Sets the pause state a fake PauseManager reports for a token. */
   const setPaused = (manager: FakeContract<IPauseManager>, token: string, paused: boolean) =>
     manager.isTokenPaused.whenCalledWith(token).returns(paused);
-
-  /** PoolRegistry entry for `comptroller`; an empty one (comptroller 0) means "not registered". */
-  const pool = (comptroller: string) => ({
-    name: "",
-    creator: ZERO_ADDRESS,
-    comptroller,
-    blockPosted: 0,
-    timestampPosted: 0,
-  });
 
   /** EBrake.decreaseCF(address,uint256) fake. */
   const decreaseCF = () => eBrake["decreaseCF(address,uint256)"];
@@ -73,22 +57,14 @@ describe("MarketPauseSentinel", () => {
   }
 
   /**
-   * Resets every fake's call history and behaviour: ACM allows everything, each vToken returns its underlying
-   * and the Core pool comptroller (`coreComptroller`), only `spokeComptroller` is registered, both comptrollers list
-   * every market, every token points at `pauseManager`, and no token is paused. Fakes live outside the EVM
-   * snapshot, so this runs before every test.
+   * Resets every fake's call history and behaviour: ACM allows everything, each vToken returns its underlying,
+   * every token points at `pauseManager`, and no token is paused. Fakes live outside the EVM snapshot, so this
+   * runs before every test.
    */
   function primeFakes() {
     accessControlManager.isAllowedToCall.reset();
     accessControlManager.isAllowedToCall.returns(true);
     decreaseCF().reset();
-    registry.getPoolByComptroller.reset();
-    registry.getPoolByComptroller.returns(pool(ZERO_ADDRESS));
-    registry.getPoolByComptroller.whenCalledWith(spokeComptroller.address).returns(pool(spokeComptroller.address));
-    for (const comptroller of [coreComptroller, spokeComptroller]) {
-      comptroller.isMarketListed.reset();
-      comptroller.isMarketListed.returns(true);
-    }
     for (const [vToken, token] of [
       [vTSLAB, TSLAB],
       [vNVDAB, NVDAB],
@@ -97,7 +73,6 @@ describe("MarketPauseSentinel", () => {
       vToken.underlying.reset();
       vToken.underlying.returns(token);
       vToken.comptroller.reset();
-      vToken.comptroller.returns(coreComptroller.address);
     }
     for (const token of [tslab, nvdab, spcxb]) {
       token.pauseManager.reset();
@@ -108,19 +83,14 @@ describe("MarketPauseSentinel", () => {
   }
 
   /**
-   * Deploys the MarketPauseSentinel behind an upgradeable proxy, wired to fake ACM, EBrake, Spoke PoolRegistry
-   * and vTokens, fake bStock tokens exposing pauseManager(), and a fake PauseManager.
+   * Deploys the MarketPauseSentinel behind an upgradeable proxy, wired to fake ACM, EBrake and vTokens, fake
+   * bStock tokens exposing pauseManager(), and a fake PauseManager.
    */
   async function deployFixture() {
     [owner, user, keeper, otherKeeper] = await ethers.getSigners();
 
     accessControlManager = await smock.fake<IAccessControlManagerV8>("IAccessControlManagerV8");
     eBrake = await smock.fake<IEBrake>("IEBrake");
-    registry = await smock.fake<PoolRegistryInterface>(
-      "@venusprotocol/isolated-pools/contracts/Pool/PoolRegistryInterface.sol:PoolRegistryInterface",
-    );
-    coreComptroller = await smock.fake<IComptroller>("contracts/Interfaces/IComptroller.sol:IComptroller");
-    spokeComptroller = await smock.fake<IComptroller>("contracts/Interfaces/IComptroller.sol:IComptroller");
     vTSLAB = await smock.fake<IVToken>("contracts/Interfaces/IVToken.sol:IVToken");
     vNVDAB = await smock.fake<IVToken>("contracts/Interfaces/IVToken.sol:IVToken");
     vSPCXB = await smock.fake<IVToken>("contracts/Interfaces/IVToken.sol:IVToken");
@@ -131,7 +101,7 @@ describe("MarketPauseSentinel", () => {
 
     const Factory = await ethers.getContractFactory("MarketPauseSentinel");
     sentinel = (await upgrades.deployProxy(Factory, [accessControlManager.address], {
-      constructorArgs: [eBrake.address, coreComptroller.address, registry.address],
+      constructorArgs: [eBrake.address],
       unsafeAllow: ["constructor", "internal-function-storage"],
     })) as MarketPauseSentinel;
 
@@ -140,9 +110,6 @@ describe("MarketPauseSentinel", () => {
       pauseManager,
       accessControlManager,
       eBrake,
-      registry,
-      coreComptroller,
-      spokeComptroller,
       vTSLAB,
       vNVDAB,
       vSPCXB,
@@ -162,9 +129,6 @@ describe("MarketPauseSentinel", () => {
       pauseManager,
       accessControlManager,
       eBrake,
-      registry,
-      coreComptroller,
-      spokeComptroller,
       vTSLAB,
       vNVDAB,
       vSPCXB,
@@ -187,10 +151,8 @@ describe("MarketPauseSentinel", () => {
   // ═══════════════════════════════════════════════════════════════════
 
   describe("Initialization", () => {
-    it("should store the EBrake, Core pool comptroller and Spoke PoolRegistry addresses", async () => {
+    it("should store the EBrake address", async () => {
       expect(await sentinel.EBRAKE()).to.equal(eBrake.address);
-      expect(await sentinel.COMPTROLLER()).to.equal(coreComptroller.address);
-      expect(await sentinel.SPOKE_POOL_REGISTRY()).to.equal(registry.address);
     });
 
     it("should set the access control manager and owner", async () => {
@@ -204,21 +166,9 @@ describe("MarketPauseSentinel", () => {
       expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
     });
 
-    it("should revert with ZeroAddress when eBrake_ or comptroller_ is the zero address", async () => {
+    it("should revert with ZeroAddress when eBrake_ is the zero address", async () => {
       const Factory = await ethers.getContractFactory("MarketPauseSentinel");
-      await expect(
-        Factory.deploy(ZERO_ADDRESS, coreComptroller.address, registry.address),
-      ).to.be.revertedWithCustomError(sentinel, "ZeroAddress");
-      await expect(Factory.deploy(eBrake.address, ZERO_ADDRESS, registry.address)).to.be.revertedWithCustomError(
-        sentinel,
-        "ZeroAddress",
-      );
-    });
-
-    it("should accept a zero Spoke PoolRegistry (chains without Spoke pools)", async () => {
-      const Factory = await ethers.getContractFactory("MarketPauseSentinel");
-      const implementation = await Factory.deploy(eBrake.address, coreComptroller.address, ZERO_ADDRESS);
-      expect(await implementation.SPOKE_POOL_REGISTRY()).to.equal(ZERO_ADDRESS);
+      await expect(Factory.deploy(ZERO_ADDRESS)).to.be.revertedWithCustomError(sentinel, "ZeroAddress");
     });
 
     it("should reject re-initialization (initializer guard)", async () => {
@@ -229,7 +179,7 @@ describe("MarketPauseSentinel", () => {
 
     it("should disable initializers on the implementation", async () => {
       const Factory = await ethers.getContractFactory("MarketPauseSentinel");
-      const implementation = await Factory.deploy(eBrake.address, coreComptroller.address, registry.address);
+      const implementation = await Factory.deploy(eBrake.address);
       await expect(implementation.initialize(accessControlManager.address)).to.be.revertedWith(
         "Initializable: contract is already initialized",
       );
@@ -335,8 +285,10 @@ describe("MarketPauseSentinel", () => {
         expect(await sentinel.isMarketMonitored(vNVDAB.address)).to.equal(false);
       });
 
-      it("should not read the market's underlying or its PauseManager", async () => {
+      it("should not read the market, its underlying or its PauseManager", async () => {
+        vTSLAB.comptroller.reverts();
         await sentinel.setMarketMonitored(vTSLAB.address, true);
+        expect(vTSLAB.comptroller).to.not.have.been.called;
         expect(vTSLAB.underlying).to.not.have.been.called;
         expect(tslab.pauseManager).to.not.have.been.called;
         expect(pauseManager.isTokenPaused).to.not.have.been.called;
@@ -356,81 +308,6 @@ describe("MarketPauseSentinel", () => {
           .to.emit(sentinel, "MarketMonitoringUpdated")
           .withArgs(vTSLAB.address, true);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(true);
-      });
-    });
-
-    describe("Core pool market", () => {
-      it("should accept a market of the Core pool comptroller without querying the Spoke PoolRegistry", async () => {
-        await sentinel.setMarketMonitored(vTSLAB.address, true);
-        expect(coreComptroller.isMarketListed).to.have.been.calledOnceWith(vTSLAB.address);
-        expect(registry.getPoolByComptroller).to.not.have.been.called;
-      });
-
-      it("should revert with MarketNotSupported for a market not listed in the Core pool comptroller", async () => {
-        coreComptroller.isMarketListed.whenCalledWith(vTSLAB.address).returns(false);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
-          .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
-          .withArgs(vTSLAB.address);
-        expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
-      });
-    });
-
-    describe("Spoke pool market", () => {
-      beforeEach(() => {
-        vTSLAB.comptroller.returns(spokeComptroller.address);
-      });
-
-      it("should accept a market listed in a comptroller registered in the Spoke PoolRegistry", async () => {
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
-          .to.emit(sentinel, "MarketMonitoringUpdated")
-          .withArgs(vTSLAB.address, true);
-        expect(registry.getPoolByComptroller).to.have.been.calledOnceWith(spokeComptroller.address);
-        expect(spokeComptroller.isMarketListed).to.have.been.calledOnceWith(vTSLAB.address);
-        expect(coreComptroller.isMarketListed).to.not.have.been.called;
-      });
-
-      it("should revert with MarketNotSupported for a market not listed in its Spoke comptroller", async () => {
-        spokeComptroller.isMarketListed.returns(false);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
-          .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
-          .withArgs(vTSLAB.address);
-      });
-
-      it("should revert with MarketNotSupported for a market of an unregistered comptroller", async () => {
-        vTSLAB.comptroller.returns(OTHER_COMPTROLLER);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
-          .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
-          .withArgs(vTSLAB.address);
-        expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
-      });
-
-      it("should revert with MarketNotSupported when the registry entry names a different comptroller", async () => {
-        vTSLAB.comptroller.returns(OTHER_COMPTROLLER);
-        registry.getPoolByComptroller.whenCalledWith(OTHER_COMPTROLLER).returns(pool(spokeComptroller.address));
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
-          .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
-          .withArgs(vTSLAB.address);
-      });
-
-      it("should revert with MarketNotSupported for a market reporting the zero comptroller", async () => {
-        vTSLAB.comptroller.returns(ZERO_ADDRESS);
-        await expect(sentinel.setMarketMonitored(vTSLAB.address, true))
-          .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
-          .withArgs(vTSLAB.address);
-      });
-
-      it("should reject Spoke markets but accept Core markets when the Spoke PoolRegistry is address(0)", async () => {
-        const Factory = await ethers.getContractFactory("MarketPauseSentinel");
-        const sentinelWithoutSpoke = (await upgrades.deployProxy(Factory, [accessControlManager.address], {
-          constructorArgs: [eBrake.address, coreComptroller.address, ZERO_ADDRESS],
-          unsafeAllow: ["constructor", "internal-function-storage"],
-        })) as MarketPauseSentinel;
-
-        await expect(sentinelWithoutSpoke.setMarketMonitored(vTSLAB.address, true))
-          .to.be.revertedWithCustomError(sentinelWithoutSpoke, "MarketNotSupported")
-          .withArgs(vTSLAB.address);
-        await sentinelWithoutSpoke.setMarketMonitored(vNVDAB.address, true);
-        expect(await sentinelWithoutSpoke.isMarketMonitored(vNVDAB.address)).to.equal(true);
       });
     });
 
@@ -457,7 +334,6 @@ describe("MarketPauseSentinel", () => {
         expect(vTSLAB.underlying).to.not.have.been.called;
         expect(vTSLAB.comptroller).to.not.have.been.called;
         expect(tslab.pauseManager).to.not.have.been.called;
-        expect(coreComptroller.isMarketListed).to.not.have.been.called;
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
       });
 

@@ -231,7 +231,7 @@ async function deployFixture(): Promise<Fixture> {
 
   // Deploy the sentinel behind a transparent proxy administered by the DefaultProxyAdmin
   const SentinelFactory = await ethers.getContractFactory("MarketPauseSentinel", deployer);
-  const implementation = await SentinelFactory.deploy(eBrake.address, COMPTROLLER, ethers.constants.AddressZero);
+  const implementation = await SentinelFactory.deploy(eBrake.address);
   const ProxyFactory = await ethers.getContractFactory(
     "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy",
     deployer,
@@ -298,7 +298,6 @@ if (FORK_MAINNET) {
       describe("1. Setup", () => {
         it("should point at the live Core EBrake and comptroller", async () => {
           expect(await sentinel.EBRAKE()).to.equal(eBrake.address);
-          expect(await sentinel.COMPTROLLER()).to.equal(ethers.utils.getAddress(COMPTROLLER));
           expect(await eBrake.IS_REMOTE_CHAIN()).to.equal(false);
           expect(await eBrake.COMPTROLLER()).to.equal(ethers.utils.getAddress(COMPTROLLER));
         });
@@ -762,10 +761,8 @@ const TESTNET_FORK_BLOCK = 135747000;
 const TESTNET_ACM = "0x45f8a08F534f34A97187626E05d4b6648Eeaa9AA";
 const TESTNET_TIMELOCK = "0xce10739590001705F7FF231611ba4A48B2820327"; // ACM admin
 const TESTNET_CORE_COMPTROLLER = "0x94d1820b2D1c7c7452A163983Dc888CEC546b77D";
-const SPOKE_POOL_REGISTRY = "0xeAA45288d804971e5a76f33559e629F5b2b1Cb8B";
 const HUB_SPOKE_COMPTROLLER = "0x11960c84d6c4F2a978a12372721C3A6A88C78f4c";
 const vNVDAB_HUB_SPOKE = "0x41A860F11Ddb71ed7d3063aE43dF0e9741B4eed3";
-const vUSDT_DEFI = "0x80CC30811e362aC9aB857C3d7875CbcCc0b65750"; // isolated pool outside the Spoke registry
 const HUB_NVDAB = { cf: parseUnits("0.5"), lt: parseUnits("0.6") };
 
 const SPOKE_COMPTROLLER_ABI = [
@@ -782,7 +779,7 @@ type SpokeFixture = {
 };
 
 /**
- * Deploys EBrake and MarketPauseSentinel (with the Spoke PoolRegistry) from the repo and makes the grants a VIP
+ * Deploys EBrake and MarketPauseSentinel from the repo and makes the grants a VIP
  * would make. The testnet NVDAB is a mock without pauseManager(), so a fake bStock pointing to a fake PauseManager
  * takes its place.
  */
@@ -799,7 +796,7 @@ async function deploySpokeFixture(): Promise<SpokeFixture> {
   const sentinel = (
     (await upgrades.deployProxy(await ethers.getContractFactory("MarketPauseSentinel"), [TESTNET_ACM], {
       ...deployOptions,
-      constructorArgs: [eBrake.address, TESTNET_CORE_COMPTROLLER, SPOKE_POOL_REGISTRY],
+      constructorArgs: [eBrake.address],
     })) as MarketPauseSentinel
   ).connect(timelock);
 
@@ -839,17 +836,11 @@ if (FORK_TESTNET) {
         pauseManager.isTokenPaused.reset();
       });
 
-      it("should monitor a market of a comptroller registered in the Spoke PoolRegistry", async () => {
+      it("should monitor a Spoke pool market", async () => {
         await expect(sentinel.setMarketMonitored(vNVDAB_HUB_SPOKE, true))
           .to.emit(sentinel, "MarketMonitoringUpdated")
           .withArgs(vNVDAB_HUB_SPOKE, true);
         expect(await sentinel.isMarketMonitored(vNVDAB_HUB_SPOKE)).to.equal(true);
-      });
-
-      it("should refuse a market of an isolated pool outside the Spoke PoolRegistry", async () => {
-        await expect(sentinel.setMarketMonitored(vUSDT_DEFI, true))
-          .to.be.revertedWithCustomError(sentinel, "MarketNotSupported")
-          .withArgs(vUSDT_DEFI);
       });
 
       it("should zero CF on the Spoke comptroller while the token is paused, keeping LT and snapshotting both", async () => {

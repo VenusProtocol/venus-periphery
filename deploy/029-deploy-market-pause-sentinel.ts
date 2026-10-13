@@ -21,8 +21,7 @@ async function verify(address: string | undefined, constructorArguments: unknown
 }
 
 /**
- * Deploys MarketPauseSentinel (wired to EBrake, the Core pool comptroller and the network's Spoke PoolRegistry, if any)
- * behind a transparent proxy owned by DefaultProxyAdmin.
+ * Deploys MarketPauseSentinel (wired to EBrake) behind a transparent proxy owned by DefaultProxyAdmin.
  *
  * The VIP grants the sentinel EBrake's `decreaseCF(address,uint256)`, grants `setMarketMonitored(address,bool)`
  * and registers the monitored markets. This script does neither.
@@ -43,23 +42,13 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     console.log("EBrake not deployed, skipping MarketPauseSentinel deployment");
     return;
   }
-  const comptroller = await getContractAddressOrNullAddress(deployments, "Unitroller");
-  if (comptroller === ethers.constants.AddressZero) {
-    console.log("Unitroller not deployed, skipping MarketPauseSentinel deployment");
-    return;
-  }
 
   const defaultProxyAdmin = await hre.artifacts.readArtifact(
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
   );
 
-  // TODO: update spokePoolRegistry address once deployed on the respective chain
-  const spokePoolRegistry = ADDRESSES.preconfiguredAddresses.SpokePoolRegistry ?? ethers.constants.AddressZero;
-
-  const constructorArgs = [eBrake, comptroller, spokePoolRegistry];
-  console.log(
-    `MarketPauseSentinel constructor args: EBrake ${eBrake}, Comptroller ${comptroller}, SpokePoolRegistry ${spokePoolRegistry}`,
-  );
+  const constructorArgs = [eBrake];
+  console.log(`MarketPauseSentinel constructor args: EBrake ${eBrake}`);
   const result = await deploy("MarketPauseSentinel", {
     contract: "MarketPauseSentinel",
     from: deployer,
