@@ -164,6 +164,7 @@ describe("MarketPauseSentinel", () => {
     it("should start with no trusted keepers and no monitored markets", async () => {
       expect(await sentinel.trustedKeepers(keeper.address)).to.equal(false);
       expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
+      expect(await sentinel.getMonitoredMarkets()).to.deep.equal([]);
     });
 
     it("should revert with ZeroAddress when eBrake_ is the zero address", async () => {
@@ -283,6 +284,7 @@ describe("MarketPauseSentinel", () => {
         expect(await emittedEvents(tx)).to.deep.equal(["MarketMonitoringUpdated"]);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(true);
         expect(await sentinel.isMarketMonitored(vNVDAB.address)).to.equal(false);
+        expect(await sentinel.getMonitoredMarkets()).to.deep.equal([vTSLAB.address]);
       });
 
       it("should not read the market, its underlying or its PauseManager", async () => {
@@ -308,6 +310,7 @@ describe("MarketPauseSentinel", () => {
           .to.emit(sentinel, "MarketMonitoringUpdated")
           .withArgs(vTSLAB.address, true);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(true);
+        expect(await sentinel.getMonitoredMarkets()).to.deep.equal([vTSLAB.address]);
       });
     });
 
@@ -324,6 +327,7 @@ describe("MarketPauseSentinel", () => {
         expect(await emittedEvents(tx)).to.deep.equal(["MarketMonitoringUpdated"]);
         expect(await sentinel.isMarketMonitored(vTSLAB.address)).to.equal(false);
         expect(await sentinel.isMarketMonitored(vNVDAB.address)).to.equal(true);
+        expect(await sentinel.getMonitoredMarkets()).to.deep.equal([vNVDAB.address]);
       });
 
       it("should not read the underlying, the token or the comptroller when removing", async () => {
@@ -350,6 +354,7 @@ describe("MarketPauseSentinel", () => {
           .to.emit(sentinel, "MarketMonitoringUpdated")
           .withArgs(vSPCXB.address, false);
         expect(await sentinel.isMarketMonitored(vSPCXB.address)).to.equal(false);
+        expect(await sentinel.getMonitoredMarkets()).to.have.members([vTSLAB.address, vNVDAB.address]);
       });
 
       it("should revert with ZeroAddress when market is address(0)", async () => {

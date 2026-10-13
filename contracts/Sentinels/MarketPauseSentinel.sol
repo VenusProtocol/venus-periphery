@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity ^0.8.25;
 
+import { EnumerableSetUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/structs/EnumerableSetUpgradeable.sol";
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 import { IEBrake } from "../EmergencyBrake/IEBrake.sol";
 import { IBStockToken } from "../Interfaces/IBStockToken.sol";
@@ -26,6 +27,8 @@ import { IVToken } from "../Interfaces/IVToken.sol";
  *      - handleBStockPause is called by trusted keepers; EBrake makes repeat calls no-ops.
  */
 contract MarketPauseSentinel is AccessControlledV8 {
+    using EnumerableSetUpgradeable for EnumerableSetUpgradeable.AddressSet;
+
     /// @notice Emergency Brake contract used to zero the collateral factor
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IEBrake public immutable EBRAKE;
@@ -33,11 +36,11 @@ contract MarketPauseSentinel is AccessControlledV8 {
     /// @notice Whether a keeper is trusted to call handleBStockPause
     mapping(address => bool) public trustedKeepers;
 
-    /// @notice Whether a vToken market is monitored, i.e. handleBStockPause may zero its CF
-    mapping(address => bool) public isMarketMonitored;
+    /// @dev The monitored vToken markets, i.e. the markets handleBStockPause may zero the CF of
+    EnumerableSetUpgradeable.AddressSet private monitoredMarkets;
 
     /// @dev Storage gap for future upgrades
-    uint256[48] private __gap;
+    uint256[47] private __gap;
 
     /// @notice Emitted when a keeper's trusted status is updated
     /// @param keeper The keeper address
@@ -129,7 +132,11 @@ contract MarketPauseSentinel is AccessControlledV8 {
 
         if (market == address(0)) revert ZeroAddress();
 
-        isMarketMonitored[market] = monitored;
+        if (monitored) {
+            monitoredMarkets.add(market);
+        } else {
+            monitoredMarkets.remove(market);
+        }
         emit MarketMonitoringUpdated(market, monitored);
     }
 
@@ -148,7 +155,7 @@ contract MarketPauseSentinel is AccessControlledV8 {
      * @custom:error MarketNotSupported if the underlying token has no PauseManager
      */
     function handleBStockPause(address market) external onlyKeeper {
-        if (!isMarketMonitored[market]) revert MarketNotMonitored(market);
+        if (!isMarketMonitored(market)) revert MarketNotMonitored(market);
 
         (bool isPaused, address underlying, address pauseManager) = checkBStockPause(market);
         if (pauseManager == address(0)) revert MarketNotSupported(market);
@@ -157,6 +164,14 @@ contract MarketPauseSentinel is AccessControlledV8 {
         EBRAKE.decreaseCF(market, 0);
 
         emit BStockPauseHandled(market, underlying, pauseManager);
+    }
+
+    /**
+     * @notice The monitored vToken markets
+     * @return The monitored market addresses, in no particular order
+     */
+    function getMonitoredMarkets() external view returns (address[] memory) {
+        return monitoredMarkets.values();
     }
 
     /**
@@ -174,7 +189,7 @@ contract MarketPauseSentinel is AccessControlledV8 {
     function checkBStockPause(
         address market
     ) public view returns (bool isPaused, address underlying, address pauseManager) {
-        if (!isMarketMonitored[market]) return (false, address(0), address(0));
+        if (!isMarketMonitored(market)) return (false, address(0), address(0));
 
         underlying = IVToken(market).underlying();
         if (underlying == address(0)) return (false, address(0), address(0));
@@ -183,5 +198,14 @@ contract MarketPauseSentinel is AccessControlledV8 {
         if (pauseManager == address(0)) return (false, underlying, address(0));
 
         isPaused = IPauseManager(pauseManager).isTokenPaused(underlying);
+    }
+
+    /**
+     * @notice Whether a vToken market is monitored, i.e. handleBStockPause may zero its CF
+     * @param market The vToken market address
+     * @return True if the market is monitored
+     */
+    function isMarketMonitored(address market) public view returns (bool) {
+        return monitoredMarkets.contains(market);
     }
 }

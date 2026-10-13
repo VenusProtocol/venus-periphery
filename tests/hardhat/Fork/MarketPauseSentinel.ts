@@ -319,6 +319,7 @@ if (FORK_MAINNET) {
             expect(await sentinel.isMarketMonitored(vToken)).to.equal(true);
           }
           expect(await sentinel.isMarketMonitored(vUSDT)).to.equal(false);
+          expect(await sentinel.getMonitoredMarkets()).to.have.members(BSTOCK_MARKETS.map(({ vToken }) => vToken));
         });
 
         it("should start with no bStock paused and the pinned core CF/LT, without an EBrake snapshot", async () => {
