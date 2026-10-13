@@ -37,6 +37,7 @@ import * as path from "path";
 
 const EBRAKE_ABI = [
   "function IS_REMOTE_CHAIN() view returns (bool)",
+  "function IS_ISOLATED_POOL() view returns (bool)",
   "function pauseActions(address[],uint8[])",
   "function pauseFlashLoan()",
   "function revokeFlashLoanAccess(address)",

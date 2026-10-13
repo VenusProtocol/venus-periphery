@@ -90,8 +90,9 @@ export async function retry<T = any>(fn: () => Promise<T>, retries = 3, delayMs 
 
 const OUTPUT_DIR = path.resolve(__dirname, "data");
 
-const EBRAKE_ABI = [
+export const EBRAKE_ABI = [
   "function IS_REMOTE_CHAIN() view returns (bool)",
+  "function IS_ISOLATED_POOL() view returns (bool)",
   "function COMPTROLLER() view returns (address)",
   "function pauseActions(address[],uint8[])",
   "function pauseSupply(address)",
