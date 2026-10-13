@@ -6,19 +6,19 @@ import { ContractTransaction } from "ethers";
 import { ethers, upgrades } from "hardhat";
 
 import type {
+  BStockPauseSentinel,
   IAccessControlManagerV8,
   IBStockToken,
   IEBrake,
   IPauseManager,
   IVToken,
-  MarketPauseSentinel,
 } from "../../../typechain";
 
 const { expect } = chai;
 chai.use(smock.matchers);
 
-describe("MarketPauseSentinel", () => {
-  let sentinel: MarketPauseSentinel;
+describe("BStockPauseSentinel", () => {
+  let sentinel: BStockPauseSentinel;
   let pauseManager: FakeContract<IPauseManager>;
   let accessControlManager: FakeContract<IAccessControlManagerV8>;
   let eBrake: FakeContract<IEBrake>;
@@ -83,7 +83,7 @@ describe("MarketPauseSentinel", () => {
   }
 
   /**
-   * Deploys the MarketPauseSentinel behind an upgradeable proxy, wired to fake ACM, EBrake and vTokens, fake
+   * Deploys the BStockPauseSentinel behind an upgradeable proxy, wired to fake ACM, EBrake and vTokens, fake
    * bStock tokens exposing pauseManager(), and a fake PauseManager.
    */
   async function deployFixture() {
@@ -99,11 +99,11 @@ describe("MarketPauseSentinel", () => {
     spcxb = await smock.fake<IBStockToken>("IBStockToken");
     pauseManager = await smock.fake<IPauseManager>("contracts/Interfaces/IPauseManager.sol:IPauseManager");
 
-    const Factory = await ethers.getContractFactory("MarketPauseSentinel");
+    const Factory = await ethers.getContractFactory("BStockPauseSentinel");
     sentinel = (await upgrades.deployProxy(Factory, [accessControlManager.address], {
       constructorArgs: [eBrake.address],
       unsafeAllow: ["constructor", "internal-function-storage"],
-    })) as MarketPauseSentinel;
+    })) as BStockPauseSentinel;
 
     return {
       sentinel,
@@ -168,7 +168,7 @@ describe("MarketPauseSentinel", () => {
     });
 
     it("should revert with ZeroAddress when eBrake_ is the zero address", async () => {
-      const Factory = await ethers.getContractFactory("MarketPauseSentinel");
+      const Factory = await ethers.getContractFactory("BStockPauseSentinel");
       await expect(Factory.deploy(ZERO_ADDRESS)).to.be.revertedWithCustomError(sentinel, "ZeroAddress");
     });
 
@@ -179,7 +179,7 @@ describe("MarketPauseSentinel", () => {
     });
 
     it("should disable initializers on the implementation", async () => {
-      const Factory = await ethers.getContractFactory("MarketPauseSentinel");
+      const Factory = await ethers.getContractFactory("BStockPauseSentinel");
       const implementation = await Factory.deploy(eBrake.address);
       await expect(implementation.initialize(accessControlManager.address)).to.be.revertedWith(
         "Initializable: contract is already initialized",

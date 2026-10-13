@@ -9,12 +9,10 @@ import { IPauseManager } from "../Interfaces/IPauseManager.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
 
 /**
- * @title MarketPauseSentinel
+ * @title BStockPauseSentinel
  * @author Venus
- * @notice Keeper-driven sentinel that tightens monitored markets through EBrake when their underlying token
- *         reports a condition that blocks its transfers. bStocks (tokenized equity) are handled by
- *         handleBStockPause, which zeroes the collateral factor (CF) while the issuer's PauseManager reports the
- *         token as paused.
+ * @notice Keeper-driven sentinel that zeroes the collateral factor (CF) of monitored bStock (tokenized equity)
+ *         markets through EBrake while the issuer's PauseManager reports the token as paused.
  * @dev A paused bStock cannot be transferred. Liquidations still seize its vTokens, but no one can redeem them
  *      for the bStock until the pause ends, so liquidators cannot exit. Zeroing CF stops new debt against the
  *      collateral, while the liquidation threshold (LT) is left unchanged so existing positions are not pushed
@@ -26,7 +24,7 @@ import { IVToken } from "../Interfaces/IVToken.sol";
  *        calls EBrake.resetCFSnapshot().
  *      - handleBStockPause is called by trusted keepers; EBrake makes repeat calls no-ops.
  */
-contract MarketPauseSentinel is AccessControlledV8 {
+contract BStockPauseSentinel is AccessControlledV8 {
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.AddressSet;
 
     /// @notice Emergency Brake contract used to zero the collateral factor
@@ -119,8 +117,8 @@ contract MarketPauseSentinel is AccessControlledV8 {
 
     /**
      * @notice Add a market to, or remove it from, the monitored markets
-     * @dev The market is not checked here: EBrake checks its listing when it zeroes CF, and each handler checks
-     *      the token it needs.
+     * @dev The market is not checked here: EBrake checks its listing when it zeroes CF, and handleBStockPause
+     *      checks its token.
      * @param market The vToken market address
      * @param monitored True to add the market, false to remove it
      * @custom:access Controlled by AccessControlManager

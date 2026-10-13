@@ -21,7 +21,7 @@ async function verify(address: string | undefined, constructorArguments: unknown
 }
 
 /**
- * Deploys MarketPauseSentinel (wired to EBrake) behind a transparent proxy owned by DefaultProxyAdmin.
+ * Deploys BStockPauseSentinel (wired to EBrake) behind a transparent proxy owned by DefaultProxyAdmin.
  *
  * The VIP grants the sentinel EBrake's `decreaseCF(address,uint256)`, grants `setMarketMonitored(address,bool)`
  * and registers the monitored markets. This script does neither.
@@ -31,7 +31,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   const { deployer } = await getNamedAccounts();
   // On a local fork, `network.name` is "hardhat"; getNetworkName() returns the forked network
   const networkName = hre.getNetworkName();
-  console.log(`Deploying MarketPauseSentinel on ${networkName} with the account: ${deployer}`);
+  console.log(`Deploying BStockPauseSentinel on ${networkName} with the account: ${deployer}`);
   const ADDRESSES = await getConfig(networkName);
 
   const accessControlManager = ADDRESSES.preconfiguredAddresses.AccessControlManager;
@@ -39,7 +39,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
 
   const eBrake = await getContractAddressOrNullAddress(deployments, "EBrake");
   if (eBrake === ethers.constants.AddressZero) {
-    console.log("EBrake not deployed, skipping MarketPauseSentinel deployment");
+    console.log("EBrake not deployed, skipping BStockPauseSentinel deployment");
     return;
   }
 
@@ -48,9 +48,9 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   );
 
   const constructorArgs = [eBrake];
-  console.log(`MarketPauseSentinel constructor args: EBrake ${eBrake}`);
-  const result = await deploy("MarketPauseSentinel", {
-    contract: "MarketPauseSentinel",
+  console.log(`BStockPauseSentinel constructor args: EBrake ${eBrake}`);
+  const result = await deploy("BStockPauseSentinel", {
+    contract: "BStockPauseSentinel",
     from: deployer,
     log: true,
     deterministicDeployment: false,
@@ -70,19 +70,19 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
   });
 
   if (result.newlyDeployed && network.live) {
-    console.log(`MarketPauseSentinel proxy deployed at: ${result.address}`);
+    console.log(`BStockPauseSentinel proxy deployed at: ${result.address}`);
     await verify(result.implementation, constructorArgs);
   }
 
-  const sentinel = await hre.ethers.getContract("MarketPauseSentinel");
+  const sentinel = await hre.ethers.getContract("BStockPauseSentinel");
   if (network.live && (await sentinel.owner()) === deployer && (await sentinel.pendingOwner()) !== timelock) {
     await sentinel.transferOwnership(timelock);
-    console.log(`MarketPauseSentinel ownership transferred to timelock: ${timelock}`);
+    console.log(`BStockPauseSentinel ownership transferred to timelock: ${timelock}`);
   }
 };
 
 export default func;
-func.tags = ["market-pause-sentinel"];
+func.tags = ["bstock-pause-sentinel"];
 // No `dependencies = ["ebrake"]`: EBrake is already live and only its address is needed.
 // Depending on the "ebrake" tag would re-run 021, which redeploys EBrake if the local bytecode differs.
 func.skip = async (hre: HardhatRuntimeEnvironment) => !SUPPORTED_NETWORKS.includes(hre.getNetworkName());
