@@ -58,7 +58,7 @@ interface ICollateralGateway {
      * @notice Emitted on a completed supply into a Spoke Pool market.
      * @param user Caller whose underlying was supplied, and the account credited and entered.
      * @param vToken Spoke market the underlying was supplied to.
-     * @param assets Underlying that reached the market, after any transfer fee.
+     * @param assets Underlying that reached the gateway, after any transfer fee from `user`.
      * @param vTokens Market receipts credited to `user`.
      */
     event SuppliedToSpoke(address indexed user, address indexed vToken, uint256 assets, uint256 vTokens);
