@@ -108,6 +108,7 @@ export const preconfiguredAddresses = {
     NormalTimelock: governanceBscMainnet.NormalTimelock.address,
     AccessControlManager: governanceBscMainnet.AccessControlManager.address,
     ResilientOracle: oracleBscMainnet.ResilientOracle.address,
+    SpokePoolRegistry: "0x372D0eE44993B5c6eb641364BAB939311e8e5B4c",
   },
   sepolia: {
     NormalTimelock: governanceSepolia.NormalTimelock.address,
