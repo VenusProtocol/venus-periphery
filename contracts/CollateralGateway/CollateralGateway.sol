@@ -47,9 +47,9 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
     /// @notice The Core Comptroller that every Core function of this gateway runs against.
     IComptroller public immutable COMPTROLLER;
 
-    /// @dev The migration in flight, readable by the flash-loan callback. Written just before
-    ///      `supplyFromCollateral` takes a flash loan and dropped with the transaction. A zero
-    ///      `_migrationUser` means no migration is in flight.
+    /// @dev Migration state, cleared at the end of the transaction. {_migrateViaFlashLoan} writes
+    ///      `_migrationUser` through `_migrationFlashAmount` before the flash loan. {executeOperation}
+    ///      writes `_migrationShares` and `_migrationVTokens` during it.
     address transient _migrationUser;
     address transient _migrationVToken;
     uint256 transient _migrationVTokenAmount;
@@ -160,8 +160,18 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
         if (walletShares > shares) walletShares = shares;
         if (walletShares != 0) IERC20(hub).safeTransferFrom(msg.sender, address(this), walletShares);
 
+        // The Core leg runs only with receipts to free and a delegate grant to free them with.
+        // Without either it would revert and take the wallet leg down with it. Receipts alone are
+        // not enough: anyone can mint them to anyone through `mintBehalf`.
         uint256 freedShares;
-        if (walletShares < shares) freedShares = _freeFromMarket(hub, vhMarket, shares - walletShares);
+        if (
+            walletShares < shares &&
+            IVToken(vhMarket).balanceOf(msg.sender) != 0 &&
+            COMPTROLLER.approvedDelegates(msg.sender, address(this))
+        ) {
+            freedShares = _freeFromMarket(hub, vhMarket, shares - walletShares);
+        }
+        if (walletShares + freedShares == 0) revert NothingReceived();
 
         assets = IHub(hub).redeem(walletShares + freedShares, msg.sender, address(this));
         if (assets < minAssets) revert InsufficientAssets(assets, minAssets);
@@ -241,6 +251,9 @@ contract CollateralGateway is ICollateralGateway, IFlashLoanReceiver, Reentrancy
 
         emit TokenSwept(address(token), recipient, balance);
     }
+
+    /// @notice Disabled: a no-op for the owner, so ownership cannot be renounced.
+    function renounceOwnership() public override onlyOwner {}
 
     /// @dev Reverts when the gateway holds less of `asset` than `balanceBefore`, meaning a market
     ///      or Hub in this migration spent tokens the gateway held before the call.

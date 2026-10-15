@@ -177,6 +177,21 @@ contract CollateralGateway_SupplyTest is Test {
         gateway.sweepToken(IERC20(address(usdt)));
     }
 
+    // ------------------------------------------------------------------ ownership
+
+    function test_renounceOwnership_keepsTheOwner() public {
+        vm.prank(owner);
+        gateway.renounceOwnership();
+
+        assertEq(gateway.owner(), owner, "owner unchanged");
+    }
+
+    function testRevert_renounceOwnership_fromANonOwner() public {
+        vm.expectRevert("Ownable: caller is not the owner");
+        vm.prank(user);
+        gateway.renounceOwnership();
+    }
+
     /// @dev An unlisted market is the caller's own address, and with it the hub and the asset the
     ///      rest of the call is validated against.
     function testRevert_supplyFromWallet_whenTheMarketIsNotListed() public {
