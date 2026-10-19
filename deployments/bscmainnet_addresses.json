@@ -2,6 +2,7 @@
   "name": "bscmainnet",
   "chainId": "56",
   "addresses": {
+    "CollateralGateway": "0xd0F7B94BF06675D13e8bA9a2546835a1c32a80b8",
     "DeviationSentinel": "0x6599C15cc8407046CD91E5c0F8B7f765fF914870",
     "DeviationSentinel_Implementation": "0xc86153Ae39fc9B60Ff59E99cA75aAD5Ab9d28a87",
     "DeviationSentinel_Proxy": "0x6599C15cc8407046CD91E5c0F8B7f765fF914870",
