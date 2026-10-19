@@ -38,12 +38,12 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @param MonitoringDisabled This YieldGroup/resource pair is not armed in `navGuardConfigs`
     /// @param YieldGroupNotRegistered The Hub does not list the supplied YieldGroup
     /// @param ResourceNotRegistered The YieldGroup does not list the supplied resource
-    /// @param ObservedValueZero The value source read back zero, so there is nothing to compare
+    /// @param ObservedValueZero The value source read back zero, but nothing is worth pausing for
     /// @param CentreZero The band is closed, but nothing is worth pausing for — see `checkNavGuardDeviation`
     /// @param WithinThreshold Not past either threshold, or past one by a gap too small against the
     ///        Hub's NAV to pause for — see `minHubNavGapBps`
-    /// @param Breached A pause is due: the value is past a threshold, or a closed band is valuing a
-    ///        live position at zero, and the gap is over `minHubNavGapBps` of the Hub's NAV
+    /// @param Breached A pause is due: the value is past a threshold or reads zero, or a closed band is
+    ///        valuing a live position at zero, and the gap is over `minHubNavGapBps` of the Hub's NAV
     enum NavGuardCheckStatus {
         MonitoringDisabled,
         YieldGroupNotRegistered,
@@ -177,8 +177,7 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @notice Thrown when the value source reports zero
     /// @dev Either a read that failed or a position the counterparty prices at nothing: the Hub
     ///      drops the readable flag in `navGuardStatus`, so the two arrive here as the same zero.
-    ///      Neither is treated as a breach, which matches the Hub refusing to close a band on a
-    ///      published zero. A genuine write-off is a governance action, not a sentinel pause.
+    ///      A failed read never pauses, as the Hub NAV read reverts with it.
     error NavGuardObservedValueZero(address resource);
 
     /// @notice Thrown when the band is closed but nothing here is mis-valued enough to pause for
@@ -367,9 +366,9 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     ///      monitoring reads and what the keeper acts on cannot drift apart.
     ///      Can revert: `yieldGroup` is caller-supplied, so a non-contract address or a revert
     ///      inside it propagates out. The Hub address is not, but once a threshold is crossed, or on
-    ///      a closed band, this reads `Hub.totalAssets()`, which reverts whenever any YieldGroup's
-    ///      valuation does. Not pausing then costs nothing: every Hub deposit and redemption is
-    ///      priced from that same read, so they revert too.
+    ///      a zero reading or a closed band, this reads `Hub.totalAssets()`, which reverts whenever
+    ///      any YieldGroup's valuation does. Not pausing then costs nothing: every Hub deposit and
+    ///      redemption is priced from that same read, so they revert too.
     /// @param yieldGroup The YieldGroup holding the resource
     /// @param resource The resource whose NavGuard band to read
     /// @return status Why a pause is or is not due
@@ -420,14 +419,11 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
         // - `observedValue` is 0 when unreadable or priced at nothing, which is below every threshold.
         // - `centre` is 0 after a full exit closes the band, which makes every threshold 0.
         if (observedValue == 0) {
-            return (
-                NavGuardCheckStatus.ObservedValueZero,
-                hub,
-                observedValue,
-                centre,
-                minAllowedValue,
-                maxAllowedValue
-            );
+            // On an open band a zero is a full loss, with the whole centre as the gap.
+            bool zeroReadingBreached = centre != 0 && config.pauseDownBps != 0 && _exceedsMinHubNavGap(hub, centre);
+
+            status = zeroReadingBreached ? NavGuardCheckStatus.Breached : NavGuardCheckStatus.ObservedValueZero;
+            return (status, hub, observedValue, centre, minAllowedValue, maxAllowedValue);
         }
         if (centre == 0) {
             // The band is closed but the position still reports a value. With the cap on, the Hub

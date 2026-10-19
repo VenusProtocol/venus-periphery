@@ -537,10 +537,21 @@ if (FORK_MAINNET) {
           await expect(f.yieldGroup.totalAssets()).to.be.revertedWithCustomError(f.yieldGroup, "ZeroSharePrice");
           await expect(f.hub.totalAssets()).to.be.reverted;
 
-          const check = await f.sentinel.checkNavGuardDeviation(CENTRIFUGE_SOURCE, JTRSY.vault);
-          expect(check.status).to.equal(Status.ObservedValueZero);
-          await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "NavGuardObservedValueZero");
+          await expect(f.sentinel.checkNavGuardDeviation(CENTRIFUGE_SOURCE, JTRSY.vault)).to.be.reverted;
+          await expect(runKeeper(f)).to.be.reverted;
           expect(await f.hub.hubPaused()).to.be.false;
+        });
+
+        // A share sweep empties the position without telling the band, leaving it open over a zero.
+        it("pauses the Hub when an open band reads back zero", async () => {
+          await f.acm.giveCallPermission(CENTRIFUGE_SOURCE, "sweep(address,address)", NORMAL_TIMELOCK);
+          await (await connectFund(JTRSY, USDT, NORMAL_TIMELOCK)).admit();
+          await f.yieldGroup.connect(f.timelock).sweep(JTRSY.share, NORMAL_TIMELOCK);
+
+          expect((await f.yieldGroup.navGuardStatus(JTRSY.vault)).observedValue).to.equal(0);
+          expect(await bandCentre(f)).to.be.gt(0);
+
+          await expectHubPaused(f, await runKeeper(f), BigNumber.from(0));
         });
 
         it("re-measures against the new centre once governance retunes the band", async () => {

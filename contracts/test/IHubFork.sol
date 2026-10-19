@@ -100,6 +100,8 @@ interface IYieldGroupCentrifugeFork is IYieldGroupNav {
 
     function claimRedeem(address resource) external returns (uint256 assets);
 
+    function sweep(address token, address to) external;
+
     /// @notice Writes off a position governance can no longer claim. Only reachable while the Hub is paused.
     function forceRemoveResource(address resource) external;
 

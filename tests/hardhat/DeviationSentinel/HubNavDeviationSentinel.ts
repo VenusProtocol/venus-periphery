@@ -504,7 +504,31 @@ describe("HubNavDeviationSentinel", () => {
     // `observed < min` would take that for a 100% drop and freeze the Hub on a transient failure.
     it("does not pause on an unreadable value source reporting zero", async () => {
       navGuardStatus(0, false);
+      hub.totalAssets.reverts();
 
+      await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE)).to.be.reverted;
+      expect(eBrake.pauseHub).to.have.callCount(0);
+    });
+
+    it("pauses when an open band reads back zero", async () => {
+      navGuardStatus(0, false);
+
+      await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
+        .to.emit(sentinel, "NavGuardDeviationHandled")
+        .withArgs(hub.address, yieldGroup.address, RESOURCE, 0, CENTRE, MIN, MAX);
+      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
+    });
+
+    // 1% of a 150,000 Hub is the whole 1,500 centre.
+    it("ignores a zero reading within minHubNavGapBps of the Hub's NAV, or with the downside unwatched", async () => {
+      navGuardStatus(0, false);
+      hub.totalAssets.returns(150_000);
+      await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
+        .to.be.revertedWithCustomError(sentinel, "NavGuardObservedValueZero")
+        .withArgs(RESOURCE);
+
+      hub.totalAssets.returns(0);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0);
       await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
         .to.be.revertedWithCustomError(sentinel, "NavGuardObservedValueZero")
         .withArgs(RESOURCE);
@@ -606,7 +630,8 @@ describe("HubNavDeviationSentinel", () => {
     // nothing about the position, a zero centre with the cap off says nothing to compare a real
     // reading against.
     it("tells a zero reading apart from a zero centre", async () => {
-      navGuardStatus(0, false);
+      yieldGroup.navGuardStatus.returns([0, 0, 0, false, 0]);
+      navBand(0);
       expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(
         Status.ObservedValueZero,
       );
@@ -779,9 +804,10 @@ describe("HubNavDeviationSentinel", () => {
       expect(yieldGroup.navGuardStatus).to.not.have.been.called;
     });
 
-    it("reports ObservedValueZero on an unreadable value source, and still hands back what it read", async () => {
+    it("reports ObservedValueZero on a zero it does not pause for, and still hands back what it read", async () => {
       // A caller comparing observedValue against the floor itself would read this 0 as a total loss.
       // The band comes back anyway, so an alert can report what was actually seen.
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0);
       navGuardStatus(0, false);
 
       const result = await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE);
