@@ -34,14 +34,16 @@ const Status = {
 
 // The exact strings the setters ask the ACM for, and therefore the exact strings an onboarding
 // VIP has to grant. A typo costs nothing at compile time and silently grants nothing on chain.
-const SET_CONFIG_ROLE = "setHubNavConfig(address,address,uint16,uint16)";
+const SET_CONFIG_ROLE = "setHubNavConfig(address,address,uint16,uint16,uint256)";
 const SET_ENABLED_ROLE = "setNavMonitoringEnabled(address,address,bool)";
 const SET_KEEPER_ROLE = "setTrustedKeeper(address,bool)";
-const SET_MIN_GAP_ROLE = "setMinHubNavGapBps(uint16)";
 
 // Pause thresholds, measured from the centre: 10% down, 5% up.
 const PAUSE_DOWN_BPS = 1_000;
 const PAUSE_UP_BPS = 500;
+
+// The smallest min pause gap the setter accepts. Tests that exercise the gate set their own.
+const MIN_PAUSE_GAP = 1;
 
 // Band used throughout, consistent with the NavBand stubbed in `navBand`: anchor and centre 1500
 // with 200 bps gaps either side, so the Hub's own bounds are 1470 and 1530. The thresholds are
@@ -124,7 +126,6 @@ describe("HubNavDeviationSentinel", () => {
     eBrake.pauseHub.reset();
     hubRegistry.isHub.reset();
     hub.yieldGroupConfig.reset();
-    hub.totalAssets.reset();
     yieldGroup.hub.reset();
     yieldGroup.navGuardStatus.reset();
     yieldGroup.navGuard.reset();
@@ -133,7 +134,7 @@ describe("HubNavDeviationSentinel", () => {
     stubLiveChain();
 
     await sentinel.setTrustedKeeper(keeper.address, true);
-    await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS);
+    await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS, MIN_PAUSE_GAP);
     await sentinel.setNavMonitoringEnabled(yieldGroup.address, RESOURCE, true);
 
     // The setters just read all three; clear that history so a test asserting "was not read" is
@@ -147,13 +148,14 @@ describe("HubNavDeviationSentinel", () => {
 
   describe("setHubNavConfig", () => {
     it("stores the thresholds and the resolved Hub, and emits", async () => {
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200))
+      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200, 25))
         .to.emit(sentinel, "NavGuardConfigUpdated")
-        .withArgs(hub.address, yieldGroup.address, OTHER_RESOURCE, [hub.address, 100, 200, false]);
+        .withArgs(hub.address, yieldGroup.address, OTHER_RESOURCE, [hub.address, 100, 200, false, 25]);
 
       const stored = await sentinel.navGuardConfigs(yieldGroup.address, OTHER_RESOURCE);
       expect(stored.pauseUpBps).to.equal(100);
       expect(stored.pauseDownBps).to.equal(200);
+      expect(stored.minPauseGap).to.equal(25);
       expect(stored.hub).to.equal(hub.address);
     });
 
@@ -164,9 +166,15 @@ describe("HubNavDeviationSentinel", () => {
       otherHub.yieldGroupConfig.returns([0, 0, false, true]);
       yieldGroup.hub.returns(otherHub.address);
 
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200))
+      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200, MIN_PAUSE_GAP))
         .to.emit(sentinel, "NavGuardConfigUpdated")
-        .withArgs(otherHub.address, yieldGroup.address, OTHER_RESOURCE, [otherHub.address, 100, 200, false]);
+        .withArgs(otherHub.address, yieldGroup.address, OTHER_RESOURCE, [
+          otherHub.address,
+          100,
+          200,
+          false,
+          MIN_PAUSE_GAP,
+        ]);
 
       expect((await sentinel.navGuardConfigs(yieldGroup.address, OTHER_RESOURCE)).hub).to.equal(otherHub.address);
       expect(hubRegistry.isHub).to.have.been.calledWith(otherHub.address);
@@ -179,7 +187,7 @@ describe("HubNavDeviationSentinel", () => {
       otherHub.yieldGroupConfig.returns([0, 0, false, true]);
       yieldGroup.hub.returns(otherHub.address);
 
-      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS, MIN_PAUSE_GAP);
 
       expect((await sentinel.navGuardConfigs(yieldGroup.address, RESOURCE)).hub).to.equal(otherHub.address);
     });
@@ -190,7 +198,7 @@ describe("HubNavDeviationSentinel", () => {
       yieldGroup.hub.returns(OTHER_HUB);
       registerHub(false);
 
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200))
+      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200, MIN_PAUSE_GAP))
         .to.be.revertedWithCustomError(sentinel, "HubNotRegistered")
         .withArgs(OTHER_HUB, yieldGroup.address);
     });
@@ -200,7 +208,7 @@ describe("HubNavDeviationSentinel", () => {
     it("reverts when that Hub does not list the YieldGroup", async () => {
       registerYieldGroup(false);
 
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200))
+      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200, MIN_PAUSE_GAP))
         .to.be.revertedWithCustomError(sentinel, "YieldGroupNotRegistered")
         .withArgs(hub.address, yieldGroup.address);
     });
@@ -208,7 +216,7 @@ describe("HubNavDeviationSentinel", () => {
     it("reverts when the YieldGroup does not list the resource", async () => {
       registerResource(false);
 
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200))
+      await expect(sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200, MIN_PAUSE_GAP))
         .to.be.revertedWithCustomError(sentinel, "ResourceNotRegistered")
         .withArgs(yieldGroup.address, OTHER_RESOURCE);
     });
@@ -216,10 +224,10 @@ describe("HubNavDeviationSentinel", () => {
     // Retuning a threshold must not disarm a live resource, and holding this role alone must not
     // be able to arm one — that is setNavMonitoringEnabled's job.
     it("leaves the enabled flag alone", async () => {
-      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 100, 200);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 100, 200, MIN_PAUSE_GAP);
       expect((await sentinel.navGuardConfigs(yieldGroup.address, RESOURCE)).enabled).to.equal(true);
 
-      await sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200);
+      await sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, 100, 200, MIN_PAUSE_GAP);
       expect((await sentinel.navGuardConfigs(yieldGroup.address, OTHER_RESOURCE)).enabled).to.equal(false);
     });
 
@@ -230,7 +238,7 @@ describe("HubNavDeviationSentinel", () => {
       otherYieldGroup.hub.returns(hub.address);
       otherYieldGroup.resourceConfig.returns([true, false, ZERO_ADDRESS]);
 
-      await sentinel.setHubNavConfig(otherYieldGroup.address, RESOURCE, 100, 200);
+      await sentinel.setHubNavConfig(otherYieldGroup.address, RESOURCE, 100, 200, MIN_PAUSE_GAP);
 
       const other = await sentinel.navGuardConfigs(otherYieldGroup.address, RESOURCE);
       expect(other.pauseUpBps).to.equal(100);
@@ -242,28 +250,33 @@ describe("HubNavDeviationSentinel", () => {
     });
 
     it("reverts on a zero YieldGroup or resource address", async () => {
-      await expect(sentinel.setHubNavConfig(ZERO_ADDRESS, RESOURCE, 1, 1)).to.be.revertedWithCustomError(
+      await expect(sentinel.setHubNavConfig(ZERO_ADDRESS, RESOURCE, 1, 1, MIN_PAUSE_GAP)).to.be.revertedWithCustomError(
         sentinel,
         "ZeroAddress",
       );
 
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, ZERO_ADDRESS, 1, 1)).to.be.revertedWithCustomError(
-        sentinel,
-        "ZeroAddress",
-      );
+      await expect(
+        sentinel.setHubNavConfig(yieldGroup.address, ZERO_ADDRESS, 1, 1, MIN_PAUSE_GAP),
+      ).to.be.revertedWithCustomError(sentinel, "ZeroAddress");
     });
 
     it("reverts only when both thresholds are zero", async () => {
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 0, 0)).to.be.revertedWithCustomError(
-        sentinel,
-        "ZeroDeviation",
-      );
+      await expect(
+        sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 0, 0, MIN_PAUSE_GAP),
+      ).to.be.revertedWithCustomError(sentinel, "ZeroDeviation");
+    });
+
+    // At 0 a fresh deposit's drift alone would pause the Hub while the band's anchor is still 0.
+    it("reverts on a zero min pause gap", async () => {
+      await expect(
+        sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS, 0),
+      ).to.be.revertedWithCustomError(sentinel, "ZeroMinPauseGap");
     });
 
     // Zero on one side is a real configuration, not a missing one: watch the upside and let a
     // genuine loss be recorded rather than freeze the Hub over it, or the reverse.
     it("accepts a threshold on one side only", async () => {
-      await sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, PAUSE_UP_BPS, 0);
+      await sentinel.setHubNavConfig(yieldGroup.address, OTHER_RESOURCE, PAUSE_UP_BPS, 0, MIN_PAUSE_GAP);
       await sentinel.setNavMonitoringEnabled(yieldGroup.address, OTHER_RESOURCE, true);
 
       const stored = await sentinel.navGuardConfigs(yieldGroup.address, OTHER_RESOURCE);
@@ -273,34 +286,32 @@ describe("HubNavDeviationSentinel", () => {
     });
 
     it("reverts when either threshold exceeds MAX_DEVIATION_BPS", async () => {
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 10_001, 100)).to.be.revertedWithCustomError(
-        sentinel,
-        "ExceedsMaxDeviation",
-      );
+      await expect(
+        sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 10_001, 100, MIN_PAUSE_GAP),
+      ).to.be.revertedWithCustomError(sentinel, "ExceedsMaxDeviation");
 
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 100, 10_001)).to.be.revertedWithCustomError(
-        sentinel,
-        "ExceedsMaxDeviation",
-      );
+      await expect(
+        sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 100, 10_001, MIN_PAUSE_GAP),
+      ).to.be.revertedWithCustomError(sentinel, "ExceedsMaxDeviation");
     });
 
     // At 10_000 the floor computes to zero, so nothing can ever fall below it and downside
     // monitoring is silently dead. The cap is inclusive upward, where there is no such point.
     it("rejects a downside threshold of exactly MAX_DEVIATION_BPS but allows it upward", async () => {
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 100, 10_000)).to.be.revertedWithCustomError(
-        sentinel,
-        "ExceedsMaxDeviation",
-      );
+      await expect(
+        sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 100, 10_000, MIN_PAUSE_GAP),
+      ).to.be.revertedWithCustomError(sentinel, "ExceedsMaxDeviation");
 
-      await expect(sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 10_000, 100)).to.not.be.reverted;
+      await expect(sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, 10_000, 100, MIN_PAUSE_GAP)).to.not.be
+        .reverted;
     });
 
     // Pins the ACM string itself rather than just that some check ran. `Unauthorized` carries the
     // signature the contract asked for, so a drift between it and what a VIP grants fails here.
-    it("asks the ACM for exactly setHubNavConfig(address,address,uint16,uint16)", async () => {
+    it("asks the ACM for exactly setHubNavConfig(address,address,uint16,uint16,uint256)", async () => {
       accessControlManager.isAllowedToCall.returns(false);
 
-      await expect(sentinel.connect(user).setHubNavConfig(yieldGroup.address, RESOURCE, 1, 1))
+      await expect(sentinel.connect(user).setHubNavConfig(yieldGroup.address, RESOURCE, 1, 1, MIN_PAUSE_GAP))
         .to.be.revertedWithCustomError(sentinel, "Unauthorized")
         .withArgs(user.address, sentinel.address, SET_CONFIG_ROLE);
     });
@@ -473,7 +484,7 @@ describe("HubNavDeviationSentinel", () => {
     // A zero threshold reads as the tightest trip point there is if it is not tested for first:
     // downTripPoint lands on the centre itself, so 800 against a centre of 1500 would pause the Hub.
     it("does not fire on a side whose threshold is zero", async () => {
-      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0, MIN_PAUSE_GAP);
       navGuardStatus(800, true);
 
       await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
@@ -483,7 +494,7 @@ describe("HubNavDeviationSentinel", () => {
     });
 
     it("still fires on the armed side when the other is zero", async () => {
-      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0, MIN_PAUSE_GAP);
       navGuardStatus(2_500, true);
 
       await sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE);
@@ -500,16 +511,6 @@ describe("HubNavDeviationSentinel", () => {
       expect(eBrake.pauseHub).to.have.callCount(0);
     });
 
-    // navGuardStatus reports a value source it could not read as observedValue == 0. A bare
-    // `observed < min` would take that for a 100% drop and freeze the Hub on a transient failure.
-    it("does not pause on an unreadable value source reporting zero", async () => {
-      navGuardStatus(0, false);
-      hub.totalAssets.reverts();
-
-      await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE)).to.be.reverted;
-      expect(eBrake.pauseHub).to.have.callCount(0);
-    });
-
     it("pauses when an open band reads back zero", async () => {
       navGuardStatus(0, false);
 
@@ -519,16 +520,14 @@ describe("HubNavDeviationSentinel", () => {
       expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
     });
 
-    // 1% of a 150,000 Hub is the whole 1,500 centre.
-    it("ignores a zero reading within minHubNavGapBps of the Hub's NAV, or with the downside unwatched", async () => {
+    it("ignores a zero reading within minPauseGap, or with the downside unwatched", async () => {
       navGuardStatus(0, false);
-      hub.totalAssets.returns(150_000);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS, CENTRE);
       await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
         .to.be.revertedWithCustomError(sentinel, "NavGuardObservedValueZero")
         .withArgs(RESOURCE);
 
-      hub.totalAssets.returns(0);
-      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0, MIN_PAUSE_GAP);
       await expect(sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE))
         .to.be.revertedWithCustomError(sentinel, "NavGuardObservedValueZero")
         .withArgs(RESOURCE);
@@ -557,9 +556,8 @@ describe("HubNavDeviationSentinel", () => {
 
     // A closed band (centre 0) that still reads a real value is the Hub's own `_guardedNav`
     // clamping this resource down to that closed cap — zero — while the position is genuinely
-    // still worth 500. On a Hub worth 10,000 that is 5% of NAV missing, so it is a breach.
+    // still worth 500, so it is a breach.
     it("pauses on a closed band whose cap is clamping a real value to zero", async () => {
-      hub.totalAssets.returns(10_000);
       yieldGroup.navGuardStatus.returns([500, 0, 0, true, 0]);
       navBand(0);
 
@@ -583,7 +581,7 @@ describe("HubNavDeviationSentinel", () => {
     // A closed, capped band whose downside was left unwatched is a side governance opted out of —
     // silently forcing a pause here would override that choice, not fix the blind spot.
     it("does not pause on a closed, capped band when the downside is unwatched", async () => {
-      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0, MIN_PAUSE_GAP);
       yieldGroup.navGuardStatus.returns([500, 0, 0, true, 0]);
       navBand(0);
 
@@ -593,10 +591,10 @@ describe("HubNavDeviationSentinel", () => {
       expect(eBrake.pauseHub).to.have.callCount(0);
     });
 
-    // 1% of a 10,000 Hub is 100. Anyone can leave that much dust in a closed band, for example
-    // with a Centrifuge deposit request made for the YieldGroup, so 100 is ignored and 101 pauses.
-    it("ignores a closed band holding up to 1% of the Hub's NAV, and pauses past it", async () => {
-      hub.totalAssets.returns(10_000);
+    // Anyone can leave dust in a closed band, for example with a Centrifuge deposit request made for
+    // the YieldGroup. With a 100 min gap, 100 is ignored and 101 pauses.
+    it("ignores a closed band holding up to minPauseGap, and pauses past it", async () => {
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS, 100);
       yieldGroup.navGuardStatus.returns([100, 0, 0, true, 0]);
       navBand(0);
 
@@ -611,9 +609,9 @@ describe("HubNavDeviationSentinel", () => {
 
     // A redeem takes its amount off the centre but leaves the gap. A centre of 100,000 that gained
     // 1%, then had 95,950 redeemed, is left at 4,050 against 5,050: a 24.7% move from a 1,000 gap.
-    // On a Hub worth 100,000 that gap is exactly 1% of NAV, so it is ignored, and 1,001 pauses.
-    it("ignores a threshold breach whose gap is up to 1% of the Hub's NAV, and pauses past it", async () => {
-      hub.totalAssets.returns(100_000);
+    // With a 1,000 min gap it is ignored, and 1,001 pauses.
+    it("ignores a threshold breach whose gap is up to minPauseGap, and pauses past it", async () => {
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS, 1_000);
       yieldGroup.navGuardStatus.returns([5_050, 3_969, 4_131, true, 4_131]);
       navBand(4_050);
 
@@ -626,8 +624,8 @@ describe("HubNavDeviationSentinel", () => {
       expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
     });
 
-    // The two zeros are different verdicts and must not collapse into one: a zero reading says
-    // nothing about the position, a zero centre with the cap off says nothing to compare a real
+    // The two zeros are different verdicts and must not collapse into one: a zero reading on a closed
+    // band is an empty position, a zero centre with the cap off says nothing to compare a real
     // reading against.
     it("tells a zero reading apart from a zero centre", async () => {
       yieldGroup.navGuardStatus.returns([0, 0, 0, false, 0]);
@@ -739,16 +737,16 @@ describe("HubNavDeviationSentinel", () => {
       expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(Status.Breached);
     });
 
-    // Both trip points sit on the centre; on a 100,000 Hub the 1% floor holds back a 1,000 gap.
-    it("leaves only minHubNavGapBps to gate a pause when the anchor is zero", async () => {
+    // Both trip points sit on the centre; a 1,000 min gap holds back a 1,000 gap.
+    it("leaves only minPauseGap to gate a pause when the anchor is zero", async () => {
       navBand(5_000, true, 0, 0, 0);
 
-      yieldGroup.navGuardStatus.returns([4_999, 5_000, 5_000, true, 5_000]);
+      yieldGroup.navGuardStatus.returns([4_998, 5_000, 5_000, true, 5_000]);
       expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(Status.Breached);
-      yieldGroup.navGuardStatus.returns([5_001, 5_000, 5_000, true, 5_000]);
+      yieldGroup.navGuardStatus.returns([5_002, 5_000, 5_000, true, 5_000]);
       expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(Status.Breached);
 
-      hub.totalAssets.returns(100_000);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, PAUSE_DOWN_BPS, 1_000);
       yieldGroup.navGuardStatus.returns([4_000, 5_000, 5_000, true, 5_000]);
       expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(
         Status.WithinThreshold,
@@ -807,7 +805,7 @@ describe("HubNavDeviationSentinel", () => {
     it("reports ObservedValueZero on a zero it does not pause for, and still hands back what it read", async () => {
       // A caller comparing observedValue against the floor itself would read this 0 as a total loss.
       // The band comes back anyway, so an alert can report what was actually seen.
-      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0);
+      await sentinel.setHubNavConfig(yieldGroup.address, RESOURCE, PAUSE_UP_BPS, 0, MIN_PAUSE_GAP);
       navGuardStatus(0, false);
 
       const result = await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE);
@@ -856,10 +854,6 @@ describe("HubNavDeviationSentinel", () => {
     it("stores the EBrake and Hub registry it was constructed with", async () => {
       expect(await sentinel.EBRAKE()).to.equal(eBrake.address);
       expect(await sentinel.HUB_REGISTRY()).to.equal(hubRegistry.address);
-    });
-
-    it("starts the Hub NAV floor at 1%", async () => {
-      expect(await sentinel.minHubNavGapBps()).to.equal(100);
     });
 
     it("reverts on a zero EBrake or Hub registry", async () => {
@@ -912,44 +906,6 @@ describe("HubNavDeviationSentinel", () => {
       await expect(sentinel.connect(user).setTrustedKeeper(user.address, true))
         .to.be.revertedWithCustomError(sentinel, "Unauthorized")
         .withArgs(user.address, sentinel.address, SET_KEEPER_ROLE);
-    });
-  });
-
-  describe("setMinHubNavGapBps", () => {
-    it("updates the floor and emits the old and new values", async () => {
-      await expect(sentinel.setMinHubNavGapBps(25)).to.emit(sentinel, "MinHubNavGapUpdated").withArgs(100, 25);
-
-      expect(await sentinel.minHubNavGapBps()).to.equal(25);
-    });
-
-    // The same 1,000 gap on a 100,000 Hub: exactly 1%, so the default floor ignores it, and at 0.5%
-    // it pauses. This pins that the check reads the stored floor, not a fixed 1%.
-    it("pauses a gap the default floor ignored once the floor is lowered", async () => {
-      hub.totalAssets.returns(100_000);
-      yieldGroup.navGuardStatus.returns([5_050, 3_969, 4_131, true, 4_131]);
-      navBand(4_050);
-
-      await expect(
-        sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE),
-      ).to.be.revertedWithCustomError(sentinel, "DeviationWithinThreshold");
-
-      await sentinel.setMinHubNavGapBps(50);
-      await sentinel.connect(keeper).handleNavGuardDeviation(yieldGroup.address, RESOURCE);
-      expect(eBrake.pauseHub).to.have.been.calledOnceWith(hub.address);
-    });
-
-    it("accepts 100% and reverts above it", async () => {
-      await sentinel.setMinHubNavGapBps(10_000);
-
-      await expect(sentinel.setMinHubNavGapBps(10_001)).to.be.revertedWithCustomError(sentinel, "ExceedsMaxDeviation");
-    });
-
-    it("asks the ACM for exactly setMinHubNavGapBps(uint16)", async () => {
-      accessControlManager.isAllowedToCall.returns(false);
-
-      await expect(sentinel.connect(user).setMinHubNavGapBps(25))
-        .to.be.revertedWithCustomError(sentinel, "Unauthorized")
-        .withArgs(user.address, sentinel.address, SET_MIN_GAP_ROLE);
     });
   });
 });

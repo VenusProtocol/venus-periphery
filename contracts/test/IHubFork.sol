@@ -60,6 +60,10 @@ interface IHubFork is IHub {
     function maxDeposit(address receiver) external view returns (uint256 capacity);
 
     function balanceOf(address account) external view returns (uint256 shares);
+
+    /// @notice Hub NAV with every NavGuard band applied. Reverts whenever a YieldGroup's valuation does.
+    /// @return total Hub NAV, in asset units.
+    function totalAssets() external view returns (uint256 total);
 }
 
 /**
