@@ -506,6 +506,29 @@ if (FORK_MAINNET) {
           expect(await f.hub.hubPaused()).to.be.true;
         });
 
+        it("still pauses when an inflow into the fund lands on top of a breach", async () => {
+          const inflow = parseUnits("250000", 18);
+          await fundMovesTo(f, -1_000);
+          expect((await f.sentinel.checkNavGuardDeviation(CENTRIFUGE_SOURCE, JTRSY.vault)).status).to.equal(
+            Status.Breached,
+          );
+
+          await f.hub
+            .connect(f.operator)
+            .reallocate(
+              [{ yieldGroup: CORE_SOURCE, resource: ethers.constants.AddressZero, amount: inflow }],
+              [{ yieldGroup: CENTRIFUGE_SOURCE, resource: JTRSY.vault, amount: inflow }],
+            );
+
+          // Measured as a share of the centre, the inflow would have hidden the breach.
+          const { observedValue } = await f.yieldGroup.navGuardStatus(JTRSY.vault);
+          const centre = await liveCentre(f, await time.latest());
+          expect(observedValue).to.be.gt(centre.mul(10_000 - PAUSE_DOWN_BPS).div(10_000));
+
+          await runKeeper(f);
+          expect(await f.hub.hubPaused()).to.be.true;
+        });
+
         it("refuses to pause when the fund stops publishing a price at all, even though that halts the Hub", async () => {
           await f.cf.publishNav(0);
 

@@ -23,8 +23,8 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @notice Pause thresholds for one Liquidity Hub resource's NavGuard band
     /// @dev A zero threshold leaves that side unwatched, so a resource can be guarded one way only.
     /// @param hub The Hub to pause, read off the YieldGroup when configured and never from a keeper
-    /// @param pauseUpBps How far above the band's centre the value must sit to trip, in bps
-    /// @param pauseDownBps How far below the band's centre the value must sit to trip, in bps
+    /// @param pauseUpBps How far above the band's centre the value must sit to trip, in bps of the anchor
+    /// @param pauseDownBps How far below the band's centre the value must sit to trip, in bps of the anchor
     /// @param enabled Whether this band is being watched. Only `setNavMonitoringEnabled` writes it.
     struct NavGuardConfig {
         address hub;
@@ -240,8 +240,8 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     ///      gap, `upGapBps` or `downGapBps`, or clamping the Hub does routinely trips a pause.
     /// @param yieldGroup Address of the YieldGroup holding the resource
     /// @param resource Address of the resource inside that YieldGroup
-    /// @param pauseUpBps How far above the centre the value must sit to trip, in bps; zero leaves it unwatched
-    /// @param pauseDownBps How far below the centre the value must sit to trip, in bps; zero leaves it unwatched
+    /// @param pauseUpBps How far above the centre the value must sit to trip, in bps of the anchor; zero leaves it unwatched
+    /// @param pauseDownBps How far below the centre the value must sit to trip, in bps of the anchor; zero leaves it unwatched
     /// @custom:event Emits NavGuardConfigUpdated event
     /// @custom:error ZeroAddress is thrown when the YieldGroup or resource address is zero
     /// @custom:error ZeroDeviation is thrown when both thresholds are zero
@@ -413,9 +413,8 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
 
         // The centre grows by `driftBps` a year but is only saved on a deposit, redeem or re-anchor,
         // so add the growth since `driftFrom`, the same way the Hub's `NavGuard._grown` does.
-        uint256 drift = (uint256(band.centre) * band.driftBps * (block.timestamp - band.driftFrom)) /
-            (uint256(MAX_DEVIATION_BPS) * 365 days);
-        centre = band.centre + drift;
+        centre = _driftGrown(band.centre, band);
+        uint256 anchor = _driftGrown(band.anchor, band);
 
         // Two zero cases are handled first, as the percentage check below would pause on either:
         // - `observedValue` is 0 when unreadable or priced at nothing, which is below every threshold.
@@ -443,8 +442,9 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
             return (status, hub, observedValue, centre, minAllowedValue, maxAllowedValue);
         }
 
-        uint256 downTripPoint = (centre * (MAX_DEVIATION_BPS - config.pauseDownBps)) / MAX_DEVIATION_BPS;
-        uint256 upTripPoint = (centre * (MAX_DEVIATION_BPS + config.pauseUpBps)) / MAX_DEVIATION_BPS;
+        // Sized off the anchor, as the Hub sizes its gaps, so an inflow cannot widen them.
+        uint256 downTripPoint = centre - (anchor * config.pauseDownBps) / MAX_DEVIATION_BPS;
+        uint256 upTripPoint = centre + (anchor * config.pauseUpBps) / MAX_DEVIATION_BPS;
 
         // A threshold of 0 means that side is off, not that it pauses on any move.
         bool breachedDown = config.pauseDownBps != 0 && observedValue < downTripPoint;
@@ -466,6 +466,16 @@ contract HubNavDeviationSentinel is AccessControlledV8 {
     /// @return Whether `gap` is over `minHubNavGapBps` of the Hub's NAV
     function _exceedsMinHubNavGap(address hub, uint256 gap) private view returns (bool) {
         return gap > (IHub(hub).totalAssets() * minHubNavGapBps) / MAX_DEVIATION_BPS;
+    }
+
+    /// @notice A band value grown by its drift since `driftFrom`
+    /// @param value The stored centre or anchor
+    /// @param band The band to read the drift from
+    /// @return The drift-grown value
+    function _driftGrown(uint256 value, IYieldGroupNav.NavBand memory band) private view returns (uint256) {
+        return
+            value +
+            (value * band.driftBps * (block.timestamp - band.driftFrom)) / (uint256(MAX_DEVIATION_BPS) * 365 days);
     }
 
     /// @notice Resolve a YieldGroup's Hub and prove the whole chain down to the resource is live

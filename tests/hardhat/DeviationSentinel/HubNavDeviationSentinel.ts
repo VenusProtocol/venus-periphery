@@ -73,10 +73,10 @@ describe("HubNavDeviationSentinel", () => {
   }
 
   // NavBand, in the Hub's field order: anchor, centre, anchoredAt, driftFrom, interval, driftBps,
-  // upGapBps, downGapBps, capEnabled, floorEnabled. Only `centre`, `driftFrom`, `driftBps` and
-  // `capEnabled` are read. No drift by default, so the stored centre is the live one.
-  function navBand(centre: number, capEnabled = true, driftFrom = 0, driftBps = 0) {
-    yieldGroup.navGuard.returns([centre, centre, 0, driftFrom, 86_400, driftBps, 200, 200, capEnabled, true]);
+  // upGapBps, downGapBps, capEnabled, floorEnabled. Only `anchor`, `centre`, `driftFrom`, `driftBps`
+  // and `capEnabled` are read. No drift by default, so the stored centre is the live one.
+  function navBand(centre: number, capEnabled = true, driftFrom = 0, driftBps = 0, anchor = centre) {
+    yieldGroup.navGuard.returns([anchor, centre, 0, driftFrom, 86_400, driftBps, 200, 200, capEnabled, true]);
   }
 
   function navGuardStatus(observed: number, isClamped: boolean) {
@@ -689,6 +689,47 @@ describe("HubNavDeviationSentinel", () => {
       const result = await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE);
       expect(result.centre).to.equal(1_620);
       expect(result.status).to.equal(Status.Breached);
+    });
+
+    // 1500 routed in after a breach: the trip point is 3000 less 10% of the 1500 anchor, 2850, not 2700.
+    it("sizes the trip points off the anchor, so an inflow cannot dilute a breach", async () => {
+      navGuardStatus(1_300, true);
+      expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(Status.Breached);
+
+      yieldGroup.navGuardStatus.returns([2_800, 2_970, 3_030, true, 2_970]);
+      navBand(3_000, true, 0, 0, CENTRE);
+      expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(Status.Breached);
+    });
+
+    // A year at 8%: centre 3240, anchor 1620, so the trip point is 3078 (3090 with an ungrown anchor).
+    it("grows the anchor by the same drift as the centre", async () => {
+      navBand(3_000, true, (await time.latest()) - 365 * 86_400, 800, CENTRE);
+
+      yieldGroup.navGuardStatus.returns([3_085, 3_000, 3_400, false, 0]);
+      expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(
+        Status.WithinThreshold,
+      );
+
+      yieldGroup.navGuardStatus.returns([3_077, 3_000, 3_400, false, 0]);
+      expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(Status.Breached);
+    });
+
+    // Both trip points sit on the centre; on a 100,000 Hub the 1% floor holds back a 1,000 gap.
+    it("leaves only minHubNavGapBps to gate a pause when the anchor is zero", async () => {
+      navBand(5_000, true, 0, 0, 0);
+
+      yieldGroup.navGuardStatus.returns([4_999, 5_000, 5_000, true, 5_000]);
+      expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(Status.Breached);
+      yieldGroup.navGuardStatus.returns([5_001, 5_000, 5_000, true, 5_000]);
+      expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(Status.Breached);
+
+      hub.totalAssets.returns(100_000);
+      yieldGroup.navGuardStatus.returns([4_000, 5_000, 5_000, true, 5_000]);
+      expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(
+        Status.WithinThreshold,
+      );
+      yieldGroup.navGuardStatus.returns([3_999, 5_000, 5_000, true, 5_000]);
+      expect((await sentinel.checkNavGuardDeviation(yieldGroup.address, RESOURCE)).status).to.equal(Status.Breached);
     });
 
     it("reports an upside breach", async () => {
