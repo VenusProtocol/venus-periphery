@@ -295,18 +295,37 @@ function classify(targets: Target[], current: Map<string, Layout>, allowlist: Re
   return results;
 }
 
+/**
+ * Points each target compiled from a moved source directory at where that source lives now, so a
+ * pure move is compared like any other upgrade instead of failing as a missing contract. Returns the
+ * `moved` prefixes no target used, which are stale.
+ */
+function applyMoves(targets: Target[], moved: Record<string, string>): string[] {
+  const used = new Set<string>();
+  for (const target of targets) {
+    const from = Object.keys(moved).find(prefix => target.fqName?.startsWith(prefix));
+    if (!from || !target.fqName) continue;
+    target.fqName = moved[from] + target.fqName.slice(from.length);
+    used.add(from);
+  }
+  return Object.keys(moved)
+    .filter(prefix => !used.has(prefix))
+    .map(prefix => `moved/${prefix}`);
+}
+
 function main(): void {
   assertReferenceIsUsable();
 
-  const allowlist: Record<string, string> = fs.existsSync(ALLOWLIST_PATH)
-    ? (JSON.parse(fs.readFileSync(ALLOWLIST_PATH, "utf8")).skip ?? {})
-    : {};
+  const allowlistFile = fs.existsSync(ALLOWLIST_PATH) ? JSON.parse(fs.readFileSync(ALLOWLIST_PATH, "utf8")) : {};
+  const allowlist: Record<string, string> = allowlistFile.skip ?? {};
 
   const targets = collectTargets();
+  const staleMoves = applyMoves(targets, allowlistFile.moved ?? {});
   const current = resolveCurrentLayouts(new Set(targets.flatMap(t => t.fqName ?? [])));
 
   console.log(`Reference: ${BASE_REF || "working tree"} | ${targets.length} deployed implementations\n`);
   const { failures, stale } = classify(targets, current, allowlist);
+  stale.push(...staleMoves);
 
   failures.forEach(f => console.log(`\n${f}`));
   // A stale entry counts towards the verdict like a real failure: the allowlist is only
