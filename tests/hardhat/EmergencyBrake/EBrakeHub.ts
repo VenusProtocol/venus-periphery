@@ -40,7 +40,7 @@ describe("EBrake — Liquidity Hub forwarders", () => {
 
     accessControlManager = await smock.fake<IAccessControlManagerV8>("IAccessControlManagerV8");
     comptroller = await smock.fake<ICorePoolComptroller>("ICorePoolComptroller");
-    hub = await smock.fake<IHub>("IHub");
+    hub = await smock.fake<IHub>("contracts/Interfaces/IHubLiquidity.sol:IHub");
     yieldGroup = await smock.fake<IYieldGroupNav>("IYieldGroupNav");
 
     accessControlManager.isAllowedToCall.returns(true);

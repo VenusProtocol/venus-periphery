@@ -101,7 +101,7 @@ describe("HubNavDeviationSentinel", () => {
     accessControlManager = await smock.fake<IAccessControlManagerV8>("IAccessControlManagerV8");
     eBrake = await smock.fake<IEBrake>("IEBrake");
     hubRegistry = await smock.fake<IHubRegistry>("IHubRegistry");
-    hub = await smock.fake<IHub>("IHub");
+    hub = await smock.fake<IHub>("contracts/Interfaces/IHubLiquidity.sol:IHub");
     yieldGroup = await smock.fake<IYieldGroupNav>("IYieldGroupNav");
 
     accessControlManager.isAllowedToCall.returns(true);
@@ -162,7 +162,7 @@ describe("HubNavDeviationSentinel", () => {
     // The Hub is never passed in. Pointed at a second Hub, so passing only because the fixture's
     // Hub is the one it would have picked anyway is not enough to make this go green.
     it("stores whichever Hub the YieldGroup names, not the fixture's", async () => {
-      const otherHub = await smock.fake<IHub>("IHub");
+      const otherHub = await smock.fake<IHub>("contracts/Interfaces/IHubLiquidity.sol:IHub");
       otherHub.yieldGroupConfig.returns([0, 0, false, true]);
       yieldGroup.hub.returns(otherHub.address);
 
@@ -183,7 +183,7 @@ describe("HubNavDeviationSentinel", () => {
 
     // A retune re-resolves it, so a stored Hub cannot outlive the YieldGroup that named it.
     it("refreshes the stored Hub on a retune", async () => {
-      const otherHub = await smock.fake<IHub>("IHub");
+      const otherHub = await smock.fake<IHub>("contracts/Interfaces/IHubLiquidity.sol:IHub");
       otherHub.yieldGroupConfig.returns([0, 0, false, true]);
       yieldGroup.hub.returns(otherHub.address);
 
