@@ -187,6 +187,7 @@ export async function increaseListaOracleTimeDeltaTolerance(): Promise<void> {
  * Increase Venus oracle maxStalePeriod on ChainlinkOracle/BinanceOracle
  * for BNB and slisBNB so stale feeds are accepted after time travel.
  */
+// eslint-disable-next-line sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 export async function increaseVenusOracleMaxStalePeriod(): Promise<void> {
   const comptrollerContract = await ethers.getContractAt(["function oracle() view returns (address)"], COMPTROLLER);
   const venusOracleAddr = await comptrollerContract.oracle();

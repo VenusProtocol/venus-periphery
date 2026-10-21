@@ -60,6 +60,10 @@ interface IHubFork is IHub {
     function maxDeposit(address receiver) external view returns (uint256 capacity);
 
     function balanceOf(address account) external view returns (uint256 shares);
+
+    /// @notice Hub NAV with every NavGuard band applied. Reverts whenever a YieldGroup's valuation does.
+    /// @return total Hub NAV, in asset units.
+    function totalAssets() external view returns (uint256 total);
 }
 
 /**
@@ -99,6 +103,8 @@ interface IYieldGroupCentrifugeFork is IYieldGroupNav {
     function claimDeposit(address resource) external returns (uint256 shares);
 
     function claimRedeem(address resource) external returns (uint256 assets);
+
+    function sweep(address token, address to) external;
 
     /// @notice Writes off a position governance can no longer claim. Only reachable while the Hub is paused.
     function forceRemoveResource(address resource) external;

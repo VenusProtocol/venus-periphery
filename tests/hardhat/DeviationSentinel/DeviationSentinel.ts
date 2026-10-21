@@ -49,7 +49,7 @@ describe("DeviationSentinel", () => {
     eBrake = await smock.fake<IEBrake>("IEBrake");
     resilientOracle = await smock.fake<ResilientOracleInterface>("ResilientOracleInterface");
     sentinelOracle = await smock.fake<OracleInterface>("OracleInterface");
-    vToken = await smock.fake<IVToken>("IVToken");
+    vToken = await smock.fake<IVToken>("contracts/Interfaces/IVToken.sol:IVToken");
 
     // ACM allows all calls by default; override in access-control tests
     accessControlManager.isAllowedToCall.returns(true);
@@ -358,7 +358,7 @@ describe("DeviationSentinel", () => {
     });
 
     it("should return (false, 0, 0, 0) for unconfigured market", async () => {
-      const unknownVToken = await smock.fake<IVToken>("IVToken");
+      const unknownVToken = await smock.fake<IVToken>("contracts/Interfaces/IVToken.sol:IVToken");
       unknownVToken.underlying.returns("0x0000000000000000000000000000000000000099");
 
       const r = await deviationSentinel.checkPriceDeviation(unknownVToken.address);
@@ -410,7 +410,7 @@ describe("DeviationSentinel", () => {
       });
 
       it("should revert with MarketNotConfigured when underlying has no config", async () => {
-        const unknownVToken = await smock.fake<IVToken>("IVToken");
+        const unknownVToken = await smock.fake<IVToken>("contracts/Interfaces/IVToken.sol:IVToken");
         unknownVToken.underlying.returns("0x0000000000000000000000000000000000000099");
 
         await expect(

@@ -2,6 +2,7 @@
   "name": "bscmainnet",
   "chainId": "56",
   "addresses": {
+    "CollateralGateway": "0xd0F7B94BF06675D13e8bA9a2546835a1c32a80b8",
     "DeviationSentinel": "0x6599C15cc8407046CD91E5c0F8B7f765fF914870",
     "DeviationSentinel_Implementation": "0xc86153Ae39fc9B60Ff59E99cA75aAD5Ab9d28a87",
     "DeviationSentinel_Proxy": "0x6599C15cc8407046CD91E5c0F8B7f765fF914870",
@@ -14,6 +15,7 @@
     "LeverageStrategiesManager": "0x03F079E809185a669Ca188676D0ADb09cbAd6dC1",
     "LeverageStrategiesManager_Implementation": "0xB8c418eFf558D7eE517b8f26B5Eb0F4f3c53F5D5",
     "LeverageStrategiesManager_Proxy": "0x03F079E809185a669Ca188676D0ADb09cbAd6dC1",
+    "NativeTokenGateway_vWBNB_Core": "0x5143eb18aA057Cd8BC9734cCfD2651823e71585f",
     "PCSStableOracle": "0x8440889CaEC04FeFEB52c3c5cd729548864E7886",
     "PCSStableOracle_Implementation": "0x48bb4aA4B41f70FfFeaa67b1b6202879A5eb9e86",
     "PCSStableOracle_Proxy": "0x8440889CaEC04FeFEB52c3c5cd729548864E7886",

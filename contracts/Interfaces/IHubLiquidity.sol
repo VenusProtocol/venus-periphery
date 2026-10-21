@@ -37,10 +37,6 @@ interface IHub {
     /// @return config Stored configuration; all-zero when never registered.
     function yieldGroupConfig(address yieldGroup) external view returns (YieldGroupConfig memory config);
 
-    /// @notice Total assets the Hub reports, with every NavGuard band applied.
-    /// @return total Hub NAV, in asset units.
-    function totalAssets() external view returns (uint256 total);
-
     /// @notice Whether the Hub is currently paused.
     /// @return paused True while the Hub is paused.
     function hubPaused() external view returns (bool paused);
@@ -125,9 +121,9 @@ interface IYieldGroupNav {
     /// @notice Where a resource's value stands against its NavGuard band right now.
     /// @dev Never reverts. A zero `observedValue` is ambiguous on purpose: the Hub reads the value
     ///      source as `(value, readable)` and drops the flag here, so a read that failed and a
-    ///      position the counterparty prices at nothing arrive identically. Neither can be told from
-    ///      the other through this interface, which is why HubNavDeviationSentinel treats a zero as no
-    ///      verdict rather than as a total loss.
+    ///      position the counterparty prices at nothing arrive identically. The Hub values the
+    ///      position at 0 in both cases, which is why HubNavDeviationSentinel pauses on either when
+    ///      the band is open.
     /// @param resource Resource to read.
     /// @return observedValue Value the counterparty reports, in asset units; `0` if unreadable or genuinely zero.
     /// @return minAllowedValue Lowest value the band allows right now.

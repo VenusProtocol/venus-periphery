@@ -68,9 +68,8 @@ const HUB_DOWN_GAP_BPS = 500;
 const PAUSE_UP_BPS = 400;
 const PAUSE_DOWN_BPS = 800;
 
-// The Hub holds about 4.26M at the fork block, so the default 1% floor is about 42.6k, which is past
-// both thresholds on the 500k position (20k up, 40k down). At 0.25% it is about 10.6k, under both.
-const MIN_HUB_NAV_GAP_BPS = 25;
+// The smallest gap that can pause, under both thresholds on the 500k position (20k up, 40k down).
+const MIN_PAUSE_GAP = parseUnits("10000", 18);
 
 const Status = {
   MonitoringDisabled: 0,
@@ -113,9 +112,8 @@ const EXISTING_GRANTS: Grant[] = [
 // What the onboarding VIP grants, against the freshly deployed Hub NAV sentinel.
 const newGrants = (hubSentinel: string): Grant[] => [
   [hubSentinel, "setTrustedKeeper(address,bool)", NORMAL_TIMELOCK],
-  [hubSentinel, "setHubNavConfig(address,address,uint16,uint16)", NORMAL_TIMELOCK],
+  [hubSentinel, "setHubNavConfig(address,address,uint16,uint16,uint256)", NORMAL_TIMELOCK],
   [hubSentinel, "setNavMonitoringEnabled(address,address,bool)", NORMAL_TIMELOCK],
-  [hubSentinel, "setMinHubNavGapBps(uint16)", NORMAL_TIMELOCK],
   [EBRAKE, "pauseHub(address)", hubSentinel],
   [HUB_USDT, "pauseHub()", EBRAKE],
   [HUB_USDT, "pauseYieldGroup(address)", EBRAKE],
@@ -197,9 +195,10 @@ async function setUpScenario() {
   expect(band.interval).to.equal(NAV_INTERVAL);
 
   // ── Governance arms the sentinel ──
-  await sentinel.connect(timelock).setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, PAUSE_UP_BPS, PAUSE_DOWN_BPS);
+  await sentinel
+    .connect(timelock)
+    .setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, PAUSE_UP_BPS, PAUSE_DOWN_BPS, MIN_PAUSE_GAP);
   await sentinel.connect(timelock).setNavMonitoringEnabled(CENTRIFUGE_SOURCE, JTRSY.vault, true);
-  await sentinel.connect(timelock).setMinHubNavGapBps(MIN_HUB_NAV_GAP_BPS);
 
   return {
     acm,
@@ -272,10 +271,6 @@ async function expectHubPaused(f: Fixture, tx: ContractTransaction, observed: Bi
     .withArgs(f.sentinel.address, HUB_USDT);
   expect(await f.hub.hubPaused()).to.be.true;
 }
-
-/** The smallest gap that can pause the Hub right now, in asset units. */
-const hubNavFloor = async (f: Fixture): Promise<BigNumber> =>
-  (await f.hub.totalAssets()).mul(MIN_HUB_NAV_GAP_BPS).div(10_000);
 
 const runKeeper = (f: Fixture) => f.sentinel.connect(f.keeper).handleNavGuardDeviation(CENTRIFUGE_SOURCE, JTRSY.vault);
 
@@ -372,7 +367,7 @@ if (FORK_MAINNET) {
 
         it("does not let a stranger arm the NAV monitoring or drive the keeper function", async () => {
           await expect(
-            f.sentinel.connect(f.stranger).setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, 100, 100),
+            f.sentinel.connect(f.stranger).setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, 100, 100, MIN_PAUSE_GAP),
           ).to.be.revertedWithCustomError(f.sentinel, "Unauthorized");
           await expect(
             f.sentinel.connect(f.stranger).setNavMonitoringEnabled(CENTRIFUGE_SOURCE, JTRSY.vault, false),
@@ -433,7 +428,9 @@ if (FORK_MAINNET) {
         });
 
         it("trips on the clamping the Hub does routinely when its threshold is narrower than the Hub's gap", async () => {
-          await f.sentinel.connect(f.timelock).setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, PAUSE_UP_BPS, 100);
+          await f.sentinel
+            .connect(f.timelock)
+            .setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, PAUSE_UP_BPS, 100, MIN_PAUSE_GAP);
 
           await fundMovesTo(f, -(HUB_DOWN_GAP_BPS + 100));
           expect((await f.yieldGroup.navGuardStatus(JTRSY.vault)).isClamped).to.be.true;
@@ -506,18 +503,50 @@ if (FORK_MAINNET) {
           expect(await f.hub.hubPaused()).to.be.true;
         });
 
-        it("refuses to pause when the fund stops publishing a price at all, even though that halts the Hub", async () => {
+        it("still pauses when an inflow into the fund lands on top of a breach", async () => {
+          const inflow = parseUnits("250000", 18);
+          await fundMovesTo(f, -1_000);
+          expect((await f.sentinel.checkNavGuardDeviation(CENTRIFUGE_SOURCE, JTRSY.vault)).status).to.equal(
+            Status.Breached,
+          );
+
+          await f.hub
+            .connect(f.operator)
+            .reallocate(
+              [{ yieldGroup: CORE_SOURCE, resource: ethers.constants.AddressZero, amount: inflow }],
+              [{ yieldGroup: CENTRIFUGE_SOURCE, resource: JTRSY.vault, amount: inflow }],
+            );
+
+          // Measured as a share of the centre, the inflow would have hidden the breach.
+          const { observedValue } = await f.yieldGroup.navGuardStatus(JTRSY.vault);
+          const centre = await liveCentre(f, await time.latest());
+          expect(observedValue).to.be.gt(centre.mul(10_000 - PAUSE_DOWN_BPS).div(10_000));
+
+          await runKeeper(f);
+          expect(await f.hub.hubPaused()).to.be.true;
+        });
+
+        it("pauses the Hub when the fund stops publishing a price at all", async () => {
           await f.cf.publishNav(0);
 
           // With no price the position cannot be valued, so the Hub's own NAV read reverts and every
-          // flow on it stops. That is the fund's failure, not a band breach, and the sentinel says so.
+          // flow on it stops. The pause still lands, so the Hub stays shut until governance reopens it.
           await expect(f.yieldGroup.totalAssets()).to.be.revertedWithCustomError(f.yieldGroup, "ZeroSharePrice");
           await expect(f.hub.totalAssets()).to.be.reverted;
 
-          const check = await f.sentinel.checkNavGuardDeviation(CENTRIFUGE_SOURCE, JTRSY.vault);
-          expect(check.status).to.equal(Status.ObservedValueZero);
-          await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "NavGuardObservedValueZero");
-          expect(await f.hub.hubPaused()).to.be.false;
+          await expectHubPaused(f, await runKeeper(f), BigNumber.from(0));
+        });
+
+        // A share sweep empties the position without telling the band, leaving it open over a zero.
+        it("pauses the Hub when an open band reads back zero", async () => {
+          await f.acm.giveCallPermission(CENTRIFUGE_SOURCE, "sweep(address,address)", NORMAL_TIMELOCK);
+          await (await connectFund(JTRSY, USDT, NORMAL_TIMELOCK)).admit();
+          await f.yieldGroup.connect(f.timelock).sweep(JTRSY.share, NORMAL_TIMELOCK);
+
+          expect((await f.yieldGroup.navGuardStatus(JTRSY.vault)).observedValue).to.equal(0);
+          expect(await bandCentre(f)).to.be.gt(0);
+
+          await expectHubPaused(f, await runKeeper(f), BigNumber.from(0));
         });
 
         it("re-measures against the new centre once governance retunes the band", async () => {
@@ -542,7 +571,9 @@ if (FORK_MAINNET) {
         });
 
         it("ignores a soaring fund when only the downside is being watched", async () => {
-          await f.sentinel.connect(f.timelock).setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, 0, PAUSE_DOWN_BPS);
+          await f.sentinel
+            .connect(f.timelock)
+            .setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, 0, PAUSE_DOWN_BPS, MIN_PAUSE_GAP);
 
           await fundMovesTo(f, 5_000);
           await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "DeviationWithinThreshold");
@@ -554,7 +585,9 @@ if (FORK_MAINNET) {
         });
 
         it("ignores a collapsing fund when only the upside is being watched", async () => {
-          await f.sentinel.connect(f.timelock).setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, PAUSE_UP_BPS, 0);
+          await f.sentinel
+            .connect(f.timelock)
+            .setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, PAUSE_UP_BPS, 0, MIN_PAUSE_GAP);
 
           await fundMovesTo(f, -5_000);
           await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "DeviationWithinThreshold");
@@ -668,9 +701,9 @@ if (FORK_MAINNET) {
           const { observedValue } = await f.yieldGroup.navGuardStatus(JTRSY.vault);
           expect(observedValue).to.be.gt(0);
           // Everything left in the fund is invisible to the Hub: only the redeemed cash counts. It is
-          // well over the Hub NAV floor, so it is worth pausing for.
+          // well over the min gap, so it is worth pausing for.
           expect(await f.yieldGroup.totalAssets()).to.equal(await f.usdt.balanceOf(CENTRIFUGE_SOURCE));
-          expect(observedValue).to.be.gt(await hubNavFloor(f));
+          expect(observedValue).to.be.gt(MIN_PAUSE_GAP);
 
           await expect(runKeeper(f))
             .to.emit(f.sentinel, "NavGuardDeviationHandled")
@@ -686,7 +719,7 @@ if (FORK_MAINNET) {
 
           const { observedValue } = await f.yieldGroup.navGuardStatus(JTRSY.vault);
           expect(observedValue).to.be.gt(0);
-          expect(observedValue).to.be.lte(await hubNavFloor(f));
+          expect(observedValue).to.be.lte(MIN_PAUSE_GAP);
 
           await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "NavGuardCentreZero");
           expect(await f.hub.hubPaused()).to.be.false;
@@ -706,7 +739,9 @@ if (FORK_MAINNET) {
 
         it("leaves the Hub open when governance is not watching the downside", async () => {
           await exitAtTheBandsValuation();
-          await f.sentinel.connect(f.timelock).setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, PAUSE_UP_BPS, 0);
+          await f.sentinel
+            .connect(f.timelock)
+            .setHubNavConfig(CENTRIFUGE_SOURCE, JTRSY.vault, PAUSE_UP_BPS, 0, MIN_PAUSE_GAP);
 
           await expect(runKeeper(f)).to.be.revertedWithCustomError(f.sentinel, "NavGuardCentreZero");
           expect(await f.hub.hubPaused()).to.be.false;
