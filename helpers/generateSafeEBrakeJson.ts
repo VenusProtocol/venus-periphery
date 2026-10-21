@@ -644,12 +644,14 @@ const enumerateBscPools = async (comptroller: string): Promise<BscPool[]> => {
 // cross-pool union. Each picked market is mapped to the pool IDs it's listed in,
 // so commandsForStep can fan out one tx per (market, pool) pair. Pools without
 // the market are skipped automatically — they never appear in poolIdsByMarket.
+// eslint-disable-next-line complexity -- predates the complexity gates, tracked for refactor
 const pickBscMarketsFanOut = async (
   ctx: StepContext,
 ): Promise<{
   marketAddresses: string[];
   symbols: Map<string, string>;
   poolIdsByMarket: Map<string, number[]>;
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 }> => {
   let pools = ctx.bscPoolsCache;
   if (!pools) {
@@ -788,6 +790,7 @@ const gatherPerMarketValues = async (
   markets: string[],
   symbols: Map<string, string>,
   cfg: PerMarketValueConfig,
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 ): Promise<Map<string, string>> => {
   const mode = await pickOne(`Apply ${cfg.kind}:`, [
     `Single value to ALL selected markets (e.g. 0 to block)`,
@@ -934,11 +937,13 @@ export type PerPoolFileResult =
       ignoredPools: Array<{ key: string; poolIdKey: string }>;
     };
 
+// eslint-disable-next-line complexity -- predates the complexity gates, tracked for refactor
 export const parsePerPoolValuesJson = (
   raw: unknown,
   markets: string[],
   symbols: Map<string, string>,
   poolIdsByMarket: Map<string, number[]>,
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 ): PerPoolFileResult => {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { kind: "notObject" };
   const symbolToAddress = new Map<string, string>();
@@ -1002,11 +1007,13 @@ interface PerPoolValueConfig {
 // (decrease_cf_pool). Without this, a market listed in N pools would reuse the
 // same value across all pools, making the per-pool op indistinguishable from the
 // all-pools variant.
+// eslint-disable-next-line complexity -- predates the complexity gates, tracked for refactor
 const gatherPerPoolValues = async (
   markets: string[],
   symbols: Map<string, string>,
   poolIdsByMarket: Map<string, number[]>,
   cfg: PerPoolValueConfig,
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 ): Promise<Map<string, Map<number, string>>> => {
   const pairs: Array<{ market: string; poolId: number }> = [];
   for (const m of markets) {
@@ -1182,6 +1189,7 @@ const gatherPerPoolValues = async (
 };
 
 // Collect the per-operation inputs (markets, actions, CFs, caps, etc.) for a single step.
+// eslint-disable-next-line sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 const gatherStep = async (operation: EBrakeOperation, ctx: StepContext): Promise<EBrakeStep> => {
   const { comptrollerAddress, isIsolatedPool } = ctx;
   let marketAddresses: string[] = [];
@@ -1368,6 +1376,7 @@ export const gatherInput = async (): Promise<EBrakeBatchInput> => {
 
 // ─── Phase 2: Generate Commands ──────────────────────────────────────────────
 
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- predates the complexity gates, tracked for refactor
 const commandsForStep = (step: EBrakeStep): EBrakeCommand[] => {
   const {
     operation,

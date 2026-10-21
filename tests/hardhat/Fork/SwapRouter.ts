@@ -402,7 +402,10 @@ describe("SwapRouter Fork Tests", function () {
             await vUSDT.connect(user).mint(supplyAmount);
 
             // Enable USDT as collateral
-            const comptroller = await ethers.getContractAt("ComptrollerInterface", COMPTROLLER_ADDRESS);
+            const comptroller = await ethers.getContractAt(
+              "@venusprotocol/venus-protocol/contracts/Comptroller/ComptrollerInterface.sol:ComptrollerInterface",
+              COMPTROLLER_ADDRESS,
+            );
             await comptroller.connect(user).enterMarkets([vUSDT.address]);
 
             // Borrow some USDC against USDT collateral
@@ -628,7 +631,10 @@ describe("SwapRouter Fork Tests", function () {
             await vUSDT.connect(user).mint(supplyAmount);
 
             // Enable USDT as collateral
-            const comptroller = await ethers.getContractAt("ComptrollerInterface", COMPTROLLER_ADDRESS);
+            const comptroller = await ethers.getContractAt(
+              "@venusprotocol/venus-protocol/contracts/Comptroller/ComptrollerInterface.sol:ComptrollerInterface",
+              COMPTROLLER_ADDRESS,
+            );
             await comptroller.connect(user).enterMarkets([vUSDT.address]);
 
             // Borrow some USDC against USDT collateral
@@ -782,7 +788,10 @@ describe("SwapRouter Fork Tests", function () {
             await vUSDT.connect(user).mint(supplyAmount);
 
             // Enable USDT as collateral
-            const comptroller = await ethers.getContractAt("ComptrollerInterface", COMPTROLLER_ADDRESS);
+            const comptroller = await ethers.getContractAt(
+              "@venusprotocol/venus-protocol/contracts/Comptroller/ComptrollerInterface.sol:ComptrollerInterface",
+              COMPTROLLER_ADDRESS,
+            );
             await comptroller.connect(user).enterMarkets([vUSDT.address]);
 
             // Borrow some USDC against USDT collateral

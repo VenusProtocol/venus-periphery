@@ -44,11 +44,13 @@ extendConfig((config: HardhatConfig) => {
           "node_modules/@venusprotocol/venus-protocol/deployments/bsctestnet",
           "node_modules/@venusprotocol/governance-contracts/deployments/bsctestnet",
           "node_modules/@venusprotocol/protocol-reserve/deployments/bsctestnet",
+          "node_modules/@venusprotocol/isolated-pools/deployments/bsctestnet",
         ],
         bscmainnet: [
           "node_modules/@venusprotocol/venus-protocol/deployments/bscmainnet",
           "node_modules/@venusprotocol/governance-contracts/deployments/bscmainnet",
           "node_modules/@venusprotocol/protocol-reserve/deployments/bscmainnet",
+          "node_modules/@venusprotocol/isolated-pools/deployments/bscmainnet",
         ],
         unichainmainnet: ["node_modules/@venusprotocol/venus-protocol/deployments/unichainmainnet"],
       },
