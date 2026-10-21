@@ -366,9 +366,12 @@ async function setupRpmForkFixture(): Promise<RpmForkFixture> {
   const dsa = IERC20__factory.connect(DSA_ADDRESS, deployer) as IERC20;
   const long = IERC20__factory.connect(LONG_ADDRESS, deployer) as IERC20;
   const short = IERC20__factory.connect(SHORT_ADDRESS, deployer) as IERC20;
-  const longVToken = (await ethers.getContractAt("IVToken", vLONG_ADDRESS)) as IVToken;
-  const shortVToken = (await ethers.getContractAt("IVToken", vSHORT_ADDRESS)) as IVToken;
-  const dsaVToken = (await ethers.getContractAt("IVToken", vDSA_ADDRESS)) as IVToken;
+  const longVToken = (await ethers.getContractAt("contracts/Interfaces/IVToken.sol:IVToken", vLONG_ADDRESS)) as IVToken;
+  const shortVToken = (await ethers.getContractAt(
+    "contracts/Interfaces/IVToken.sol:IVToken",
+    vSHORT_ADDRESS,
+  )) as IVToken;
+  const dsaVToken = (await ethers.getContractAt("contracts/Interfaces/IVToken.sol:IVToken", vDSA_ADDRESS)) as IVToken;
 
   // Configure DSA in RPM
   await rpm.connect(deployer).addDSAVToken(vDSA_ADDRESS);
@@ -1176,7 +1179,10 @@ if (FORK_MAINNET) {
           );
 
           // Record underlying DSA balance in position account (in DSA market) before close
-          const dsaVToken = (await ethers.getContractAt("IVToken", vDSA_ADDRESS)) as IVToken;
+          const dsaVToken = (await ethers.getContractAt(
+            "contracts/Interfaces/IVToken.sol:IVToken",
+            vDSA_ADDRESS,
+          )) as IVToken;
           const dsaUnderlyingBefore = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
 
           // Execute partial close with profit
@@ -1329,7 +1335,10 @@ if (FORK_MAINNET) {
           );
 
           // Record underlying DSA balance in position account (in DSA market) before close
-          const dsaVToken = (await ethers.getContractAt("IVToken", vDSA_ADDRESS)) as IVToken;
+          const dsaVToken = (await ethers.getContractAt(
+            "contracts/Interfaces/IVToken.sol:IVToken",
+            vDSA_ADDRESS,
+          )) as IVToken;
           const dsaUnderlyingBefore = await dsaVToken.callStatic.balanceOfUnderlying(positionAccount);
 
           // Execute full close with profit

@@ -93,6 +93,7 @@ contract PendlePTVaultAdapter is
 
     /// @param pendleRouter_ Pendle Router (IPAllActionV3) address.
     /// @param comptroller_ Venus core pool Comptroller address.
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address pendleRouter_, address comptroller_) {
         if (pendleRouter_ == address(0)) revert ZeroAddress();
         if (comptroller_ == address(0)) revert ZeroAddress();

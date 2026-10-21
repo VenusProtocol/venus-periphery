@@ -1,10 +1,8 @@
-import { smock } from "@defi-wonderland/smock";
 import "@nomicfoundation/hardhat-chai-matchers";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
 
-import { EBRAKE_ABI } from "../../../../helpers/generateSafeEBrakeJson";
 import { forking, initMainnetUser } from "../utils";
 import { bscmainnetConfig } from "./configs";
 import { EBrakeFixture, createDeployFixture, runSharedTests } from "./shared";
@@ -28,21 +26,6 @@ if (FORK_MAINNET) {
 
       // Shared tests: deployment, access control, pause, caps
       runSharedTests(config, get);
-
-      describe("Safe tooling", () => {
-        it("should read the remote-chain flag from an implementation that only has IS_ISOLATED_POOL()", async () => {
-          const { eBrake } = get();
-          const legacy = await smock.fake(["function IS_ISOLATED_POOL() view returns (bool)"]);
-          legacy.IS_ISOLATED_POOL.returns(true);
-
-          const read = (address: string) => {
-            const contract = new ethers.Contract(address, EBRAKE_ABI, ethers.provider);
-            return contract.IS_REMOTE_CHAIN().catch(() => contract.IS_ISOLATED_POOL());
-          };
-          expect(await read(legacy.address)).to.equal(true);
-          expect(await read(eBrake.address)).to.equal(false);
-        });
-      });
 
       // ═════════════════════════════════════════════════════════════════════
       // BNB-ONLY: Flash Loan Pausing

@@ -44,11 +44,13 @@ extendConfig((config: HardhatConfig) => {
           "node_modules/@venusprotocol/venus-protocol/deployments/bsctestnet",
           "node_modules/@venusprotocol/governance-contracts/deployments/bsctestnet",
           "node_modules/@venusprotocol/protocol-reserve/deployments/bsctestnet",
+          "node_modules/@venusprotocol/isolated-pools/deployments/bsctestnet",
         ],
         bscmainnet: [
           "node_modules/@venusprotocol/venus-protocol/deployments/bscmainnet",
           "node_modules/@venusprotocol/governance-contracts/deployments/bscmainnet",
           "node_modules/@venusprotocol/protocol-reserve/deployments/bscmainnet",
+          "node_modules/@venusprotocol/isolated-pools/deployments/bscmainnet",
         ],
         unichainmainnet: ["node_modules/@venusprotocol/venus-protocol/deployments/unichainmainnet"],
       },
@@ -64,8 +66,8 @@ extendConfig((config: HardhatConfig) => {
 });
 
 // Override the built-in test task to accept --fork <network>, which sets
-// FORKED_NETWORK so simulateSafeEBrakeTx.ts (and other fork tests) can pick
-// up the correct archive node URL without needing a separate env var.
+// FORKED_NETWORK so fork tests can pick up the correct archive node URL
+// without needing a separate env var.
 task(TASK_TEST)
   .addOptionalParam("fork", "Fork a live network by name (e.g. bsctestnet, bscmainnet)")
   .setAction(async (args, _hre, runSuper) => {

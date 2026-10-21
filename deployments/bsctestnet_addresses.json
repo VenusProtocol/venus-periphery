@@ -2,6 +2,7 @@
   "name": "bsctestnet",
   "chainId": "97",
   "addresses": {
+    "CollateralGateway": "0x1B6D1ff76beb57CF7C9B2e05BE16cb9529DCa2F9",
     "DeviationSentinel": "0x9245d72712548707809D66848e63B8E2B169F3c1",
     "DeviationSentinel_Implementation": "0x455C09D6BA46e7C9f80f29506DcC8E5F8378832a",
     "DeviationSentinel_Proxy": "0x9245d72712548707809D66848e63B8E2B169F3c1",
@@ -14,6 +15,7 @@
     "LeverageStrategiesManager": "0x5187226337C95c4BE683D37Ffc66D41f5b6cE38f",
     "LeverageStrategiesManager_Implementation": "0xaD740d56dCf8FB0484f4C27CA3356cF1e379cb4e",
     "LeverageStrategiesManager_Proxy": "0x5187226337C95c4BE683D37Ffc66D41f5b6cE38f",
+    "NativeTokenGateway_vWBNB_Core": "0xF34AAfc540Adc827A84736553BD29DE87a117558",
     "PositionAccount": "0xC9A5f1598e434E3E52CE25D7ff290E4CF167ee52",
     "RelativePositionManager": "0x25dbA64B28F93cC40e9cAf9691266043fe1000a2",
     "RelativePositionManager_Implementation": "0x1A7faa1Ce4cD4252A7348c2Fe1Ad0d117e965d57",
