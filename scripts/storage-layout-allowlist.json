@@ -7,7 +7,13 @@
     "and fails the check, so this file cannot outlive the problem it documents. Prefer fixing or annotating",
     "over adding here.",
     "A deployment that is simply new does not belong here: it is absent from the base ref and passes on its own.",
-    "Empty is the intended steady state: every deployment here records both storageLayout and metadata."
+    "Empty is the intended steady state: every deployment here records both storageLayout and metadata.",
+    "`moved` maps a source directory deployments were compiled from to where it lives now, for a pure move.",
+    "Those deployments are still compared, against the source at its new path. A prefix that no deployment",
+    "records is stale and fails the check, which happens once each one is redeployed from the new path."
   ],
-  "skip": {}
+  "skip": {},
+  "moved": {
+    "contracts/DeviationSentinel/": "contracts/Sentinels/"
+  }
 }
