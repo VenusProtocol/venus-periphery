@@ -12,6 +12,7 @@ The first major addition in this repository is the PositionSwapper, a flexible m
 
 - NodeJS - 20.x
 - Solc - v0.8.25 (https://github.com/ethereum/solidity/releases/tag/v0.8.25)
+- Foundry - v1.5.1 (https://book.getfoundry.sh/getting-started/installation), for the Solidity tests
 
 ## Installing
 
@@ -34,6 +35,18 @@ REPORT_GAS=true npx hardhat test
 ```
 
 - To run fork tests add FORK=true, FORKED_NETWORK and one ARCHIVE_NODE var in the .env file.
+
+### Foundry tests
+
+Solidity tests live in `tests/foundry` and use the same `node_modules` dependencies as Hardhat. `forge-std` is a git submodule in `lib`.
+
+```bash
+
+git submodule update --init
+
+yarn test:forge
+
+```
 
 ## Deployment
 
@@ -114,6 +127,20 @@ npx solhint 'contracts/**/*.sol' --fix
 MNEMONIC="<>" BSC_API_KEY="<>" npx hardhat run ./script/hardhat/deploy.ts --network testnet
 
 ```
+
+## Upgrade Safety
+
+CI runs both checks on every pull request. To run them locally:
+
+```bash
+yarn hardhat compile
+yarn check:upgrade-safety
+yarn check:storage-layout
+```
+
+`check:storage-layout` compares against the working tree by default; set `STORAGE_LAYOUT_BASE_REF=origin/develop` to compare against a branch, as CI does.
+
+`check:upgrade-safety` reads every file in `artifacts/build-info`, including ones left by earlier compiles, so an old copy of a contract can fail it after the source is fixed. If it fails on correct code, run `yarn check:upgrades:force`, which recompiles from scratch with `--force` and then runs both checks.
 
 ## Documentation
 

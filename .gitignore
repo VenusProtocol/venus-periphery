@@ -11,6 +11,10 @@ artifacts-zk
 typechain
 .openzeppelin
 
+# Foundry
+out
+cache-foundry
+
 # Coverage
 coverage
 coverage.json

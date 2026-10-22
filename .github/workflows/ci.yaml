@@ -66,6 +66,30 @@ jobs:
           recreate: true
           path: code-coverage-results.md
 
+  test-forge:
+    name: Test (Foundry)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "yarn"
+
+      - name: Install deps
+        run: yarn
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+
+      - name: Run foundry unit tests
+        run: forge test --no-match-path "tests/foundry/fork/**"
+
   deploy:
     name: Deploy
     runs-on: ubuntu-22.04

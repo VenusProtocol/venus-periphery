@@ -88,6 +88,12 @@ export const BASE_MAINNET_MULTISIG = "0x1803Cf1D3495b43cC628aa1d8638A981F8CD341C
 export const UNICHAIN_SEPOLIA_MULTISIG = "0x9831D3A641E8c7F082EEA75b8249c99be9D09a34";
 export const UNICHAIN_MAINNET_MULTISIG = "0x1803Cf1D3495b43cC628aa1d8638A981F8CD341C";
 
+export const DEFAULT_BLOCKS_PER_YEAR = 42_048_000; // assuming a block is mined every 0.75 seconds
+export const BSC_BLOCKS_PER_YEAR = 42_048_000; // assuming a block is mined every 0.75 seconds
+export const ETH_BLOCKS_PER_YEAR = 2_628_000; // assuming a block is mined every 12 seconds
+export const OPBNB_BLOCKS_PER_YEAR = 63_072_000; // assuming a block is mined every 0.5 seconds
+export const SECONDS_PER_YEAR = 31_536_000; // seconds per year
+
 export const preconfiguredAddresses = {
   hardhat: {
     VTreasury: "account:deployer",
@@ -100,11 +106,19 @@ export const preconfiguredAddresses = {
     NormalTimelock: governanceBscTestnet.NormalTimelock.address,
     AccessControlManager: governanceBscTestnet.AccessControlManager.address,
     ResilientOracle: oracleBscTestnet.ResilientOracle.address,
+    // Liquidity Hub registry, from venus-liquidity-hub. BSC only — every other network leaves this
+    // out, and HubNavDeviationSentinel is not deployed there.
+    HubRegistry: "0x5346f648029d1D1d1034e09e8AD7a115f5D7A159",
+    // Spoke pools keep a registry of their own, separate from the isolated-pools `PoolRegistry`.
+    // Hardcoded until `@venusprotocol/isolated-pools` publishes the Spoke deployments.
+    SpokePoolRegistry: "0xeAA45288d804971e5a76f33559e629F5b2b1Cb8B",
   },
   bscmainnet: {
     NormalTimelock: governanceBscMainnet.NormalTimelock.address,
     AccessControlManager: governanceBscMainnet.AccessControlManager.address,
     ResilientOracle: oracleBscMainnet.ResilientOracle.address,
+    HubRegistry: "0x6D93Fd479f2d37445CFBe132412e316a0364acc2",
+    SpokePoolRegistry: "0x372D0eE44993B5c6eb641364BAB939311e8e5B4c",
   },
   sepolia: {
     NormalTimelock: governanceSepolia.NormalTimelock.address,
@@ -246,47 +260,16 @@ export const globalConfig: NetworkConfig = {
   },
 };
 
+// Every supported network maps to the globalConfig entry of the same name; the only
+// exception is "development", which reuses the bsctestnet config.
+const CONFIG_ALIASES = new Map<string, keyof NetworkConfig>([["development", "bsctestnet"]]);
+
 export async function getConfig(networkName: string): Promise<DeploymentConfig> {
-  switch (networkName) {
-    case "hardhat":
-      return globalConfig.hardhat;
-    case "bsctestnet":
-      return globalConfig.bsctestnet;
-    case "bscmainnet":
-      return globalConfig.bscmainnet;
-    case "sepolia":
-      return globalConfig.sepolia;
-    case "ethereum":
-      return globalConfig.ethereum;
-    case "opbnbtestnet":
-      return globalConfig.opbnbtestnet;
-    case "opbnbmainnet":
-      return globalConfig.opbnbmainnet;
-    case "arbitrumsepolia":
-      return globalConfig.arbitrumsepolia;
-    case "arbitrumone":
-      return globalConfig.arbitrumone;
-    case "zksyncsepolia":
-      return globalConfig.zksyncsepolia;
-    case "zksyncmainnet":
-      return globalConfig.zksyncmainnet;
-    case "opsepolia":
-      return globalConfig.opsepolia;
-    case "opmainnet":
-      return globalConfig.opmainnet;
-    case "basesepolia":
-      return globalConfig.basesepolia;
-    case "basemainnet":
-      return globalConfig.basemainnet;
-    case "unichainsepolia":
-      return globalConfig.unichainsepolia;
-    case "unichainmainnet":
-      return globalConfig.unichainmainnet;
-    case "development":
-      return globalConfig.bsctestnet;
-    default:
-      throw new Error(`config for network ${networkName} is not available.`);
+  const key = CONFIG_ALIASES.get(networkName) ?? networkName;
+  if (!Object.prototype.hasOwnProperty.call(globalConfig, key)) {
+    throw new Error(`config for network ${networkName} is not available.`);
   }
+  return globalConfig[key as keyof NetworkConfig];
 }
 
 export const getContractAddressOrNullAddress = async (deployments: DeploymentsExtension, name: string) => {
