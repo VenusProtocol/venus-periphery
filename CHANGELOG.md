@@ -1,3 +1,9 @@
+## <small>1.3.1-dev.1 (2026-10-27)</small>
+
+* Merge pull request #89 from VenusProtocol/main ([93a851b](https://github.com/VenusProtocol/venus-periphery/commit/93a851b)), closes [#89](https://github.com/VenusProtocol/venus-periphery/issues/89)
+* Merge pull request #90 from VenusProtocol/docs/hashdit-collateral-gateway-report ([6c7c65c](https://github.com/VenusProtocol/venus-periphery/commit/6c7c65c)), closes [#90](https://github.com/VenusProtocol/venus-periphery/issues/90)
+* docs(audits): add HashDit CollateralGateway report ([2bd06b4](https://github.com/VenusProtocol/venus-periphery/commit/2bd06b4))
+
 ## 1.3.0 (2026-10-22)
 
 * [L01] size the pause trip points off the drift-grown anchor ([3ba7461](https://github.com/VenusProtocol/venus-periphery/commit/3ba7461))
