@@ -9,6 +9,7 @@ import type {
   BStockPauseSentinel,
   IAccessControlManagerV8,
   IBStockToken,
+  ICompliance,
   IEBrake,
   IPauseManager,
   IVToken,
@@ -20,6 +21,7 @@ chai.use(smock.matchers);
 describe("BStockPauseSentinel", () => {
   let sentinel: BStockPauseSentinel;
   let pauseManager: FakeContract<IPauseManager>;
+  let compliance: FakeContract<ICompliance>;
   let accessControlManager: FakeContract<IAccessControlManagerV8>;
   let eBrake: FakeContract<IEBrake>;
   let vTSLAB: FakeContract<IVToken>;
@@ -58,8 +60,8 @@ describe("BStockPauseSentinel", () => {
 
   /**
    * Resets every fake's call history and behaviour: ACM allows everything, each vToken returns its underlying,
-   * every token points at `pauseManager`, and no token is paused. Fakes live outside the EVM snapshot, so this
-   * runs before every test.
+   * every token points at `pauseManager` and `compliance`, no token is paused and the compliance module accepts
+   * every account. Fakes live outside the EVM snapshot, so this runs before every test.
    */
   function primeFakes() {
     accessControlManager.isAllowedToCall.reset();
@@ -77,14 +79,17 @@ describe("BStockPauseSentinel", () => {
     for (const token of [tslab, nvdab, spcxb]) {
       token.pauseManager.reset();
       token.pauseManager.returns(pauseManager.address);
+      token.compliance.reset();
+      token.compliance.returns(compliance.address);
     }
     pauseManager.isTokenPaused.reset();
     pauseManager.isTokenPaused.returns(false);
+    compliance.checkIsCompliant.reset();
   }
 
   /**
    * Deploys the BStockPauseSentinel behind an upgradeable proxy, wired to fake ACM, EBrake and vTokens, fake
-   * bStock tokens exposing pauseManager(), and a fake PauseManager.
+   * bStock tokens exposing pauseManager() and compliance(), a fake PauseManager and a fake compliance module.
    */
   async function deployFixture() {
     [owner, user, keeper, otherKeeper] = await ethers.getSigners();
@@ -98,6 +103,7 @@ describe("BStockPauseSentinel", () => {
     nvdab = await smock.fake<IBStockToken>("IBStockToken");
     spcxb = await smock.fake<IBStockToken>("IBStockToken");
     pauseManager = await smock.fake<IPauseManager>("contracts/Interfaces/IPauseManager.sol:IPauseManager");
+    compliance = await smock.fake<ICompliance>("ICompliance");
 
     const Factory = await ethers.getContractFactory("BStockPauseSentinel");
     sentinel = (await upgrades.deployProxy(Factory, [accessControlManager.address], {
@@ -108,6 +114,7 @@ describe("BStockPauseSentinel", () => {
     return {
       sentinel,
       pauseManager,
+      compliance,
       accessControlManager,
       eBrake,
       vTSLAB,
@@ -127,6 +134,7 @@ describe("BStockPauseSentinel", () => {
     ({
       sentinel,
       pauseManager,
+      compliance,
       accessControlManager,
       eBrake,
       vTSLAB,
@@ -388,10 +396,40 @@ describe("BStockPauseSentinel", () => {
       expect([isPaused, underlying, manager]).to.deep.equal([false, TSLAB, pauseManager.address]);
     });
 
-    it("should report a monitored market whose token is paused", async () => {
+    it("should report a monitored market whose token is paused, without reading the compliance module", async () => {
       setPaused(pauseManager, TSLAB, true);
       const [isPaused, underlying, manager] = await sentinel.checkBStockPause(vTSLAB.address);
       expect([isPaused, underlying, manager]).to.deep.equal([true, TSLAB, pauseManager.address]);
+      expect(tslab.compliance).to.not.have.been.called;
+    });
+
+    it("should run the token's compliance check for the market while the token is not paused", async () => {
+      await sentinel.checkBStockPause(vTSLAB.address);
+      expect(compliance.checkIsCompliant).to.have.been.calledOnceWith(TSLAB, vTSLAB.address);
+    });
+
+    it("should report a market the compliance module rejects as paused", async () => {
+      compliance.checkIsCompliant.whenCalledWith(TSLAB, vTSLAB.address).reverts("UserBlocked");
+      const [isPaused, underlying, manager] = await sentinel.checkBStockPause(vTSLAB.address);
+      expect([isPaused, underlying, manager]).to.deep.equal([true, TSLAB, pauseManager.address]);
+    });
+
+    it("should report paused on a revert without a reason (fail closed)", async () => {
+      compliance.checkIsCompliant.reverts();
+      const [isPaused] = await sentinel.checkBStockPause(vTSLAB.address);
+      expect(isPaused).to.equal(true);
+    });
+
+    it("should ignore a rejection of another token or another account", async () => {
+      compliance.checkIsCompliant.whenCalledWith(NVDAB, vTSLAB.address).reverts();
+      compliance.checkIsCompliant.whenCalledWith(TSLAB, user.address).reverts();
+      const [isPaused] = await sentinel.checkBStockPause(vTSLAB.address);
+      expect(isPaused).to.equal(false);
+    });
+
+    it("should bubble up a revert from the token's compliance()", async () => {
+      tslab.compliance.reverts("compliance getter failure");
+      await expect(sentinel.checkBStockPause(vTSLAB.address)).to.be.revertedWith("compliance getter failure");
     });
 
     it("should report no pause for a token without a PauseManager", async () => {
@@ -581,6 +619,7 @@ describe("BStockPauseSentinel", () => {
         expect(vTSLAB.underlying).to.have.been.calledOnce;
         expect(tslab.pauseManager).to.have.been.calledOnce;
         expect(pauseManager.isTokenPaused).to.have.been.calledOnceWith(TSLAB);
+        expect(tslab.compliance).to.not.have.been.called;
       });
 
       it("should emit exactly one BStockPauseHandled(market, underlying, caller, pauseManager)", async () => {
@@ -632,6 +671,22 @@ describe("BStockPauseSentinel", () => {
         await expect(sentinel.connect(keeper).handleBStockPause(vSPCXB.address))
           .to.be.revertedWithCustomError(sentinel, "MarketNotMonitored")
           .withArgs(vSPCXB.address);
+        expect(decreaseCF()).to.not.have.been.called;
+      });
+    });
+
+    describe("market blocked by the compliance module", () => {
+      it("should zero CF for a market the compliance module rejects and emit BStockPauseHandled", async () => {
+        compliance.checkIsCompliant.whenCalledWith(TSLAB, vTSLAB.address).reverts("UserSanctioned");
+        await expect(sentinel.connect(keeper).handleBStockPause(vTSLAB.address))
+          .to.emit(sentinel, "BStockPauseHandled")
+          .withArgs(vTSLAB.address, TSLAB, pauseManager.address);
+        expect(decreaseCF()).to.have.been.calledOnceWith(vTSLAB.address, 0);
+      });
+
+      it("should not act on other monitored markets", async () => {
+        compliance.checkIsCompliant.whenCalledWith(TSLAB, vTSLAB.address).reverts();
+        expect(await emittedEvents(sentinel.connect(keeper).handleBStockPause(vNVDAB.address))).to.deep.equal([]);
         expect(decreaseCF()).to.not.have.been.called;
       });
     });

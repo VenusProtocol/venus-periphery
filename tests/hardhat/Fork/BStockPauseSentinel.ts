@@ -6,7 +6,14 @@ import { BigNumber, Contract, ContractTransaction } from "ethers";
 import { parseUnits } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 
-import { BStockPauseSentinel, EBrake, IAccessControlManagerV8, IBStockToken, IPauseManager } from "../../../typechain";
+import {
+  BStockPauseSentinel,
+  EBrake,
+  IAccessControlManagerV8,
+  IBStockToken,
+  ICompliance,
+  IPauseManager,
+} from "../../../typechain";
 import { BStockPauseSentinel__factory } from "../../../typechain/factories/BStockPauseSentinel__factory";
 import { IAccessControlManagerV8__factory } from "../../../typechain/factories/IAccessControlManagerV8__factory";
 import { FORK_MAINNET, forking, initMainnetUser } from "./utils";
@@ -23,6 +30,7 @@ const NORMAL_TIMELOCK = "0x939bD8d64c0A9583A7Dcea9933f7b21697ab6396";
 const ACM = "0x4788629abc6cfca10f9f969efdeaa1cf70c23555";
 const DEFAULT_PROXY_ADMIN = "0x6beb6D2695B67FEb73ad4f172E8E2975497187e4";
 const PAUSE_MANAGER = "0x9fc74Be63f3589485B2423984a7a0557e0CF700a";
+const COMPLIANCE = "0x53dBa7AaBDe774787A1F57236B235567dA8e14F4";
 
 const vTSLAB = "0x97421799419Eb782628e73e7220d8E0A207469a3";
 const vNVDAB = "0xEb8Ca841cBe1BC4832A10b15c7dAB1081eDaD371";
@@ -93,6 +101,17 @@ const PAUSE_MANAGER_ABI = [
   "function unpauseAllTokens()",
 ];
 
+const COMPLIANCE_ABI = [
+  "function OPS_ROLE() view returns (bytes32)",
+  "function getRoleMember(bytes32 role, uint256 index) view returns (address)",
+  "function sanctionedAddresses(address account) view returns (bool)",
+  "function blockedAddresses(address token, address account) view returns (bool)",
+  "function addToSanctionsList(address[] accounts)",
+  "function addToBlocklist(address token, address[] accounts)",
+  "error UserSanctioned()",
+  "error UserBlocked()",
+];
+
 const ERC20_ABI = [
   "function balanceOf(address account) view returns (uint256)",
   "function transfer(address to, uint256 amount) returns (bool)",
@@ -105,6 +124,7 @@ const BSTOCK_ABI = [
   "function DEFAULT_ADMIN_ROLE() view returns (bytes32)",
   "function getRoleMember(bytes32 role, uint256 index) view returns (address)",
   "function pauseManager() view returns (address)",
+  "function compliance() view returns (address)",
   "function setPauseManager(address newPauseManager)",
   "error TokenPaused()",
 ];
@@ -748,6 +768,61 @@ if (FORK_MAINNET) {
           await expectUntouched(eBrake, comptroller, vTSLAB, before);
         });
       });
+
+      // ═════════════════════════════════════════════════════════════════════
+      // 9. VTOKEN BLOCKED BY THE COMPLIANCE MODULE
+      // ═════════════════════════════════════════════════════════════════════
+
+      describe("9. vToken blocked by the compliance module", () => {
+        let compliance: Contract;
+        let tslab: Contract;
+
+        beforeEach(async () => {
+          // Impersonate a current ops role holder on the real compliance module
+          const complianceView = new ethers.Contract(COMPLIANCE, COMPLIANCE_ABI, ethers.provider);
+          const opsAddress = await complianceView.getRoleMember(await complianceView.OPS_ROLE(), 0);
+          compliance = complianceView.connect(await initMainnetUser(opsAddress, parseUnits("1")));
+          tslab = new ethers.Contract(TSLAB, BSTOCK_ABI, await initMainnetUser(TSLAB_HOLDER, parseUnits("1")));
+        });
+
+        it("should find TSLAB on the compliance module with vTSLAB neither sanctioned nor blocklisted", async () => {
+          expect(await tslab.compliance()).to.equal(COMPLIANCE);
+          expect(await compliance.sanctionedAddresses(vTSLAB)).to.equal(false);
+          expect(await compliance.blockedAddresses(TSLAB, vTSLAB)).to.equal(false);
+        });
+
+        it("should zero CF when vTSLAB is sanctioned, which blocks TSLAB transfers into it", async () => {
+          const before = await readPoolStates(comptroller, vTSLAB);
+          await compliance.addToSanctionsList([vTSLAB]);
+          await expect(tslab.transfer(vTSLAB, 1)).to.be.revertedWithCustomError(compliance, "UserSanctioned");
+          expect(await pauseManager.isTokenPaused(TSLAB)).to.equal(false);
+
+          const [isPaused, underlying, manager] = await sentinel.checkBStockPause(vTSLAB);
+          expect([isPaused, underlying, manager]).to.deep.equal([true, TSLAB, PAUSE_MANAGER]);
+          const tx = sentinel.connect(keeper).handleBStockPause(vTSLAB);
+          await expect(tx).to.emit(sentinel, "BStockPauseHandled").withArgs(vTSLAB, TSLAB, PAUSE_MANAGER);
+          await expectCFZeroed(eBrake, comptroller, vTSLAB, before);
+        });
+
+        it("should zero CF when vTSLAB is blocklisted for TSLAB, which blocks TSLAB transfers into it", async () => {
+          const before = await readPoolStates(comptroller, vTSLAB);
+          await compliance.addToBlocklist(TSLAB, [vTSLAB]);
+          await expect(tslab.transfer(vTSLAB, 1)).to.be.revertedWithCustomError(compliance, "UserBlocked");
+
+          expect((await sentinel.checkBStockPause(vTSLAB)).isPaused).to.equal(true);
+          await sentinel.connect(keeper).handleBStockPause(vTSLAB);
+          await expectCFZeroed(eBrake, comptroller, vTSLAB, before);
+        });
+
+        it("should ignore vTSLAB blocklisted for another token, which does not block TSLAB", async () => {
+          const before = await readPoolStates(comptroller, vTSLAB);
+          await compliance.addToBlocklist(NVDAB, [vTSLAB]);
+          await tslab.transfer(vTSLAB, 1);
+
+          expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vTSLAB))).to.deep.equal([]);
+          await expectUntouched(eBrake, comptroller, vTSLAB, before);
+        });
+      });
     });
   });
 }
@@ -782,7 +857,7 @@ type SpokeFixture = {
 /**
  * Deploys EBrake and BStockPauseSentinel from the repo and makes the grants a VIP
  * would make. The testnet NVDAB is a mock without pauseManager(), so a fake bStock pointing to a fake PauseManager
- * takes its place.
+ * and a fake compliance module takes its place.
  */
 async function deploySpokeFixture(): Promise<SpokeFixture> {
   const [, keeper] = await ethers.getSigners();
@@ -818,6 +893,7 @@ async function deploySpokeFixture(): Promise<SpokeFixture> {
     address: nvdab,
   });
   token.pauseManager.returns(pauseManager.address);
+  token.compliance.returns((await smock.fake<ICompliance>("ICompliance")).address);
 
   return { sentinel, eBrake, hubSpoke, pauseManager, nvdab, keeper };
 }

@@ -5,6 +5,7 @@ import { EnumerableSetUpgradeable } from "@openzeppelin/contracts-upgradeable/ut
 import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 import { IEBrake } from "../EmergencyBrake/IEBrake.sol";
 import { IBStockToken } from "../Interfaces/IBStockToken.sol";
+import { ICompliance } from "../Interfaces/ICompliance.sol";
 import { IPauseManager } from "../Interfaces/IPauseManager.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
 
@@ -12,7 +13,8 @@ import { IVToken } from "../Interfaces/IVToken.sol";
  * @title BStockPauseSentinel
  * @author Venus
  * @notice Keeper-driven sentinel that zeroes the collateral factor (CF) of monitored bStock (tokenized equity)
- *         markets through EBrake while the issuer's PauseManager reports the token as paused.
+ *         markets through EBrake while the issuer's PauseManager reports the token as paused, or the token's
+ *         compliance module sanctions or blocklists the market.
  * @dev A paused bStock cannot be transferred. Liquidations still seize its vTokens, but no one can redeem them
  *      for the bStock until the pause ends, so liquidators cannot exit. Zeroing CF stops new debt against the
  *      collateral, while the liquidation threshold (LT) is left unchanged so existing positions are not pushed
@@ -20,6 +22,10 @@ import { IVToken } from "../Interfaces/IVToken.sol";
  *      - Any market EBrake can act on: EBrake acts on the market's own comptroller and checks the listing there.
  *      - The pause is read from the PauseManager the token itself points to (pauseManager()), which is the
  *        one the token checks before every transfer.
+ *      - A sanctioned or blocklisted vToken can neither send nor receive the token, which blocks redeems and
+ *        mints just like a pause, so it is treated as one. The block is read by running the same
+ *        checkIsCompliant call the token makes, on the compliance module it points to (compliance()); any
+ *        revert there counts as blocked.
  *      - Tighten-only: CF is restored by a governance VIP that reads EBrake.getMarketCFSnapshot() and then
  *        calls EBrake.resetCFSnapshot().
  *      - handleBStockPause is called by trusted keepers; EBrake makes repeat calls no-ops.
@@ -51,11 +57,13 @@ contract BStockPauseSentinel is AccessControlledV8 {
     event MarketMonitoringUpdated(address indexed market, bool monitored);
 
     /// @notice Emitted when handleBStockPause asks EBrake to zero the CF of a market whose underlying token is paused
-    /// @dev Emitted on every handleBStockPause call that finds the token paused, including repeat calls on a
-    ///      market whose CF is already zero (EBrake then makes no change and emits no CollateralFactorDecreased event)
+    ///         or blocked for the market by the token's compliance module
+    /// @dev Emitted on every handleBStockPause call that finds the token paused or the market blocked, including
+    ///      repeat calls on a market whose CF is already zero (EBrake then makes no change and emits no
+    ///      CollateralFactorDecreased event)
     /// @param market The vToken market address
-    /// @param underlying The paused underlying token
-    /// @param pauseManager The PauseManager that reported the underlying token as paused
+    /// @param underlying The market's underlying token
+    /// @param pauseManager The PauseManager the underlying token points to
     event BStockPauseHandled(address indexed market, address indexed underlying, address pauseManager);
 
     /// @notice Thrown when a zero address is provided
@@ -139,15 +147,16 @@ contract BStockPauseSentinel is AccessControlledV8 {
     }
 
     /**
-     * @notice Zero the collateral factor of a monitored market while its underlying token is paused
+     * @notice Zero the collateral factor of a monitored market while its underlying token is paused, or blocked
+     *         for the market by the token's compliance module
      * @dev Calls EBrake.decreaseCF(market, 0), which zeroes CF in the market's pool (on the BSC Core pool, also
      *      in every e-mode pool the market is listed in), keeps LT and snapshots the previous CF/LT. Repeat calls
-     *      are no-ops in EBrake. The pause is read through checkBStockPause; while the token is not paused the
-     *      call does nothing.
-     *      Reverts if the underlying token does not expose pauseManager().
+     *      are no-ops in EBrake. The pause and the compliance block are read through checkBStockPause; while
+     *      neither holds the call does nothing.
+     *      Reverts if the underlying token does not expose pauseManager() or compliance().
      * @param market The vToken market address
      * @custom:access Only trusted keepers
-     * @custom:event Emits BStockPauseHandled when the token is paused
+     * @custom:event Emits BStockPauseHandled when the token is paused or the market blocked
      * @custom:error UnauthorizedKeeper if the caller is not a trusted keeper
      * @custom:error MarketNotMonitored if the market is not monitored
      * @custom:error MarketNotSupported if the underlying token has no PauseManager
@@ -176,10 +185,12 @@ contract BStockPauseSentinel is AccessControlledV8 {
      * @notice Check whether a monitored market's underlying bStock is paused, i.e. whether handleBStockPause would
      *         act on it
      * @dev Returns zeros for a market that is not monitored, and isPaused = false for an underlying token with
-     *      no PauseManager. Reads the PauseManager the token itself points to.
-     *      Reverts if the underlying token does not expose pauseManager().
+     *      no PauseManager. Reads the PauseManager the token itself points to. While the token is not paused, also
+     *      runs the token's compliance check for the market; a revert there counts as blocked.
+     *      Reverts if the underlying token does not expose pauseManager() or compliance().
      * @param market The vToken market address
-     * @return isPaused True if the market is monitored and its underlying token is paused
+     * @return isPaused True if the market is monitored and its underlying token is paused, or the token's
+     *         compliance module rejects the market (sanctioned, or blocklisted for the token)
      * @return underlying The market's underlying token, or address(0) if the market is not monitored
      * @return pauseManager The PauseManager the token points to, or address(0) if the market is not monitored or
      *         the token has none
@@ -195,7 +206,7 @@ contract BStockPauseSentinel is AccessControlledV8 {
         pauseManager = IBStockToken(underlying).pauseManager();
         if (pauseManager == address(0)) return (false, underlying, address(0));
 
-        isPaused = IPauseManager(pauseManager).isTokenPaused(underlying);
+        isPaused = IPauseManager(pauseManager).isTokenPaused(underlying) || _isBlockedByCompliance(underlying, market);
     }
 
     /**
@@ -205,5 +216,21 @@ contract BStockPauseSentinel is AccessControlledV8 {
      */
     function isMarketMonitored(address market) public view returns (bool) {
         return monitoredMarkets.contains(market);
+    }
+
+    /**
+     * @notice Whether the token's compliance module rejects a market as a party to a transfer of the token
+     * @dev Runs the check the token runs on every transfer; any revert from the compliance module counts as rejected
+     * @param underlying The market's underlying token
+     * @param market The vToken market address
+     * @return True if the compliance module rejects the market
+     */
+    function _isBlockedByCompliance(address underlying, address market) private view returns (bool) {
+        address compliance = IBStockToken(underlying).compliance();
+        try ICompliance(compliance).checkIsCompliant(underlying, market) {
+            return false;
+        } catch {
+            return true;
+        }
     }
 }
