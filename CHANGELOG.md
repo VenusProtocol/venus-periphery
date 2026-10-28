@@ -1,3 +1,8 @@
+## <small>1.3.1-dev.2 (2026-10-28)</small>
+
+* Merge pull request #91 from VenusProtocol/fix/storage-layout-deployed-renames ([de40887](https://github.com/VenusProtocol/venus-periphery/commit/de40887)), closes [#91](https://github.com/VenusProtocol/venus-periphery/issues/91)
+* fix: ignore already-deployed oz-renamed-from in storage layout check ([8897d2a](https://github.com/VenusProtocol/venus-periphery/commit/8897d2a))
+
 ## <small>1.3.1-dev.1 (2026-10-27)</small>
 
 * Merge pull request #89 from VenusProtocol/main ([93a851b](https://github.com/VenusProtocol/venus-periphery/commit/93a851b)), closes [#89](https://github.com/VenusProtocol/venus-periphery/issues/89)
