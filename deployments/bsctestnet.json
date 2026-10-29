@@ -559,7 +559,7 @@
       ]
     },
     "BStockPauseSentinel_Implementation": {
-      "address": "0xCca1cABB35DE7c2560c98A1e3D443374C2601811",
+      "address": "0x0965e122751aC3Db4621eB7A571C9C4a7c9ED659",
       "abi": [
         {
           "inputs": [
@@ -10162,7 +10162,7 @@
       ]
     },
     "MockBStockToken": {
-      "address": "0x32F7F2F24C219Bb6c48218B7f1A21A32758e1499",
+      "address": "0x4E1abeeE79413b38CFCC6c59be3Dabf21A824cF3",
       "abi": [
         {
           "inputs": [
@@ -10183,6 +10183,11 @@
         {
           "inputs": [],
           "name": "TokenPaused",
+          "type": "error"
+        },
+        {
+          "inputs": [],
+          "name": "UserBlocked",
           "type": "error"
         },
         {
@@ -10208,6 +10213,25 @@
             }
           ],
           "name": "Approval",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "bool",
+              "name": "blocked",
+              "type": "bool"
+            }
+          ],
+          "name": "BlockedSet",
           "type": "event"
         },
         {
@@ -10329,6 +10353,56 @@
               "internalType": "uint256",
               "name": "",
               "type": "uint256"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "name": "blocked",
+          "outputs": [
+            {
+              "internalType": "bool",
+              "name": "",
+              "type": "bool"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "token",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            }
+          ],
+          "name": "checkIsCompliant",
+          "outputs": [],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "compliance",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
             }
           ],
           "stateMutability": "view",
@@ -10482,6 +10556,24 @@
         {
           "inputs": [],
           "name": "renounceOwnership",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            },
+            {
+              "internalType": "bool",
+              "name": "blocked_",
+              "type": "bool"
+            }
+          ],
+          "name": "setBlocked",
           "outputs": [],
           "stateMutability": "nonpayable",
           "type": "function"

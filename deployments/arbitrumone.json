@@ -2483,7 +2483,7 @@
       ]
     },
     "EBrake_Implementation": {
-      "address": "0x99d41774E679588D82C7045324Bde8DfF97773b9",
+      "address": "0x8A7d8589A597619A7842d3BC284b9a5a276FaE56",
       "abi": [
         {
           "inputs": [
@@ -2494,7 +2494,7 @@
             },
             {
               "internalType": "bool",
-              "name": "isIsolatedPool_",
+              "name": "isRemoteChain_",
               "type": "bool"
             }
           ],
@@ -2597,8 +2597,24 @@
           "type": "error"
         },
         {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "expected",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "actual",
+              "type": "address"
+            }
+          ],
+          "name": "MarketsOnDifferentComptrollers",
+          "type": "error"
+        },
+        {
           "inputs": [],
-          "name": "NotSupportedOnIsolatedPool",
+          "name": "NotSupportedOnRemoteChain",
           "type": "error"
         },
         {
@@ -2806,6 +2822,75 @@
           "anonymous": false,
           "inputs": [
             {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "hub",
+              "type": "address"
+            }
+          ],
+          "name": "HubPaused",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "yieldGroup",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "resource",
+              "type": "address"
+            }
+          ],
+          "name": "HubResourcePaused",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "hub",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "yieldGroup",
+              "type": "address"
+            }
+          ],
+          "name": "HubYieldGroupPaused",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
               "indexed": false,
               "internalType": "uint8",
               "name": "version",
@@ -2950,7 +3035,7 @@
         },
         {
           "inputs": [],
-          "name": "IS_ISOLATED_POOL",
+          "name": "IS_REMOTE_CHAIN",
           "outputs": [
             {
               "internalType": "bool",
@@ -3163,6 +3248,50 @@
         {
           "inputs": [],
           "name": "pauseFlashLoan",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "hub",
+              "type": "address"
+            }
+          ],
+          "name": "pauseHub",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "yieldGroup",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "resource",
+              "type": "address"
+            }
+          ],
+          "name": "pauseHubResource",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "yieldGroup",
+              "type": "address"
+            }
+          ],
+          "name": "pauseHubYieldGroup",
           "outputs": [],
           "stateMutability": "nonpayable",
           "type": "function"

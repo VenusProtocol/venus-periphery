@@ -3,7 +3,7 @@
   "chainId": "97",
   "addresses": {
     "BStockPauseSentinel": "0xC25b2B657D24380eDd1a1Cff5296385541e85204",
-    "BStockPauseSentinel_Implementation": "0xCca1cABB35DE7c2560c98A1e3D443374C2601811",
+    "BStockPauseSentinel_Implementation": "0x0965e122751aC3Db4621eB7A571C9C4a7c9ED659",
     "BStockPauseSentinel_Proxy": "0xC25b2B657D24380eDd1a1Cff5296385541e85204",
     "CollateralGateway": "0x1B6D1ff76beb57CF7C9B2e05BE16cb9529DCa2F9",
     "DeviationSentinel": "0x9245d72712548707809D66848e63B8E2B169F3c1",
@@ -21,7 +21,7 @@
     "LeverageStrategiesManager": "0x5187226337C95c4BE683D37Ffc66D41f5b6cE38f",
     "LeverageStrategiesManager_Implementation": "0xaD740d56dCf8FB0484f4C27CA3356cF1e379cb4e",
     "LeverageStrategiesManager_Proxy": "0x5187226337C95c4BE683D37Ffc66D41f5b6cE38f",
-    "MockBStockToken": "0x32F7F2F24C219Bb6c48218B7f1A21A32758e1499",
+    "MockBStockToken": "0x4E1abeeE79413b38CFCC6c59be3Dabf21A824cF3",
     "NativeTokenGateway_vWBNB_Core": "0xF34AAfc540Adc827A84736553BD29DE87a117558",
     "PositionAccount": "0xC9A5f1598e434E3E52CE25D7ff290E4CF167ee52",
     "RelativePositionManager": "0x25dbA64B28F93cC40e9cAf9691266043fe1000a2",
