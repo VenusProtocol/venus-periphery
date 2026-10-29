@@ -57,4 +57,5 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
 
 export default func;
 func.tags = ["hub-nav-sentinel"];
-func.dependencies = ["ebrake"];
+// No `dependencies = ["ebrake"]`: EBrake is already live and only its address is needed.
+// Depending on the "ebrake" tag would re-run 021, which tries to upgrade the timelock-owned proxy and fails.

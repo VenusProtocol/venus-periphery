@@ -6,10 +6,10 @@ import { HardhatRuntimeEnvironment } from "hardhat/types";
 import { getConfig, getContractAddressOrNullAddress } from "../helpers/deploymentConfig";
 
 /**
- * bStocks are only listed on BNB Chain. bsctestnet is left out: its bStocks are mock tokens
- * without a pauseManager() pointer, so none of them could be monitored.
+ * bStocks are only listed on BNB Chain. On bsctestnet the sentinel monitors MockBStockToken (deploy/030),
+ * which is its own PauseManager, since the pre-existing testnet bStock mocks expose no pauseManager().
  */
-const SUPPORTED_NETWORKS = ["bscmainnet"];
+const SUPPORTED_NETWORKS = ["bscmainnet", "bsctestnet"];
 
 /** Verify a contract on the explorer without failing the deployment (e.g. on a local fork). */
 async function verify(address: string | undefined, constructorArguments: unknown[]): Promise<void> {
