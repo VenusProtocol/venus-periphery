@@ -1,0 +1,909 @@
+{
+  "address": "0xb53F17D2aE94e88eea6864B2307a9760D95845A7",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "contract IEBrake",
+          "name": "eBrake_",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "MarketNotMonitored",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "MarketNotSupported",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "sender",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "calledContract",
+          "type": "address"
+        },
+        {
+          "internalType": "string",
+          "name": "methodSignature",
+          "type": "string"
+        }
+      ],
+      "name": "Unauthorized",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "UnauthorizedKeeper",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroAddress",
+      "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "underlying",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "pauseManager",
+          "type": "address"
+        }
+      ],
+      "name": "BStockPauseHandled",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint8",
+          "name": "version",
+          "type": "uint8"
+        }
+      ],
+      "name": "Initialized",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "monitored",
+          "type": "bool"
+        }
+      ],
+      "name": "MarketMonitoringUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "oldAccessControlManager",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "newAccessControlManager",
+          "type": "address"
+        }
+      ],
+      "name": "NewAccessControlManager",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "previousOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "OwnershipTransferStarted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "previousOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "OwnershipTransferred",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "keeper",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "isTrusted",
+          "type": "bool"
+        }
+      ],
+      "name": "TrustedKeeperUpdated",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "EBRAKE",
+      "outputs": [
+        {
+          "internalType": "contract IEBrake",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "acceptOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "accessControlManager",
+      "outputs": [
+        {
+          "internalType": "contract IAccessControlManagerV8",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "checkBStockPause",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "isPaused",
+          "type": "bool"
+        },
+        {
+          "internalType": "address",
+          "name": "underlying",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "pauseManager",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getMonitoredMarkets",
+      "outputs": [
+        {
+          "internalType": "address[]",
+          "name": "",
+          "type": "address[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "handleBStockPause",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "accessControlManager_",
+          "type": "address"
+        }
+      ],
+      "name": "initialize",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "isMarketMonitored",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "owner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "pendingOwner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "renounceOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "accessControlManager_",
+          "type": "address"
+        }
+      ],
+      "name": "setAccessControlManager",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "monitored",
+          "type": "bool"
+        }
+      ],
+      "name": "setMarketMonitored",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "keeper",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "isTrusted",
+          "type": "bool"
+        }
+      ],
+      "name": "setTrustedKeeper",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "transferOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "trustedKeepers",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "transactionHash": "0x1e8dda192274e7d6a8bc3aa66d642dc657376dccf240db3ba5d2df5fedc45f0f",
+  "receipt": {
+    "to": null,
+    "from": "0x9b0A3EAE7f174937d31745B710BbeA68e9D1BEf7",
+    "contractAddress": "0xb53F17D2aE94e88eea6864B2307a9760D95845A7",
+    "transactionIndex": 12,
+    "gasUsed": "976284",
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000400000000000000000000000000000004000000000000000000000000000000040000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000",
+    "blockHash": "0x06c231220f299ae60711f93c4632b9114d5badab35b7e31bf69636f0a312a493",
+    "transactionHash": "0x1e8dda192274e7d6a8bc3aa66d642dc657376dccf240db3ba5d2df5fedc45f0f",
+    "logs": [
+      {
+        "transactionIndex": 12,
+        "blockNumber": 130433881,
+        "transactionHash": "0x1e8dda192274e7d6a8bc3aa66d642dc657376dccf240db3ba5d2df5fedc45f0f",
+        "address": "0xb53F17D2aE94e88eea6864B2307a9760D95845A7",
+        "topics": ["0x7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498"],
+        "data": "0x00000000000000000000000000000000000000000000000000000000000000ff",
+        "logIndex": 126,
+        "blockHash": "0x06c231220f299ae60711f93c4632b9114d5badab35b7e31bf69636f0a312a493"
+      }
+    ],
+    "blockNumber": 130433881,
+    "cumulativeGasUsed": "8212570",
+    "status": 1,
+    "byzantium": true
+  },
+  "args": ["0x35eBaBB99c7Fb7ba0C90bCc26e5d55Cdf89C23Ec"],
+  "numDeployments": 1,
+  "solcInputHash": "fc9746bb5512de3a891e046ba5439c72",
+  "metadata": "{\"compiler\":{\"version\":\"0.8.28+commit.7893614a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"contract IEBrake\",\"name\":\"eBrake_\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"MarketNotMonitored\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"MarketNotSupported\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"sender\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"calledContract\",\"type\":\"address\"},{\"internalType\":\"string\",\"name\":\"methodSignature\",\"type\":\"string\"}],\"name\":\"Unauthorized\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"UnauthorizedKeeper\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"ZeroAddress\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"underlying\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"pauseManager\",\"type\":\"address\"}],\"name\":\"BStockPauseHandled\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint8\",\"name\":\"version\",\"type\":\"uint8\"}],\"name\":\"Initialized\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"bool\",\"name\":\"monitored\",\"type\":\"bool\"}],\"name\":\"MarketMonitoringUpdated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"oldAccessControlManager\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"newAccessControlManager\",\"type\":\"address\"}],\"name\":\"NewAccessControlManager\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"OwnershipTransferStarted\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"OwnershipTransferred\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"keeper\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"bool\",\"name\":\"isTrusted\",\"type\":\"bool\"}],\"name\":\"TrustedKeeperUpdated\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"EBRAKE\",\"outputs\":[{\"internalType\":\"contract IEBrake\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"acceptOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"accessControlManager\",\"outputs\":[{\"internalType\":\"contract IAccessControlManagerV8\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"checkBStockPause\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"isPaused\",\"type\":\"bool\"},{\"internalType\":\"address\",\"name\":\"underlying\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"pauseManager\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"getMonitoredMarkets\",\"outputs\":[{\"internalType\":\"address[]\",\"name\":\"\",\"type\":\"address[]\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"handleBStockPause\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"accessControlManager_\",\"type\":\"address\"}],\"name\":\"initialize\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"}],\"name\":\"isMarketMonitored\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"owner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"pendingOwner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"renounceOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"accessControlManager_\",\"type\":\"address\"}],\"name\":\"setAccessControlManager\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"market\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"monitored\",\"type\":\"bool\"}],\"name\":\"setMarketMonitored\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"keeper\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"isTrusted\",\"type\":\"bool\"}],\"name\":\"setTrustedKeeper\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"transferOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"trustedKeepers\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"}],\"devdoc\":{\"author\":\"Venus\",\"details\":\"A paused bStock cannot be transferred. Liquidations still seize its vTokens, but no one can redeem them      for the bStock until the pause ends, so liquidators cannot exit. Zeroing CF stops new debt against the      collateral, while the liquidation threshold (LT) is left unchanged so existing positions are not pushed      into liquidation.      - Any market EBrake can act on: EBrake acts on the market's own comptroller and checks the listing there.      - The pause is read from the PauseManager the token itself points to (pauseManager()), which is the        one the token checks before every transfer.      - A sanctioned or blocklisted vToken can neither send nor receive the token, which blocks redeems and        mints just like a pause, so it is treated as one. The block is read by running the same        checkIsCompliant call the token makes, on the compliance module it points to (compliance()); any        revert there counts as blocked.      - Tighten-only: CF is restored by a governance VIP that reads EBrake.getMarketCFSnapshot() and then        calls EBrake.resetCFSnapshot().      - handleBStockPause is called by trusted keepers; EBrake makes repeat calls no-ops.\",\"errors\":{\"MarketNotMonitored(address)\":[{\"params\":{\"market\":\"The vToken market address\"}}],\"MarketNotSupported(address)\":[{\"params\":{\"market\":\"The vToken market address\"}}]},\"events\":{\"BStockPauseHandled(address,address,address)\":{\"details\":\"Emitted on every handleBStockPause call that finds the token paused or the market blocked, including      repeat calls on a market whose CF is already zero (EBrake then makes no change and emits no      CollateralFactorDecreased event)\",\"params\":{\"market\":\"The vToken market address\",\"pauseManager\":\"The PauseManager the underlying token points to\",\"underlying\":\"The market's underlying token\"}},\"Initialized(uint8)\":{\"details\":\"Triggered when the contract has been initialized or reinitialized.\"},\"MarketMonitoringUpdated(address,bool)\":{\"params\":{\"market\":\"The vToken market address\",\"monitored\":\"True if the market was added, false if it was removed\"}},\"TrustedKeeperUpdated(address,bool)\":{\"params\":{\"isTrusted\":\"Whether the keeper is trusted\",\"keeper\":\"The keeper address\"}}},\"kind\":\"dev\",\"methods\":{\"acceptOwnership()\":{\"details\":\"The new owner accepts the ownership transfer.\"},\"checkBStockPause(address)\":{\"details\":\"Returns zeros for a market that is not monitored, and isPaused = false for an underlying token with      no PauseManager. Reads the PauseManager the token itself points to. While the token is not paused, also      runs the token's compliance check for the market; a revert there counts as blocked.      Reverts if the underlying token does not expose pauseManager() or compliance().\",\"params\":{\"market\":\"The vToken market address\"},\"returns\":{\"isPaused\":\"True if the market is monitored and its underlying token is paused, or the token's         compliance module rejects the market (sanctioned, or blocklisted for the token)\",\"pauseManager\":\"The PauseManager the token points to, or address(0) if the market is not monitored or         the token has none\",\"underlying\":\"The market's underlying token, or address(0) if the market is not monitored\"}},\"constructor\":{\"custom:error\":\"ZeroAddress if eBrake_ is the zero address\",\"custom:oz-upgrades-unsafe-allow\":\"constructor\",\"params\":{\"eBrake_\":\"Address of the EBrake contract\"}},\"getMonitoredMarkets()\":{\"returns\":{\"_0\":\"The monitored market addresses, in no particular order\"}},\"handleBStockPause(address)\":{\"custom:access\":\"Only trusted keepers\",\"custom:error\":\"UnauthorizedKeeper if the caller is not a trusted keeperMarketNotMonitored if the market is not monitoredMarketNotSupported if the underlying token has no PauseManager\",\"custom:event\":\"Emits BStockPauseHandled when the token is paused or the market blocked\",\"details\":\"Calls EBrake.decreaseCF(market, 0), which zeroes CF in the market's pool (on the BSC Core pool, also      in every e-mode pool the market is listed in), keeps LT and snapshots the previous CF/LT. Repeat calls      are no-ops in EBrake. The pause and the compliance block are read through checkBStockPause; while      neither holds the call does nothing.      Reverts if the underlying token does not expose pauseManager() or compliance().\",\"params\":{\"market\":\"The vToken market address\"}},\"initialize(address)\":{\"params\":{\"accessControlManager_\":\"Address of the AccessControlManager\"}},\"isMarketMonitored(address)\":{\"params\":{\"market\":\"The vToken market address\"},\"returns\":{\"_0\":\"True if the market is monitored\"}},\"owner()\":{\"details\":\"Returns the address of the current owner.\"},\"pendingOwner()\":{\"details\":\"Returns the address of the pending owner.\"},\"renounceOwnership()\":{\"details\":\"Leaves the contract without owner. It will not be possible to call `onlyOwner` functions. Can only be called by the current owner. NOTE: Renouncing ownership will leave the contract without an owner, thereby disabling any functionality that is only available to the owner.\"},\"setAccessControlManager(address)\":{\"custom:access\":\"Only Governance\",\"custom:event\":\"Emits NewAccessControlManager event\",\"details\":\"Admin function to set address of AccessControlManager\",\"params\":{\"accessControlManager_\":\"The new address of the AccessControlManager\"}},\"setMarketMonitored(address,bool)\":{\"custom:access\":\"Controlled by AccessControlManager\",\"custom:error\":\"ZeroAddress if market is the zero address\",\"custom:event\":\"Emits MarketMonitoringUpdated\",\"details\":\"The market is not checked here: EBrake checks its listing when it zeroes CF, and handleBStockPause      checks its token.\",\"params\":{\"market\":\"The vToken market address\",\"monitored\":\"True to add the market, false to remove it\"}},\"setTrustedKeeper(address,bool)\":{\"custom:access\":\"Controlled by AccessControlManager\",\"custom:error\":\"ZeroAddress if keeper is the zero address\",\"custom:event\":\"Emits TrustedKeeperUpdated\",\"params\":{\"isTrusted\":\"Whether the keeper should be trusted\",\"keeper\":\"The keeper address\"}},\"transferOwnership(address)\":{\"details\":\"Starts the ownership transfer of the contract to a new account. Replaces the pending transfer if there is one. Can only be called by the current owner.\"}},\"stateVariables\":{\"EBRAKE\":{\"custom:oz-upgrades-unsafe-allow\":\"state-variable-immutable\"},\"__gap\":{\"details\":\"Storage gap for future upgrades\"},\"monitoredMarkets\":{\"details\":\"The monitored vToken markets, i.e. the markets handleBStockPause may zero the CF of\"}},\"title\":\"BStockPauseSentinel\",\"version\":1},\"userdoc\":{\"errors\":{\"MarketNotMonitored(address)\":[{\"notice\":\"Thrown when handleBStockPause is called for a market that is not monitored\"}],\"MarketNotSupported(address)\":[{\"notice\":\"Thrown when braking a market whose underlying token has no PauseManager\"}],\"Unauthorized(address,address,string)\":[{\"notice\":\"Thrown when the action is prohibited by AccessControlManager\"}],\"UnauthorizedKeeper()\":[{\"notice\":\"Thrown when handleBStockPause is called by an address that is not a trusted keeper\"}],\"ZeroAddress()\":[{\"notice\":\"Thrown when a zero address is provided\"}]},\"events\":{\"BStockPauseHandled(address,address,address)\":{\"notice\":\"Emitted when handleBStockPause asks EBrake to zero the CF of a market whose underlying token is paused         or blocked for the market by the token's compliance module\"},\"MarketMonitoringUpdated(address,bool)\":{\"notice\":\"Emitted when a market is added to or removed from the monitored markets\"},\"NewAccessControlManager(address,address)\":{\"notice\":\"Emitted when access control manager contract address is changed\"},\"TrustedKeeperUpdated(address,bool)\":{\"notice\":\"Emitted when a keeper's trusted status is updated\"}},\"kind\":\"user\",\"methods\":{\"EBRAKE()\":{\"notice\":\"Emergency Brake contract used to zero the collateral factor\"},\"accessControlManager()\":{\"notice\":\"Returns the address of the access control manager contract\"},\"checkBStockPause(address)\":{\"notice\":\"Check whether a monitored market's underlying bStock is paused, i.e. whether handleBStockPause would         act on it\"},\"constructor\":{\"notice\":\"Sets EBrake and disables initializers on the implementation\"},\"getMonitoredMarkets()\":{\"notice\":\"The monitored vToken markets\"},\"handleBStockPause(address)\":{\"notice\":\"Zero the collateral factor of a monitored market while its underlying token is paused, or blocked         for the market by the token's compliance module\"},\"initialize(address)\":{\"notice\":\"Initializes the proxy with the AccessControlManager\"},\"isMarketMonitored(address)\":{\"notice\":\"Whether a vToken market is monitored, i.e. handleBStockPause may zero its CF\"},\"setAccessControlManager(address)\":{\"notice\":\"Sets the address of AccessControlManager\"},\"setMarketMonitored(address,bool)\":{\"notice\":\"Add a market to, or remove it from, the monitored markets\"},\"setTrustedKeeper(address,bool)\":{\"notice\":\"Set the trusted status of a keeper allowed to call handleBStockPause\"},\"trustedKeepers(address)\":{\"notice\":\"Whether a keeper is trusted to call handleBStockPause\"}},\"notice\":\"Keeper-driven sentinel that zeroes the collateral factor (CF) of monitored bStock (tokenized equity)         markets through EBrake while the issuer's PauseManager reports the token as paused, or the token's         compliance module sanctions or blocklists the market.\",\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/Sentinels/BStockPauseSentinel.sol\":\"BStockPauseSentinel\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\",\"useLiteralContent\":true},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[],\"viaIR\":true},\"sources\":{\"@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (access/Ownable2Step.sol)\\n\\npragma solidity ^0.8.0;\\n\\nimport \\\"./OwnableUpgradeable.sol\\\";\\nimport {Initializable} from \\\"../proxy/utils/Initializable.sol\\\";\\n\\n/**\\n * @dev Contract module which provides access control mechanism, where\\n * there is an account (an owner) that can be granted exclusive access to\\n * specific functions.\\n *\\n * By default, the owner account will be the one that deploys the contract. This\\n * can later be changed with {transferOwnership} and {acceptOwnership}.\\n *\\n * This module is used through inheritance. It will make available all functions\\n * from parent (Ownable).\\n */\\nabstract contract Ownable2StepUpgradeable is Initializable, OwnableUpgradeable {\\n    address private _pendingOwner;\\n\\n    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);\\n\\n    function __Ownable2Step_init() internal onlyInitializing {\\n        __Ownable_init_unchained();\\n    }\\n\\n    function __Ownable2Step_init_unchained() internal onlyInitializing {\\n    }\\n    /**\\n     * @dev Returns the address of the pending owner.\\n     */\\n    function pendingOwner() public view virtual returns (address) {\\n        return _pendingOwner;\\n    }\\n\\n    /**\\n     * @dev Starts the ownership transfer of the contract to a new account. Replaces the pending transfer if there is one.\\n     * Can only be called by the current owner.\\n     */\\n    function transferOwnership(address newOwner) public virtual override onlyOwner {\\n        _pendingOwner = newOwner;\\n        emit OwnershipTransferStarted(owner(), newOwner);\\n    }\\n\\n    /**\\n     * @dev Transfers ownership of the contract to a new account (`newOwner`) and deletes any pending owner.\\n     * Internal function without access restriction.\\n     */\\n    function _transferOwnership(address newOwner) internal virtual override {\\n        delete _pendingOwner;\\n        super._transferOwnership(newOwner);\\n    }\\n\\n    /**\\n     * @dev The new owner accepts the ownership transfer.\\n     */\\n    function acceptOwnership() public virtual {\\n        address sender = _msgSender();\\n        require(pendingOwner() == sender, \\\"Ownable2Step: caller is not the new owner\\\");\\n        _transferOwnership(sender);\\n    }\\n\\n    /**\\n     * @dev This empty reserved space is put in place to allow future versions to add new\\n     * variables without shifting down storage in the inheritance chain.\\n     * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps\\n     */\\n    uint256[49] private __gap;\\n}\\n\",\"keccak256\":\"0x9140dabc466abab21b48b72dbda26736b1183a310d0e677d3719d201df026510\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (access/Ownable.sol)\\n\\npragma solidity ^0.8.0;\\n\\nimport \\\"../utils/ContextUpgradeable.sol\\\";\\nimport {Initializable} from \\\"../proxy/utils/Initializable.sol\\\";\\n\\n/**\\n * @dev Contract module which provides a basic access control mechanism, where\\n * there is an account (an owner) that can be granted exclusive access to\\n * specific functions.\\n *\\n * By default, the owner account will be the one that deploys the contract. This\\n * can later be changed with {transferOwnership}.\\n *\\n * This module is used through inheritance. It will make available the modifier\\n * `onlyOwner`, which can be applied to your functions to restrict their use to\\n * the owner.\\n */\\nabstract contract OwnableUpgradeable is Initializable, ContextUpgradeable {\\n    address private _owner;\\n\\n    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);\\n\\n    /**\\n     * @dev Initializes the contract setting the deployer as the initial owner.\\n     */\\n    function __Ownable_init() internal onlyInitializing {\\n        __Ownable_init_unchained();\\n    }\\n\\n    function __Ownable_init_unchained() internal onlyInitializing {\\n        _transferOwnership(_msgSender());\\n    }\\n\\n    /**\\n     * @dev Throws if called by any account other than the owner.\\n     */\\n    modifier onlyOwner() {\\n        _checkOwner();\\n        _;\\n    }\\n\\n    /**\\n     * @dev Returns the address of the current owner.\\n     */\\n    function owner() public view virtual returns (address) {\\n        return _owner;\\n    }\\n\\n    /**\\n     * @dev Throws if the sender is not the owner.\\n     */\\n    function _checkOwner() internal view virtual {\\n        require(owner() == _msgSender(), \\\"Ownable: caller is not the owner\\\");\\n    }\\n\\n    /**\\n     * @dev Leaves the contract without owner. It will not be possible to call\\n     * `onlyOwner` functions. Can only be called by the current owner.\\n     *\\n     * NOTE: Renouncing ownership will leave the contract without an owner,\\n     * thereby disabling any functionality that is only available to the owner.\\n     */\\n    function renounceOwnership() public virtual onlyOwner {\\n        _transferOwnership(address(0));\\n    }\\n\\n    /**\\n     * @dev Transfers ownership of the contract to a new account (`newOwner`).\\n     * Can only be called by the current owner.\\n     */\\n    function transferOwnership(address newOwner) public virtual onlyOwner {\\n        require(newOwner != address(0), \\\"Ownable: new owner is the zero address\\\");\\n        _transferOwnership(newOwner);\\n    }\\n\\n    /**\\n     * @dev Transfers ownership of the contract to a new account (`newOwner`).\\n     * Internal function without access restriction.\\n     */\\n    function _transferOwnership(address newOwner) internal virtual {\\n        address oldOwner = _owner;\\n        _owner = newOwner;\\n        emit OwnershipTransferred(oldOwner, newOwner);\\n    }\\n\\n    /**\\n     * @dev This empty reserved space is put in place to allow future versions to add new\\n     * variables without shifting down storage in the inheritance chain.\\n     * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps\\n     */\\n    uint256[49] private __gap;\\n}\\n\",\"keccak256\":\"0x359a1ab89b46b9aba7bcad3fb651924baf4893d15153049b9976b0fc9be1358e\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (proxy/utils/Initializable.sol)\\n\\npragma solidity ^0.8.2;\\n\\nimport \\\"../../utils/AddressUpgradeable.sol\\\";\\n\\n/**\\n * @dev This is a base contract to aid in writing upgradeable contracts, or any kind of contract that will be deployed\\n * behind a proxy. Since proxied contracts do not make use of a constructor, it's common to move constructor logic to an\\n * external initializer function, usually called `initialize`. It then becomes necessary to protect this initializer\\n * function so it can only be called once. The {initializer} modifier provided by this contract will have this effect.\\n *\\n * The initialization functions use a version number. Once a version number is used, it is consumed and cannot be\\n * reused. This mechanism prevents re-execution of each \\\"step\\\" but allows the creation of new initialization steps in\\n * case an upgrade adds a module that needs to be initialized.\\n *\\n * For example:\\n *\\n * [.hljs-theme-light.nopadding]\\n * ```solidity\\n * contract MyToken is ERC20Upgradeable {\\n *     function initialize() initializer public {\\n *         __ERC20_init(\\\"MyToken\\\", \\\"MTK\\\");\\n *     }\\n * }\\n *\\n * contract MyTokenV2 is MyToken, ERC20PermitUpgradeable {\\n *     function initializeV2() reinitializer(2) public {\\n *         __ERC20Permit_init(\\\"MyToken\\\");\\n *     }\\n * }\\n * ```\\n *\\n * TIP: To avoid leaving the proxy in an uninitialized state, the initializer function should be called as early as\\n * possible by providing the encoded function call as the `_data` argument to {ERC1967Proxy-constructor}.\\n *\\n * CAUTION: When used with inheritance, manual care must be taken to not invoke a parent initializer twice, or to ensure\\n * that all initializers are idempotent. This is not verified automatically as constructors are by Solidity.\\n *\\n * [CAUTION]\\n * ====\\n * Avoid leaving a contract uninitialized.\\n *\\n * An uninitialized contract can be taken over by an attacker. This applies to both a proxy and its implementation\\n * contract, which may impact the proxy. To prevent the implementation contract from being used, you should invoke\\n * the {_disableInitializers} function in the constructor to automatically lock it when it is deployed:\\n *\\n * [.hljs-theme-light.nopadding]\\n * ```\\n * /// @custom:oz-upgrades-unsafe-allow constructor\\n * constructor() {\\n *     _disableInitializers();\\n * }\\n * ```\\n * ====\\n */\\nabstract contract Initializable {\\n    /**\\n     * @dev Indicates that the contract has been initialized.\\n     * @custom:oz-retyped-from bool\\n     */\\n    uint8 private _initialized;\\n\\n    /**\\n     * @dev Indicates that the contract is in the process of being initialized.\\n     */\\n    bool private _initializing;\\n\\n    /**\\n     * @dev Triggered when the contract has been initialized or reinitialized.\\n     */\\n    event Initialized(uint8 version);\\n\\n    /**\\n     * @dev A modifier that defines a protected initializer function that can be invoked at most once. In its scope,\\n     * `onlyInitializing` functions can be used to initialize parent contracts.\\n     *\\n     * Similar to `reinitializer(1)`, except that functions marked with `initializer` can be nested in the context of a\\n     * constructor.\\n     *\\n     * Emits an {Initialized} event.\\n     */\\n    modifier initializer() {\\n        bool isTopLevelCall = !_initializing;\\n        require(\\n            (isTopLevelCall && _initialized < 1) || (!AddressUpgradeable.isContract(address(this)) && _initialized == 1),\\n            \\\"Initializable: contract is already initialized\\\"\\n        );\\n        _initialized = 1;\\n        if (isTopLevelCall) {\\n            _initializing = true;\\n        }\\n        _;\\n        if (isTopLevelCall) {\\n            _initializing = false;\\n            emit Initialized(1);\\n        }\\n    }\\n\\n    /**\\n     * @dev A modifier that defines a protected reinitializer function that can be invoked at most once, and only if the\\n     * contract hasn't been initialized to a greater version before. In its scope, `onlyInitializing` functions can be\\n     * used to initialize parent contracts.\\n     *\\n     * A reinitializer may be used after the original initialization step. This is essential to configure modules that\\n     * are added through upgrades and that require initialization.\\n     *\\n     * When `version` is 1, this modifier is similar to `initializer`, except that functions marked with `reinitializer`\\n     * cannot be nested. If one is invoked in the context of another, execution will revert.\\n     *\\n     * Note that versions can jump in increments greater than 1; this implies that if multiple reinitializers coexist in\\n     * a contract, executing them in the right order is up to the developer or operator.\\n     *\\n     * WARNING: setting the version to 255 will prevent any future reinitialization.\\n     *\\n     * Emits an {Initialized} event.\\n     */\\n    modifier reinitializer(uint8 version) {\\n        require(!_initializing && _initialized < version, \\\"Initializable: contract is already initialized\\\");\\n        _initialized = version;\\n        _initializing = true;\\n        _;\\n        _initializing = false;\\n        emit Initialized(version);\\n    }\\n\\n    /**\\n     * @dev Modifier to protect an initialization function so that it can only be invoked by functions with the\\n     * {initializer} and {reinitializer} modifiers, directly or indirectly.\\n     */\\n    modifier onlyInitializing() {\\n        require(_initializing, \\\"Initializable: contract is not initializing\\\");\\n        _;\\n    }\\n\\n    /**\\n     * @dev Locks the contract, preventing any future reinitialization. This cannot be part of an initializer call.\\n     * Calling this in the constructor of a contract will prevent that contract from being initialized or reinitialized\\n     * to any version. It is recommended to use this to lock implementation contracts that are designed to be called\\n     * through proxies.\\n     *\\n     * Emits an {Initialized} event the first time it is successfully executed.\\n     */\\n    function _disableInitializers() internal virtual {\\n        require(!_initializing, \\\"Initializable: contract is initializing\\\");\\n        if (_initialized != type(uint8).max) {\\n            _initialized = type(uint8).max;\\n            emit Initialized(type(uint8).max);\\n        }\\n    }\\n\\n    /**\\n     * @dev Returns the highest version that has been initialized. See {reinitializer}.\\n     */\\n    function _getInitializedVersion() internal view returns (uint8) {\\n        return _initialized;\\n    }\\n\\n    /**\\n     * @dev Returns `true` if the contract is currently initializing. See {onlyInitializing}.\\n     */\\n    function _isInitializing() internal view returns (bool) {\\n        return _initializing;\\n    }\\n}\\n\",\"keccak256\":\"0x89be10e757d242e9b18d5a32c9fbe2019f6d63052bbe46397a430a1d60d7f794\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (token/ERC20/IERC20.sol)\\n\\npragma solidity ^0.8.0;\\n\\n/**\\n * @dev Interface of the ERC20 standard as defined in the EIP.\\n */\\ninterface IERC20Upgradeable {\\n    /**\\n     * @dev Emitted when `value` tokens are moved from one account (`from`) to\\n     * another (`to`).\\n     *\\n     * Note that `value` may be zero.\\n     */\\n    event Transfer(address indexed from, address indexed to, uint256 value);\\n\\n    /**\\n     * @dev Emitted when the allowance of a `spender` for an `owner` is set by\\n     * a call to {approve}. `value` is the new allowance.\\n     */\\n    event Approval(address indexed owner, address indexed spender, uint256 value);\\n\\n    /**\\n     * @dev Returns the amount of tokens in existence.\\n     */\\n    function totalSupply() external view returns (uint256);\\n\\n    /**\\n     * @dev Returns the amount of tokens owned by `account`.\\n     */\\n    function balanceOf(address account) external view returns (uint256);\\n\\n    /**\\n     * @dev Moves `amount` tokens from the caller's account to `to`.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * Emits a {Transfer} event.\\n     */\\n    function transfer(address to, uint256 amount) external returns (bool);\\n\\n    /**\\n     * @dev Returns the remaining number of tokens that `spender` will be\\n     * allowed to spend on behalf of `owner` through {transferFrom}. This is\\n     * zero by default.\\n     *\\n     * This value changes when {approve} or {transferFrom} are called.\\n     */\\n    function allowance(address owner, address spender) external view returns (uint256);\\n\\n    /**\\n     * @dev Sets `amount` as the allowance of `spender` over the caller's tokens.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * IMPORTANT: Beware that changing an allowance with this method brings the risk\\n     * that someone may use both the old and the new allowance by unfortunate\\n     * transaction ordering. One possible solution to mitigate this race\\n     * condition is to first reduce the spender's allowance to 0 and set the\\n     * desired value afterwards:\\n     * https://github.com/ethereum/EIPs/issues/20#issuecomment-263524729\\n     *\\n     * Emits an {Approval} event.\\n     */\\n    function approve(address spender, uint256 amount) external returns (bool);\\n\\n    /**\\n     * @dev Moves `amount` tokens from `from` to `to` using the\\n     * allowance mechanism. `amount` is then deducted from the caller's\\n     * allowance.\\n     *\\n     * Returns a boolean value indicating whether the operation succeeded.\\n     *\\n     * Emits a {Transfer} event.\\n     */\\n    function transferFrom(address from, address to, uint256 amount) external returns (bool);\\n}\\n\",\"keccak256\":\"0x0e1f0f5f62f67a881cd1a9597acbc0a5e4071f3c2c10449a183b922ae7272e3f\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (utils/Address.sol)\\n\\npragma solidity ^0.8.1;\\n\\n/**\\n * @dev Collection of functions related to the address type\\n */\\nlibrary AddressUpgradeable {\\n    /**\\n     * @dev Returns true if `account` is a contract.\\n     *\\n     * [IMPORTANT]\\n     * ====\\n     * It is unsafe to assume that an address for which this function returns\\n     * false is an externally-owned account (EOA) and not a contract.\\n     *\\n     * Among others, `isContract` will return false for the following\\n     * types of addresses:\\n     *\\n     *  - an externally-owned account\\n     *  - a contract in construction\\n     *  - an address where a contract will be created\\n     *  - an address where a contract lived, but was destroyed\\n     *\\n     * Furthermore, `isContract` will also return true if the target contract within\\n     * the same transaction is already scheduled for destruction by `SELFDESTRUCT`,\\n     * which only has an effect at the end of a transaction.\\n     * ====\\n     *\\n     * [IMPORTANT]\\n     * ====\\n     * You shouldn't rely on `isContract` to protect against flash loan attacks!\\n     *\\n     * Preventing calls from contracts is highly discouraged. It breaks composability, breaks support for smart wallets\\n     * like Gnosis Safe, and does not provide security since it can be circumvented by calling from a contract\\n     * constructor.\\n     * ====\\n     */\\n    function isContract(address account) internal view returns (bool) {\\n        // This method relies on extcodesize/address.code.length, which returns 0\\n        // for contracts in construction, since the code is only stored at the end\\n        // of the constructor execution.\\n\\n        return account.code.length > 0;\\n    }\\n\\n    /**\\n     * @dev Replacement for Solidity's `transfer`: sends `amount` wei to\\n     * `recipient`, forwarding all available gas and reverting on errors.\\n     *\\n     * https://eips.ethereum.org/EIPS/eip-1884[EIP1884] increases the gas cost\\n     * of certain opcodes, possibly making contracts go over the 2300 gas limit\\n     * imposed by `transfer`, making them unable to receive funds via\\n     * `transfer`. {sendValue} removes this limitation.\\n     *\\n     * https://consensys.net/diligence/blog/2019/09/stop-using-soliditys-transfer-now/[Learn more].\\n     *\\n     * IMPORTANT: because control is transferred to `recipient`, care must be\\n     * taken to not create reentrancy vulnerabilities. Consider using\\n     * {ReentrancyGuard} or the\\n     * https://solidity.readthedocs.io/en/v0.8.0/security-considerations.html#use-the-checks-effects-interactions-pattern[checks-effects-interactions pattern].\\n     */\\n    function sendValue(address payable recipient, uint256 amount) internal {\\n        require(address(this).balance >= amount, \\\"Address: insufficient balance\\\");\\n\\n        (bool success, ) = recipient.call{value: amount}(\\\"\\\");\\n        require(success, \\\"Address: unable to send value, recipient may have reverted\\\");\\n    }\\n\\n    /**\\n     * @dev Performs a Solidity function call using a low level `call`. A\\n     * plain `call` is an unsafe replacement for a function call: use this\\n     * function instead.\\n     *\\n     * If `target` reverts with a revert reason, it is bubbled up by this\\n     * function (like regular Solidity function calls).\\n     *\\n     * Returns the raw returned data. To convert to the expected return value,\\n     * use https://solidity.readthedocs.io/en/latest/units-and-global-variables.html?highlight=abi.decode#abi-encoding-and-decoding-functions[`abi.decode`].\\n     *\\n     * Requirements:\\n     *\\n     * - `target` must be a contract.\\n     * - calling `target` with `data` must not revert.\\n     *\\n     * _Available since v3.1._\\n     */\\n    function functionCall(address target, bytes memory data) internal returns (bytes memory) {\\n        return functionCallWithValue(target, data, 0, \\\"Address: low-level call failed\\\");\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`], but with\\n     * `errorMessage` as a fallback revert reason when `target` reverts.\\n     *\\n     * _Available since v3.1._\\n     */\\n    function functionCall(\\n        address target,\\n        bytes memory data,\\n        string memory errorMessage\\n    ) internal returns (bytes memory) {\\n        return functionCallWithValue(target, data, 0, errorMessage);\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`],\\n     * but also transferring `value` wei to `target`.\\n     *\\n     * Requirements:\\n     *\\n     * - the calling contract must have an ETH balance of at least `value`.\\n     * - the called Solidity function must be `payable`.\\n     *\\n     * _Available since v3.1._\\n     */\\n    function functionCallWithValue(address target, bytes memory data, uint256 value) internal returns (bytes memory) {\\n        return functionCallWithValue(target, data, value, \\\"Address: low-level call with value failed\\\");\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCallWithValue-address-bytes-uint256-}[`functionCallWithValue`], but\\n     * with `errorMessage` as a fallback revert reason when `target` reverts.\\n     *\\n     * _Available since v3.1._\\n     */\\n    function functionCallWithValue(\\n        address target,\\n        bytes memory data,\\n        uint256 value,\\n        string memory errorMessage\\n    ) internal returns (bytes memory) {\\n        require(address(this).balance >= value, \\\"Address: insufficient balance for call\\\");\\n        (bool success, bytes memory returndata) = target.call{value: value}(data);\\n        return verifyCallResultFromTarget(target, success, returndata, errorMessage);\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`],\\n     * but performing a static call.\\n     *\\n     * _Available since v3.3._\\n     */\\n    function functionStaticCall(address target, bytes memory data) internal view returns (bytes memory) {\\n        return functionStaticCall(target, data, \\\"Address: low-level static call failed\\\");\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-string-}[`functionCall`],\\n     * but performing a static call.\\n     *\\n     * _Available since v3.3._\\n     */\\n    function functionStaticCall(\\n        address target,\\n        bytes memory data,\\n        string memory errorMessage\\n    ) internal view returns (bytes memory) {\\n        (bool success, bytes memory returndata) = target.staticcall(data);\\n        return verifyCallResultFromTarget(target, success, returndata, errorMessage);\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`],\\n     * but performing a delegate call.\\n     *\\n     * _Available since v3.4._\\n     */\\n    function functionDelegateCall(address target, bytes memory data) internal returns (bytes memory) {\\n        return functionDelegateCall(target, data, \\\"Address: low-level delegate call failed\\\");\\n    }\\n\\n    /**\\n     * @dev Same as {xref-Address-functionCall-address-bytes-string-}[`functionCall`],\\n     * but performing a delegate call.\\n     *\\n     * _Available since v3.4._\\n     */\\n    function functionDelegateCall(\\n        address target,\\n        bytes memory data,\\n        string memory errorMessage\\n    ) internal returns (bytes memory) {\\n        (bool success, bytes memory returndata) = target.delegatecall(data);\\n        return verifyCallResultFromTarget(target, success, returndata, errorMessage);\\n    }\\n\\n    /**\\n     * @dev Tool to verify that a low level call to smart-contract was successful, and revert (either by bubbling\\n     * the revert reason or using the provided one) in case of unsuccessful call or if target was not a contract.\\n     *\\n     * _Available since v4.8._\\n     */\\n    function verifyCallResultFromTarget(\\n        address target,\\n        bool success,\\n        bytes memory returndata,\\n        string memory errorMessage\\n    ) internal view returns (bytes memory) {\\n        if (success) {\\n            if (returndata.length == 0) {\\n                // only check isContract if the call was successful and the return data is empty\\n                // otherwise we already know that it was a contract\\n                require(isContract(target), \\\"Address: call to non-contract\\\");\\n            }\\n            return returndata;\\n        } else {\\n            _revert(returndata, errorMessage);\\n        }\\n    }\\n\\n    /**\\n     * @dev Tool to verify that a low level call was successful, and revert if it wasn't, either by bubbling the\\n     * revert reason or using the provided one.\\n     *\\n     * _Available since v4.3._\\n     */\\n    function verifyCallResult(\\n        bool success,\\n        bytes memory returndata,\\n        string memory errorMessage\\n    ) internal pure returns (bytes memory) {\\n        if (success) {\\n            return returndata;\\n        } else {\\n            _revert(returndata, errorMessage);\\n        }\\n    }\\n\\n    function _revert(bytes memory returndata, string memory errorMessage) private pure {\\n        // Look for revert reason and bubble it up if present\\n        if (returndata.length > 0) {\\n            // The easiest way to bubble the revert reason is using memory via assembly\\n            /// @solidity memory-safe-assembly\\n            assembly {\\n                let returndata_size := mload(returndata)\\n                revert(add(32, returndata), returndata_size)\\n            }\\n        } else {\\n            revert(errorMessage);\\n        }\\n    }\\n}\\n\",\"keccak256\":\"0x9c80f545915582e63fe206c6ce27cbe85a86fc10b9cd2a0e8c9488fb7c2ee422\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/utils/ContextUpgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.4) (utils/Context.sol)\\n\\npragma solidity ^0.8.0;\\nimport {Initializable} from \\\"../proxy/utils/Initializable.sol\\\";\\n\\n/**\\n * @dev Provides information about the current execution context, including the\\n * sender of the transaction and its data. While these are generally available\\n * via msg.sender and msg.data, they should not be accessed in such a direct\\n * manner, since when dealing with meta-transactions the account sending and\\n * paying for execution may not be the actual sender (as far as an application\\n * is concerned).\\n *\\n * This contract is only required for intermediate, library-like contracts.\\n */\\nabstract contract ContextUpgradeable is Initializable {\\n    function __Context_init() internal onlyInitializing {\\n    }\\n\\n    function __Context_init_unchained() internal onlyInitializing {\\n    }\\n    function _msgSender() internal view virtual returns (address) {\\n        return msg.sender;\\n    }\\n\\n    function _msgData() internal view virtual returns (bytes calldata) {\\n        return msg.data;\\n    }\\n\\n    function _contextSuffixLength() internal view virtual returns (uint256) {\\n        return 0;\\n    }\\n\\n    /**\\n     * @dev This empty reserved space is put in place to allow future versions to add new\\n     * variables without shifting down storage in the inheritance chain.\\n     * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps\\n     */\\n    uint256[50] private __gap;\\n}\\n\",\"keccak256\":\"0x75097e35253e7fb282ee4d7f27a80eaacfa759923185bf17302a89cbc059c5ef\",\"license\":\"MIT\"},\"@openzeppelin/contracts-upgradeable/utils/structs/EnumerableSetUpgradeable.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (utils/structs/EnumerableSet.sol)\\n// This file was procedurally generated from scripts/generate/templates/EnumerableSet.js.\\n\\npragma solidity ^0.8.0;\\n\\n/**\\n * @dev Library for managing\\n * https://en.wikipedia.org/wiki/Set_(abstract_data_type)[sets] of primitive\\n * types.\\n *\\n * Sets have the following properties:\\n *\\n * - Elements are added, removed, and checked for existence in constant time\\n * (O(1)).\\n * - Elements are enumerated in O(n). No guarantees are made on the ordering.\\n *\\n * ```solidity\\n * contract Example {\\n *     // Add the library methods\\n *     using EnumerableSet for EnumerableSet.AddressSet;\\n *\\n *     // Declare a set state variable\\n *     EnumerableSet.AddressSet private mySet;\\n * }\\n * ```\\n *\\n * As of v3.3.0, sets of type `bytes32` (`Bytes32Set`), `address` (`AddressSet`)\\n * and `uint256` (`UintSet`) are supported.\\n *\\n * [WARNING]\\n * ====\\n * Trying to delete such a structure from storage will likely result in data corruption, rendering the structure\\n * unusable.\\n * See https://github.com/ethereum/solidity/pull/11843[ethereum/solidity#11843] for more info.\\n *\\n * In order to clean an EnumerableSet, you can either remove all elements one by one or create a fresh instance using an\\n * array of EnumerableSet.\\n * ====\\n */\\nlibrary EnumerableSetUpgradeable {\\n    // To implement this library for multiple types with as little code\\n    // repetition as possible, we write it in terms of a generic Set type with\\n    // bytes32 values.\\n    // The Set implementation uses private functions, and user-facing\\n    // implementations (such as AddressSet) are just wrappers around the\\n    // underlying Set.\\n    // This means that we can only create new EnumerableSets for types that fit\\n    // in bytes32.\\n\\n    struct Set {\\n        // Storage of set values\\n        bytes32[] _values;\\n        // Position of the value in the `values` array, plus 1 because index 0\\n        // means a value is not in the set.\\n        mapping(bytes32 => uint256) _indexes;\\n    }\\n\\n    /**\\n     * @dev Add a value to a set. O(1).\\n     *\\n     * Returns true if the value was added to the set, that is if it was not\\n     * already present.\\n     */\\n    function _add(Set storage set, bytes32 value) private returns (bool) {\\n        if (!_contains(set, value)) {\\n            set._values.push(value);\\n            // The value is stored at length-1, but we add 1 to all indexes\\n            // and use 0 as a sentinel value\\n            set._indexes[value] = set._values.length;\\n            return true;\\n        } else {\\n            return false;\\n        }\\n    }\\n\\n    /**\\n     * @dev Removes a value from a set. O(1).\\n     *\\n     * Returns true if the value was removed from the set, that is if it was\\n     * present.\\n     */\\n    function _remove(Set storage set, bytes32 value) private returns (bool) {\\n        // We read and store the value's index to prevent multiple reads from the same storage slot\\n        uint256 valueIndex = set._indexes[value];\\n\\n        if (valueIndex != 0) {\\n            // Equivalent to contains(set, value)\\n            // To delete an element from the _values array in O(1), we swap the element to delete with the last one in\\n            // the array, and then remove the last element (sometimes called as 'swap and pop').\\n            // This modifies the order of the array, as noted in {at}.\\n\\n            uint256 toDeleteIndex = valueIndex - 1;\\n            uint256 lastIndex = set._values.length - 1;\\n\\n            if (lastIndex != toDeleteIndex) {\\n                bytes32 lastValue = set._values[lastIndex];\\n\\n                // Move the last value to the index where the value to delete is\\n                set._values[toDeleteIndex] = lastValue;\\n                // Update the index for the moved value\\n                set._indexes[lastValue] = valueIndex; // Replace lastValue's index to valueIndex\\n            }\\n\\n            // Delete the slot where the moved value was stored\\n            set._values.pop();\\n\\n            // Delete the index for the deleted slot\\n            delete set._indexes[value];\\n\\n            return true;\\n        } else {\\n            return false;\\n        }\\n    }\\n\\n    /**\\n     * @dev Returns true if the value is in the set. O(1).\\n     */\\n    function _contains(Set storage set, bytes32 value) private view returns (bool) {\\n        return set._indexes[value] != 0;\\n    }\\n\\n    /**\\n     * @dev Returns the number of values on the set. O(1).\\n     */\\n    function _length(Set storage set) private view returns (uint256) {\\n        return set._values.length;\\n    }\\n\\n    /**\\n     * @dev Returns the value stored at position `index` in the set. O(1).\\n     *\\n     * Note that there are no guarantees on the ordering of values inside the\\n     * array, and it may change when more values are added or removed.\\n     *\\n     * Requirements:\\n     *\\n     * - `index` must be strictly less than {length}.\\n     */\\n    function _at(Set storage set, uint256 index) private view returns (bytes32) {\\n        return set._values[index];\\n    }\\n\\n    /**\\n     * @dev Return the entire set in an array\\n     *\\n     * WARNING: This operation will copy the entire storage to memory, which can be quite expensive. This is designed\\n     * to mostly be used by view accessors that are queried without any gas fees. Developers should keep in mind that\\n     * this function has an unbounded cost, and using it as part of a state-changing function may render the function\\n     * uncallable if the set grows to a point where copying to memory consumes too much gas to fit in a block.\\n     */\\n    function _values(Set storage set) private view returns (bytes32[] memory) {\\n        return set._values;\\n    }\\n\\n    // Bytes32Set\\n\\n    struct Bytes32Set {\\n        Set _inner;\\n    }\\n\\n    /**\\n     * @dev Add a value to a set. O(1).\\n     *\\n     * Returns true if the value was added to the set, that is if it was not\\n     * already present.\\n     */\\n    function add(Bytes32Set storage set, bytes32 value) internal returns (bool) {\\n        return _add(set._inner, value);\\n    }\\n\\n    /**\\n     * @dev Removes a value from a set. O(1).\\n     *\\n     * Returns true if the value was removed from the set, that is if it was\\n     * present.\\n     */\\n    function remove(Bytes32Set storage set, bytes32 value) internal returns (bool) {\\n        return _remove(set._inner, value);\\n    }\\n\\n    /**\\n     * @dev Returns true if the value is in the set. O(1).\\n     */\\n    function contains(Bytes32Set storage set, bytes32 value) internal view returns (bool) {\\n        return _contains(set._inner, value);\\n    }\\n\\n    /**\\n     * @dev Returns the number of values in the set. O(1).\\n     */\\n    function length(Bytes32Set storage set) internal view returns (uint256) {\\n        return _length(set._inner);\\n    }\\n\\n    /**\\n     * @dev Returns the value stored at position `index` in the set. O(1).\\n     *\\n     * Note that there are no guarantees on the ordering of values inside the\\n     * array, and it may change when more values are added or removed.\\n     *\\n     * Requirements:\\n     *\\n     * - `index` must be strictly less than {length}.\\n     */\\n    function at(Bytes32Set storage set, uint256 index) internal view returns (bytes32) {\\n        return _at(set._inner, index);\\n    }\\n\\n    /**\\n     * @dev Return the entire set in an array\\n     *\\n     * WARNING: This operation will copy the entire storage to memory, which can be quite expensive. This is designed\\n     * to mostly be used by view accessors that are queried without any gas fees. Developers should keep in mind that\\n     * this function has an unbounded cost, and using it as part of a state-changing function may render the function\\n     * uncallable if the set grows to a point where copying to memory consumes too much gas to fit in a block.\\n     */\\n    function values(Bytes32Set storage set) internal view returns (bytes32[] memory) {\\n        bytes32[] memory store = _values(set._inner);\\n        bytes32[] memory result;\\n\\n        /// @solidity memory-safe-assembly\\n        assembly {\\n            result := store\\n        }\\n\\n        return result;\\n    }\\n\\n    // AddressSet\\n\\n    struct AddressSet {\\n        Set _inner;\\n    }\\n\\n    /**\\n     * @dev Add a value to a set. O(1).\\n     *\\n     * Returns true if the value was added to the set, that is if it was not\\n     * already present.\\n     */\\n    function add(AddressSet storage set, address value) internal returns (bool) {\\n        return _add(set._inner, bytes32(uint256(uint160(value))));\\n    }\\n\\n    /**\\n     * @dev Removes a value from a set. O(1).\\n     *\\n     * Returns true if the value was removed from the set, that is if it was\\n     * present.\\n     */\\n    function remove(AddressSet storage set, address value) internal returns (bool) {\\n        return _remove(set._inner, bytes32(uint256(uint160(value))));\\n    }\\n\\n    /**\\n     * @dev Returns true if the value is in the set. O(1).\\n     */\\n    function contains(AddressSet storage set, address value) internal view returns (bool) {\\n        return _contains(set._inner, bytes32(uint256(uint160(value))));\\n    }\\n\\n    /**\\n     * @dev Returns the number of values in the set. O(1).\\n     */\\n    function length(AddressSet storage set) internal view returns (uint256) {\\n        return _length(set._inner);\\n    }\\n\\n    /**\\n     * @dev Returns the value stored at position `index` in the set. O(1).\\n     *\\n     * Note that there are no guarantees on the ordering of values inside the\\n     * array, and it may change when more values are added or removed.\\n     *\\n     * Requirements:\\n     *\\n     * - `index` must be strictly less than {length}.\\n     */\\n    function at(AddressSet storage set, uint256 index) internal view returns (address) {\\n        return address(uint160(uint256(_at(set._inner, index))));\\n    }\\n\\n    /**\\n     * @dev Return the entire set in an array\\n     *\\n     * WARNING: This operation will copy the entire storage to memory, which can be quite expensive. This is designed\\n     * to mostly be used by view accessors that are queried without any gas fees. Developers should keep in mind that\\n     * this function has an unbounded cost, and using it as part of a state-changing function may render the function\\n     * uncallable if the set grows to a point where copying to memory consumes too much gas to fit in a block.\\n     */\\n    function values(AddressSet storage set) internal view returns (address[] memory) {\\n        bytes32[] memory store = _values(set._inner);\\n        address[] memory result;\\n\\n        /// @solidity memory-safe-assembly\\n        assembly {\\n            result := store\\n        }\\n\\n        return result;\\n    }\\n\\n    // UintSet\\n\\n    struct UintSet {\\n        Set _inner;\\n    }\\n\\n    /**\\n     * @dev Add a value to a set. O(1).\\n     *\\n     * Returns true if the value was added to the set, that is if it was not\\n     * already present.\\n     */\\n    function add(UintSet storage set, uint256 value) internal returns (bool) {\\n        return _add(set._inner, bytes32(value));\\n    }\\n\\n    /**\\n     * @dev Removes a value from a set. O(1).\\n     *\\n     * Returns true if the value was removed from the set, that is if it was\\n     * present.\\n     */\\n    function remove(UintSet storage set, uint256 value) internal returns (bool) {\\n        return _remove(set._inner, bytes32(value));\\n    }\\n\\n    /**\\n     * @dev Returns true if the value is in the set. O(1).\\n     */\\n    function contains(UintSet storage set, uint256 value) internal view returns (bool) {\\n        return _contains(set._inner, bytes32(value));\\n    }\\n\\n    /**\\n     * @dev Returns the number of values in the set. O(1).\\n     */\\n    function length(UintSet storage set) internal view returns (uint256) {\\n        return _length(set._inner);\\n    }\\n\\n    /**\\n     * @dev Returns the value stored at position `index` in the set. O(1).\\n     *\\n     * Note that there are no guarantees on the ordering of values inside the\\n     * array, and it may change when more values are added or removed.\\n     *\\n     * Requirements:\\n     *\\n     * - `index` must be strictly less than {length}.\\n     */\\n    function at(UintSet storage set, uint256 index) internal view returns (uint256) {\\n        return uint256(_at(set._inner, index));\\n    }\\n\\n    /**\\n     * @dev Return the entire set in an array\\n     *\\n     * WARNING: This operation will copy the entire storage to memory, which can be quite expensive. This is designed\\n     * to mostly be used by view accessors that are queried without any gas fees. Developers should keep in mind that\\n     * this function has an unbounded cost, and using it as part of a state-changing function may render the function\\n     * uncallable if the set grows to a point where copying to memory consumes too much gas to fit in a block.\\n     */\\n    function values(UintSet storage set) internal view returns (uint256[] memory) {\\n        bytes32[] memory store = _values(set._inner);\\n        uint256[] memory result;\\n\\n        /// @solidity memory-safe-assembly\\n        assembly {\\n            result := store\\n        }\\n\\n        return result;\\n    }\\n}\\n\",\"keccak256\":\"0x1c65595a26548a1b2263315b08a56334a2d7087319814437559c3c96025e939f\",\"license\":\"MIT\"},\"@openzeppelin/contracts/access/IAccessControl.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts v4.4.1 (access/IAccessControl.sol)\\n\\npragma solidity ^0.8.0;\\n\\n/**\\n * @dev External interface of AccessControl declared to support ERC165 detection.\\n */\\ninterface IAccessControl {\\n    /**\\n     * @dev Emitted when `newAdminRole` is set as ``role``'s admin role, replacing `previousAdminRole`\\n     *\\n     * `DEFAULT_ADMIN_ROLE` is the starting admin for all roles, despite\\n     * {RoleAdminChanged} not being emitted signaling this.\\n     *\\n     * _Available since v3.1._\\n     */\\n    event RoleAdminChanged(bytes32 indexed role, bytes32 indexed previousAdminRole, bytes32 indexed newAdminRole);\\n\\n    /**\\n     * @dev Emitted when `account` is granted `role`.\\n     *\\n     * `sender` is the account that originated the contract call, an admin role\\n     * bearer except when using {AccessControl-_setupRole}.\\n     */\\n    event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender);\\n\\n    /**\\n     * @dev Emitted when `account` is revoked `role`.\\n     *\\n     * `sender` is the account that originated the contract call:\\n     *   - if using `revokeRole`, it is the admin role bearer\\n     *   - if using `renounceRole`, it is the role bearer (i.e. `account`)\\n     */\\n    event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender);\\n\\n    /**\\n     * @dev Returns `true` if `account` has been granted `role`.\\n     */\\n    function hasRole(bytes32 role, address account) external view returns (bool);\\n\\n    /**\\n     * @dev Returns the admin role that controls `role`. See {grantRole} and\\n     * {revokeRole}.\\n     *\\n     * To change a role's admin, use {AccessControl-_setRoleAdmin}.\\n     */\\n    function getRoleAdmin(bytes32 role) external view returns (bytes32);\\n\\n    /**\\n     * @dev Grants `role` to `account`.\\n     *\\n     * If `account` had not been already granted `role`, emits a {RoleGranted}\\n     * event.\\n     *\\n     * Requirements:\\n     *\\n     * - the caller must have ``role``'s admin role.\\n     */\\n    function grantRole(bytes32 role, address account) external;\\n\\n    /**\\n     * @dev Revokes `role` from `account`.\\n     *\\n     * If `account` had been granted `role`, emits a {RoleRevoked} event.\\n     *\\n     * Requirements:\\n     *\\n     * - the caller must have ``role``'s admin role.\\n     */\\n    function revokeRole(bytes32 role, address account) external;\\n\\n    /**\\n     * @dev Revokes `role` from the calling account.\\n     *\\n     * Roles are often managed via {grantRole} and {revokeRole}: this function's\\n     * purpose is to provide a mechanism for accounts to lose their privileges\\n     * if they are compromised (such as when a trusted device is misplaced).\\n     *\\n     * If the calling account had been granted `role`, emits a {RoleRevoked}\\n     * event.\\n     *\\n     * Requirements:\\n     *\\n     * - the caller must be `account`.\\n     */\\n    function renounceRole(bytes32 role, address account) external;\\n}\\n\",\"keccak256\":\"0x59ce320a585d7e1f163cd70390a0ef2ff9cec832e2aa544293a00692465a7a57\",\"license\":\"MIT\"},\"@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\nimport \\\"@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol\\\";\\nimport \\\"@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol\\\";\\n\\nimport \\\"./IAccessControlManagerV8.sol\\\";\\n\\n/**\\n * @title AccessControlledV8\\n * @author Venus\\n * @notice This contract is helper between access control manager and actual contract. This contract further inherited by other contract (using solidity 0.8.13)\\n * to integrate access controlled mechanism. It provides initialise methods and verifying access methods.\\n */\\nabstract contract AccessControlledV8 is Initializable, Ownable2StepUpgradeable {\\n    /// @notice Access control manager contract\\n    IAccessControlManagerV8 internal _accessControlManager;\\n\\n    /**\\n     * @dev This empty reserved space is put in place to allow future versions to add new\\n     * variables without shifting down storage in the inheritance chain.\\n     * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps\\n     */\\n    uint256[49] private __gap;\\n\\n    /// @notice Emitted when access control manager contract address is changed\\n    event NewAccessControlManager(address oldAccessControlManager, address newAccessControlManager);\\n\\n    /// @notice Thrown when the action is prohibited by AccessControlManager\\n    error Unauthorized(address sender, address calledContract, string methodSignature);\\n\\n    function __AccessControlled_init(address accessControlManager_) internal onlyInitializing {\\n        __Ownable2Step_init();\\n        __AccessControlled_init_unchained(accessControlManager_);\\n    }\\n\\n    function __AccessControlled_init_unchained(address accessControlManager_) internal onlyInitializing {\\n        _setAccessControlManager(accessControlManager_);\\n    }\\n\\n    /**\\n     * @notice Sets the address of AccessControlManager\\n     * @dev Admin function to set address of AccessControlManager\\n     * @param accessControlManager_ The new address of the AccessControlManager\\n     * @custom:event Emits NewAccessControlManager event\\n     * @custom:access Only Governance\\n     */\\n    function setAccessControlManager(address accessControlManager_) external onlyOwner {\\n        _setAccessControlManager(accessControlManager_);\\n    }\\n\\n    /**\\n     * @notice Returns the address of the access control manager contract\\n     */\\n    function accessControlManager() external view returns (IAccessControlManagerV8) {\\n        return _accessControlManager;\\n    }\\n\\n    /**\\n     * @dev Internal function to set address of AccessControlManager\\n     * @param accessControlManager_ The new address of the AccessControlManager\\n     */\\n    function _setAccessControlManager(address accessControlManager_) internal {\\n        require(address(accessControlManager_) != address(0), \\\"invalid acess control manager address\\\");\\n        address oldAccessControlManager = address(_accessControlManager);\\n        _accessControlManager = IAccessControlManagerV8(accessControlManager_);\\n        emit NewAccessControlManager(oldAccessControlManager, accessControlManager_);\\n    }\\n\\n    /**\\n     * @notice Reverts if the call is not allowed by AccessControlManager\\n     * @param signature Method signature\\n     */\\n    function _checkAccessAllowed(string memory signature) internal view {\\n        bool isAllowedToCall = _accessControlManager.isAllowedToCall(msg.sender, signature);\\n\\n        if (!isAllowedToCall) {\\n            revert Unauthorized(msg.sender, address(this), signature);\\n        }\\n    }\\n}\\n\",\"keccak256\":\"0xe7f5f96c70fb32912ecc0032f81f7876607353413fe7f723d41d260ac9c26a06\",\"license\":\"BSD-3-Clause\"},\"@venusprotocol/governance-contracts/contracts/Governance/IAccessControlManagerV8.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\nimport \\\"@openzeppelin/contracts/access/IAccessControl.sol\\\";\\n\\n/**\\n * @title IAccessControlManagerV8\\n * @author Venus\\n * @notice Interface implemented by the `AccessControlManagerV8` contract.\\n */\\ninterface IAccessControlManagerV8 is IAccessControl {\\n    function giveCallPermission(address contractAddress, string calldata functionSig, address accountToPermit) external;\\n\\n    function revokeCallPermission(\\n        address contractAddress,\\n        string calldata functionSig,\\n        address accountToRevoke\\n    ) external;\\n\\n    function isAllowedToCall(address account, string calldata functionSig) external view returns (bool);\\n\\n    function hasPermission(\\n        address account,\\n        address contractAddress,\\n        string calldata functionSig\\n    ) external view returns (bool);\\n}\\n\",\"keccak256\":\"0xaa29b098440d0b3a131c5ecdf25ce548790c1b5ac7bf9b5c0264b6af6f7a1e0b\",\"license\":\"BSD-3-Clause\"},\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\ninterface OracleInterface {\\n    function getPrice(address asset) external view returns (uint256);\\n}\\n\\ninterface ResilientOracleInterface is OracleInterface {\\n    function updatePrice(address vToken) external;\\n\\n    function updateAssetPrice(address asset) external;\\n\\n    function getUnderlyingPrice(address vToken) external view returns (uint256);\\n}\\n\\ninterface BoundValidatorInterface {\\n    function validatePriceWithAnchorPrice(\\n        address asset,\\n        uint256 reporterPrice,\\n        uint256 anchorPrice\\n    ) external view returns (bool);\\n}\\n\",\"keccak256\":\"0xd3bbb7c9eef19e8f467342df6034ef95399a00964646fb8c82b438968ae3a8c0\",\"license\":\"BSD-3-Clause\"},\"contracts/EmergencyBrake/IEBrake.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\nimport { IComptroller } from \\\"../Interfaces/IComptroller.sol\\\";\\n\\n/**\\n * @title IEBrake\\n * @author Venus Protocol\\n * @notice Interface for the EBrake (Emergency Brake) contract.\\n *         EBrake is an emergency action router that can only TIGHTEN restrictions,\\n *         never loosen them. It also snapshots pre-incident values (CF, caps) so that\\n *         governance can read and restore them via VIP. See resetCFSnapshot(),\\n *         resetBorrowCapSnapshot() and resetSupplyCapSnapshot().\\n *\\n * @dev Design goals and integration patterns:\\n *\\n *   1. DIRECT ACCESS\\n *      The Venus multisig is whitelisted. During an incident, the multisig can call\\n *      any function here (pause, set caps, etc.) without going through governance.\\n *\\n *   2. ON-CHAIN MONITORING CONTRACTS\\n *      Contracts like DeviationSentinel or any Venus monitoring contract are also whitelisted.\\n *      They contain their own detection logic (e.g. price deviation checks) and call into EBrake\\n *      when a threat is detected. Example: DeviationSentinel detects a price anomaly \\u2192 calls\\n *      EBrake.pauseSupply() or EBrake.decreaseCF(). The detection logic stays isolated in\\n *      the monitor; EBrake only handles execution.\\n *\\n *   3. THIRD-PARTY MONITORS VIA SAFE MODULES\\n *      External monitoring services (e.g. Hypernative) don't get direct whitelist access. Instead,\\n *      for each service we create a dedicated Safe Module on our multisig. The Safe Module contains\\n *      its own allowlist of which EBrake functions that service can call (e.g. Hypernative can only\\n *      pause supply/borrow, not set caps). This keeps permission scoping outside of EBrake \\u2014 each\\n *      module enforces its own restrictions.\\n *\\n *   SAFETY INVARIANT \\u2014 \\\"Do no harm to existing users\\\":\\n *\\n *      This contract can ONLY tighten restrictions, NEVER loosen them. If a whitelisted address\\n *      is compromised, the worst outcome is a temporary freeze \\u2014 never fund loss or liquidation.\\n *\\n *      This contract intentionally CANNOT:\\n *        - Unpause             \\u2192 EBrake can only pause, never unpause. Recovery is via governance VIP\\n *        - Pause REPAY         \\u2192 users must always be able to repay to avoid liquidation\\n *        - Pause SEIZE         \\u2192 liquidations must always work to prevent bad debt accumulation\\n *        - Pause protocol      \\u2192 setProtocolPaused blocks repay + liquidation, same problem\\n *        - Lower LT            \\u2192 lowering liquidation threshold would instantly make healthy\\n *                                 positions liquidatable, harming innocent users\\n *        - Increase caps       \\u2192 caps can only be decreased to reduce exposure, never increased\\n *        - Enable forced       \\u2192 bypasses shortfall check entirely \\u2014 ANY borrower becomes\\n *          liquidation            liquidatable even with healthy collateral ratio\\n *        - Target individual   \\u2192 prevents griefing specific addresses via per-user forced\\n *          users                  liquidation\\n *        - Set close factor    \\u2192 increasing allows liquidators to seize larger portions of\\n *                                 collateral in one tx\\n *        - Change oracle       \\u2192 wrong oracle = mass mispricing = mass liquidations\\n *        - Change liquidation  \\u2192 altering incentive changes liquidation economics for all users\\n *          incentive\\n *\\n *      Worst-case if EBrake is compromised:\\n *        - Pauses minting/borrowing/redeeming/transfers (inconvenient, no fund loss)\\n *        - Zeros supply/borrow caps (blocks new positions, existing ones unaffected)\\n *        - Decreases collateral factor (blocks new borrows against asset, does NOT liquidate\\n *          existing positions \\u2014 that requires LT change, which EBrake cannot do)\\n *        - Pauses flash loans (blocks flash loan attack vector, no user impact)\\n *        - Pauses the Liquidity Hub (blocks deposits and redemptions; existing balances\\n *          untouched, and emergencyReallocate still works)\\n *        - Pauses a Hub YieldGroup or one of its resources (stops new deposits routing there, and\\n *          user withdrawals skip it; the balance already there still counts toward NAV)\\n *      Recovery: Governance VIP restores all parameters. Temporary freeze, not catastrophic.\\n *\\n *   BSC vs NON-BSC DIFFERENCES:\\n *\\n *      The IS_REMOTE_CHAIN immutable determines which comptroller ABI is used for COMPTROLLER\\n *      (see OTHER COMPTROLLERS for markets of other comptrollers).\\n *      It is set at deployment and cannot be changed.\\n *\\n *      BSC (BNB Chain) \\u2014 Diamond Comptroller (IS_REMOTE_CHAIN = false):\\n *        - decreaseCF(market, newCF) \\u2014 for markets of COMPTROLLER, iterates corePoolId to lastPoolId,\\n *          applies newCF only to pools where currentCF > newCF; silently skips pools already at or\\n *          below newCF.\\n *        - decreaseCF(market, poolId, newCF) \\u2014 targets a single pool (e.g. multisig use)\\n *        - Uses poolMarkets() (7-value return) to read LT,\\n *          calls setCollateralFactor(poolId, market, newCF, LT) which returns uint256 error code\\n *        - Supports e-mode pools via poolId > 0\\n *        - pauseFlashLoan() \\u2014 flash loans only exist on Diamond\\n *        - pauseHub(hub), pauseHubYieldGroup(yieldGroup), pauseHubResource(yieldGroup, resource)\\n *          \\u2014 the Liquidity Hub is BSC-only\\n *        - disablePoolBorrow(poolId, market) \\u2014 per-pool granular borrow disable, only on Diamond\\n *        - revokeFlashLoanAccess(account) \\u2014 remove a single account from the flash loan\\n *          whitelist; flash loan whitelist only exists on Diamond\\n *        - ACM permission strings use underscore prefix:\\n *          _setActionsPaused, _setMarketBorrowCaps, _setMarketSupplyCaps\\n *\\n *      Non-BSC chains \\u2014 IL Comptroller (IS_REMOTE_CHAIN = true):\\n *        - decreaseCF(market, newCF) \\u2014 uses markets() (3-value return) to read LT,\\n *          calls setCollateralFactor(market, newCF, LT) which returns void (no error code).\\n *          Reverts if newCF > currentCF.\\n *        - No poolId concept \\u2014 only the core pool exists (other pools are deprecated)\\n *        - decreaseCF(market, poolId, newCF) not granted ACM permission (no pool concept on IL)\\n *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)\\n *        - pauseHub(address), pauseHubYieldGroup(address) and\\n *          pauseHubResource(address,address) not granted ACM permission (no Liquidity Hub off BSC).\\n *          These are EBrake's own roles; what EBrake must hold on the Hub side is `pauseHub()` and\\n *          `pauseYieldGroup(address)` on the Hub, and `pauseResource(address)` on each YieldGroup.\\n *        - ACM permission strings have no underscore:\\n *          setActionsPaused, setMarketBorrowCaps, setMarketSupplyCaps\\n *\\n *      All other functions (pauseActions, pauseSupply, pauseBorrow, pauseRedeem,\\n *      pauseTransfer, setMarketBorrowCaps, setMarketSupplyCaps) are ABI-compatible\\n *      across both comptroller types and work identically on all chains.\\n *\\n *   OTHER COMPTROLLERS (e.g. SPOKE POOLS):\\n *\\n *      The per-market functions (pauseActions, pauseSupply, pauseRedeem, pauseBorrow, pauseTransfer,\\n *      decreaseCF(address,uint256), setMarketBorrowCaps, setMarketSupplyCaps) act on market.comptroller(),\\n *      whoever the caller is.\\n *        - For a market of a comptroller other than COMPTROLLER (Spoke pools run the isolated-pools\\n *          codebase), decreaseCF(address,uint256) uses the IL ABI with pool id 0, whatever IS_REMOTE_CHAIN\\n *          says. The pause and cap functions have the same ABI on both comptroller types.\\n *        - EBrake can only act on a comptroller once governance grants EBrake these ACM permissions on it\\n *          (no underscore prefix, uint256[] actions): setActionsPaused(address[],uint256[],bool),\\n *          setCollateralFactor(address,uint256,uint256), setMarketBorrowCaps(address[],uint256[]) and\\n *          setMarketSupplyCaps(address[],uint256[]). These grants decide which comptrollers EBrake reaches.\\n *        - All markets of a batch must share one comptroller, otherwise the call reverts with\\n *          MarketsOnDifferentComptrollers.\\n *      Each ACM permission on EBrake covers every comptroller EBrake reaches. Callers that should only act on\\n *      some pools check the market themselves.\\n *      resetCFSnapshot picks its path the same way as decreaseCF(address,uint256).\\n *      The Diamond-only functions (pauseFlashLoan, disablePoolBorrow, revokeFlashLoanAccess,\\n *      decreaseCF(address,uint96,uint256)) only ever act on COMPTROLLER.\\n *      Snapshots are keyed by market address, so Core and Spoke markets never share an entry.\\n */\\ninterface IEBrake {\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n    //                              EVENTS\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n\\n    /// @notice Emitted when actions are paused on markets via batch pause.\\n    /// @param caller The address that triggered the emergency action.\\n    /// @param markets The vToken market addresses that were paused.\\n    /// @param actions The actions that were paused.\\n    event ActionsPaused(address indexed caller, address[] markets, IComptroller.Action[] actions);\\n\\n    /// @notice Emitted when a single action is paused on a market.\\n    /// @param caller The address that triggered the emergency action.\\n    /// @param market The vToken market address that was paused.\\n    /// @param action The action that was paused.\\n    event ActionPaused(address indexed caller, address indexed market, IComptroller.Action action);\\n\\n    /// @notice Emitted when flash loans are paused.\\n    /// @param caller The address that triggered the emergency action.\\n    event FlashLoanPaused(address indexed caller);\\n\\n    /// @notice Emitted when borrowing is disabled for a market in a specific pool.\\n    /// @param caller The address that triggered the emergency action.\\n    /// @param poolId The pool identifier (0 = core pool, >0 = e-mode pools).\\n    /// @param market The vToken market address whose pool-borrow flag was disabled.\\n    event PoolBorrowDisabled(address indexed caller, uint96 indexed poolId, address indexed market);\\n\\n    /// @notice Emitted when an account is removed from the flash loan whitelist.\\n    /// @param caller The address that triggered the emergency action.\\n    /// @param account The account whose flash loan access was revoked.\\n    event FlashLoanAccessRevoked(address indexed caller, address indexed account);\\n\\n    /// @notice Emitted when a collateral factor is decreased.\\n    ///         Used for both core/e-mode pools and IL comptrollers.\\n    /// @param caller The address that triggered the emergency action.\\n    /// @param market The vToken market address whose CF was decreased.\\n    /// @param poolId The pool ID. On BNB Chain (Diamond comptroller) this identifies the core pool (0)\\n    ///        or an e-mode pool (>0). IL comptrollers (non-BSC chains, Spoke pools) have no pool concept,\\n    ///        so 0 is used.\\n    /// @param newCF The new collateral factor value that the market was set to.\\n    event CollateralFactorDecreased(\\n        address indexed caller,\\n        address indexed market,\\n        uint96 indexed poolId,\\n        uint256 newCF\\n    );\\n\\n    /// @notice Emitted when borrow caps are decreased.\\n    /// @param caller The address that triggered the emergency action.\\n    /// @param markets The vToken market addresses whose borrow caps were decreased.\\n    /// @param newBorrowCaps The new borrow cap values.\\n    event BorrowCapsDecreased(address indexed caller, address[] markets, uint256[] newBorrowCaps);\\n\\n    /// @notice Emitted when supply caps are decreased.\\n    /// @param caller The address that triggered the emergency action.\\n    /// @param markets The vToken market addresses whose supply caps were decreased.\\n    /// @param newSupplyCaps The new supply cap values.\\n    event SupplyCapsDecreased(address indexed caller, address[] markets, uint256[] newSupplyCaps);\\n\\n    /// @notice Emitted when a market's CF/LT snapshot is reset after governance recovery.\\n    /// @param market The market address whose CF snapshot was cleared.\\n    event CFSnapshotReset(address indexed market);\\n\\n    /// @notice Emitted when a market's borrow cap snapshot is reset after governance recovery.\\n    /// @param market The market address whose borrow cap snapshot was cleared.\\n    event BorrowCapSnapshotReset(address indexed market);\\n\\n    /// @notice Emitted when a market's supply cap snapshot is reset after governance recovery.\\n    /// @param market The market address whose supply cap snapshot was cleared.\\n    event SupplyCapSnapshotReset(address indexed market);\\n\\n    /// @notice Emitted when the Liquidity Hub was paused through EBrake.\\n    /// @param caller The address that triggered the pause.\\n    /// @param hub The Hub that was paused.\\n    event HubPaused(address indexed caller, address indexed hub);\\n\\n    /// @notice Emitted when a Hub YieldGroup was paused through EBrake.\\n    /// @param caller The address that triggered the pause.\\n    /// @param hub The Hub the YieldGroup belongs to.\\n    /// @param yieldGroup The YieldGroup that was paused.\\n    event HubYieldGroupPaused(address indexed caller, address indexed hub, address indexed yieldGroup);\\n\\n    /// @notice Emitted when a resource inside a Hub YieldGroup was paused through EBrake.\\n    /// @param caller The address that triggered the pause.\\n    /// @param yieldGroup The YieldGroup that holds the resource.\\n    /// @param resource The resource that was paused.\\n    event HubResourcePaused(address indexed caller, address indexed yieldGroup, address indexed resource);\\n\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n    //                              ERRORS\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n\\n    /// @notice Thrown when a forbidden action (REPAY, SEIZE, etc.) is passed to batch pause.\\n    /// @param action The disallowed action that was passed.\\n    error ForbiddenAction(IComptroller.Action action);\\n\\n    /// @notice Thrown when a zero address is passed where a valid address is required.\\n    error ZeroAddress();\\n\\n    /// @notice Thrown when a market is not listed in the given pool.\\n    ///         On BNB Chain (Diamond comptroller) poolId identifies the core pool (0) or an e-mode pool (>0).\\n    ///         IL comptrollers (non-BSC chains, Spoke pools) have no pool concept, so poolId is 0.\\n    /// @param poolId The pool ID that was queried.\\n    /// @param market The market address that is not listed.\\n    error MarketNotListed(uint96 poolId, address market);\\n\\n    /// @notice Thrown when setCollateralFactor returns a non-zero error code.\\n    /// @param errorCode The error code returned by the comptroller.\\n    error SetCollateralFactorFailed(uint256 errorCode);\\n\\n    /// @notice Thrown when an empty array is passed where at least one element is required.\\n    error EmptyArray();\\n\\n    /// @notice Thrown when array lengths do not match.\\n    /// @param expected The expected array length.\\n    /// @param actual The actual array length.\\n    error ArrayLengthMismatch(uint256 expected, uint256 actual);\\n\\n    /// @notice Thrown when the requested cap exceeds the current cap on the comptroller.\\n    /// @param market The market whose cap was attempted to be increased.\\n    /// @param currentCap The current cap value on the comptroller.\\n    /// @param requestedCap The new cap value that was rejected.\\n    error CapExceedsCurrent(address market, uint256 currentCap, uint256 requestedCap);\\n\\n    /// @notice Thrown when a function is called that is not supported on remote chains (IS_REMOTE_CHAIN).\\n    ///         Pool ID is a Diamond-only concept \\u2014 this function should never be ACM-granted on IL chains.\\n    error NotSupportedOnRemoteChain();\\n\\n    /// @notice Thrown when the requested collateral factor exceeds the current CF on the comptroller.\\n    ///         EBrake can only tighten CF \\u2014 newCF must be <= currentCF.\\n    /// @param market The market whose CF was attempted to be increased.\\n    /// @param poolId The pool ID where the violation was detected (0 on IL comptroller).\\n    /// @param currentCF The current collateral factor on the comptroller.\\n    /// @param requestedCF The new CF value that was rejected.\\n    error CFExceedsCurrent(address market, uint96 poolId, uint256 currentCF, uint256 requestedCF);\\n\\n    /// @notice Thrown when a batch mixes markets of different comptrollers.\\n    /// @param expected The comptroller of the first market in the batch.\\n    /// @param actual The comptroller of the first market that differs from it.\\n    error MarketsOnDifferentComptrollers(address expected, address actual);\\n\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n    //                     EMERGENCY ACTIONS \\u2014 BATCH OPERATIONS\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n\\n    /**\\n     * @notice Pause multiple actions on multiple markets in one call.\\n     * @dev Only MINT, REDEEM, BORROW, and TRANSFER are allowed. Reverts on REPAY, SEIZE,\\n     *      LIQUIDATE, ENTER_MARKET, or EXIT_MARKET \\u2014 see SAFETY INVARIANT.\\n     * @param markets The vToken market addresses to pause actions on.\\n     * @param actions The actions to pause.\\n     */\\n    function pauseActions(address[] calldata markets, IComptroller.Action[] calldata actions) external;\\n\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n    //                     EMERGENCY ACTIONS \\u2014 SINGLE MARKET PAUSING\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n\\n    /// @notice Pause supply (mint) on a single market.\\n    ///         Blocks new deposits. Existing suppliers can still redeem.\\n    /// @param market The vToken market address.\\n    function pauseSupply(address market) external;\\n\\n    /// @notice Pause redeem on a single market.\\n    ///         Blocks withdrawals. Use when draining must be stopped immediately.\\n    /// @param market The vToken market address.\\n    function pauseRedeem(address market) external;\\n\\n    /// @notice Pause borrow on a single market.\\n    ///         Blocks new borrows. Existing borrowers can still repay.\\n    /// @param market The vToken market address.\\n    function pauseBorrow(address market) external;\\n\\n    /// @notice Pause transfer of vTokens on a single market.\\n    ///         Blocks vToken movement, prevents attacker from moving stolen collateral.\\n    /// @param market The vToken market address.\\n    function pauseTransfer(address market) external;\\n\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n    //                     EMERGENCY ACTIONS \\u2014 FLASH LOANS\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n\\n    /// @notice Pause flash loans across the core pool.\\n    function pauseFlashLoan() external;\\n\\n    /**\\n     * @notice Disable borrowing for a market in a specific pool, leaving other pools unaffected.\\n     * @dev Only meaningful on Diamond comptroller (BSC) where the per-pool `isBorrowAllowed` flag exists.\\n     *      On non-BSC chains the underlying call will revert (selector mismatch on IL comptroller).\\n     *\\n     *      This is independent of `pauseBorrow(market)` which flips the global\\n     *      `_actionPaused[market][BORROW]` flag across every pool. Both flags must allow borrowing\\n     *      for borrows to actually proceed in a given pool/market \\u2014 recovery from a combined\\n     *      tightening therefore requires governance to clear both flags.\\n     *\\n     *      The boolean argument is hardcoded to `false` inside the implementation to preserve\\n     *      the EBrake \\\"tighten only, never loosen\\\" invariant. Re-enabling borrow is governance-only.\\n     * @param poolId The pool identifier (0 = core pool, >0 = e-mode pools).\\n     * @param market The vToken market address.\\n     */\\n    function disablePoolBorrow(uint96 poolId, address market) external;\\n\\n    /**\\n     * @notice Remove a single account from the flash loan whitelist.\\n     * @dev Only meaningful on Diamond comptroller (BSC) where the flash loan whitelist exists.\\n     *      On non-BSC chains the underlying call will revert (selector mismatch on IL comptroller).\\n     *\\n     *      This is the surgical alternative to `pauseFlashLoan()`, which kills flash loans for\\n     *      every whitelisted account. Use it when a single whitelisted integrator is compromised.\\n     *\\n     *      The boolean argument is hardcoded to `false` inside the implementation to preserve\\n     *      the EBrake \\\"tighten only, never loosen\\\" invariant. Re-granting access is governance-only.\\n     *\\n     *      Idempotent: if the account is not currently whitelisted, the call is a no-op and\\n     *      no event is emitted. FlashLoanAccessRevoked is a true state-change signal.\\n     * @param account The account whose flash loan access should be revoked.\\n     */\\n    function revokeFlashLoanAccess(address account) external;\\n\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n    //                     EMERGENCY ACTIONS \\u2014 LIQUIDITY HUB\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n\\n    /**\\n     * @notice Pause the Liquidity Hub, halting deposits and redemptions.\\n     * @dev Forwards to the Hub, which EBrake holds the `pauseHub()` ACM role on. Tighten-only \\u2014\\n     *      unpausing is a VIP against the Hub directly. An already-paused Hub is a no-op with no\\n     *      event, so {HubPaused} stays a true state-change signal, as {pauseFlashLoan} does.\\n     * @param hub The Liquidity Hub to pause.\\n     */\\n    function pauseHub(address hub) external;\\n\\n    /**\\n     * @notice Stop a Hub routing new deposits to one YieldGroup. The balance already there still\\n     *         counts toward NAV, but user withdrawals skip it until governance unpauses it.\\n     * @dev Forwards to the Hub the YieldGroup reports through `hub()`, which EBrake holds the\\n     *      `pauseYieldGroup(address)` ACM role on. Tighten-only, and an already-paused YieldGroup is\\n     *      a no-op with no event, as {pauseHub}. A YieldGroup the Hub never registered reads as\\n     *      unpaused, so the Hub's own `YieldGroupNotRegistered` revert comes back to the caller \\u2014\\n     *      which is also what stops a fake YieldGroup that names a real Hub.\\n     * @param yieldGroup The YieldGroup to pause.\\n     */\\n    function pauseHubYieldGroup(address yieldGroup) external;\\n\\n    /**\\n     * @notice Stop a Hub YieldGroup routing new deposits to one of its resources. The balance\\n     *         already there still counts toward NAV, but user withdrawals skip it until governance\\n     *         unpauses it.\\n     * @dev Forwards to the YieldGroup, which checks `pauseResource(address)` against its own\\n     *      address, so EBrake needs that grant on every YieldGroup it should reach. Tighten-only,\\n     *      and an already-paused resource is a no-op with no event, as {pauseHub}. A resource the\\n     *      YieldGroup never registered reads as unpaused, so its `ResourceNotRegistered` revert\\n     *      comes back to the caller.\\n     * @param yieldGroup The YieldGroup that holds the resource.\\n     * @param resource The resource to pause.\\n     */\\n    function pauseHubResource(address yieldGroup, address resource) external;\\n\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n    //                     EMERGENCY ACTIONS \\u2014 RISK PARAMETER ADJUSTMENTS\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n\\n    /**\\n     * @notice Decrease collateral factor to `newCF` for a market across all relevant pools.\\n     *         Liquidation threshold is left unchanged.\\n     *         Blocks/limits new borrows against the asset. Does NOT make existing positions liquidatable \\u2014\\n     *         that would require lowering LT, which this contract cannot do.\\n     * @dev On the Diamond (markets of COMPTROLLER, IS_REMOTE_CHAIN=false): iterates corePoolId to lastPoolId;\\n     *      applies `newCF` only to pools where currentCF > newCF (silently skips pools already\\n     *      at or below newCF and unlisted pools). Never reverts due to CF comparison \\u2014 use the\\n     *      per-pool overload if you need strict enforcement on a specific pool.\\n     *      On an IL comptroller (IS_REMOTE_CHAIN=true, or a market of another comptroller such as a\\n     *      Spoke pool): applies to the single market entry with pool id 0 and\\n     *      reverts with CFExceedsCurrent if newCF > currentCF.\\n     * @param market The vToken market address whose CF should be decreased.\\n     * @param newCF The new collateral factor value. On Diamond, pools already at or below this\\n     *              value are silently skipped. On IL, must be <= current CF.\\n     */\\n    function decreaseCF(address market, uint256 newCF) external;\\n\\n    /**\\n     * @notice Decrease collateral factor to `newCF` for a market in a specific pool.\\n     *         Same safety guarantees as decreaseCF(address,uint256) \\u2014 LT is left unchanged.\\n     * @dev Only meaningful on Diamond comptroller (BSC) where multiple pools exist.\\n     *      Reverts with NotSupportedOnRemoteChain on IL chains \\u2014 ACM must not grant this permission there.\\n     *      Reverts with CFExceedsCurrent if newCF > current CF in the targeted pool.\\n     * @param market The vToken market address whose CF should be decreased.\\n     * @param poolId The pool ID (0 for core pool, >0 for e-mode pools).\\n     * @param newCF The new collateral factor value. Must be <= current CF in the targeted pool.\\n     */\\n    function decreaseCF(address market, uint96 poolId, uint256 newCF) external;\\n\\n    /**\\n     * @notice Decrease borrow caps on markets. Each new cap must be strictly LOWER than the current value.\\n     *         Elements equal to the current cap are silently skipped. Setting to 0 blocks all new borrows.\\n     *         Existing borrows are never affected by caps.\\n     * @param markets The vToken market addresses to adjust borrow caps on.\\n     * @param newBorrowCaps The new borrow cap values. Each must be < current cap (equality is a no-op, > reverts).\\n     */\\n    function setMarketBorrowCaps(address[] calldata markets, uint256[] calldata newBorrowCaps) external;\\n\\n    /**\\n     * @notice Decrease supply caps on markets. Each new cap must be strictly LOWER than the current value.\\n     *         Elements equal to the current cap are silently skipped. Setting to 0 blocks all new deposits.\\n     *         Existing deposits are never affected by caps.\\n     * @param markets The vToken market addresses to adjust supply caps on.\\n     * @param newSupplyCaps The new supply cap values. Each must be < current cap (equality is a no-op, > reverts).\\n     */\\n    function setMarketSupplyCaps(address[] calldata markets, uint256[] calldata newSupplyCaps) external;\\n\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n    //                     MARKET STATE SNAPSHOT \\u2014 RESET & VIEW\\n    // \\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\n\\n    /**\\n     * @notice Reset only the stored CF/LT snapshot for a market.\\n     * @dev Called by governance as part of a recovery VIP after restoring collateral factors.\\n     *      Clears per-pool CF/LT values so that future EBrake actions can capture fresh\\n     *      pre-incident values. Does not touch cap snapshots.\\n     *      For a market of COMPTROLLER on the Diamond it clears pool ids corePoolId to lastPoolId; for any other\\n     *      market, pool id 0.\\n     * @param market The vToken market address whose CF snapshot should be cleared.\\n     */\\n    function resetCFSnapshot(address market) external;\\n\\n    /**\\n     * @notice Reset only the stored borrow cap snapshot for a market.\\n     * @dev Called by governance as part of a recovery VIP after restoring the borrow cap.\\n     *      Clears borrowCap and borrowCapSnapshotted so that future EBrake actions can capture\\n     *      a fresh pre-incident value. Does not touch the supply cap or CF snapshots.\\n     * @param market The vToken market address whose borrow cap snapshot should be cleared.\\n     */\\n    function resetBorrowCapSnapshot(address market) external;\\n\\n    /**\\n     * @notice Reset only the stored supply cap snapshot for a market.\\n     * @dev Called by governance as part of a recovery VIP after restoring the supply cap.\\n     *      Clears supplyCap and supplyCapSnapshotted so that future EBrake actions can capture\\n     *      a fresh pre-incident value. Does not touch the borrow cap or CF snapshots.\\n     * @param market The vToken market address whose supply cap snapshot should be cleared.\\n     */\\n    function resetSupplyCapSnapshot(address market) external;\\n\\n    /**\\n     * @notice Read the stored collateral factor and liquidation threshold snapshot for a market in a specific pool.\\n     * @param market The vToken market address.\\n     * @param poolId The pool ID (0 for IL comptrollers, including Spoke pools, or the core pool on Diamond).\\n     * @return cf The collateral factor that was stored before EBrake zeroed it. 0 if no snapshot exists.\\n     * @return lt The liquidation threshold at the time of the snapshot. 0 if no snapshot exists.\\n     */\\n    function getMarketCFSnapshot(address market, uint96 poolId) external view returns (uint256 cf, uint256 lt);\\n}\\n\",\"keccak256\":\"0x797fc325e8cff141068cb153b19b1567b134be124b0b16586a60d6a422b1678e\",\"license\":\"BSD-3-Clause\"},\"contracts/Interfaces/IBStockToken.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\n/**\\n * @title IBStockToken\\n * @author Venus\\n * @notice Minimal interface of a bStock token (tokenized equity) used by Venus.\\n * @dev Each bStock checks its PauseManager before every transfer, and the issuer can repoint it\\n *      (setPauseManager), so different bStocks may use different PauseManagers.\\n *      It also checks every party to a transfer against its compliance module, which the issuer can repoint\\n *      (setCompliance) too.\\n */\\ninterface IBStockToken {\\n    /// @notice Returns the PauseManager the token checks before every transfer\\n    /// @return The PauseManager address\\n    function pauseManager() external view returns (address);\\n\\n    /// @notice Returns the compliance module the token checks every party to a transfer against\\n    /// @return The compliance module address\\n    function compliance() external view returns (address);\\n}\\n\",\"keccak256\":\"0x49e307aaecbd6c8643fb02bbe3285562afd4786cf84d54cb2bce7fade22461bb\",\"license\":\"BSD-3-Clause\"},\"contracts/Interfaces/ICompliance.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\n/**\\n * @title ICompliance\\n * @author Venus\\n * @notice Minimal interface of the bStock issuer's compliance module (BSC: 0x53dBa7AaBDe774787A1F57236B235567dA8e14F4).\\n *         A bStock runs checkIsCompliant on every party to a transfer, so a sanctioned or blocklisted address can\\n *         neither send nor receive the token.\\n */\\ninterface ICompliance {\\n    /// @notice Reverts if an account may not be a party to a transfer of a token\\n    /// @dev Reverts with UserSanctioned() for a sanctioned account and UserBlocked() for one blocklisted for the token\\n    /// @param token The token being transferred\\n    /// @param account The account to check\\n    function checkIsCompliant(address token, address account) external view;\\n}\\n\",\"keccak256\":\"0xea86ed00bbb16e7292a257182b0cb2cad5ba842f85d36e24877b2f8f234cc74c\",\"license\":\"BSD-3-Clause\"},\"contracts/Interfaces/IComptroller.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\nimport { ResilientOracleInterface } from \\\"@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol\\\";\\nimport { IVToken } from \\\"./IVToken.sol\\\";\\n\\n/// @title IComptroller\\n/// @author Venus Protocol\\n/// @notice Interface for the Venus Comptroller with market management and risk parameter functions.\\ninterface IComptroller {\\n    enum Action {\\n        MINT,\\n        REDEEM,\\n        BORROW,\\n        REPAY,\\n        SEIZE,\\n        LIQUIDATE,\\n        TRANSFER,\\n        ENTER_MARKET,\\n        EXIT_MARKET\\n    }\\n\\n    /// @notice Pause or unpause specific actions on given markets.\\n    /// @param markets_ The list of vToken market addresses.\\n    /// @param actions_ The list of actions to pause/unpause.\\n    /// @param paused_ True to pause, false to unpause.\\n    function setActionsPaused(address[] calldata markets_, Action[] calldata actions_, bool paused_) external;\\n\\n    /// @notice Set borrow caps for the given markets.\\n    /// @param vTokens The list of vToken market addresses.\\n    /// @param newBorrowCaps The list of new borrow cap values.\\n    function setMarketBorrowCaps(address[] calldata vTokens, uint256[] calldata newBorrowCaps) external;\\n\\n    /// @notice Set supply caps for the given markets.\\n    /// @param vTokens The list of vToken market addresses.\\n    /// @param newSupplyCaps The list of new supply cap values.\\n    function setMarketSupplyCaps(address[] calldata vTokens, uint256[] calldata newSupplyCaps) external;\\n\\n    /// @notice Unlist a market from the comptroller.\\n    /// @param vToken The vToken market address to unlist.\\n    /// @return uint256 Error code (0 = success).\\n    function unlistMarket(address vToken) external returns (uint256);\\n\\n    /// @notice Execute a flash loan.\\n    /// @param onBehalf The address on whose behalf the flash loan is executed.\\n    /// @param receiver The address receiving the flash loan funds.\\n    /// @param vTokens The list of vToken markets to borrow from.\\n    /// @param underlyingAmounts The list of underlying amounts to borrow.\\n    /// @param param Additional parameters for the flash loan callback.\\n    function executeFlashLoan(\\n        address payable onBehalf,\\n        address payable receiver,\\n        IVToken[] memory vTokens,\\n        uint256[] memory underlyingAmounts,\\n        bytes memory param\\n    ) external;\\n\\n    /// @notice Enter multiple markets to use as collateral.\\n    /// @param vTokens The list of vToken market addresses to enter.\\n    /// @return uint256[] Error codes for each market (0 = success).\\n    function enterMarkets(address[] calldata vTokens) external returns (uint256[] memory);\\n\\n    /// @notice Enter a market on behalf of another address.\\n    /// @param onBehalf The address to enter the market for.\\n    /// @param vToken The vToken market address.\\n    /// @return uint256 Error code (0 = success).\\n    function enterMarketBehalf(address onBehalf, address vToken) external returns (uint256);\\n\\n    /// @notice Enter a market for a specific user (internal comptroller use).\\n    /// @param user The user address.\\n    /// @param vToken The vToken market address.\\n    /// @return uint256 Error code (0 = success).\\n    function enterMarket(address user, address vToken) external returns (uint256);\\n\\n    /// @notice Enter a market for an account. The caller needs the ACM permission for `enterMarketForAccount(address,address)`.\\n    /// @param account The account to enter the market for.\\n    /// @param vToken The vToken market address.\\n    /// @return uint256 Error code (0 = success).\\n    function enterMarketForAccount(address account, address vToken) external returns (uint256);\\n\\n    /// @notice Check whether an action is paused on a given market.\\n    /// @param market The vToken market address.\\n    /// @param action The action to check.\\n    /// @return bool True if the action is paused.\\n    function actionPaused(address market, Action action) external view returns (bool);\\n\\n    /// @notice Get market information for a given vToken.\\n    /// @param vToken The vToken market address.\\n    /// @return isListed Whether the market is listed.\\n    /// @return collateralFactorMantissa The collateral factor mantissa.\\n    /// @return isComped Whether the market receives COMP/XVS rewards.\\n    function markets(\\n        address vToken\\n    ) external view returns (bool isListed, uint256 collateralFactorMantissa, bool isComped);\\n\\n    /// @notice Get the price oracle used by the comptroller.\\n    /// @return ResilientOracleInterface The oracle contract.\\n    function oracle() external view returns (ResilientOracleInterface);\\n\\n    /// @notice Check if an account has entered a given market.\\n    /// @param account The account address.\\n    /// @param vToken The vToken market to check membership for.\\n    /// @return bool True if the account is a member of the market.\\n    function checkMembership(address account, IVToken vToken) external view returns (bool);\\n\\n    /// @notice Get the borrowing power of an account.\\n    /// @param account The account address.\\n    /// @return error Error code (0 = success).\\n    /// @return liquidity The account's excess liquidity.\\n    /// @return shortfall The account's shortfall.\\n    function getBorrowingPower(\\n        address account\\n    ) external view returns (uint256 error, uint256 liquidity, uint256 shortfall);\\n\\n    /// @notice Get an account's liquidity as it would be after redeeming or borrowing in one market.\\n    /// @param account The account address.\\n    /// @param vTokenModify The vToken market the redeem or borrow applies to.\\n    /// @param redeemTokens The amount of vTokens to redeem.\\n    /// @param borrowAmount The amount of underlying to borrow.\\n    /// @return error Error code (0 = success).\\n    /// @return liquidity The account's excess liquidity.\\n    /// @return shortfall The account's shortfall.\\n    function getHypotheticalAccountLiquidity(\\n        address account,\\n        address vTokenModify,\\n        uint256 redeemTokens,\\n        uint256 borrowAmount\\n    ) external view returns (uint256 error, uint256 liquidity, uint256 shortfall);\\n\\n    /// @notice Get the treasury fee percentage.\\n    /// @return uint256 The treasury percentage mantissa.\\n    function treasuryPercent() external view returns (uint256);\\n\\n    /// @notice Get the borrow cap for a given market.\\n    /// @param vToken The vToken market address.\\n    /// @return uint256 The borrow cap.\\n    function borrowCaps(address vToken) external view returns (uint256);\\n\\n    /// @notice Get the supply cap for a given market.\\n    /// @param vToken The vToken market address.\\n    /// @return uint256 The supply cap.\\n    function supplyCaps(address vToken) external view returns (uint256);\\n\\n    /// @notice Check if a delegate is approved to borrow on behalf of a borrower.\\n    /// @param borrower The borrower address.\\n    /// @param delegate The delegate address.\\n    /// @return bool True if the delegate is approved.\\n    function approvedDelegates(address borrower, address delegate) external view returns (bool);\\n\\n    function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);\\n\\n    function exitMarket(address vToken) external returns (uint256);\\n\\n    function updateDelegate(address delegate, bool approved) external;\\n}\\n\",\"keccak256\":\"0xdcdddb422160ac0e1e0c752254a451bda3a561582d05b979de077c77511aa0a8\",\"license\":\"BSD-3-Clause\"},\"contracts/Interfaces/IPauseManager.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\n/**\\n * @title IPauseManager\\n * @author Venus\\n * @notice Minimal interface of the bStock issuer's PauseManager (BSC: 0x9fc74Be63f3589485B2423984a7a0557e0CF700a).\\n *         While a token is paused there, every transfer of that token reverts.\\n */\\ninterface IPauseManager {\\n    /// @notice Returns whether a token is currently paused\\n    /// @dev True if the token is paused individually or if all tokens are paused\\n    /// @param token The token address to check\\n    /// @return True if the token is paused, false otherwise\\n    function isTokenPaused(address token) external view returns (bool);\\n}\\n\",\"keccak256\":\"0x155a681c293ccee0d06f70fb1ae352cd4dbce280dd78717d20adbce6de66e403\",\"license\":\"BSD-3-Clause\"},\"contracts/Interfaces/IVToken.sol\":{\"content\":\"pragma solidity ^0.8.25;\\n\\nimport { IERC20Upgradeable } from \\\"@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol\\\";\\nimport { IComptroller } from \\\"./IComptroller.sol\\\";\\n\\ninterface IVToken is IERC20Upgradeable {\\n    function accrueInterest() external returns (uint256);\\n\\n    function redeem(uint256 redeemTokens) external returns (uint256);\\n\\n    function redeemUnderlying(uint256 redeemAmount) external returns (uint256);\\n\\n    function borrowBalanceCurrent(address borrower) external returns (uint256);\\n\\n    function balanceOfUnderlying(address owner) external returns (uint256);\\n\\n    function seize(address liquidator, address borrower, uint seizeTokens) external returns (uint);\\n\\n    function mintBehalf(address receiver, uint mintAmount) external returns (uint);\\n\\n    function borrowBehalf(address borrower, uint borrowAmount) external returns (uint256);\\n\\n    function comptroller() external view returns (IComptroller);\\n\\n    function borrowBalanceStored(address account) external view returns (uint256);\\n\\n    function underlying() external view returns (address);\\n\\n    function totalBorrows() external view returns (uint256);\\n\\n    function totalBorrowsCurrent() external returns (uint256);\\n\\n    function exchangeRateCurrent() external returns (uint256);\\n\\n    function exchangeRateStored() external view returns (uint256);\\n\\n    function flashLoanFeeMantissa() external view returns (uint256);\\n\\n    function repayBorrowBehalf(address borrower, uint repayAmount) external returns (uint256);\\n\\n    function redeemUnderlyingBehalf(address redeemer, uint redeemAmount) external returns (uint);\\n\\n    function redeemBehalf(address redeemer, uint redeemTokens) external returns (uint);\\n}\\n\",\"keccak256\":\"0x94cf86cb110375ab723303bc6c112a70d44781f059051890a05c9c430e49e16b\"},\"contracts/Sentinels/BStockPauseSentinel.sol\":{\"content\":\"// SPDX-License-Identifier: BSD-3-Clause\\npragma solidity ^0.8.25;\\n\\nimport { EnumerableSetUpgradeable } from \\\"@openzeppelin/contracts-upgradeable/utils/structs/EnumerableSetUpgradeable.sol\\\";\\nimport { AccessControlledV8 } from \\\"@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol\\\";\\nimport { IEBrake } from \\\"../EmergencyBrake/IEBrake.sol\\\";\\nimport { IBStockToken } from \\\"../Interfaces/IBStockToken.sol\\\";\\nimport { ICompliance } from \\\"../Interfaces/ICompliance.sol\\\";\\nimport { IPauseManager } from \\\"../Interfaces/IPauseManager.sol\\\";\\nimport { IVToken } from \\\"../Interfaces/IVToken.sol\\\";\\n\\n/**\\n * @title BStockPauseSentinel\\n * @author Venus\\n * @notice Keeper-driven sentinel that zeroes the collateral factor (CF) of monitored bStock (tokenized equity)\\n *         markets through EBrake while the issuer's PauseManager reports the token as paused, or the token's\\n *         compliance module sanctions or blocklists the market.\\n * @dev A paused bStock cannot be transferred. Liquidations still seize its vTokens, but no one can redeem them\\n *      for the bStock until the pause ends, so liquidators cannot exit. Zeroing CF stops new debt against the\\n *      collateral, while the liquidation threshold (LT) is left unchanged so existing positions are not pushed\\n *      into liquidation.\\n *      - Any market EBrake can act on: EBrake acts on the market's own comptroller and checks the listing there.\\n *      - The pause is read from the PauseManager the token itself points to (pauseManager()), which is the\\n *        one the token checks before every transfer.\\n *      - A sanctioned or blocklisted vToken can neither send nor receive the token, which blocks redeems and\\n *        mints just like a pause, so it is treated as one. The block is read by running the same\\n *        checkIsCompliant call the token makes, on the compliance module it points to (compliance()); any\\n *        revert there counts as blocked.\\n *      - Tighten-only: CF is restored by a governance VIP that reads EBrake.getMarketCFSnapshot() and then\\n *        calls EBrake.resetCFSnapshot().\\n *      - handleBStockPause is called by trusted keepers; EBrake makes repeat calls no-ops.\\n */\\ncontract BStockPauseSentinel is AccessControlledV8 {\\n    using EnumerableSetUpgradeable for EnumerableSetUpgradeable.AddressSet;\\n\\n    /// @notice Emergency Brake contract used to zero the collateral factor\\n    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable\\n    IEBrake public immutable EBRAKE;\\n\\n    /// @notice Whether a keeper is trusted to call handleBStockPause\\n    mapping(address => bool) public trustedKeepers;\\n\\n    /// @dev The monitored vToken markets, i.e. the markets handleBStockPause may zero the CF of\\n    EnumerableSetUpgradeable.AddressSet private monitoredMarkets;\\n\\n    /// @dev Storage gap for future upgrades\\n    uint256[47] private __gap;\\n\\n    /// @notice Emitted when a keeper's trusted status is updated\\n    /// @param keeper The keeper address\\n    /// @param isTrusted Whether the keeper is trusted\\n    event TrustedKeeperUpdated(address indexed keeper, bool isTrusted);\\n\\n    /// @notice Emitted when a market is added to or removed from the monitored markets\\n    /// @param market The vToken market address\\n    /// @param monitored True if the market was added, false if it was removed\\n    event MarketMonitoringUpdated(address indexed market, bool monitored);\\n\\n    /// @notice Emitted when handleBStockPause asks EBrake to zero the CF of a market whose underlying token is paused\\n    ///         or blocked for the market by the token's compliance module\\n    /// @dev Emitted on every handleBStockPause call that finds the token paused or the market blocked, including\\n    ///      repeat calls on a market whose CF is already zero (EBrake then makes no change and emits no\\n    ///      CollateralFactorDecreased event)\\n    /// @param market The vToken market address\\n    /// @param underlying The market's underlying token\\n    /// @param pauseManager The PauseManager the underlying token points to\\n    event BStockPauseHandled(address indexed market, address indexed underlying, address pauseManager);\\n\\n    /// @notice Thrown when a zero address is provided\\n    error ZeroAddress();\\n\\n    /// @notice Thrown when handleBStockPause is called by an address that is not a trusted keeper\\n    error UnauthorizedKeeper();\\n\\n    /// @notice Thrown when braking a market whose underlying token has no PauseManager\\n    /// @param market The vToken market address\\n    error MarketNotSupported(address market);\\n\\n    /// @notice Thrown when handleBStockPause is called for a market that is not monitored\\n    /// @param market The vToken market address\\n    error MarketNotMonitored(address market);\\n\\n    /// @notice Restricts a function to trusted keepers\\n    modifier onlyKeeper() {\\n        if (!trustedKeepers[msg.sender]) revert UnauthorizedKeeper();\\n        _;\\n    }\\n\\n    /**\\n     * @notice Sets EBrake and disables initializers on the implementation\\n     * @param eBrake_ Address of the EBrake contract\\n     * @custom:error ZeroAddress if eBrake_ is the zero address\\n     * @custom:oz-upgrades-unsafe-allow constructor\\n     */\\n    constructor(IEBrake eBrake_) {\\n        if (address(eBrake_) == address(0)) revert ZeroAddress();\\n        EBRAKE = eBrake_;\\n        _disableInitializers();\\n    }\\n\\n    /**\\n     * @notice Initializes the proxy with the AccessControlManager\\n     * @param accessControlManager_ Address of the AccessControlManager\\n     */\\n    function initialize(address accessControlManager_) external initializer {\\n        __AccessControlled_init(accessControlManager_);\\n    }\\n\\n    /**\\n     * @notice Set the trusted status of a keeper allowed to call handleBStockPause\\n     * @param keeper The keeper address\\n     * @param isTrusted Whether the keeper should be trusted\\n     * @custom:access Controlled by AccessControlManager\\n     * @custom:event Emits TrustedKeeperUpdated\\n     * @custom:error ZeroAddress if keeper is the zero address\\n     */\\n    function setTrustedKeeper(address keeper, bool isTrusted) external {\\n        _checkAccessAllowed(\\\"setTrustedKeeper(address,bool)\\\");\\n\\n        if (keeper == address(0)) revert ZeroAddress();\\n\\n        trustedKeepers[keeper] = isTrusted;\\n        emit TrustedKeeperUpdated(keeper, isTrusted);\\n    }\\n\\n    /**\\n     * @notice Add a market to, or remove it from, the monitored markets\\n     * @dev The market is not checked here: EBrake checks its listing when it zeroes CF, and handleBStockPause\\n     *      checks its token.\\n     * @param market The vToken market address\\n     * @param monitored True to add the market, false to remove it\\n     * @custom:access Controlled by AccessControlManager\\n     * @custom:event Emits MarketMonitoringUpdated\\n     * @custom:error ZeroAddress if market is the zero address\\n     */\\n    function setMarketMonitored(address market, bool monitored) external {\\n        _checkAccessAllowed(\\\"setMarketMonitored(address,bool)\\\");\\n\\n        if (market == address(0)) revert ZeroAddress();\\n\\n        if (monitored) {\\n            monitoredMarkets.add(market);\\n        } else {\\n            monitoredMarkets.remove(market);\\n        }\\n        emit MarketMonitoringUpdated(market, monitored);\\n    }\\n\\n    /**\\n     * @notice Zero the collateral factor of a monitored market while its underlying token is paused, or blocked\\n     *         for the market by the token's compliance module\\n     * @dev Calls EBrake.decreaseCF(market, 0), which zeroes CF in the market's pool (on the BSC Core pool, also\\n     *      in every e-mode pool the market is listed in), keeps LT and snapshots the previous CF/LT. Repeat calls\\n     *      are no-ops in EBrake. The pause and the compliance block are read through checkBStockPause; while\\n     *      neither holds the call does nothing.\\n     *      Reverts if the underlying token does not expose pauseManager() or compliance().\\n     * @param market The vToken market address\\n     * @custom:access Only trusted keepers\\n     * @custom:event Emits BStockPauseHandled when the token is paused or the market blocked\\n     * @custom:error UnauthorizedKeeper if the caller is not a trusted keeper\\n     * @custom:error MarketNotMonitored if the market is not monitored\\n     * @custom:error MarketNotSupported if the underlying token has no PauseManager\\n     */\\n    function handleBStockPause(address market) external onlyKeeper {\\n        if (!isMarketMonitored(market)) revert MarketNotMonitored(market);\\n\\n        (bool isPaused, address underlying, address pauseManager) = checkBStockPause(market);\\n        if (pauseManager == address(0)) revert MarketNotSupported(market);\\n        if (!isPaused) return;\\n\\n        EBRAKE.decreaseCF(market, 0);\\n\\n        emit BStockPauseHandled(market, underlying, pauseManager);\\n    }\\n\\n    /**\\n     * @notice The monitored vToken markets\\n     * @return The monitored market addresses, in no particular order\\n     */\\n    function getMonitoredMarkets() external view returns (address[] memory) {\\n        return monitoredMarkets.values();\\n    }\\n\\n    /**\\n     * @notice Check whether a monitored market's underlying bStock is paused, i.e. whether handleBStockPause would\\n     *         act on it\\n     * @dev Returns zeros for a market that is not monitored, and isPaused = false for an underlying token with\\n     *      no PauseManager. Reads the PauseManager the token itself points to. While the token is not paused, also\\n     *      runs the token's compliance check for the market; a revert there counts as blocked.\\n     *      Reverts if the underlying token does not expose pauseManager() or compliance().\\n     * @param market The vToken market address\\n     * @return isPaused True if the market is monitored and its underlying token is paused, or the token's\\n     *         compliance module rejects the market (sanctioned, or blocklisted for the token)\\n     * @return underlying The market's underlying token, or address(0) if the market is not monitored\\n     * @return pauseManager The PauseManager the token points to, or address(0) if the market is not monitored or\\n     *         the token has none\\n     */\\n    function checkBStockPause(\\n        address market\\n    ) public view returns (bool isPaused, address underlying, address pauseManager) {\\n        if (!isMarketMonitored(market)) return (false, address(0), address(0));\\n\\n        underlying = IVToken(market).underlying();\\n        if (underlying == address(0)) return (false, address(0), address(0));\\n\\n        pauseManager = IBStockToken(underlying).pauseManager();\\n        if (pauseManager == address(0)) return (false, underlying, address(0));\\n\\n        isPaused = IPauseManager(pauseManager).isTokenPaused(underlying) || _isBlockedByCompliance(underlying, market);\\n    }\\n\\n    /**\\n     * @notice Whether a vToken market is monitored, i.e. handleBStockPause may zero its CF\\n     * @param market The vToken market address\\n     * @return True if the market is monitored\\n     */\\n    function isMarketMonitored(address market) public view returns (bool) {\\n        return monitoredMarkets.contains(market);\\n    }\\n\\n    /**\\n     * @notice Whether the token's compliance module rejects a market as a party to a transfer of the token\\n     * @dev Runs the check the token runs on every transfer; any revert from the compliance module counts as rejected\\n     * @param underlying The market's underlying token\\n     * @param market The vToken market address\\n     * @return True if the compliance module rejects the market\\n     */\\n    function _isBlockedByCompliance(address underlying, address market) private view returns (bool) {\\n        address compliance = IBStockToken(underlying).compliance();\\n        try ICompliance(compliance).checkIsCompliant(underlying, market) {\\n            return false;\\n        } catch {\\n            return true;\\n        }\\n    }\\n}\\n\",\"keccak256\":\"0x94dba39001f99ede3cd5df3d950cd6776e62ce66ce1caf0e5172f17cd591eb8e\",\"license\":\"BSD-3-Clause\"}},\"version\":1}",
+  "bytecode": "0x60a03461012d57601f61117238819003918201601f19168301916001600160401b038311848410176101315780849260209460405283398101031261012d57516001600160a01b03811680820361012d571561011e576080525f5460ff8160081c166100c95760ff8082160361008f575b60405161102c908161014682396080518181816106eb0152610b190152f35b60ff90811916175f557f7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498602060405160ff8152a15f610070565b60405162461bcd60e51b815260206004820152602760248201527f496e697469616c697a61626c653a20636f6e747261637420697320696e697469604482015266616c697a696e6760c81b6064820152608490fd5b63d92e233d60e01b5f5260045ffd5b5f80fd5b634e487b7160e01b5f52604160045260245ffdfe60806040526004361015610011575f80fd5b5f3560e01c80630e32cb861461081657806310c95885146107575780631a67d76c1461071a5780631a8e6242146106d65780635fada94d14610692578063715018a61461062d57806379ba5097146105a9578063871eb3f9146104fa5780638da5cb5b146104d2578063955a9b201461041b578063a1605c4a146103d3578063b4a0bdf3146103ab578063c4d66de8146101a3578063c68b2f3614610161578063e30c3978146101395763f2fde38b146100c9575f80fd5b34610135576020366003190112610135576100e261089d565b6100ea610bed565b606580546001600160a01b0319166001600160a01b039283169081179091556033549091167f38d16b8cac22d99fc7c124b9cd0de2d3fa1faef420bfe791d8c362d765e227005f80a3005b5f80fd5b34610135575f366003190112610135576065546040516001600160a01b039091168152602090f35b346101355760203660031901126101355760206101996001600160a01b0361018761089d565b165f5260cb60205260405f2054151590565b6040519015158152f35b34610135576020366003190112610135576101bc61089d565b5f5460ff8160081c16159081809261039e575b8015610387575b1561032b5760ff1981166001175f558161031a575b5061020e60ff5f5460081c1661020081610e24565b61020981610e24565b610e24565b61021733610d01565b5f549161022960ff8460081c16610e24565b6001600160a01b0381169081156102c757609780546001600160a01b03198116939093179055604080516001600160a01b0393841681529190921660208201527f66fd58e82f7b31a2a5c30e0888f3093efe4e111b00cd2b0c31fe014601293aa09190a161029357005b61ff0019165f557f7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498602060405160018152a1005b60405162461bcd60e51b815260206004820152602560248201527f696e76616c696420616365737320636f6e74726f6c206d616e61676572206164604482015264647265737360d81b6064820152608490fd5b61ffff1916610101175f55826101eb565b60405162461bcd60e51b815260206004820152602e60248201527f496e697469616c697a61626c653a20636f6e747261637420697320616c72656160448201526d191e481a5b9a5d1a585b1a5e995960921b6064820152608490fd5b50303b1580156101d65750600160ff8216146101d6565b50600160ff8216106101cf565b34610135575f366003190112610135576097546040516001600160a01b039091168152602090f35b34610135576020366003190112610135576103ec61089d565b335f5260c960205260ff60405f2054161561040c5761040a90610ad8565b005b6377b1434760e01b5f5260045ffd5b3461013557610429366108b3565b9061046a60405161043b6040826108e2565b601e81527f736574547275737465644b656570657228616464726573732c626f6f6c2900006020820152610d78565b6001600160a01b03169081156104c35760207f7e408cd3b78bfa9957ad0675d216841a1a928c24b49c36676e56d403e18b60b691835f5260c9825260405f209015159060ff1981541660ff8316179055604051908152a2005b63d92e233d60e01b5f5260045ffd5b34610135575f366003190112610135576033546040516001600160a01b039091168152602090f35b3461013557610508366108b3565b9061054960405161051a6040826108e2565b602081527f7365744d61726b65744d6f6e69746f72656428616464726573732c626f6f6c296020820152610d78565b6001600160a01b03169081156104c3576020817fdfe0e6ba115235af4605aca6b1fb3b9ceb321dac44728e2cf1f0f40721654a06925f1461059a5761058d84610f9c565b505b6040519015158152a2005b6105a384610ead565b5061058f565b34610135575f36600319011261013557606554336001600160a01b03909116036105d65761040a33610d01565b60405162461bcd60e51b815260206004820152602960248201527f4f776e61626c6532537465703a2063616c6c6572206973206e6f7420746865206044820152683732bb9037bbb732b960b91b6064820152608490fd5b34610135575f36600319011261013557610645610bed565b606580546001600160a01b03199081169091556033805491821690555f906001600160a01b03167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e08280a3005b346101355760203660031901126101355760606106b56106b061089d565b61094f565b6040805193151584526001600160a01b039283166020850152911690820152f35b34610135575f366003190112610135576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b34610135576020366003190112610135576001600160a01b0361073b61089d565b165f5260c9602052602060ff60405f2054166040519015158152f35b34610135575f3660031901126101355760405180602060ca549283815201809260ca5f527f42d72674974f694b5f5159593243114d38a5c39c89d6b62fee061ff523240ee1905f5b81811061080057505050816107b59103826108e2565b604051918291602083019060208452518091526040830191905f5b8181106107de575050500390f35b82516001600160a01b03168452859450602093840193909201916001016107d0565b825484526020909301926001928301920161079f565b346101355760203660031901126101355761082f61089d565b610837610bed565b6001600160a01b0381169081156102c757609780546001600160a01b03198116939093179055604080516001600160a01b0393841681529190921660208201527f66fd58e82f7b31a2a5c30e0888f3093efe4e111b00cd2b0c31fe014601293aa09190a1005b600435906001600160a01b038216820361013557565b6040906003190112610135576004356001600160a01b0381168103610135579060243580151581036101355790565b90601f8019910116810190811067ffffffffffffffff82111761090457604052565b634e487b7160e01b5f52604160045260245ffd5b9081602091031261013557516001600160a01b03811681036101355790565b90816020910312610135575180151581036101355790565b6001600160a01b0381165f81815260cb602052604090205490919015610aad57602060049260405193848092636f307dc360e01b82525afa918215610a69575f92610ab7575b506001600160a01b03821615610aad576040516355e89d7f60e11b8152906020826004816001600160a01b0387165afa918215610a69575f92610a7c575b506001600160a01b03821615610a745760405163179dab5560e21b81526001600160a01b0384811660048301529091906020908390602490829087165afa918215610a69575f92610a38575b508115610a2a575092565b610a35915083610c45565b92565b610a5b91925060203d602011610a62575b610a5381836108e2565b810190610937565b905f610a1f565b503d610a49565b6040513d5f823e3d90fd5b505f92839150565b610a9f91925060203d602011610aa6575b610a9781836108e2565b810190610918565b905f6109d3565b503d610a8d565b50505f905f905f90565b610ad191925060203d602011610aa657610a9781836108e2565b905f610995565b6001600160a01b0381165f81815260cb602052604090205490919015610bda57610b019061094f565b6001600160a01b031692918315610bc75715610bc2577f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690813b15610135575f809260446040518095819363aff860df60e01b83528860048401528160248401525af1908115610a69577f6a470546570f66eba9fa8be472d0bfcef44bfad0eb5a2f7a8997c5edb26d91e592602092610bb2575b506040519485526001600160a01b031693a3565b5f610bbc916108e2565b5f610b9e565b505050565b82633c94b11560e01b5f5260045260245ffd5b506335a00c9160e11b5f5260045260245ffd5b6033546001600160a01b03163303610c0157565b606460405162461bcd60e51b815260206004820152602060248201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e65726044820152fd5b604051636290865d60e01b81525f9291906020816004816001600160a01b0386165afa908115610a69575f91610ce2575b506001600160a01b031691823b15610135576040516334dae8d560e01b81526001600160a01b03928316600482015291166024820152905f90829060449082905afa9081610ccd575b50610cca5750600190565b90565b610cda9192505f906108e2565b5f905f610cbf565b610cfb915060203d602011610aa657610a9781836108e2565b5f610c76565b606580546001600160a01b0319908116909155603380549182166001600160a01b0393841690811790915591167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e05f80a3565b805180835260209291819084018484015e5f828201840152601f01601f1916010190565b609754604080516318c5e8ab60e01b815233600482015260248101919091529060209082906001600160a01b03168180610db56044820188610d54565b03915afa908115610a69575f91610e05575b5015610dd05750565b604051634a3fa29360e01b815233600482015230602482015260606044820152908190610e01906064830190610d54565b0390fd5b610e1e915060203d602011610a6257610a5381836108e2565b5f610dc7565b15610e2b57565b60405162461bcd60e51b815260206004820152602b60248201527f496e697469616c697a61626c653a20636f6e7472616374206973206e6f74206960448201526a6e697469616c697a696e6760a81b6064820152608490fd5b8054821015610e99575f5260205f2001905f90565b634e487b7160e01b5f52603260045260245ffd5b5f81815260cb60205260409020548015610f96575f198101818111610f825760ca545f19810191908211610f8257808203610f34575b50505060ca548015610f20575f1901610efd8160ca610e84565b8154905f199060031b1b1916905560ca555f5260cb6020525f6040812055600190565b634e487b7160e01b5f52603160045260245ffd5b610f6c610f45610f569360ca610e84565b90549060031b1c92839260ca610e84565b819391549060031b91821b915f19901b19161790565b90555f5260cb60205260405f20555f8080610ee3565b634e487b7160e01b5f52601160045260245ffd5b50505f90565b805f5260cb60205260405f2054155f14610ff15760ca546801000000000000000081101561090457610fda610f5682600185940160ca5560ca610e84565b905560ca54905f5260cb60205260405f2055600190565b505f9056fea264697066735822122042e1fbd35635dc406cde745fcb9ccd0166fd9c8f6973aac03106505b26d5b46b64736f6c634300081c0033",
+  "deployedBytecode": "0x60806040526004361015610011575f80fd5b5f3560e01c80630e32cb861461081657806310c95885146107575780631a67d76c1461071a5780631a8e6242146106d65780635fada94d14610692578063715018a61461062d57806379ba5097146105a9578063871eb3f9146104fa5780638da5cb5b146104d2578063955a9b201461041b578063a1605c4a146103d3578063b4a0bdf3146103ab578063c4d66de8146101a3578063c68b2f3614610161578063e30c3978146101395763f2fde38b146100c9575f80fd5b34610135576020366003190112610135576100e261089d565b6100ea610bed565b606580546001600160a01b0319166001600160a01b039283169081179091556033549091167f38d16b8cac22d99fc7c124b9cd0de2d3fa1faef420bfe791d8c362d765e227005f80a3005b5f80fd5b34610135575f366003190112610135576065546040516001600160a01b039091168152602090f35b346101355760203660031901126101355760206101996001600160a01b0361018761089d565b165f5260cb60205260405f2054151590565b6040519015158152f35b34610135576020366003190112610135576101bc61089d565b5f5460ff8160081c16159081809261039e575b8015610387575b1561032b5760ff1981166001175f558161031a575b5061020e60ff5f5460081c1661020081610e24565b61020981610e24565b610e24565b61021733610d01565b5f549161022960ff8460081c16610e24565b6001600160a01b0381169081156102c757609780546001600160a01b03198116939093179055604080516001600160a01b0393841681529190921660208201527f66fd58e82f7b31a2a5c30e0888f3093efe4e111b00cd2b0c31fe014601293aa09190a161029357005b61ff0019165f557f7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498602060405160018152a1005b60405162461bcd60e51b815260206004820152602560248201527f696e76616c696420616365737320636f6e74726f6c206d616e61676572206164604482015264647265737360d81b6064820152608490fd5b61ffff1916610101175f55826101eb565b60405162461bcd60e51b815260206004820152602e60248201527f496e697469616c697a61626c653a20636f6e747261637420697320616c72656160448201526d191e481a5b9a5d1a585b1a5e995960921b6064820152608490fd5b50303b1580156101d65750600160ff8216146101d6565b50600160ff8216106101cf565b34610135575f366003190112610135576097546040516001600160a01b039091168152602090f35b34610135576020366003190112610135576103ec61089d565b335f5260c960205260ff60405f2054161561040c5761040a90610ad8565b005b6377b1434760e01b5f5260045ffd5b3461013557610429366108b3565b9061046a60405161043b6040826108e2565b601e81527f736574547275737465644b656570657228616464726573732c626f6f6c2900006020820152610d78565b6001600160a01b03169081156104c35760207f7e408cd3b78bfa9957ad0675d216841a1a928c24b49c36676e56d403e18b60b691835f5260c9825260405f209015159060ff1981541660ff8316179055604051908152a2005b63d92e233d60e01b5f5260045ffd5b34610135575f366003190112610135576033546040516001600160a01b039091168152602090f35b3461013557610508366108b3565b9061054960405161051a6040826108e2565b602081527f7365744d61726b65744d6f6e69746f72656428616464726573732c626f6f6c296020820152610d78565b6001600160a01b03169081156104c3576020817fdfe0e6ba115235af4605aca6b1fb3b9ceb321dac44728e2cf1f0f40721654a06925f1461059a5761058d84610f9c565b505b6040519015158152a2005b6105a384610ead565b5061058f565b34610135575f36600319011261013557606554336001600160a01b03909116036105d65761040a33610d01565b60405162461bcd60e51b815260206004820152602960248201527f4f776e61626c6532537465703a2063616c6c6572206973206e6f7420746865206044820152683732bb9037bbb732b960b91b6064820152608490fd5b34610135575f36600319011261013557610645610bed565b606580546001600160a01b03199081169091556033805491821690555f906001600160a01b03167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e08280a3005b346101355760203660031901126101355760606106b56106b061089d565b61094f565b6040805193151584526001600160a01b039283166020850152911690820152f35b34610135575f366003190112610135576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b34610135576020366003190112610135576001600160a01b0361073b61089d565b165f5260c9602052602060ff60405f2054166040519015158152f35b34610135575f3660031901126101355760405180602060ca549283815201809260ca5f527f42d72674974f694b5f5159593243114d38a5c39c89d6b62fee061ff523240ee1905f5b81811061080057505050816107b59103826108e2565b604051918291602083019060208452518091526040830191905f5b8181106107de575050500390f35b82516001600160a01b03168452859450602093840193909201916001016107d0565b825484526020909301926001928301920161079f565b346101355760203660031901126101355761082f61089d565b610837610bed565b6001600160a01b0381169081156102c757609780546001600160a01b03198116939093179055604080516001600160a01b0393841681529190921660208201527f66fd58e82f7b31a2a5c30e0888f3093efe4e111b00cd2b0c31fe014601293aa09190a1005b600435906001600160a01b038216820361013557565b6040906003190112610135576004356001600160a01b0381168103610135579060243580151581036101355790565b90601f8019910116810190811067ffffffffffffffff82111761090457604052565b634e487b7160e01b5f52604160045260245ffd5b9081602091031261013557516001600160a01b03811681036101355790565b90816020910312610135575180151581036101355790565b6001600160a01b0381165f81815260cb602052604090205490919015610aad57602060049260405193848092636f307dc360e01b82525afa918215610a69575f92610ab7575b506001600160a01b03821615610aad576040516355e89d7f60e11b8152906020826004816001600160a01b0387165afa918215610a69575f92610a7c575b506001600160a01b03821615610a745760405163179dab5560e21b81526001600160a01b0384811660048301529091906020908390602490829087165afa918215610a69575f92610a38575b508115610a2a575092565b610a35915083610c45565b92565b610a5b91925060203d602011610a62575b610a5381836108e2565b810190610937565b905f610a1f565b503d610a49565b6040513d5f823e3d90fd5b505f92839150565b610a9f91925060203d602011610aa6575b610a9781836108e2565b810190610918565b905f6109d3565b503d610a8d565b50505f905f905f90565b610ad191925060203d602011610aa657610a9781836108e2565b905f610995565b6001600160a01b0381165f81815260cb602052604090205490919015610bda57610b019061094f565b6001600160a01b031692918315610bc75715610bc2577f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690813b15610135575f809260446040518095819363aff860df60e01b83528860048401528160248401525af1908115610a69577f6a470546570f66eba9fa8be472d0bfcef44bfad0eb5a2f7a8997c5edb26d91e592602092610bb2575b506040519485526001600160a01b031693a3565b5f610bbc916108e2565b5f610b9e565b505050565b82633c94b11560e01b5f5260045260245ffd5b506335a00c9160e11b5f5260045260245ffd5b6033546001600160a01b03163303610c0157565b606460405162461bcd60e51b815260206004820152602060248201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e65726044820152fd5b604051636290865d60e01b81525f9291906020816004816001600160a01b0386165afa908115610a69575f91610ce2575b506001600160a01b031691823b15610135576040516334dae8d560e01b81526001600160a01b03928316600482015291166024820152905f90829060449082905afa9081610ccd575b50610cca5750600190565b90565b610cda9192505f906108e2565b5f905f610cbf565b610cfb915060203d602011610aa657610a9781836108e2565b5f610c76565b606580546001600160a01b0319908116909155603380549182166001600160a01b0393841690811790915591167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e05f80a3565b805180835260209291819084018484015e5f828201840152601f01601f1916010190565b609754604080516318c5e8ab60e01b815233600482015260248101919091529060209082906001600160a01b03168180610db56044820188610d54565b03915afa908115610a69575f91610e05575b5015610dd05750565b604051634a3fa29360e01b815233600482015230602482015260606044820152908190610e01906064830190610d54565b0390fd5b610e1e915060203d602011610a6257610a5381836108e2565b5f610dc7565b15610e2b57565b60405162461bcd60e51b815260206004820152602b60248201527f496e697469616c697a61626c653a20636f6e7472616374206973206e6f74206960448201526a6e697469616c697a696e6760a81b6064820152608490fd5b8054821015610e99575f5260205f2001905f90565b634e487b7160e01b5f52603260045260245ffd5b5f81815260cb60205260409020548015610f96575f198101818111610f825760ca545f19810191908211610f8257808203610f34575b50505060ca548015610f20575f1901610efd8160ca610e84565b8154905f199060031b1b1916905560ca555f5260cb6020525f6040812055600190565b634e487b7160e01b5f52603160045260245ffd5b610f6c610f45610f569360ca610e84565b90549060031b1c92839260ca610e84565b819391549060031b91821b915f19901b19161790565b90555f5260cb60205260405f20555f8080610ee3565b634e487b7160e01b5f52601160045260245ffd5b50505f90565b805f5260cb60205260405f2054155f14610ff15760ca546801000000000000000081101561090457610fda610f5682600185940160ca5560ca610e84565b905560ca54905f5260cb60205260405f2055600190565b505f9056fea264697066735822122042e1fbd35635dc406cde745fcb9ccd0166fd9c8f6973aac03106505b26d5b46b64736f6c634300081c0033",
+  "devdoc": {
+    "author": "Venus",
+    "details": "A paused bStock cannot be transferred. Liquidations still seize its vTokens, but no one can redeem them      for the bStock until the pause ends, so liquidators cannot exit. Zeroing CF stops new debt against the      collateral, while the liquidation threshold (LT) is left unchanged so existing positions are not pushed      into liquidation.      - Any market EBrake can act on: EBrake acts on the market's own comptroller and checks the listing there.      - The pause is read from the PauseManager the token itself points to (pauseManager()), which is the        one the token checks before every transfer.      - A sanctioned or blocklisted vToken can neither send nor receive the token, which blocks redeems and        mints just like a pause, so it is treated as one. The block is read by running the same        checkIsCompliant call the token makes, on the compliance module it points to (compliance()); any        revert there counts as blocked.      - Tighten-only: CF is restored by a governance VIP that reads EBrake.getMarketCFSnapshot() and then        calls EBrake.resetCFSnapshot().      - handleBStockPause is called by trusted keepers; EBrake makes repeat calls no-ops.",
+    "errors": {
+      "MarketNotMonitored(address)": [
+        {
+          "params": {
+            "market": "The vToken market address"
+          }
+        }
+      ],
+      "MarketNotSupported(address)": [
+        {
+          "params": {
+            "market": "The vToken market address"
+          }
+        }
+      ]
+    },
+    "events": {
+      "BStockPauseHandled(address,address,address)": {
+        "details": "Emitted on every handleBStockPause call that finds the token paused or the market blocked, including      repeat calls on a market whose CF is already zero (EBrake then makes no change and emits no      CollateralFactorDecreased event)",
+        "params": {
+          "market": "The vToken market address",
+          "pauseManager": "The PauseManager the underlying token points to",
+          "underlying": "The market's underlying token"
+        }
+      },
+      "Initialized(uint8)": {
+        "details": "Triggered when the contract has been initialized or reinitialized."
+      },
+      "MarketMonitoringUpdated(address,bool)": {
+        "params": {
+          "market": "The vToken market address",
+          "monitored": "True if the market was added, false if it was removed"
+        }
+      },
+      "TrustedKeeperUpdated(address,bool)": {
+        "params": {
+          "isTrusted": "Whether the keeper is trusted",
+          "keeper": "The keeper address"
+        }
+      }
+    },
+    "kind": "dev",
+    "methods": {
+      "acceptOwnership()": {
+        "details": "The new owner accepts the ownership transfer."
+      },
+      "checkBStockPause(address)": {
+        "details": "Returns zeros for a market that is not monitored, and isPaused = false for an underlying token with      no PauseManager. Reads the PauseManager the token itself points to. While the token is not paused, also      runs the token's compliance check for the market; a revert there counts as blocked.      Reverts if the underlying token does not expose pauseManager() or compliance().",
+        "params": {
+          "market": "The vToken market address"
+        },
+        "returns": {
+          "isPaused": "True if the market is monitored and its underlying token is paused, or the token's         compliance module rejects the market (sanctioned, or blocklisted for the token)",
+          "pauseManager": "The PauseManager the token points to, or address(0) if the market is not monitored or         the token has none",
+          "underlying": "The market's underlying token, or address(0) if the market is not monitored"
+        }
+      },
+      "constructor": {
+        "custom:error": "ZeroAddress if eBrake_ is the zero address",
+        "custom:oz-upgrades-unsafe-allow": "constructor",
+        "params": {
+          "eBrake_": "Address of the EBrake contract"
+        }
+      },
+      "getMonitoredMarkets()": {
+        "returns": {
+          "_0": "The monitored market addresses, in no particular order"
+        }
+      },
+      "handleBStockPause(address)": {
+        "custom:access": "Only trusted keepers",
+        "custom:error": "UnauthorizedKeeper if the caller is not a trusted keeperMarketNotMonitored if the market is not monitoredMarketNotSupported if the underlying token has no PauseManager",
+        "custom:event": "Emits BStockPauseHandled when the token is paused or the market blocked",
+        "details": "Calls EBrake.decreaseCF(market, 0), which zeroes CF in the market's pool (on the BSC Core pool, also      in every e-mode pool the market is listed in), keeps LT and snapshots the previous CF/LT. Repeat calls      are no-ops in EBrake. The pause and the compliance block are read through checkBStockPause; while      neither holds the call does nothing.      Reverts if the underlying token does not expose pauseManager() or compliance().",
+        "params": {
+          "market": "The vToken market address"
+        }
+      },
+      "initialize(address)": {
+        "params": {
+          "accessControlManager_": "Address of the AccessControlManager"
+        }
+      },
+      "isMarketMonitored(address)": {
+        "params": {
+          "market": "The vToken market address"
+        },
+        "returns": {
+          "_0": "True if the market is monitored"
+        }
+      },
+      "owner()": {
+        "details": "Returns the address of the current owner."
+      },
+      "pendingOwner()": {
+        "details": "Returns the address of the pending owner."
+      },
+      "renounceOwnership()": {
+        "details": "Leaves the contract without owner. It will not be possible to call `onlyOwner` functions. Can only be called by the current owner. NOTE: Renouncing ownership will leave the contract without an owner, thereby disabling any functionality that is only available to the owner."
+      },
+      "setAccessControlManager(address)": {
+        "custom:access": "Only Governance",
+        "custom:event": "Emits NewAccessControlManager event",
+        "details": "Admin function to set address of AccessControlManager",
+        "params": {
+          "accessControlManager_": "The new address of the AccessControlManager"
+        }
+      },
+      "setMarketMonitored(address,bool)": {
+        "custom:access": "Controlled by AccessControlManager",
+        "custom:error": "ZeroAddress if market is the zero address",
+        "custom:event": "Emits MarketMonitoringUpdated",
+        "details": "The market is not checked here: EBrake checks its listing when it zeroes CF, and handleBStockPause      checks its token.",
+        "params": {
+          "market": "The vToken market address",
+          "monitored": "True to add the market, false to remove it"
+        }
+      },
+      "setTrustedKeeper(address,bool)": {
+        "custom:access": "Controlled by AccessControlManager",
+        "custom:error": "ZeroAddress if keeper is the zero address",
+        "custom:event": "Emits TrustedKeeperUpdated",
+        "params": {
+          "isTrusted": "Whether the keeper should be trusted",
+          "keeper": "The keeper address"
+        }
+      },
+      "transferOwnership(address)": {
+        "details": "Starts the ownership transfer of the contract to a new account. Replaces the pending transfer if there is one. Can only be called by the current owner."
+      }
+    },
+    "stateVariables": {
+      "EBRAKE": {
+        "custom:oz-upgrades-unsafe-allow": "state-variable-immutable"
+      },
+      "__gap": {
+        "details": "Storage gap for future upgrades"
+      },
+      "monitoredMarkets": {
+        "details": "The monitored vToken markets, i.e. the markets handleBStockPause may zero the CF of"
+      }
+    },
+    "title": "BStockPauseSentinel",
+    "version": 1
+  },
+  "userdoc": {
+    "errors": {
+      "MarketNotMonitored(address)": [
+        {
+          "notice": "Thrown when handleBStockPause is called for a market that is not monitored"
+        }
+      ],
+      "MarketNotSupported(address)": [
+        {
+          "notice": "Thrown when braking a market whose underlying token has no PauseManager"
+        }
+      ],
+      "Unauthorized(address,address,string)": [
+        {
+          "notice": "Thrown when the action is prohibited by AccessControlManager"
+        }
+      ],
+      "UnauthorizedKeeper()": [
+        {
+          "notice": "Thrown when handleBStockPause is called by an address that is not a trusted keeper"
+        }
+      ],
+      "ZeroAddress()": [
+        {
+          "notice": "Thrown when a zero address is provided"
+        }
+      ]
+    },
+    "events": {
+      "BStockPauseHandled(address,address,address)": {
+        "notice": "Emitted when handleBStockPause asks EBrake to zero the CF of a market whose underlying token is paused         or blocked for the market by the token's compliance module"
+      },
+      "MarketMonitoringUpdated(address,bool)": {
+        "notice": "Emitted when a market is added to or removed from the monitored markets"
+      },
+      "NewAccessControlManager(address,address)": {
+        "notice": "Emitted when access control manager contract address is changed"
+      },
+      "TrustedKeeperUpdated(address,bool)": {
+        "notice": "Emitted when a keeper's trusted status is updated"
+      }
+    },
+    "kind": "user",
+    "methods": {
+      "EBRAKE()": {
+        "notice": "Emergency Brake contract used to zero the collateral factor"
+      },
+      "accessControlManager()": {
+        "notice": "Returns the address of the access control manager contract"
+      },
+      "checkBStockPause(address)": {
+        "notice": "Check whether a monitored market's underlying bStock is paused, i.e. whether handleBStockPause would         act on it"
+      },
+      "constructor": {
+        "notice": "Sets EBrake and disables initializers on the implementation"
+      },
+      "getMonitoredMarkets()": {
+        "notice": "The monitored vToken markets"
+      },
+      "handleBStockPause(address)": {
+        "notice": "Zero the collateral factor of a monitored market while its underlying token is paused, or blocked         for the market by the token's compliance module"
+      },
+      "initialize(address)": {
+        "notice": "Initializes the proxy with the AccessControlManager"
+      },
+      "isMarketMonitored(address)": {
+        "notice": "Whether a vToken market is monitored, i.e. handleBStockPause may zero its CF"
+      },
+      "setAccessControlManager(address)": {
+        "notice": "Sets the address of AccessControlManager"
+      },
+      "setMarketMonitored(address,bool)": {
+        "notice": "Add a market to, or remove it from, the monitored markets"
+      },
+      "setTrustedKeeper(address,bool)": {
+        "notice": "Set the trusted status of a keeper allowed to call handleBStockPause"
+      },
+      "trustedKeepers(address)": {
+        "notice": "Whether a keeper is trusted to call handleBStockPause"
+      }
+    },
+    "notice": "Keeper-driven sentinel that zeroes the collateral factor (CF) of monitored bStock (tokenized equity)         markets through EBrake while the issuer's PauseManager reports the token as paused, or the token's         compliance module sanctions or blocklists the market.",
+    "version": 1
+  },
+  "storageLayout": {
+    "storage": [
+      {
+        "astId": 246,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "_initialized",
+        "offset": 0,
+        "slot": "0",
+        "type": "t_uint8"
+      },
+      {
+        "astId": 249,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "_initializing",
+        "offset": 1,
+        "slot": "0",
+        "type": "t_bool"
+      },
+      {
+        "astId": 866,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "__gap",
+        "offset": 0,
+        "slot": "1",
+        "type": "t_array(t_uint256)50_storage"
+      },
+      {
+        "astId": 118,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "_owner",
+        "offset": 0,
+        "slot": "51",
+        "type": "t_address"
+      },
+      {
+        "astId": 238,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "__gap",
+        "offset": 0,
+        "slot": "52",
+        "type": "t_array(t_uint256)49_storage"
+      },
+      {
+        "astId": 11,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "_pendingOwner",
+        "offset": 0,
+        "slot": "101",
+        "type": "t_address"
+      },
+      {
+        "astId": 105,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "__gap",
+        "offset": 0,
+        "slot": "102",
+        "type": "t_array(t_uint256)49_storage"
+      },
+      {
+        "astId": 1567,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "_accessControlManager",
+        "offset": 0,
+        "slot": "151",
+        "type": "t_contract(IAccessControlManagerV8)1752"
+      },
+      {
+        "astId": 1572,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "__gap",
+        "offset": 0,
+        "slot": "152",
+        "type": "t_array(t_uint256)49_storage"
+      },
+      {
+        "astId": 2575,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "trustedKeepers",
+        "offset": 0,
+        "slot": "201",
+        "type": "t_mapping(t_address,t_bool)"
+      },
+      {
+        "astId": 2579,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "monitoredMarkets",
+        "offset": 0,
+        "slot": "202",
+        "type": "t_struct(AddressSet)1193_storage"
+      },
+      {
+        "astId": 2584,
+        "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+        "label": "__gap",
+        "offset": 0,
+        "slot": "204",
+        "type": "t_array(t_uint256)47_storage"
+      }
+    ],
+    "types": {
+      "t_address": {
+        "encoding": "inplace",
+        "label": "address",
+        "numberOfBytes": "20"
+      },
+      "t_array(t_bytes32)dyn_storage": {
+        "base": "t_bytes32",
+        "encoding": "dynamic_array",
+        "label": "bytes32[]",
+        "numberOfBytes": "32"
+      },
+      "t_array(t_uint256)47_storage": {
+        "base": "t_uint256",
+        "encoding": "inplace",
+        "label": "uint256[47]",
+        "numberOfBytes": "1504"
+      },
+      "t_array(t_uint256)49_storage": {
+        "base": "t_uint256",
+        "encoding": "inplace",
+        "label": "uint256[49]",
+        "numberOfBytes": "1568"
+      },
+      "t_array(t_uint256)50_storage": {
+        "base": "t_uint256",
+        "encoding": "inplace",
+        "label": "uint256[50]",
+        "numberOfBytes": "1600"
+      },
+      "t_bool": {
+        "encoding": "inplace",
+        "label": "bool",
+        "numberOfBytes": "1"
+      },
+      "t_bytes32": {
+        "encoding": "inplace",
+        "label": "bytes32",
+        "numberOfBytes": "32"
+      },
+      "t_contract(IAccessControlManagerV8)1752": {
+        "encoding": "inplace",
+        "label": "contract IAccessControlManagerV8",
+        "numberOfBytes": "20"
+      },
+      "t_mapping(t_address,t_bool)": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => bool)",
+        "numberOfBytes": "32",
+        "value": "t_bool"
+      },
+      "t_mapping(t_bytes32,t_uint256)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => uint256)",
+        "numberOfBytes": "32",
+        "value": "t_uint256"
+      },
+      "t_struct(AddressSet)1193_storage": {
+        "encoding": "inplace",
+        "label": "struct EnumerableSetUpgradeable.AddressSet",
+        "members": [
+          {
+            "astId": 1192,
+            "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+            "label": "_inner",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_struct(Set)878_storage"
+          }
+        ],
+        "numberOfBytes": "64"
+      },
+      "t_struct(Set)878_storage": {
+        "encoding": "inplace",
+        "label": "struct EnumerableSetUpgradeable.Set",
+        "members": [
+          {
+            "astId": 873,
+            "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+            "label": "_values",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_array(t_bytes32)dyn_storage"
+          },
+          {
+            "astId": 877,
+            "contract": "contracts/Sentinels/BStockPauseSentinel.sol:BStockPauseSentinel",
+            "label": "_indexes",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_mapping(t_bytes32,t_uint256)"
+          }
+        ],
+        "numberOfBytes": "64"
+      },
+      "t_uint256": {
+        "encoding": "inplace",
+        "label": "uint256",
+        "numberOfBytes": "32"
+      },
+      "t_uint8": {
+        "encoding": "inplace",
+        "label": "uint8",
+        "numberOfBytes": "1"
+      }
+    }
+  }
+}
