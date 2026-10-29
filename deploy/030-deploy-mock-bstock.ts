@@ -3,8 +3,8 @@ import { DeployFunction } from "hardhat-deploy/dist/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 
 /**
- * Deploys MockBStockToken on bsctestnet so BStockPauseSentinel has a pausable bStock to monitor.
- * The deployer keeps ownership so it can pause and unpause the token from the keeper side.
+ * Deploys MockBStockToken on bsctestnet so BStockPauseSentinel has a bStock it can see paused or blocked.
+ * The deployer keeps ownership so it can pause the token and block markets from the keeper side.
  */
 const func: DeployFunction = async function ({ getNamedAccounts, deployments, network }: HardhatRuntimeEnvironment) {
   const { deploy } = deployments;
