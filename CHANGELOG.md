@@ -1,3 +1,8 @@
+## <small>1.3.1-dev.3 (2026-11-04)</small>
+
+* Merge pull request #94 from VenusProtocol/doc/cantina-final-report ([d1c5d07](https://github.com/VenusProtocol/venus-periphery/commit/d1c5d07)), closes [#94](https://github.com/VenusProtocol/venus-periphery/issues/94)
+* docs(audits): add Cantina final report ([87cc81c](https://github.com/VenusProtocol/venus-periphery/commit/87cc81c))
+
 ## <small>1.3.1-dev.2 (2026-10-28)</small>
 
 * Merge pull request #91 from VenusProtocol/fix/storage-layout-deployed-renames ([de40887](https://github.com/VenusProtocol/venus-periphery/commit/de40887)), closes [#91](https://github.com/VenusProtocol/venus-periphery/issues/91)
