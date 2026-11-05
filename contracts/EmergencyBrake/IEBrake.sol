@@ -78,6 +78,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          applies newCF only to pools where currentCF > newCF; silently skips pools already at or
  *          below newCF.
  *        - decreaseCF(market, poolId, newCF) — targets a single pool (e.g. multisig use)
+ *        - resetCFSnapshot(market, poolId) — clears the CF snapshot of a single pool
  *        - Uses poolMarkets() (7-value return) to read LT,
  *          calls setCollateralFactor(poolId, market, newCF, LT) which returns uint256 error code
  *        - Supports e-mode pools via poolId > 0
@@ -95,7 +96,8 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          calls setCollateralFactor(market, newCF, LT) which returns void (no error code).
  *          Reverts if newCF > currentCF.
  *        - No poolId concept — only the core pool exists (other pools are deprecated)
- *        - decreaseCF(market, poolId, newCF) not granted ACM permission (no pool concept on IL)
+ *        - decreaseCF(market, poolId, newCF) and resetCFSnapshot(market, poolId) not granted ACM permission
+ *          (no pool concept on IL)
  *        - pauseFlashLoan() not granted ACM permission (flash loans don't exist on IL)
  *        - pauseHub(address), pauseHubYieldGroup(address) and
  *          pauseHubResource(address,address) not granted ACM permission (no Liquidity Hub off BSC).
@@ -124,9 +126,10 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
  *          MarketsOnDifferentComptrollers.
  *      Each ACM permission on EBrake covers every comptroller EBrake reaches. Callers that should only act on
  *      some pools check the market themselves.
- *      resetCFSnapshot picks its path the same way as decreaseCF(address,uint256).
+ *      resetCFSnapshot(address) picks its path the same way as decreaseCF(address,uint256).
  *      The Diamond-only functions (pauseFlashLoan, disablePoolBorrow, revokeFlashLoanAccess,
- *      decreaseCF(address,uint96,uint256)) only ever act on COMPTROLLER.
+ *      decreaseCF(address,uint96,uint256)) only ever act on COMPTROLLER. resetCFSnapshot(address,uint96)
+ *      is Diamond-only too; it only clears EBrake's own snapshot storage.
  *      Snapshots are keyed by market address, so Core and Spoke markets never share an entry.
  */
 interface IEBrake {
@@ -191,6 +194,11 @@ interface IEBrake {
     /// @notice Emitted when a market's CF/LT snapshot is reset after governance recovery.
     /// @param market The market address whose CF snapshot was cleared.
     event CFSnapshotReset(address indexed market);
+
+    /// @notice Emitted when a market's CF/LT snapshot is reset for a single pool.
+    /// @param market The market address whose CF snapshot was cleared.
+    /// @param poolId The pool ID whose snapshot was cleared.
+    event PoolCFSnapshotReset(address indexed market, uint96 indexed poolId);
 
     /// @notice Emitted when a market's borrow cap snapshot is reset after governance recovery.
     /// @param market The market address whose borrow cap snapshot was cleared.
@@ -449,10 +457,20 @@ interface IEBrake {
      *      Clears per-pool CF/LT values so that future EBrake actions can capture fresh
      *      pre-incident values. Does not touch cap snapshots.
      *      For a market of COMPTROLLER on the Diamond it clears pool ids corePoolId to lastPoolId; for any other
-     *      market, pool id 0.
+     *      market, pool id 0. To restore only some pools of a market, use resetCFSnapshot(address,uint96).
      * @param market The vToken market address whose CF snapshot should be cleared.
      */
     function resetCFSnapshot(address market) external;
+
+    /**
+     * @notice Reset the stored CF/LT snapshot of a market in a single pool.
+     * @dev Called by governance after restoring the CF of one pool while other pools stay tightened.
+     *      Snapshots of other pools are kept. Does not touch cap snapshots.
+     *      Reverts with NotSupportedOnRemoteChain on IL chains — ACM must not grant this permission there.
+     * @param market The vToken market address whose CF snapshot should be cleared.
+     * @param poolId The pool ID (0 for core pool, >0 for e-mode pools).
+     */
+    function resetCFSnapshot(address market, uint96 poolId) external;
 
     /**
      * @notice Reset only the stored borrow cap snapshot for a market.

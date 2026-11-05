@@ -332,6 +332,18 @@ contract EBrake is IEBrake, AccessControlledV8 {
     }
 
     /// @inheritdoc IEBrake
+    function resetCFSnapshot(address market, uint96 poolId) external {
+        _checkAccessAllowed("resetCFSnapshot(address,uint96)");
+        if (IS_REMOTE_CHAIN) revert NotSupportedOnRemoteChain();
+
+        MarketState storage state = marketStates[market];
+        delete state.poolCFs[poolId];
+        delete state.poolLTs[poolId];
+
+        emit PoolCFSnapshotReset(market, poolId);
+    }
+
+    /// @inheritdoc IEBrake
     function resetBorrowCapSnapshot(address market) external {
         _checkAccessAllowed("resetBorrowCapSnapshot(address)");
 

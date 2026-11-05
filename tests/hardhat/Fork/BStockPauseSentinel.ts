@@ -640,7 +640,7 @@ if (FORK_MAINNET) {
             await comptroller.setCollateralFactor(poolId, vTSLAB, snapshot.cf, snapshot.lt);
           }
           await acm.giveCallPermission(eBrake.address, RESET_CF_SNAPSHOT, NORMAL_TIMELOCK);
-          await eBrake.resetCFSnapshot(vTSLAB);
+          await eBrake["resetCFSnapshot(address)"](vTSLAB);
           await expectUntouched(eBrake, comptroller, vTSLAB, original);
           expect(await sentinelEvents(sentinel, sentinel.connect(keeper).handleBStockPause(vTSLAB))).to.deep.equal([]);
 
