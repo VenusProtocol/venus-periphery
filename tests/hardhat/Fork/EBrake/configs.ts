@@ -84,6 +84,7 @@ const DIAMOND_EBRAKE_FUNCTIONS = [
   "setMarketBorrowCaps(address[],uint256[])",
   "setMarketSupplyCaps(address[],uint256[])",
   "resetCFSnapshot(address)",
+  "resetCFSnapshot(address,uint96)",
   "resetBorrowCapSnapshot(address)",
   "resetSupplyCapSnapshot(address)",
 ];
