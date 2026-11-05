@@ -36,7 +36,7 @@ contract Executor is IExecutor, AccessControlledV8, ReentrancyGuardUpgradeable {
     ICorePoolComptroller public immutable COMPTROLLER;
 
     /// @notice Whether this Executor targets a BSC Diamond comptroller (true) or IL comptroller (false).
-    /// @dev    EBrake handles both paths internally via its own IS_ISOLATED_POOL flag.
+    /// @dev    EBrake handles both paths internally via its own IS_REMOTE_CHAIN flag.
     bool public immutable IS_CORE_POOL;
 
     /// @notice Per-market configuration for automated risk parameter adjustments.
