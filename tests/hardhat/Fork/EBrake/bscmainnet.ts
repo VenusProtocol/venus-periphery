@@ -73,16 +73,17 @@ if (FORK_MAINNET) {
         });
 
         it("should partially decrease CF on core pool", async () => {
+          // vUSDT: a non-zero CF needs a fresh price, and vBTCB's goes stale ~50s after the fork block
           const { eBrake, comptroller, whitelistedUser } = get();
-          const marketBefore = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
+          const marketBefore = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken2);
           expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
           const halfCF = marketBefore.collateralFactorMantissa.div(2);
 
-          await expect(eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken1, halfCF))
+          await expect(eBrake.connect(whitelistedUser)["decreaseCF(address,uint256)"](config.vToken2, halfCF))
             .to.emit(eBrake, "CollateralFactorDecreased")
-            .withArgs(whitelistedUser.address, config.vToken1, CORE_POOL_ID, halfCF);
+            .withArgs(whitelistedUser.address, config.vToken2, CORE_POOL_ID, halfCF);
 
-          const marketAfter = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
+          const marketAfter = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken2);
           expect(marketAfter.collateralFactorMantissa).to.equal(halfCF);
           expect(marketAfter.liquidationThresholdMantissa).to.equal(marketBefore.liquidationThresholdMantissa);
         });
@@ -152,18 +153,19 @@ if (FORK_MAINNET) {
         });
 
         it("should partially decrease CF on a specific pool", async () => {
+          // vUSDT: a non-zero CF needs a fresh price, and vBTCB's goes stale ~50s after the fork block
           const { eBrake, comptroller, whitelistedUser } = get();
-          const marketBefore = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
+          const marketBefore = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken2);
           expect(marketBefore.collateralFactorMantissa).to.be.gt(0);
           const halfCF = marketBefore.collateralFactorMantissa.div(2);
 
           await expect(
-            eBrake.connect(whitelistedUser)["decreaseCF(address,uint96,uint256)"](config.vToken1, CORE_POOL_ID, halfCF),
+            eBrake.connect(whitelistedUser)["decreaseCF(address,uint96,uint256)"](config.vToken2, CORE_POOL_ID, halfCF),
           )
             .to.emit(eBrake, "CollateralFactorDecreased")
-            .withArgs(whitelistedUser.address, config.vToken1, CORE_POOL_ID, halfCF);
+            .withArgs(whitelistedUser.address, config.vToken2, CORE_POOL_ID, halfCF);
 
-          const marketAfter = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken1);
+          const marketAfter = await comptroller.poolMarkets(CORE_POOL_ID, config.vToken2);
           expect(marketAfter.collateralFactorMantissa).to.equal(halfCF);
         });
 

@@ -304,7 +304,7 @@ if (FORK_MAINNET) {
           expect(await f.sentinel.accessControlManager()).to.equal(ACM);
           expect(await f.sentinel.owner()).to.equal(NORMAL_TIMELOCK);
           expect(await f.eBrake.COMPTROLLER()).to.equal(COMPTROLLER);
-          expect(await f.eBrake.IS_ISOLATED_POOL()).to.be.false;
+          expect(await f.eBrake.IS_REMOTE_CHAIN()).to.be.false;
           expect(await f.eBrake.accessControlManager()).to.equal(ACM);
         });
 

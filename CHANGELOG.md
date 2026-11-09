@@ -1,3 +1,55 @@
+## 1.4.0-dev.1 (2026-11-05)
+
+* [L01] treat a compliance block on the vToken as a bStock pause ([02cbc12](https://github.com/VenusProtocol/venus-periphery/commit/02cbc12))
+* Merge branch 'feat/vpd-2312-spoke-ebrake' into feat/sentinels-testnet-deployments ([a2d4239](https://github.com/VenusProtocol/venus-periphery/commit/a2d4239))
+* Merge branch 'feat/vpd-2312-spoke-ebrake' into feat/sentinels-testnet-deployments ([3e3c5cb](https://github.com/VenusProtocol/venus-periphery/commit/3e3c5cb))
+* Merge pull request #81 from VenusProtocol/feat/vpd-2312-spoke-ebrake ([661d248](https://github.com/VenusProtocol/venus-periphery/commit/661d248)), closes [#81](https://github.com/VenusProtocol/venus-periphery/issues/81)
+* Merge pull request #84 from VenusProtocol/feat/sentinels-testnet-deployments ([3591e89](https://github.com/VenusProtocol/venus-periphery/commit/3591e89)), closes [#84](https://github.com/VenusProtocol/venus-periphery/issues/84)
+* Merge remote-tracking branch 'origin/develop' into feat/vpd-2312-spoke-ebrake ([810d357](https://github.com/VenusProtocol/venus-periphery/commit/810d357))
+* Merge remote-tracking branch 'origin/feat/hub-nav-deviation' into feat/vpd-2312-spoke-ebrake ([195bfb2](https://github.com/VenusProtocol/venus-periphery/commit/195bfb2))
+* feat: add compliance to MockBStockToken and redeploy it on bsctestnet ([8dc7fc8](https://github.com/VenusProtocol/venus-periphery/commit/8dc7fc8))
+* feat: add MockBStockToken so BStockPauseSentinel can run on bsctestnet ([7129bb1](https://github.com/VenusProtocol/venus-periphery/commit/7129bb1))
+* feat: add TokenPauseSentinel to zero bStock CF via EBrake on pause ([1a31d32](https://github.com/VenusProtocol/venus-periphery/commit/1a31d32))
+* feat: deploy EBrake impl, HubNavDeviationSentinel and BStockPauseSentinel on bsctestnet ([845ac3d](https://github.com/VenusProtocol/venus-periphery/commit/845ac3d))
+* feat: deploy MockBStockToken on bsctestnet ([da516c4](https://github.com/VenusProtocol/venus-periphery/commit/da516c4))
+* feat: derive sentinel pools from comptroller(), add Spoke fork tests ([15a6093](https://github.com/VenusProtocol/venus-periphery/commit/15a6093))
+* feat: let EBrake act on each market's own comptroller ([123a7c7](https://github.com/VenusProtocol/venus-periphery/commit/123a7c7))
+* feat: list MarketPauseSentinel's monitored markets on-chain ([713a7ad](https://github.com/VenusProtocol/venus-periphery/commit/713a7ad))
+* feat: route Spoke resetCFSnapshot, rename to MarketPauseSentinel ([a6f9842](https://github.com/VenusProtocol/venus-periphery/commit/a6f9842))
+* feat: skip unpaused tokens in handleBStockPause, emit BStockPauseHandled ([b97d0b5](https://github.com/VenusProtocol/venus-periphery/commit/b97d0b5))
+* feat: updating deployment files ([63ef666](https://github.com/VenusProtocol/venus-periphery/commit/63ef666))
+* feat: updating deployment files ([c00a8fa](https://github.com/VenusProtocol/venus-periphery/commit/c00a8fa))
+* chore: deploy EBrake impls and BStockPauseSentinel ([b82dc1d](https://github.com/VenusProtocol/venus-periphery/commit/b82dc1d))
+* chore: redeploy HubNavDeviationSentinel implementation on bsctestnet ([3ba5574](https://github.com/VenusProtocol/venus-periphery/commit/3ba5574))
+* chore: remove the Safe EBrake TX generator and fork simulator ([bd2ccfc](https://github.com/VenusProtocol/venus-periphery/commit/bd2ccfc))
+* docs: correct the liquidation and Diamond decreaseCF NatSpec ([c1e2dbd](https://github.com/VenusProtocol/venus-periphery/commit/c1e2dbd))
+* docs(audits): add HashDit EBrake Spoke and bStock sentinel audit report ([9d851a1](https://github.com/VenusProtocol/venus-periphery/commit/9d851a1))
+* fix: declare the sentinel source move in the storage layout check ([95be653](https://github.com/VenusProtocol/venus-periphery/commit/95be653))
+* fix: keep IS_ISOLATED_POOL in the Safe EBrake scripts' ABIs ([6c83165](https://github.com/VenusProtocol/venus-periphery/commit/6c83165))
+* refactor: drop MarketPauseSentinel's listing check and pool immutables ([bcb70ed](https://github.com/VenusProtocol/venus-periphery/commit/bcb70ed))
+* refactor: rename EBrake IS_ISOLATED_POOL and its error to remote chain ([f3ac46a](https://github.com/VenusProtocol/venus-periphery/commit/f3ac46a))
+* refactor: rename MarketPauseSentinel to BStockPauseSentinel ([4eccf5e](https://github.com/VenusProtocol/venus-periphery/commit/4eccf5e))
+* test: add TokenPauseSentinel bscmainnet fork tests ([a4595ee](https://github.com/VenusProtocol/venus-periphery/commit/a4595ee))
+* test: add TokenPauseSentinel unit tests ([45106c8](https://github.com/VenusProtocol/venus-periphery/commit/45106c8))
+* test: cover Spoke markets in EBrake bsctestnet fork tests ([fb36f04](https://github.com/VenusProtocol/venus-periphery/commit/fb36f04))
+* test: use vUSDT for partial CF decreases in EBrake bscmainnet fork tests ([fb97bab](https://github.com/VenusProtocol/venus-periphery/commit/fb97bab))
+
+## <small>1.3.1-dev.3 (2026-11-04)</small>
+
+* Merge pull request #94 from VenusProtocol/doc/cantina-final-report ([d1c5d07](https://github.com/VenusProtocol/venus-periphery/commit/d1c5d07)), closes [#94](https://github.com/VenusProtocol/venus-periphery/issues/94)
+* docs(audits): add Cantina final report ([87cc81c](https://github.com/VenusProtocol/venus-periphery/commit/87cc81c))
+
+## <small>1.3.1-dev.2 (2026-10-28)</small>
+
+* Merge pull request #91 from VenusProtocol/fix/storage-layout-deployed-renames ([de40887](https://github.com/VenusProtocol/venus-periphery/commit/de40887)), closes [#91](https://github.com/VenusProtocol/venus-periphery/issues/91)
+* fix: ignore already-deployed oz-renamed-from in storage layout check ([8897d2a](https://github.com/VenusProtocol/venus-periphery/commit/8897d2a))
+
+## <small>1.3.1-dev.1 (2026-10-27)</small>
+
+* Merge pull request #89 from VenusProtocol/main ([93a851b](https://github.com/VenusProtocol/venus-periphery/commit/93a851b)), closes [#89](https://github.com/VenusProtocol/venus-periphery/issues/89)
+* Merge pull request #90 from VenusProtocol/docs/hashdit-collateral-gateway-report ([6c7c65c](https://github.com/VenusProtocol/venus-periphery/commit/6c7c65c)), closes [#90](https://github.com/VenusProtocol/venus-periphery/issues/90)
+* docs(audits): add HashDit CollateralGateway report ([2bd06b4](https://github.com/VenusProtocol/venus-periphery/commit/2bd06b4))
+
 ## 1.3.0 (2026-10-22)
 
 * [L01] size the pause trip points off the drift-grown anchor ([3ba7461](https://github.com/VenusProtocol/venus-periphery/commit/3ba7461))

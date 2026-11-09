@@ -235,12 +235,31 @@ function hasContract(output: { contracts?: Record<string, Record<string, unknown
   return Boolean(output.contracts?.[fqName.slice(0, at)]?.[fqName.slice(at + 1)]);
 }
 
+/**
+ * Artifacts don't record `@custom:oz-renamed-from`, and OZ reports a rename whenever the current
+ * annotation differs from the deployed one, even if the label is unchanged. So once a rename ships, its
+ * annotation would fail every later run. Copying the annotation onto the deployed variable with the same
+ * slot, offset and label restores what OZ's own manifest would hold. A real rename has a different label,
+ * so it is still caught. The slot is matched too because labels like `__gap` repeat across inherited
+ * contracts.
+ */
+function restoreDeployedRenames(deployed: Layout, updated: Layout): void {
+  for (const old of deployed.storage) {
+    const same = updated.storage.find(
+      item => item.slot === old.slot && item.offset === old.offset && item.label === old.label,
+    );
+    if (same) old.renamedFrom = same.renamedFrom;
+  }
+}
+
 /** Undefined when the layouts are compatible. A contract missing from build-info is a failure
  *  rather than a skip, so a renamed or deleted source cannot drop out of the check unnoticed. */
 function check(target: Target, current: Map<string, Layout>): string | undefined {
   const updated = target.fqName ? current.get(target.fqName) : undefined;
   if (!updated) return `${target.fqName} was not found in artifacts/build-info`;
-  const report = getStorageUpgradeReport(target.deployed as Layout, updated, withValidationDefaults({}));
+  const deployed = target.deployed as Layout;
+  restoreDeployedRenames(deployed, updated);
+  const report = getStorageUpgradeReport(deployed, updated, withValidationDefaults({}));
   return report.ok ? undefined : report.explain(false);
 }
 
@@ -295,18 +314,37 @@ function classify(targets: Target[], current: Map<string, Layout>, allowlist: Re
   return results;
 }
 
+/**
+ * Points each target compiled from a moved source directory at where that source lives now, so a
+ * pure move is compared like any other upgrade instead of failing as a missing contract. Returns the
+ * `moved` prefixes no target used, which are stale.
+ */
+function applyMoves(targets: Target[], moved: Record<string, string>): string[] {
+  const used = new Set<string>();
+  for (const target of targets) {
+    const from = Object.keys(moved).find(prefix => target.fqName?.startsWith(prefix));
+    if (!from || !target.fqName) continue;
+    target.fqName = moved[from] + target.fqName.slice(from.length);
+    used.add(from);
+  }
+  return Object.keys(moved)
+    .filter(prefix => !used.has(prefix))
+    .map(prefix => `moved/${prefix}`);
+}
+
 function main(): void {
   assertReferenceIsUsable();
 
-  const allowlist: Record<string, string> = fs.existsSync(ALLOWLIST_PATH)
-    ? (JSON.parse(fs.readFileSync(ALLOWLIST_PATH, "utf8")).skip ?? {})
-    : {};
+  const allowlistFile = fs.existsSync(ALLOWLIST_PATH) ? JSON.parse(fs.readFileSync(ALLOWLIST_PATH, "utf8")) : {};
+  const allowlist: Record<string, string> = allowlistFile.skip ?? {};
 
   const targets = collectTargets();
+  const staleMoves = applyMoves(targets, allowlistFile.moved ?? {});
   const current = resolveCurrentLayouts(new Set(targets.flatMap(t => t.fqName ?? [])));
 
   console.log(`Reference: ${BASE_REF || "working tree"} | ${targets.length} deployed implementations\n`);
   const { failures, stale } = classify(targets, current, allowlist);
+  stale.push(...staleMoves);
 
   failures.forEach(f => console.log(`\n${f}`));
   // A stale entry counts towards the verdict like a real failure: the allowlist is only
