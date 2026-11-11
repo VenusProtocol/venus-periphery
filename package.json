@@ -115,7 +115,8 @@
     "solidity-parser-antlr": "https://github.com/solidity-parser/parser#0.8.2",
     "@defi-wonderland/smock": "2.4.0",
     "hardhat": "2.22.15",
-    "@venusprotocol/solidity-utilities": "2.0.3"
+    "@venusprotocol/solidity-utilities": "2.0.3",
+    "elliptic": "6.6.1"
   },
   "publishConfig": {
     "access": "public",
