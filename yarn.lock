@@ -3629,15 +3629,15 @@ __metadata:
   linkType: hard
 
 "amazon-cognito-identity-js@npm:^6.0.1":
-  version: 6.3.16
-  resolution: "amazon-cognito-identity-js@npm:6.3.16"
+  version: 6.3.22
+  resolution: "amazon-cognito-identity-js@npm:6.3.22"
   dependencies:
     "@aws-crypto/sha256-js": 1.2.2
     buffer: 4.9.2
     fast-base64-decode: ^1.0.0
     isomorphic-unfetch: ^3.0.0
-    js-cookie: ^2.2.1
-  checksum: 0cc29bbf1deb421549636a8c077cb58a2bf8a144072e21c9d750053712b8ff430dd915672e597c04193bdbf314d047ac1ee9483ce901f90ac92b8bbf0d0a841f
+    js-cookie: ^3.0.7
+  checksum: 814b07477b138211a91d09d5894d9f0817c63ed65fbacca8ce64f9c73a49ec54e109b72668aec0eabb0aac439ef87015cf912c1a3a752a95fd39ab884bc41018
   languageName: node
   linkType: hard
 
@@ -7565,7 +7565,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"js-cookie@npm:3.0.8":
+"js-cookie@npm:^3.0.7":
   version: 3.0.8
   resolution: "js-cookie@npm:3.0.8"
   checksum: 73ce2e57d352caf01b4ff40406fd474e7e2edd545a6fdcecbe8fb1d764ef761db99b40a2ca990473064f0519a6af0f2cfae30410c93fcb8bf2a4bc4215c5395d

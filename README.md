@@ -10,7 +10,7 @@ The first major addition in this repository is the PositionSwapper, a flexible m
 
 ## Prerequisites
 
-- NodeJS - 20.x
+- Node.js >= 20
 - Solc - v0.8.25 (https://github.com/ethereum/solidity/releases/tag/v0.8.25)
 - Foundry - v1.5.1 (https://book.getfoundry.sh/getting-started/installation), for the Solidity tests
 
