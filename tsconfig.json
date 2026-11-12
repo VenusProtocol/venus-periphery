@@ -7,6 +7,7 @@
     "outDir": "dist",
     "declaration": true,
     "resolveJsonModule": true,
+    "skipLibCheck": true,
     "paths": {
       "@nomiclabs/hardhat-ethers": ["./node_modules/hardhat-deploy-ethers"]
     }
