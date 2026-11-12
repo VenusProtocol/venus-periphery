@@ -42,7 +42,7 @@ jobs:
         run: yarn
 
       - name: Check dependency compatibility
-        run: node --test tests/dependencies/*.cjs
+        run: node --test scripts/checks/cognito-cookie-storage.cjs
 
       - name: Run hardhat compile and tests coverage
         run: |
