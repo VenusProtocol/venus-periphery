@@ -1,3 +1,20 @@
+## <small>1.4.1 (2026-11-12)</small>
+
+* Merge branch 'develop' into ci/release-environment ([5884e2b](https://github.com/VenusProtocol/venus-periphery/commit/5884e2b))
+* Merge pull request #108 from VenusProtocol/chore/dependabot-cleanup ([6fbb662](https://github.com/VenusProtocol/venus-periphery/commit/6fbb662)), closes [#108](https://github.com/VenusProtocol/venus-periphery/issues/108)
+* Merge pull request #109 from VenusProtocol/fix/dependabot-review-followup ([53c651b](https://github.com/VenusProtocol/venus-periphery/commit/53c651b)), closes [#109](https://github.com/VenusProtocol/venus-periphery/issues/109)
+* Merge pull request #110 from VenusProtocol/sync/develop-to-main-20261112 ([9cfb003](https://github.com/VenusProtocol/venus-periphery/commit/9cfb003)), closes [#110](https://github.com/VenusProtocol/venus-periphery/issues/110)
+* Merge pull request #97 from VenusProtocol/ci/release-environment ([2c85df3](https://github.com/VenusProtocol/venus-periphery/commit/2c85df3)), closes [#97](https://github.com/VenusProtocol/venus-periphery/issues/97)
+* chore: pin patched elliptic via resolutions ([312f526](https://github.com/VenusProtocol/venus-periphery/commit/312f526))
+* chore: pin patched versions of exploitable transitive deps ([cc8e0d9](https://github.com/VenusProtocol/venus-periphery/commit/cc8e0d9))
+* chore: refresh lockfile to clear dependabot alerts ([5651f5b](https://github.com/VenusProtocol/venus-periphery/commit/5651f5b))
+* chore: remove unused solparse dev dependency ([dcd4ace](https://github.com/VenusProtocol/venus-periphery/commit/dcd4ace))
+* chore: sync develop into main ([e305a6a](https://github.com/VenusProtocol/venus-periphery/commit/e305a6a))
+* chore(release): 1.4.0-dev.2 [skip ci] ([4c452a5](https://github.com/VenusProtocol/venus-periphery/commit/4c452a5))
+* test: keep standalone dependency check outside Hardhat discovery ([0e91773](https://github.com/VenusProtocol/venus-periphery/commit/0e91773))
+* fix: restore Cognito CookieStorage compatibility and require Node 20 ([de36e5e](https://github.com/VenusProtocol/venus-periphery/commit/de36e5e))
+* ci: read VENUS_TOOLS_TOKEN from the release environment ([4738f94](https://github.com/VenusProtocol/venus-periphery/commit/4738f94))
+
 ## 1.4.0 (2026-11-10)
 
 * [L01] treat a compliance block on the vToken as a bStock pause ([02cbc12](https://github.com/VenusProtocol/venus-periphery/commit/02cbc12))
