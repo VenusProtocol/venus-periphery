@@ -56,6 +56,7 @@ const GOVERNANCE_EBRAKE_FUNCTIONS = [
   "setMarketBorrowCaps(address[],uint256[])",
   "setMarketSupplyCaps(address[],uint256[])",
   "resetCFSnapshot(address)",
+  "resetCFSnapshot(address,uint96)",
   "resetBorrowCapSnapshot(address)",
   "resetSupplyCapSnapshot(address)",
 ];
@@ -227,7 +228,7 @@ if (FORK_TESTNET) {
           expect(snapshotBefore.lt).to.equal(NVDAB_LT);
           expect((await eBrake.marketStates(vUSDT_HUB_SPOKE)).supplyCapSnapshotted).to.equal(true);
 
-          await eBrake.connect(governance).resetCFSnapshot(vNVDAB_HUB_SPOKE);
+          await eBrake.connect(governance)["resetCFSnapshot(address)"](vNVDAB_HUB_SPOKE);
           await eBrake.connect(governance).resetSupplyCapSnapshot(vUSDT_HUB_SPOKE);
 
           const snapshotAfter = await eBrake.getMarketCFSnapshot(vNVDAB_HUB_SPOKE, 0);
@@ -242,11 +243,26 @@ if (FORK_TESTNET) {
           expect((await eBrake.getMarketCFSnapshot(vUSDT_CORE, 0)).cf).to.equal(USDT_CORE_CF);
           expect((await eBrake.getMarketCFSnapshot(vUSDT_CORE, USDT_CORE_EMODE_POOL)).cf).to.be.gt(0);
 
-          await eBrake.connect(governance).resetCFSnapshot(vUSDT_CORE);
+          await eBrake.connect(governance)["resetCFSnapshot(address)"](vUSDT_CORE);
 
           expect((await eBrake.getMarketCFSnapshot(vUSDT_CORE, 0)).cf).to.equal(0);
           expect((await eBrake.getMarketCFSnapshot(vUSDT_CORE, USDT_CORE_EMODE_POOL)).cf).to.equal(0);
           expect((await eBrake.getMarketCFSnapshot(vNVDAB_HUB_SPOKE, 0)).cf).to.equal(NVDAB_CF);
+        });
+
+        it("should reset one pool of a Core market and keep the other pool's snapshot", async () => {
+          await eBrake.connect(governance)["decreaseCF(address,uint256)"](vUSDT_CORE, 0);
+          const eModeSnapshot = await eBrake.getMarketCFSnapshot(vUSDT_CORE, USDT_CORE_EMODE_POOL);
+          expect(eModeSnapshot.cf).to.be.gt(0);
+
+          await expect(eBrake.connect(governance)["resetCFSnapshot(address,uint96)"](vUSDT_CORE, 0))
+            .to.emit(eBrake, "PoolCFSnapshotReset")
+            .withArgs(vUSDT_CORE, 0);
+
+          expect((await eBrake.getMarketCFSnapshot(vUSDT_CORE, 0)).cf).to.equal(0);
+          const eModeAfter = await eBrake.getMarketCFSnapshot(vUSDT_CORE, USDT_CORE_EMODE_POOL);
+          expect(eModeAfter.cf).to.equal(eModeSnapshot.cf);
+          expect(eModeAfter.lt).to.equal(eModeSnapshot.lt);
         });
       });
 
