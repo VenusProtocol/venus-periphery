@@ -29,6 +29,7 @@ compilation_restrictions = [
     { paths = "contracts/RelativePositionManager/RelativePositionManager.sol", via_ir = true },
     { paths = "contracts/SmartDCA/ISmartDCA.sol", via_ir = true },
     { paths = "contracts/SmartDCA/SmartDCA.sol", via_ir = true },
+    { paths = "contracts/SmartDCA/SmartDCALens.sol", via_ir = true },
     { paths = "contracts/SmartDCA/SmartDCAMath.sol", via_ir = true },
     { paths = "contracts/SwapHelper/SwapHelper.sol", via_ir = true },
     { paths = "contracts/SwapRouter/ISwapRouter.sol", via_ir = true },
