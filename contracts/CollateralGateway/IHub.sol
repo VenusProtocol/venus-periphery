@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 /// @title IHub
 /// @author Venus Protocol
-/// @notice ERC4626 functions of a Venus Liquidity Hub used by the CollateralGateway.
+/// @notice ERC4626 functions of a Venus Liquidity Hub used by the CollateralGateway and SmartDCA.
 interface IHub {
     /// @notice Get the underlying asset the hub accepts.
     /// @return address The underlying asset.
@@ -21,4 +21,14 @@ interface IHub {
     /// @param owner The address whose shares are burned.
     /// @return uint256 The amount of underlying sent.
     function redeem(uint256 shares, address receiver, address owner) external returns (uint256);
+
+    /// @notice Get the shares burned to withdraw `assets`, rounded up.
+    /// @param assets The amount of underlying to withdraw.
+    /// @return uint256 The amount of shares.
+    function previewWithdraw(uint256 assets) external view returns (uint256);
+
+    /// @notice Get the underlying paid for redeeming `shares`, rounded down.
+    /// @param shares The amount of shares to redeem.
+    /// @return uint256 The amount of underlying.
+    function previewRedeem(uint256 shares) external view returns (uint256);
 }
