@@ -6,16 +6,16 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 /**
  * @title SmartDCAMath
  * @author Venus
- * @notice Pure math for SmartDCA: round dates, the round fee and index steps.
- * @dev A round is a month, numbered as months since January 1970: `(year - 1970) * 12 + (month - 1)`.
- *      Round `r` locks on the 15th of its month at 00:00 UTC+8, which is the 14th at 16:00 UTC.
- *      Fees, index steps and bought amounts round down, in favour of the contract.
+ * @notice Pure math for SmartDCA: round dates, the round fee and the index steps that credit plans.
+ * @dev A round is a month, numbered as months since January 1970: `(year - 1970) * 12 + (month - 1)`. For example
+ *      November 2026 is round 682. Round `r` locks on the 15th of its month at 00:00 UTC+8, which is the 14th at
+ *      16:00 UTC. Fees, index steps and bought amounts round down, in favour of the contract.
  */
 library SmartDCAMath {
-    /// @notice Time from the 1st of a month at 00:00 UTC to its lock, the 14th at 16:00 UTC
+    /// @notice Time from the 1st of a month at 00:00 UTC to its lock time, the 14th at 16:00 UTC
     uint256 internal constant LOCK_OFFSET = 13 days + 16 hours;
 
-    /// @notice Scale of the bought-token indexes
+    /// @notice Scale of the asset indexes, 1e36 like the Venus reward indexes
     uint256 internal constant INDEX_SCALE = 1e36;
 
     /// @notice Basis points in 100%
@@ -26,7 +26,7 @@ library SmartDCAMath {
      * @param round Round number
      * @return Unix timestamp
      */
-    function roundStart(uint32 round) internal pure returns (uint256) {
+    function lockTimeOf(uint32 round) internal pure returns (uint256) {
         uint256 year = 1970 + round / 12;
         uint256 month = (round % 12) + 1;
         return _daysFromCivil(year, month, 1) * 1 days + LOCK_OFFSET;
@@ -34,102 +34,106 @@ library SmartDCAMath {
 
     /**
      * @notice Latest round whose lock time is at or before `timestamp`
-     * @dev A new pair starts with this round as its last settled one
+     * @dev A new pair starts with this round as its last settled one, so its first round is the next to lock
      * @param timestamp Unix timestamp, at least `LOCK_OFFSET`
      * @return Round number
      */
-    function currentRound(uint256 timestamp) internal pure returns (uint32) {
+    function latestLockedRound(uint256 timestamp) internal pure returns (uint32) {
         (uint256 year, uint256 month) = _civilFromDays((timestamp - LOCK_OFFSET) / 1 days);
         return uint32((year - 1970) * 12 + month - 1);
     }
 
     /**
-     * @notice Round fee on the interest part of what was redeemed
-     * @param stableOut Stable received for the round's units
-     * @param dueBase Sum of the bases (B) of the plans in the round
-     * @param feeRate Fee rate in basis points
-     * @return fee Fee to the Reserve
-     * @return rate Rate actually charged: `feeRate`, or 0 when there is no interest
+     * @notice Fee a round takes on the interest part of what it redeemed
+     * @param stableRedeemed Stable amount the round redeemed
+     * @param roundPrincipal Principal of the round's plans
+     * @param feeRateBps Fee rate, in basis points
+     * @return fee Stable amount for the Reserve
+     * @return rateCharged `feeRateBps`, or 0 when the round redeemed no more than its principal
      */
     function roundFee(
-        uint256 stableOut,
-        uint256 dueBase,
-        uint16 feeRate
-    ) internal pure returns (uint256 fee, uint16 rate) {
-        if (stableOut <= dueBase) return (0, 0);
-        return (((stableOut - dueBase) * feeRate) / BPS, feeRate);
+        uint256 stableRedeemed,
+        uint256 roundPrincipal,
+        uint16 feeRateBps
+    ) internal pure returns (uint256 fee, uint16 rateCharged) {
+        if (stableRedeemed <= roundPrincipal) return (0, 0);
+        return (((stableRedeemed - roundPrincipal) * feeRateBps) / BPS, feeRateBps);
     }
 
     /**
-     * @notice Index steps that split a round's bought units over its plans
-     * @dev A plan's share of the round is `P = slice * stableOut / dueUnits * (1 - e) + base * e`, with
-     *      `e = rate / BPS`. Summed over the plans that is `net`. So a plan gets
-     *      `slice * indexStep / INDEX_SCALE + base * baseIndexStep / INDEX_SCALE` bought units.
-     * @param boughtUnits Asset units minted for the round
-     * @param stableOut Stable received for the round's units
-     * @param net `stableOut` minus the fee
-     * @param dueUnits Sum of the slices in the round
-     * @param rate Fee rate charged, in basis points
-     * @return indexStep Bought units per stable unit of slice, scaled by `INDEX_SCALE`
-     * @return baseIndexStep Bought units per unit of base, scaled by `INDEX_SCALE`
+     * @notice Index steps that split a round's asset units over its plans
+     * @dev With `e = rateBps / BPS`, a plan's share of the round's net stable is
+     *      `stableUnitsPerBuy * stableRedeemed / roundStableUnits * (1 - e) + principalPerBuy * e`, so it pays the fee
+     *      on its own interest only. Summed over the round's plans that is `stableNet`. Splitting `assetUnits` in the
+     *      same ratio gives a plan
+     *      `stableUnitsPerBuy * perUnitStep / INDEX_SCALE + principalPerBuy * perPrincipalStep / INDEX_SCALE`.
+     * @param assetUnits Asset units minted for what the round bought
+     * @param stableRedeemed Stable amount the round redeemed
+     * @param stableNet `stableRedeemed` less the fee
+     * @param roundStableUnits Stable units the round sold
+     * @param rateBps Fee rate the round charged, in basis points
+     * @return perUnitStep Asset units per stable unit sold, scaled by `INDEX_SCALE`
+     * @return perPrincipalStep Asset units per wei of principal, scaled by `INDEX_SCALE`
      */
-    function indexSteps(
-        uint256 boughtUnits,
-        uint256 stableOut,
-        uint256 net,
-        uint256 dueUnits,
-        uint16 rate
-    ) internal pure returns (uint256 indexStep, uint256 baseIndexStep) {
-        uint256 scaled = boughtUnits * INDEX_SCALE;
-        indexStep = Math.mulDiv(scaled, stableOut * (BPS - rate), dueUnits * net * BPS);
-        baseIndexStep = Math.mulDiv(scaled, rate, net * BPS);
+    function roundIndexSteps(
+        uint256 assetUnits,
+        uint256 stableRedeemed,
+        uint256 stableNet,
+        uint256 roundStableUnits,
+        uint16 rateBps
+    ) internal pure returns (uint256 perUnitStep, uint256 perPrincipalStep) {
+        uint256 scaled = assetUnits * INDEX_SCALE;
+        perUnitStep = Math.mulDiv(scaled, stableRedeemed * (BPS - rateBps), roundStableUnits * stableNet * BPS);
+        perPrincipalStep = Math.mulDiv(scaled, rateBps, stableNet * BPS);
     }
 
     /**
-     * @notice Rounds of a plan's schedule that have settled
+     * @notice Buys of a plan's schedule that have settled
      * @param lastSettledRound Pair's last settled round
      * @param firstRound First round of the schedule
      * @param buys Buys in the schedule
-     * @return Settled rounds, at most `buys`
+     * @return Settled buys, at most `buys`
      */
-    function roundsDone(uint32 lastSettledRound, uint32 firstRound, uint8 buys) internal pure returns (uint8) {
+    function buysSettled(uint32 lastSettledRound, uint32 firstRound, uint8 buys) internal pure returns (uint8) {
         if (lastSettledRound < firstRound) return 0;
-        uint256 done = lastSettledRound - firstRound + 1;
-        return done > buys ? buys : uint8(done);
+        uint256 settled = lastSettledRound - firstRound + 1;
+        return settled > buys ? buys : uint8(settled);
     }
 
     /**
      * @notice Whether a plan is in the pair's next round and that round's lock time has passed
-     * @param openRound Pair's next round, `lastSettledRound + 1`
+     * @param nextRound Pair's next round, `lastSettledRound + 1`
      * @param firstRound First round of the plan's schedule
      * @param buys Buys in the schedule
      * @param timestamp Time to check at
-     * @return True while the plan's slice is in a locked, unsettled round
+     * @return True while the plan's buy is in a locked round that has not settled
      */
     function inRunningRound(
-        uint32 openRound,
+        uint32 nextRound,
         uint32 firstRound,
         uint8 buys,
         uint256 timestamp
     ) internal pure returns (bool) {
-        return openRound >= firstRound && openRound < firstRound + buys && timestamp >= roundStart(openRound);
+        return nextRound >= firstRound && nextRound < firstRound + buys && timestamp >= lockTimeOf(nextRound);
     }
 
     /**
-     * @notice Asset units a plan earned between two index readings
-     * @param slice Plan's stable units per buy
-     * @param base Plan's base per buy
-     * @param indexDelta Growth of `cumIndex` over the plan's settled rounds
-     * @param baseIndexDelta Growth of `cumBaseIndex` over the same rounds
+     * @notice Asset units a plan bought between two index readings
+     * @param stableUnitsPerBuy Plan's stable units per buy
+     * @param principalPerBuy Plan's principal per buy
+     * @param perUnitIndexGrowth Growth of `assetPerUnitIndex` over the plan's settled rounds
+     * @param perPrincipalIndexGrowth Growth of `assetPerPrincipalIndex` over the same rounds
      * @return Asset units, rounded down
      */
-    function planBought(
-        uint256 slice,
-        uint256 base,
-        uint256 indexDelta,
-        uint256 baseIndexDelta
+    function assetUnitsBought(
+        uint256 stableUnitsPerBuy,
+        uint256 principalPerBuy,
+        uint256 perUnitIndexGrowth,
+        uint256 perPrincipalIndexGrowth
     ) internal pure returns (uint256) {
-        return Math.mulDiv(slice, indexDelta, INDEX_SCALE) + Math.mulDiv(base, baseIndexDelta, INDEX_SCALE);
+        return
+            Math.mulDiv(stableUnitsPerBuy, perUnitIndexGrowth, INDEX_SCALE) +
+            Math.mulDiv(principalPerBuy, perPrincipalIndexGrowth, INDEX_SCALE);
     }
 
     /// @dev Days from 1970-01-01 to a date. Howard Hinnant's algorithm, for years from 1970.

@@ -20,39 +20,47 @@ import { ISmartDCA } from "./ISmartDCA.sol";
 /**
  * @title SmartDCA
  * @author Venus
- * @notice Monthly dollar cost averaging from a stable (USDT, USDC, U) into an asset (BTCB, ETH, WBNB). A user
- *         deposits once and picks a number of monthly buys. The deposit waits in the stable's yield source.
- *         From the 15th at 00:00 UTC+8 a keeper buys every plan's part for the month in a few swaps through
- *         SwapHelper (route built off chain), each bounded by the keeper's fresh quote, and the bought asset is supplied to its yield source.
- * @dev Accounting is pooled per pair, so no round call loops over plans:
- *      - A plan holds stable units and sells one `slice` of them per round. The pair keeps `dueUnits`, the sum
- *        of the slices in its next round, and `dueBase`, the sum of the bases.
- *      - `startBuy` redeems `dueUnits` in one call. `settle` turns what was bought into units and moves two
- *        indexes, so each plan's share is read from the indexes in constant gas.
- *      - Plans that join or leave a pair are added to or removed from `dueUnits` through per-round
- *        `sliceStarting` and `sliceEnding` sums, applied when that round settles.
- *      This contract never borrows and never enters a market, so nothing it holds is collateral.
+ * @notice Dollar cost averaging from a stable (USDT, USDC or U) into an asset (BTCB, ETH or WBNB). A user deposits
+ *         once and picks how many monthly buys to make. Until each buy, the deposit earns interest in the pair's
+ *         stable source (a Liquidity Hub at launch). Once a month a keeper buys for every plan of a pair at once, and
+ *         the asset bought is supplied to the pair's asset source (Core at launch), where it keeps earning until
+ *         the user takes it out. Each pair has its own two sources, set by governance.
+ * @dev How one month runs for one pair:
+ *      1. Lock. On the 15th at 00:00 UTC+8 the pair's round locks. Plans in it cannot top up or cancel until it
+ *         settles, and new plans join next month's round instead.
+ *      2. `startRound`. A keeper redeems the round's stable from the yield source and sends the fee to the Reserve.
+ *         The fee is a share of the interest only, never of principal.
+ *      3. `swapRoundPart`. The keeper swaps that stable for the asset in 1 to `maxParts` parts through SwapHelper,
+ *         on routes built and signed off chain. Each part must return at least the keeper's fresh quote less
+ *         `maxSlippageBps`.
+ *      4. `settleRound`. The asset bought is supplied to its yield source and the round closes.
+ *
+ *      No call loops over plans. Every plan sells the same number of stable units in each of its buys, so a pair
+ *      only stores the totals of its next round (`roundStableUnits`, `roundPrincipal`). Settling a round adds the
+ *      asset bought per stable unit sold to a running index, and a plan's asset is its units per buy times how much
+ *      the index grew over its rounds. A plan that starts or ends in a later round is added to or removed from the
+ *      totals when the round before it settles, through that round's `stableUnitsJoining` and `stableUnitsEnding`.
+ *      So every call costs the same gas however many plans a pair has.
+ *
+ *      SmartDCA never borrows and never enables a market as collateral, so nothing it holds can be liquidated.
  */
 contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
 
-    /// @notice Highest slippage bound governance can set, 1%
-    uint16 public constant MAX_SLIPPAGE = 100;
+    /// @notice Highest slippage bound governance can set, in basis points (1%)
+    uint16 public constant MAX_SLIPPAGE_BPS = 100;
 
     /// @notice Highest number of parts a round can be split into
-    uint8 public constant MAX_SPLIT_N = 50;
+    uint8 public constant MAX_PARTS = 50;
 
-    /// @notice Highest number of buys a plan can have
+    /// @notice Highest number of buys a plan can have (10 years of monthly buys)
     uint8 public constant MAX_BUYS = 120;
-
-    /// @notice Longest wait before backup addresses can run a round
-    uint32 public constant MAX_BACKUP_DELAY = 24 hours;
 
     /// @notice Core pool Comptroller; Core yield sources must be listed in it
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IComptroller public immutable COMPTROLLER;
 
-    /// @notice Hub directory; Hub yield sources must be registered in it
+    /// @notice Hub registry; Hub yield sources must be registered in it
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IHubRegistry public immutable HUB_REGISTRY;
 
@@ -60,18 +68,18 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     ResilientOracleInterface public immutable ORACLE;
 
-    /// @notice SwapHelper every swap goes through; it runs only a multicall signed by its backend signer
+    /// @notice SwapHelper every swap goes through; it only runs a multicall signed by its backend signer
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     SwapHelper public immutable SWAP_HELPER;
 
     /// @notice Fee rate on the interest part of each buy and of a cancel, in basis points
-    uint16 public feeRate;
+    uint16 public feeRateBps;
 
     /// @notice Most a swap can return below the keeper's quote, in basis points
-    uint16 public maxSlippage;
+    uint16 public maxSlippageBps;
 
     /// @notice Most parts a round can be split into
-    uint8 public maxSplitN;
+    uint8 public maxParts;
 
     /// @notice Fewest buys a new plan can have
     uint8 public minBuys;
@@ -79,60 +87,53 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @notice Most buys a new plan can have
     uint8 public maxBuys;
 
-    /// @notice Wait after a pair's lock time before backup addresses can run its round
-    uint32 public backupDelay;
-
     /// @notice Number of pairs; pair ids run from 1 to `pairCount`
     uint32 public pairCount;
 
     /// @notice Receives fees and rewards
     address public reserve;
 
+    /// @notice Highest fee rate governance can set, in basis points; 20% at launch
+    uint16 public maxFeeRateBps;
+
     /// @notice Id of the last plan created; plan ids start at 1
     uint256 public lastPlanId;
 
-    /// @notice Highest fee rate governance can set, in basis points; 20% at launch
-    uint16 public maxFeeRate;
-
     /// @notice Pairs by id
-    mapping(uint32 => Pair) public pairs;
+    mapping(uint32 pairId => Pair) public pairs;
 
     /// @notice Pair id by stable and asset, 0 when none
-    mapping(address => mapping(address => uint32)) public pairIdOf;
+    mapping(address stable => mapping(address asset => uint32 pairId)) public pairIdByTokens;
 
     /// @notice Rounds by pair and round number
-    mapping(uint32 => mapping(uint32 => Round)) public rounds;
+    mapping(uint32 pairId => mapping(uint32 round => Round)) public rounds;
 
     /// @notice Plans by id
-    mapping(uint256 => Plan) public plans;
+    mapping(uint256 planId => Plan) public plans;
 
-    /// @notice Yield source by token
-    mapping(address => Source) public sources;
+    /// @notice Yield source of each side of each pair
+    mapping(uint32 pairId => mapping(Side side => YieldSource)) public yieldSources;
 
-    /// @notice Token whose yield source is this address (a Hub or a vToken), 0 when none
-    mapping(address => address) public tokenOfSource;
-
-    /// @notice Least stable per buy, by stable
-    mapping(address => uint256) public minPerBuy;
+    /// @notice Least stable amount per buy, in the stable's decimals
+    mapping(address stable => uint256 amount) public minAmountPerBuy;
 
     /// @notice Addresses that run rounds from the lock time
-    mapping(address => bool) public isKeeper;
+    mapping(address account => bool) public isKeeper;
 
-    /// @notice Addresses that run rounds from the lock time plus `backupDelay`
-    mapping(address => bool) public isBackup;
+    /// @dev Plan ids each owner created, oldest first
+    mapping(address owner => uint256[] planIds) private _planIdsByOwner;
 
-    /// @dev Plan ids by owner
-    mapping(address => uint256[]) private _plansOf;
+    /// @dev Storage gap for future upgrades; with the 11 slots above, SmartDCA's own state takes 50 slots
+    uint256[39] private __gap;
 
-    /// @dev Storage gap for future upgrades
-    uint256[36] private __gap;
-
-    /// @notice Sets the external contracts and disables initializers on the implementation
-    /// @param comptroller Core pool Comptroller
-    /// @param hubRegistry Hub directory
-    /// @param oracle ResilientOracle
-    /// @param swapHelper SwapHelper that runs the signed swap multicall
-    /// @custom:oz-upgrades-unsafe-allow constructor
+    /**
+     * @notice Sets the external contracts and disables initializers on the implementation
+     * @param comptroller Core pool Comptroller
+     * @param hubRegistry Liquidity Hub registry
+     * @param oracle ResilientOracle
+     * @param swapHelper SwapHelper that runs the signed swap multicall
+     * @custom:oz-upgrades-unsafe-allow constructor
+     */
     constructor(address comptroller, address hubRegistry, address oracle, address swapHelper) {
         if (comptroller == address(0) || hubRegistry == address(0) || oracle == address(0) || swapHelper == address(0))
             revert ZeroAddress();
@@ -143,22 +144,24 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         _disableInitializers();
     }
 
-    /// @notice Initializes the proxy with the launch parameters
-    /// @dev Fee rate starts at 0, capped at 20%. Slippage 0.1%, up to 10 parts, 2 to 60 buys, backups after 9 hours.
-    /// @param accessControlManager_ AccessControlManager
-    /// @param reserve_ Receives fees and rewards
+    /**
+     * @notice Initializes the proxy with the launch parameters
+     * @dev Fee rate 0 with a cap of 20%, slippage bound 0.1%, up to 10 parts per round, and 2 to 60 buys per
+     *      plan
+     * @param accessControlManager_ AccessControlManager
+     * @param reserve_ Receives fees and rewards
+     */
     function initialize(address accessControlManager_, address reserve_) external initializer {
         if (reserve_ == address(0)) revert ZeroAddress();
         __AccessControlled_init(accessControlManager_);
         __Pausable_init();
         __ReentrancyGuard_init();
         reserve = reserve_;
-        maxFeeRate = 2_000;
-        maxSlippage = 10;
-        maxSplitN = 10;
+        maxFeeRateBps = 2_000;
+        maxSlippageBps = 10;
+        maxParts = 10;
         minBuys = 2;
         maxBuys = 60;
-        backupDelay = 9 hours;
     }
 
     /// @inheritdoc ISmartDCA
@@ -169,306 +172,339 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     ) external nonReentrant whenNotPaused returns (uint256 planId) {
         Pair storage pair = _pair(pairId);
         if (!pair.enabled) revert PairDisabled();
-        if (buys < minBuys || buys > maxBuys) revert InvalidBuys();
-        if (amount < minPerBuy[pair.stable] * buys) revert DepositTooSmall();
+        if (buys < minBuys || buys > maxBuys) revert InvalidBuys(buys, minBuys, maxBuys);
+        uint256 minimum = minAmountPerBuy[pair.stable] * buys;
+        if (amount < minimum) revert DepositTooSmall(amount, minimum);
 
-        _advanceEmpty(pairId, pair);
-        _touchLock(pairId, pair);
+        _settleEmptyRounds(pairId, pair);
+        _emitRoundLocked(pairId, pair);
 
-        uint256 received = _pull(pair.stable, amount);
-        uint256 units = _deposit(pair.stable, received);
-        uint256 slice = units / buys;
-        uint256 base = received / buys;
-        if (slice == 0 || base == 0) revert DepositTooSmall();
+        uint256 received = _pullToken(pair.stable, amount);
+        uint256 stableUnits = _deposit(yieldSources[pairId][Side.Stable], pair.stable, received);
+        uint256 stableUnitsPerBuy = stableUnits / buys;
+        uint256 principalPerBuy = received / buys;
+        if (stableUnitsPerBuy == 0 || principalPerBuy == 0) revert DepositTooSmall(received, minimum);
 
-        // The cutoff is the pair's open round: before its lock the plan joins it, from the lock the round after.
-        // During an overrun that is the round right after the stuck one, not the calendar month.
-        uint32 openRound = pair.lastSettledRound + 1;
-        uint32 firstRound = block.timestamp < SmartDCAMath.roundStart(openRound) ? openRound : openRound + 1;
-        _addToRound(pairId, pair, firstRound, slice, base);
+        // Before the next round's lock the plan joins it, from the lock on the round after. During an overrun that
+        // is the round right after the running one, not the calendar month.
+        uint32 nextRound = pair.lastSettledRound + 1;
+        uint32 firstRound = block.timestamp < SmartDCAMath.lockTimeOf(nextRound) ? nextRound : nextRound + 1;
+        _addToRound(pairId, pair, firstRound, stableUnitsPerBuy, principalPerBuy);
         Round storage last = rounds[pairId][firstRound + buys - 1];
-        last.sliceEnding += slice;
-        last.baseEnding += base;
+        last.stableUnitsEnding += stableUnitsPerBuy;
+        last.principalEnding += principalPerBuy;
 
         planId = ++lastPlanId;
         plans[planId] = Plan({
             owner: msg.sender,
             pairId: pairId,
             status: PlanStatus.Active,
-            buys: buys,
-            buysDone: 0,
-            firstRound: firstRound,
-            stableUnits: units,
-            slice: slice,
-            base: base,
-            carriedBought: 0,
-            withdrawnBought: 0
+            scheduleBuys: buys,
+            buysBeforeSchedule: 0,
+            scheduleFirstRound: firstRound,
+            scheduleStableUnits: stableUnits,
+            stableUnitsPerBuy: stableUnitsPerBuy,
+            principalPerBuy: principalPerBuy,
+            assetUnitsCarried: 0,
+            assetUnitsPaid: 0
         });
-        _plansOf[msg.sender].push(planId);
+        _planIdsByOwner[msg.sender].push(planId);
 
-        emit PlanCreated(planId, msg.sender, pairId, received, units, slice, base, buys, firstRound);
+        emit PlanCreated(
+            planId,
+            msg.sender,
+            pairId,
+            received,
+            stableUnits,
+            stableUnitsPerBuy,
+            principalPerBuy,
+            buys,
+            firstRound
+        );
     }
 
     /// @inheritdoc ISmartDCA
-    function topUp(uint256 planId, uint256 amount) external nonReentrant whenNotPaused {
+    function topUpPlan(uint256 planId, uint256 amount) external nonReentrant whenNotPaused {
         Plan storage plan = _ownedActivePlan(planId);
         uint32 pairId = plan.pairId;
         Pair storage pair = pairs[pairId];
         if (!pair.enabled) revert PairDisabled();
 
-        _advanceEmpty(pairId, pair);
-        uint8 roundsDone = _roundsDone(plan, pair);
-        if (roundsDone == plan.buys) revert PlanMatured();
+        _settleEmptyRounds(pairId, pair);
+        uint8 buysSettled = _buysSettled(plan, pair);
+        if (buysSettled == plan.scheduleBuys) revert PlanMatured();
         if (_inRunningRound(plan, pair)) revert PlanInRunningRound();
 
-        uint8 buysLeft = plan.buys - roundsDone;
-        if (amount == 0 || amount < minPerBuy[pair.stable] * buysLeft) revert DepositTooSmall();
+        uint8 buysLeft = plan.scheduleBuys - buysSettled;
+        uint256 minimum = minAmountPerBuy[pair.stable] * buysLeft;
+        if (amount == 0 || amount < minimum) revert DepositTooSmall(amount, minimum);
 
         // Restart the schedule from the next unsettled round, keeping what was bought so far
-        plan.carriedBought += _indexBought(plan, pairId, roundsDone);
-        plan.buysDone += roundsDone;
-        plan.firstRound += roundsDone;
-        plan.buys = buysLeft;
+        plan.assetUnitsCarried += _assetUnitsFromIndex(plan, pairId, buysSettled);
+        plan.buysBeforeSchedule += buysSettled;
+        plan.scheduleFirstRound += buysSettled;
+        plan.scheduleBuys = buysLeft;
 
-        uint256 received = _pull(pair.stable, amount);
-        uint256 units = _deposit(pair.stable, received);
-        uint256 stableUnits = plan.stableUnits - plan.slice * roundsDone + units;
-        uint256 slice = stableUnits / buysLeft;
-        uint256 base = plan.base + received / buysLeft;
+        uint256 received = _pullToken(pair.stable, amount);
+        uint256 stableUnitsAdded = _deposit(yieldSources[pairId][Side.Stable], pair.stable, received);
+        uint256 stableUnits = plan.scheduleStableUnits - plan.stableUnitsPerBuy * buysSettled + stableUnitsAdded;
+        uint256 stableUnitsPerBuy = stableUnits / buysLeft;
+        uint256 principalPerBuy = plan.principalPerBuy + received / buysLeft;
 
-        uint256 sliceAdded = slice - plan.slice;
-        uint256 baseAdded = base - plan.base;
-        _addToRound(pairId, pair, plan.firstRound, sliceAdded, baseAdded);
-        Round storage last = rounds[pairId][plan.firstRound + buysLeft - 1];
-        last.sliceEnding += sliceAdded;
-        last.baseEnding += baseAdded;
+        // Only the increase per buy moves; the plan's old amounts are already in the round totals
+        uint256 perBuyIncrease = stableUnitsPerBuy - plan.stableUnitsPerBuy;
+        uint256 principalIncrease = principalPerBuy - plan.principalPerBuy;
+        _addToRound(pairId, pair, plan.scheduleFirstRound, perBuyIncrease, principalIncrease);
+        Round storage last = rounds[pairId][plan.scheduleFirstRound + buysLeft - 1];
+        last.stableUnitsEnding += perBuyIncrease;
+        last.principalEnding += principalIncrease;
 
-        plan.stableUnits = stableUnits;
-        plan.slice = slice;
-        plan.base = base;
+        plan.scheduleStableUnits = stableUnits;
+        plan.stableUnitsPerBuy = stableUnitsPerBuy;
+        plan.principalPerBuy = principalPerBuy;
 
-        emit PlanToppedUp(planId, received, units, slice, base, buysLeft);
+        emit PlanToppedUp(planId, received, stableUnitsAdded, stableUnitsPerBuy, principalPerBuy, buysLeft);
     }
 
     /// @inheritdoc ISmartDCA
     function withdrawBought(uint256 planId, uint256 amount) external nonReentrant whenNotPaused {
         Plan storage plan = _ownedActivePlan(planId);
         Pair storage pair = pairs[plan.pairId];
+        YieldSource storage assetSource = yieldSources[plan.pairId][Side.Asset];
 
-        uint256 bought = _bought(plan, pair);
-        // Checked first: with nothing bought the asset's pool can be empty, and `_unitsForAmount` divides by it
-        if (bought == 0) revert ZeroAmount();
-        uint256 units = amount == type(uint256).max ? bought : _unitsForAmount(pair.asset, amount);
-        if (units == 0) revert ZeroAmount();
-        if (units > bought) revert InsufficientBought();
+        uint256 assetUnitsOwed = _assetUnitsOwed(plan, pair);
+        // Checked first: with nothing bought the asset's source can hold nothing, and `_unitsForAmount` divides by it
+        if (assetUnitsOwed == 0) revert ZeroAmount();
+        uint256 assetUnits = amount == type(uint256).max ? assetUnitsOwed : _unitsForAmount(assetSource, amount);
+        if (assetUnits == 0) revert ZeroAmount();
+        if (assetUnits > assetUnitsOwed) revert WithdrawExceedsBought(assetUnits, assetUnitsOwed);
 
-        plan.withdrawnBought += units;
-        uint256 amountOut = _redeem(pair.asset, units);
-        IERC20(pair.asset).safeTransfer(msg.sender, amountOut);
+        plan.assetUnitsPaid += assetUnits;
+        uint256 assetAmount = _redeem(assetSource, pair.asset, assetUnits);
+        IERC20(pair.asset).safeTransfer(msg.sender, assetAmount);
 
-        emit BoughtWithdrawn(planId, units, amountOut);
+        emit BoughtWithdrawn(planId, assetUnits, assetAmount);
     }
 
     /// @inheritdoc ISmartDCA
-    function cancel(uint256 planId) external nonReentrant whenNotPaused {
+    function cancelPlan(uint256 planId) external nonReentrant whenNotPaused {
         Plan storage plan = _ownedActivePlan(planId);
         uint32 pairId = plan.pairId;
         Pair storage pair = pairs[pairId];
 
-        _advanceEmpty(pairId, pair);
-        uint8 roundsDone = _roundsDone(plan, pair);
-        if (roundsDone == plan.buys) revert PlanMatured();
+        _settleEmptyRounds(pairId, pair);
+        uint8 buysSettled = _buysSettled(plan, pair);
+        if (buysSettled == plan.scheduleBuys) revert PlanMatured();
         if (_inRunningRound(plan, pair)) revert PlanInRunningRound();
 
-        _removeFromRound(pairId, pair, plan.firstRound, plan.slice, plan.base);
-        Round storage last = rounds[pairId][plan.firstRound + plan.buys - 1];
-        last.sliceEnding -= plan.slice;
-        last.baseEnding -= plan.base;
+        _removeFromRound(pairId, pair, plan.scheduleFirstRound, plan.stableUnitsPerBuy, plan.principalPerBuy);
+        Round storage last = rounds[pairId][plan.scheduleFirstRound + plan.scheduleBuys - 1];
+        last.stableUnitsEnding -= plan.stableUnitsPerBuy;
+        last.principalEnding -= plan.principalPerBuy;
 
-        uint256 bought = _bought(plan, pair);
-        uint256 stableUnits = plan.stableUnits - plan.slice * roundsDone;
-        uint8 buysLeft = plan.buys - roundsDone;
+        uint256 assetUnitsOwed = _assetUnitsOwed(plan, pair);
+        uint256 stableUnitsLeft = plan.scheduleStableUnits - plan.stableUnitsPerBuy * buysSettled;
+        uint8 buysLeft = plan.scheduleBuys - buysSettled;
         plan.status = PlanStatus.Cancelled;
-        // Same move as topUp, so the record keeps the buys done; these fields share the status slot
-        plan.buysDone += roundsDone;
-        plan.firstRound += roundsDone;
-        plan.buys = buysLeft;
-        plan.withdrawnBought += bought;
+        // Moved the same way as a top up, so the record keeps how many buys settled
+        plan.buysBeforeSchedule += buysSettled;
+        plan.scheduleFirstRound += buysSettled;
+        plan.scheduleBuys = buysLeft;
+        plan.assetUnitsPaid += assetUnitsOwed;
 
-        uint256 stableOut = _redeem(pair.stable, stableUnits);
-        uint256 principalLeft = plan.base * buysLeft;
-        uint256 fee = stableOut > principalLeft ? ((stableOut - principalLeft) * feeRate) / SmartDCAMath.BPS : 0;
+        uint256 stableRedeemed = _redeem(yieldSources[pairId][Side.Stable], pair.stable, stableUnitsLeft);
+        uint256 principalLeft = plan.principalPerBuy * buysLeft;
+        uint256 fee = stableRedeemed > principalLeft
+            ? ((stableRedeemed - principalLeft) * feeRateBps) / SmartDCAMath.BPS
+            : 0;
         if (fee != 0) {
             IERC20(pair.stable).safeTransfer(reserve, fee);
-            emit FeeCollected(pairId, planId, fee);
+            emit CancelFeeCollected(pairId, planId, fee);
         }
-        IERC20(pair.stable).safeTransfer(msg.sender, stableOut - fee);
+        IERC20(pair.stable).safeTransfer(msg.sender, stableRedeemed - fee);
 
-        uint256 assetOut;
-        if (bought != 0) {
-            assetOut = _redeem(pair.asset, bought);
-            IERC20(pair.asset).safeTransfer(msg.sender, assetOut);
+        uint256 assetAmount;
+        if (assetUnitsOwed != 0) {
+            assetAmount = _redeem(yieldSources[pairId][Side.Asset], pair.asset, assetUnitsOwed);
+            IERC20(pair.asset).safeTransfer(msg.sender, assetAmount);
         }
 
-        emit PlanCancelled(planId, stableOut - fee, fee, assetOut);
+        emit PlanCancelled(planId, stableRedeemed - fee, fee, assetAmount);
     }
 
     /// @inheritdoc ISmartDCA
-    function claim(uint256 planId, bool toCore) external nonReentrant whenNotPaused {
+    function claimPlan(uint256 planId, bool toCore) external nonReentrant whenNotPaused {
         Plan storage plan = _ownedActivePlan(planId);
         Pair storage pair = pairs[plan.pairId];
-        _advanceEmpty(plan.pairId, pair);
-        _touchLock(plan.pairId, pair);
-        if (_roundsDone(plan, pair) != plan.buys) revert PlanNotMatured();
+        _settleEmptyRounds(plan.pairId, pair);
+        _emitRoundLocked(plan.pairId, pair);
+        if (_buysSettled(plan, pair) != plan.scheduleBuys) revert PlanNotMatured();
 
-        uint256 bought = _bought(plan, pair);
-        plan.status = PlanStatus.Done;
-        plan.withdrawnBought += bought;
+        uint256 assetUnitsOwed = _assetUnitsOwed(plan, pair);
+        plan.status = PlanStatus.Claimed;
+        plan.assetUnitsPaid += assetUnitsOwed;
 
-        // Stable units left by rounding the slice down: fewer than `buys`, worth under 1 wei with a Hub source
-        sources[pair.stable].units -= plan.stableUnits - plan.slice * plan.buys;
+        // Stable units left by rounding `stableUnitsPerBuy` down: fewer than `scheduleBuys`, worth under 1 wei
+        yieldSources[plan.pairId][Side.Stable].unitsIssued -=
+            plan.scheduleStableUnits - plan.stableUnitsPerBuy * plan.scheduleBuys;
 
-        uint256 amountOut;
-        if (bought != 0) {
+        uint256 amount;
+        if (assetUnitsOwed != 0) {
+            YieldSource storage assetSource = yieldSources[plan.pairId][Side.Asset];
             if (toCore) {
-                Source storage source = sources[pair.asset];
-                if (source.kind != SourceKind.Core) revert NotCoreSource();
-                amountOut = _transferUnits(pair.asset, bought, msg.sender);
+                if (assetSource.kind != SourceKind.Core) revert NotCoreSource();
+                amount = _transferUnits(assetSource, assetUnitsOwed, msg.sender);
             } else {
-                amountOut = _redeem(pair.asset, bought);
-                IERC20(pair.asset).safeTransfer(msg.sender, amountOut);
+                amount = _redeem(assetSource, pair.asset, assetUnitsOwed);
+                IERC20(pair.asset).safeTransfer(msg.sender, amount);
             }
         }
 
-        emit PlanClaimed(planId, toCore, amountOut);
+        emit PlanClaimed(planId, toCore, amount);
     }
 
     /// @inheritdoc ISmartDCA
-    function startBuy(uint32 pairId, uint8 parts) external nonReentrant whenNotPaused {
+    function startRound(uint32 pairId, uint8 parts) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
-        _checkRoundCaller(pair);
-        if (parts == 0 || parts > maxSplitN) revert InvalidParts();
+        _checkRoundCaller(pairId, pair);
+        if (parts == 0 || parts > maxParts) revert InvalidParts();
 
-        // An empty round settles here with no swap
-        _advanceEmpty(pairId, pair);
+        // Rounds with nothing to buy settle here with no swap
+        _settleEmptyRounds(pairId, pair);
         uint32 round = pair.lastSettledRound + 1;
-        if (block.timestamp < SmartDCAMath.roundStart(round)) return;
-        _touchLock(pairId, pair);
+        if (block.timestamp < SmartDCAMath.lockTimeOf(round)) return;
+        _emitRoundLocked(pairId, pair);
 
         Round storage r = rounds[pairId][round];
-        if (r.partsTotal != 0) revert BuyAlreadyStarted();
+        if (r.partsTotal != 0) revert RoundAlreadyStarted(pairId);
 
-        uint256 stableOut = _redeem(pair.stable, pair.dueUnits);
-        if (stableOut == 0) revert ZeroAmount();
-        (uint256 fee, uint16 rate) = SmartDCAMath.roundFee(stableOut, pair.dueBase, feeRate);
-        uint256 net = stableOut - fee;
+        uint256 stableRedeemed = _redeem(yieldSources[pairId][Side.Stable], pair.stable, pair.roundStableUnits);
+        if (stableRedeemed == 0) revert ZeroAmount();
+        (uint256 fee, uint16 rate) = SmartDCAMath.roundFee(stableRedeemed, pair.roundPrincipal, feeRateBps);
+        uint256 stableNet = stableRedeemed - fee;
 
         r.partsTotal = parts;
-        r.feeRate = rate;
-        r.stableOut = stableOut;
-        r.net = net;
-        r.toSwap = net;
+        r.feeRateBps = rate;
+        r.stableRedeemed = stableRedeemed;
+        r.stableNet = stableNet;
+        r.stableToSwap = stableNet;
 
         if (fee != 0) {
             IERC20(pair.stable).safeTransfer(reserve, fee);
-            emit FeeCollected(pairId, 0, fee);
+            emit RoundFeeCollected(pairId, round, fee);
         }
-        emit BuyStarted(pairId, round, parts, pair.dueUnits, stableOut, net);
+        emit RoundStarted(
+            pairId,
+            round,
+            parts,
+            pair.roundStableUnits,
+            stableRedeemed,
+            pair.roundPrincipal,
+            rate,
+            stableNet
+        );
     }
 
     /// @inheritdoc ISmartDCA
-    function executeOrder(
+    function swapRoundPart(
         uint32 pairId,
         uint256 quotedOut,
         bytes calldata swapData
     ) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
-        _checkRoundCaller(pair);
+        _checkRoundCaller(pairId, pair);
         uint32 round = pair.lastSettledRound + 1;
-        Round storage r = _executingRound(pairId, round);
+        Round storage r = _startedRound(pairId, round);
         if (r.partsDone == r.partsTotal) revert NoPartsLeft();
         if (quotedOut == 0) revert ZeroAmount();
 
         // An even share of what is left; on the last part that is all of it
-        uint256 amountIn = r.toSwap / (r.partsTotal - r.partsDone);
-
-        uint256 minOut = Math.mulDiv(quotedOut, SmartDCAMath.BPS - maxSlippage, SmartDCAMath.BPS);
+        uint256 stableIn = r.stableToSwap / (r.partsTotal - r.partsDone);
+        uint256 minOut = Math.mulDiv(quotedOut, SmartDCAMath.BPS - maxSlippageBps, SmartDCAMath.BPS);
 
         // Same flow as LeverageStrategiesManager._performSwap: the signed multicall swaps what SwapHelper holds
         // and sends the asset back here
+        IERC20 stable = IERC20(pair.stable);
         IERC20 asset = IERC20(pair.asset);
-        IERC20(pair.stable).safeTransfer(address(SWAP_HELPER), amountIn);
-        uint256 balanceBefore = asset.balanceOf(address(this));
-        (bool success, ) = address(SWAP_HELPER).call(swapData);
-        if (!success) revert TokenSwapCallFailed();
-        uint256 amountOut = asset.balanceOf(address(this)) - balanceBefore;
-        if (amountOut < minOut) revert SlippageExceeded(amountOut, minOut);
+        address swapHelper = address(SWAP_HELPER);
+        // Stable held here and in SwapHelper together only falls by what the swap sold, so a refund to this
+        // contract, a part left in SwapHelper and dust moved between the two all show as unspent
+        uint256 stableHeldBefore = stable.balanceOf(address(this)) + stable.balanceOf(swapHelper);
+        uint256 assetBefore = asset.balanceOf(address(this));
+        stable.safeTransfer(swapHelper, stableIn);
+        (bool success, ) = swapHelper.call(swapData);
+        if (!success) revert SwapFailed();
+        uint256 stableHeldAfter = stable.balanceOf(address(this)) + stable.balanceOf(swapHelper);
+        uint256 stableSpent = stableHeldBefore > stableHeldAfter ? stableHeldBefore - stableHeldAfter : 0;
+        if (stableSpent < stableIn) revert PartNotFullySwapped(stableIn, stableSpent);
+        uint256 assetOut = asset.balanceOf(address(this)) - assetBefore;
+        if (assetOut < minOut) revert SlippageExceeded(assetOut, minOut);
 
-        r.toSwap -= amountIn;
-        r.amountOut += amountOut;
+        r.stableToSwap -= stableIn;
+        r.assetBought += assetOut;
         r.partsDone += 1;
 
-        emit OrderExecuted(pairId, round, r.partsDone, amountIn, amountOut, quotedOut, minOut);
+        emit RoundPartSwapped(pairId, round, r.partsDone, stableIn, assetOut, quotedOut, minOut);
     }
 
     /// @inheritdoc ISmartDCA
-    function resplit(uint32 pairId, uint8 parts) external nonReentrant whenNotPaused {
+    function resplitRound(uint32 pairId, uint8 parts) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
-        _checkRoundCaller(pair);
+        _checkRoundCaller(pairId, pair);
         uint32 round = pair.lastSettledRound + 1;
-        Round storage r = _executingRound(pairId, round);
+        Round storage r = _startedRound(pairId, round);
         if (r.partsDone == r.partsTotal) revert NoPartsLeft();
         if (r.resplitUsed) revert AlreadyResplit();
-        if (parts == 0 || parts > maxSplitN) revert InvalidParts();
+        if (parts == 0 || parts > maxParts) revert InvalidParts();
 
         r.resplitUsed = true;
         r.partsTotal = r.partsDone + parts;
 
-        emit OrderResplit(pairId, round, r.partsDone, parts);
+        emit RoundResplit(pairId, round, r.partsDone, parts);
     }
 
     /// @inheritdoc ISmartDCA
-    function settle(uint32 pairId) external nonReentrant whenNotPaused {
+    function settleRound(uint32 pairId) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
-        _checkRoundCaller(pair);
+        _checkRoundCaller(pairId, pair);
         uint32 round = pair.lastSettledRound + 1;
-        Round storage r = _executingRound(pairId, round);
+        Round storage r = _startedRound(pairId, round);
         if (r.partsDone != r.partsTotal) revert PartsLeft();
 
-        uint256 boughtUnits = _deposit(pair.asset, r.amountOut);
-        (uint256 indexStep, uint256 baseIndexStep) = SmartDCAMath.indexSteps(
-            boughtUnits,
-            r.stableOut,
-            r.net,
-            pair.dueUnits,
-            r.feeRate
+        uint256 assetUnits = _deposit(yieldSources[pairId][Side.Asset], pair.asset, r.assetBought);
+        (uint256 perUnitStep, uint256 perPrincipalStep) = SmartDCAMath.roundIndexSteps(
+            assetUnits,
+            r.stableRedeemed,
+            r.stableNet,
+            pair.roundStableUnits,
+            r.feeRateBps
         );
 
         // The rounding leftover stays in the pool: a plan rounds down once over all its rounds, so it can read
         // up to one unit per round more than a per-round round-down would keep for it
-        pair.cumIndex += indexStep;
-        pair.cumBaseIndex += baseIndexStep;
+        pair.assetPerUnitIndex += perUnitStep;
+        pair.assetPerPrincipalIndex += perPrincipalStep;
         _closeRound(pair, r, round);
 
-        emit PairSettled(
+        emit RoundSettled(
             pairId,
             round,
-            r.stableOut,
-            r.stableOut - r.net,
-            r.amountOut,
-            boughtUnits,
-            pair.cumIndex,
-            pair.cumBaseIndex
+            r.stableRedeemed,
+            r.stableRedeemed - r.stableNet,
+            r.assetBought,
+            assetUnits,
+            pair.assetPerUnitIndex,
+            pair.assetPerPrincipalIndex
         );
 
-        _advanceEmpty(pairId, pair);
+        _settleEmptyRounds(pairId, pair);
     }
 
     /// @inheritdoc ISmartDCA
-    function sync(uint32 pairId) external nonReentrant whenNotPaused {
+    function syncPair(uint32 pairId) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
-        _advanceEmpty(pairId, pair);
-        _touchLock(pairId, pair);
+        _settleEmptyRounds(pairId, pair);
+        _emitRoundLocked(pairId, pair);
     }
 
     /// @inheritdoc ISmartDCA
@@ -482,45 +518,37 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
-    function setFeeRate(uint16 bps) external {
+    function setFeeRate(uint16 newFeeRateBps) external {
         _checkAccessAllowed("setFeeRate(uint16)");
-        if (bps > maxFeeRate) revert AboveHardCap();
-        emit FeeRateUpdated(feeRate, bps);
-        feeRate = bps;
+        if (newFeeRateBps > maxFeeRateBps) revert AboveHardCap();
+        emit FeeRateUpdated(feeRateBps, newFeeRateBps);
+        feeRateBps = newFeeRateBps;
     }
 
     /// @inheritdoc ISmartDCA
-    function setMaxFeeRate(uint16 bps) external {
+    function setMaxFeeRate(uint16 newMaxFeeRateBps) external {
         _checkAccessAllowed("setMaxFeeRate(uint16)");
-        if (bps > SmartDCAMath.BPS) revert AboveHardCap();
-        if (bps < feeRate) revert InvalidParameter();
-        emit MaxFeeRateUpdated(maxFeeRate, bps);
-        maxFeeRate = bps;
+        if (newMaxFeeRateBps > SmartDCAMath.BPS) revert AboveHardCap();
+        if (newMaxFeeRateBps < feeRateBps) revert InvalidParameter();
+        emit MaxFeeRateUpdated(maxFeeRateBps, newMaxFeeRateBps);
+        maxFeeRateBps = newMaxFeeRateBps;
     }
 
     /// @inheritdoc ISmartDCA
-    function setMaxSlippage(uint16 bps) external {
+    function setMaxSlippage(uint16 newMaxSlippageBps) external {
         _checkAccessAllowed("setMaxSlippage(uint16)");
-        if (bps > MAX_SLIPPAGE) revert AboveHardCap();
-        emit MaxSlippageUpdated(maxSlippage, bps);
-        maxSlippage = bps;
+        if (newMaxSlippageBps > MAX_SLIPPAGE_BPS) revert AboveHardCap();
+        emit MaxSlippageUpdated(maxSlippageBps, newMaxSlippageBps);
+        maxSlippageBps = newMaxSlippageBps;
     }
 
     /// @inheritdoc ISmartDCA
-    function setMaxSplitN(uint8 n) external {
-        _checkAccessAllowed("setMaxSplitN(uint8)");
-        if (n == 0) revert InvalidParameter();
-        if (n > MAX_SPLIT_N) revert AboveHardCap();
-        emit MaxSplitNUpdated(maxSplitN, n);
-        maxSplitN = n;
-    }
-
-    /// @inheritdoc ISmartDCA
-    function setBackup(address account, bool allowed) external {
-        _checkAccessAllowed("setBackup(address,bool)");
-        if (account == address(0)) revert ZeroAddress();
-        isBackup[account] = allowed;
-        emit BackupUpdated(account, allowed);
+    function setMaxParts(uint8 newMaxParts) external {
+        _checkAccessAllowed("setMaxParts(uint8)");
+        if (newMaxParts == 0) revert InvalidParameter();
+        if (newMaxParts > MAX_PARTS) revert AboveHardCap();
+        emit MaxPartsUpdated(maxParts, newMaxParts);
+        maxParts = newMaxParts;
     }
 
     /// @inheritdoc ISmartDCA
@@ -530,36 +558,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
-    function setYieldSource(address token, SourceKind kind, address source) external nonReentrant {
-        _checkAccessAllowed("setYieldSource(address,uint8,address)");
-        if (token == address(0) || source == address(0)) revert ZeroAddress();
-        if (kind == SourceKind.Hub) {
-            if (!HUB_REGISTRY.isHub(source) || IHub(source).asset() != token) revert InvalidSource();
-        } else if (kind == SourceKind.Core) {
-            (bool isListed, , ) = COMPTROLLER.markets(source);
-            if (!isListed || IVToken(source).underlying() != token) revert InvalidSource();
-        } else {
-            revert InvalidSource();
-        }
-        Source storage current = sources[token];
-        if (current.source == source) revert InvalidSource();
-
-        // Holdings move in the same call; units do not change, so no plan record changes
-        uint256 migrated;
-        uint256 oldShares = current.shares;
-        if (oldShares != 0) {
-            _checkTokenUnlocked(token);
-            current.shares = 0;
-            migrated = _sourceRedeem(current, token, oldShares);
-        }
-        address oldSource = current.source;
-        delete tokenOfSource[oldSource];
-        current.kind = kind;
-        current.source = source;
-        tokenOfSource[source] = token;
-        if (migrated != 0) current.shares = _sourceDeposit(current, token, migrated);
-
-        emit YieldSourceUpdated(token, oldSource, kind, source, migrated);
+    function setYieldSource(uint32 pairId, Side side, SourceKind kind, address source) external nonReentrant {
+        _checkAccessAllowed("setYieldSource(uint32,uint8,uint8,address)");
+        _setYieldSource(pairId, _pair(pairId), side, kind, source);
     }
 
     /// @inheritdoc ISmartDCA
@@ -571,54 +572,54 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
-    function setBackupDelay(uint32 delay) external {
-        _checkAccessAllowed("setBackupDelay(uint32)");
-        if (delay > MAX_BACKUP_DELAY) revert AboveHardCap();
-        emit BackupDelayUpdated(backupDelay, delay);
-        backupDelay = delay;
-    }
-
-    /// @inheritdoc ISmartDCA
-    function setMinPerBuy(address stable, uint256 amount) external {
-        _checkAccessAllowed("setMinPerBuy(address,uint256)");
+    function setMinAmountPerBuy(address stable, uint256 newAmount) external {
+        _checkAccessAllowed("setMinAmountPerBuy(address,uint256)");
         if (stable == address(0)) revert ZeroAddress();
-        if (amount == 0) revert InvalidParameter();
-        emit MinPerBuyUpdated(stable, minPerBuy[stable], amount);
-        minPerBuy[stable] = amount;
+        if (newAmount == 0) revert InvalidParameter();
+        emit MinAmountPerBuyUpdated(stable, minAmountPerBuy[stable], newAmount);
+        minAmountPerBuy[stable] = newAmount;
     }
 
     /// @inheritdoc ISmartDCA
-    function setBuyBounds(uint8 minBuys_, uint8 maxBuys_) external {
+    function setBuyBounds(uint8 newMinBuys, uint8 newMaxBuys) external {
         _checkAccessAllowed("setBuyBounds(uint8,uint8)");
-        if (minBuys_ == 0 || minBuys_ > maxBuys_) revert InvalidParameter();
-        if (maxBuys_ > MAX_BUYS) revert AboveHardCap();
-        emit BuyBoundsUpdated(minBuys, maxBuys, minBuys_, maxBuys_);
-        minBuys = minBuys_;
-        maxBuys = maxBuys_;
+        if (newMinBuys == 0 || newMinBuys > newMaxBuys) revert InvalidParameter();
+        if (newMaxBuys > MAX_BUYS) revert AboveHardCap();
+        emit BuyBoundsUpdated(minBuys, maxBuys, newMinBuys, newMaxBuys);
+        minBuys = newMinBuys;
+        maxBuys = newMaxBuys;
     }
 
     /// @inheritdoc ISmartDCA
-    function addPair(address stable, address asset) external returns (uint32 pairId) {
-        _checkAccessAllowed("addPair(address,address)");
-        if (stable == asset) revert InvalidPair();
-        if (sources[stable].kind == SourceKind.None) revert NoYieldSource(stable);
-        if (sources[asset].kind == SourceKind.None) revert NoYieldSource(asset);
-        if (pairIdOf[stable][asset] != 0) revert PairExists();
-        // Without a minimum, a dust plan whose slice redeems 0 would revert every `startBuy` of the pair
-        if (minPerBuy[stable] == 0) revert InvalidParameter();
+    function addPair(
+        address stable,
+        address asset,
+        SourceKind stableKind,
+        address stableSource,
+        SourceKind assetKind,
+        address assetSource
+    ) external returns (uint32 pairId) {
+        _checkAccessAllowed("addPair(address,address,uint8,address,uint8,address)");
+        if (stable == asset) revert SameTokens();
+        if (pairIdByTokens[stable][asset] != 0) revert PairExists();
+        // Without a minimum, a dust plan whose units per buy redeem 0 would revert every `startRound` of the pair
+        if (minAmountPerBuy[stable] == 0) revert InvalidParameter();
         // Reverts when the oracle cannot price either token
         ORACLE.getPrice(stable);
         ORACLE.getPrice(asset);
 
         pairId = ++pairCount;
-        pairIdOf[stable][asset] = pairId;
+        pairIdByTokens[stable][asset] = pairId;
         Pair storage pair = pairs[pairId];
         pair.stable = stable;
         pair.asset = asset;
         pair.enabled = true;
-        pair.lastSettledRound = SmartDCAMath.currentRound(block.timestamp);
+        pair.lastSettledRound = SmartDCAMath.latestLockedRound(block.timestamp);
 
         emit PairAdded(pairId, stable, asset);
+        // The pair holds nothing yet, so these only check and record the sources
+        _setYieldSource(pairId, pair, Side.Stable, stableKind, stableSource);
+        _setYieldSource(pairId, pair, Side.Asset, assetKind, assetSource);
     }
 
     /// @inheritdoc ISmartDCA
@@ -639,16 +640,19 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         _checkAccessAllowed("sweepToken(address,address)");
         if (to == address(0)) revert ZeroAddress();
 
-        // Owed: source shares held for plans, and stable or asset held by a round between startBuy and settle
+        // Several pairs can share one source, so their shares add up
         uint256 owed;
-        address sourceToken = tokenOfSource[token];
-        if (sourceToken != address(0)) owed = sources[sourceToken].shares;
         for (uint32 id = 1; id <= pairCount; ++id) {
+            YieldSource storage stableSource = yieldSources[id][Side.Stable];
+            YieldSource storage assetSource = yieldSources[id][Side.Asset];
+            if (stableSource.sourceAddress == token) owed += stableSource.sharesHeld;
+            if (assetSource.sourceAddress == token) owed += assetSource.sharesHeld;
+
             Pair storage pair = pairs[id];
             Round storage r = rounds[id][pair.lastSettledRound + 1];
             if (r.partsTotal == 0) continue;
-            if (pair.stable == token) owed += r.toSwap;
-            if (pair.asset == token) owed += r.amountOut;
+            if (pair.stable == token) owed += r.stableToSwap;
+            if (pair.asset == token) owed += r.assetBought;
         }
 
         uint256 balance = IERC20(token).balanceOf(address(this));
@@ -658,60 +662,67 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
-    function setReserve(address reserve_) external {
+    function setReserve(address newReserve) external {
         _checkAccessAllowed("setReserve(address)");
-        if (reserve_ == address(0)) revert ZeroAddress();
-        emit ReserveUpdated(reserve, reserve_);
-        reserve = reserve_;
+        if (newReserve == address(0)) revert ZeroAddress();
+        emit ReserveUpdated(reserve, newReserve);
+        reserve = newReserve;
     }
 
     /// @inheritdoc ISmartDCA
-    function lockTime(uint32 pairId) external view returns (uint256) {
-        return SmartDCAMath.roundStart(pairs[pairId].lastSettledRound + 1);
+    function nextLockTime(uint32 pairId) external view returns (uint256) {
+        return SmartDCAMath.lockTimeOf(pairs[pairId].lastSettledRound + 1);
     }
 
     /// @inheritdoc ISmartDCA
-    function getPlansOf(address owner) external view returns (uint256[] memory) {
-        return _plansOf[owner];
+    function getPlanIds(address owner) external view returns (uint256[] memory) {
+        return _planIdsByOwner[owner];
     }
 
-    /// @dev Settles, with no swap, every round of the pair that has nothing due and whose lock time has passed
-    function _advanceEmpty(uint32 pairId, Pair storage pair) internal {
-        while (pair.dueUnits == 0) {
+    /// @dev Settles, with no swap, every round of the pair that has nothing to buy and whose lock time has passed
+    function _settleEmptyRounds(uint32 pairId, Pair storage pair) internal {
+        while (pair.roundStableUnits == 0) {
             uint32 round = pair.lastSettledRound + 1;
-            if (block.timestamp < SmartDCAMath.roundStart(round)) return;
+            if (block.timestamp < SmartDCAMath.lockTimeOf(round)) return;
             Round storage r = rounds[pairId][round];
             _closeRound(pair, r, round);
-            emit PairSettled(pairId, round, 0, 0, 0, 0, pair.cumIndex, pair.cumBaseIndex);
+            emit RoundSettled(pairId, round, 0, 0, 0, 0, pair.assetPerUnitIndex, pair.assetPerPrincipalIndex);
         }
     }
 
-    /// @dev Records the indexes for `round`, moves the next round's plans in and the ended ones out
+    /// @dev Records the indexes for `round`, adds the plans that start next and removes the ones that ended
     function _closeRound(Pair storage pair, Round storage r, uint32 round) internal {
-        r.cumIndexAfter = pair.cumIndex;
-        r.cumBaseIndexAfter = pair.cumBaseIndex;
-        pair.dueUnits = pair.dueUnits - r.sliceEnding + r.sliceStarting;
-        pair.dueBase = pair.dueBase - r.baseEnding + r.baseStarting;
+        r.assetPerUnitIndexAfter = pair.assetPerUnitIndex;
+        r.assetPerPrincipalIndexAfter = pair.assetPerPrincipalIndex;
+        pair.roundStableUnits = pair.roundStableUnits - r.stableUnitsEnding + r.stableUnitsJoining;
+        pair.roundPrincipal = pair.roundPrincipal - r.principalEnding + r.principalJoining;
         pair.lastSettledRound = round;
     }
 
-    /// @dev Emits `LockEntered` once per round, from the pair's lock time
-    function _touchLock(uint32 pairId, Pair storage pair) internal {
+    /// @dev Emits `RoundLocked` once per round, from the round's lock time
+    function _emitRoundLocked(uint32 pairId, Pair storage pair) internal {
         uint32 round = pair.lastSettledRound + 1;
-        if (pair.lockEnteredRound == round || block.timestamp < SmartDCAMath.roundStart(round)) return;
-        pair.lockEnteredRound = round;
-        emit LockEntered(pairId, round);
+        if (pair.lockEmittedRound == round || block.timestamp < SmartDCAMath.lockTimeOf(round)) return;
+        pair.lockEmittedRound = round;
+        emit RoundLocked(pairId, round);
     }
 
-    /// @dev Adds a slice to the pair's next round, or parks it until the round before `firstRound` settles
-    function _addToRound(uint32 pairId, Pair storage pair, uint32 firstRound, uint256 slice, uint256 base) internal {
+    /// @dev Adds a plan's amounts per buy to the pair's next round, or, for a later first round, to the joining
+    ///      totals of the round before it
+    function _addToRound(
+        uint32 pairId,
+        Pair storage pair,
+        uint32 firstRound,
+        uint256 stableUnitsPerBuy,
+        uint256 principalPerBuy
+    ) internal {
         if (firstRound <= pair.lastSettledRound + 1) {
-            pair.dueUnits += slice;
-            pair.dueBase += base;
+            pair.roundStableUnits += stableUnitsPerBuy;
+            pair.roundPrincipal += principalPerBuy;
         } else {
             Round storage r = rounds[pairId][firstRound - 1];
-            r.sliceStarting += slice;
-            r.baseStarting += base;
+            r.stableUnitsJoining += stableUnitsPerBuy;
+            r.principalJoining += principalPerBuy;
         }
     }
 
@@ -720,132 +731,93 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         uint32 pairId,
         Pair storage pair,
         uint32 firstRound,
-        uint256 slice,
-        uint256 base
+        uint256 stableUnitsPerBuy,
+        uint256 principalPerBuy
     ) internal {
         if (firstRound <= pair.lastSettledRound + 1) {
-            pair.dueUnits -= slice;
-            pair.dueBase -= base;
+            pair.roundStableUnits -= stableUnitsPerBuy;
+            pair.roundPrincipal -= principalPerBuy;
         } else {
             Round storage r = rounds[pairId][firstRound - 1];
-            r.sliceStarting -= slice;
-            r.baseStarting -= base;
+            r.stableUnitsJoining -= stableUnitsPerBuy;
+            r.principalJoining -= principalPerBuy;
         }
-    }
-
-    /// @dev Keepers from the pair's lock time, backup addresses from the lock time plus `backupDelay`
-    function _checkRoundCaller(Pair storage pair) internal view {
-        uint256 lock = SmartDCAMath.roundStart(pair.lastSettledRound + 1);
-        if (isKeeper[msg.sender]) {
-            if (block.timestamp < lock) revert PairNotLocked();
-        } else if (isBackup[msg.sender]) {
-            if (block.timestamp < lock + backupDelay) revert BackupTooEarly();
-        } else {
-            revert NotAllowedCaller();
-        }
-    }
-
-    /// @dev Reverts while any pair using `token` is past its lock time and not settled
-    function _checkTokenUnlocked(address token) internal view {
-        for (uint32 id = 1; id <= pairCount; ++id) {
-            Pair storage pair = pairs[id];
-            if (pair.stable != token && pair.asset != token) continue;
-            if (block.timestamp >= SmartDCAMath.roundStart(pair.lastSettledRound + 1)) revert TokenLocked(token);
-        }
-    }
-
-    function _executingRound(uint32 pairId, uint32 round) internal view returns (Round storage r) {
-        r = rounds[pairId][round];
-        if (r.partsTotal == 0) revert PairNotExecuting();
-    }
-
-    function _pair(uint32 pairId) internal view returns (Pair storage pair) {
-        if (pairId == 0 || pairId > pairCount) revert InvalidPair();
-        pair = pairs[pairId];
-    }
-
-    function _ownedActivePlan(uint256 planId) internal view returns (Plan storage plan) {
-        plan = plans[planId];
-        if (plan.owner != msg.sender) revert NotPlanOwner();
-        if (plan.status != PlanStatus.Active) revert PlanNotActive();
-    }
-
-    /// @dev Rounds of the current schedule that have settled
-    function _roundsDone(Plan storage plan, Pair storage pair) internal view returns (uint8) {
-        return SmartDCAMath.roundsDone(pair.lastSettledRound, plan.firstRound, plan.buys);
-    }
-
-    /// @dev True from the lock time of a round the plan is in until that round settles
-    function _inRunningRound(Plan storage plan, Pair storage pair) internal view returns (bool) {
-        return SmartDCAMath.inRunningRound(pair.lastSettledRound + 1, plan.firstRound, plan.buys, block.timestamp);
-    }
-
-    /// @dev Asset units the plan holds now
-    function _bought(Plan storage plan, Pair storage pair) internal view returns (uint256) {
-        return plan.carriedBought + _indexBought(plan, plan.pairId, _roundsDone(plan, pair)) - plan.withdrawnBought;
-    }
-
-    /// @dev Asset units bought in the current schedule's first `roundsDone` rounds
-    function _indexBought(Plan storage plan, uint32 pairId, uint8 roundsDone) internal view returns (uint256) {
-        if (roundsDone == 0) return 0;
-        Round storage before = rounds[pairId][plan.firstRound - 1];
-        Round storage last = rounds[pairId][plan.firstRound + roundsDone - 1];
-        return
-            SmartDCAMath.planBought(
-                plan.slice,
-                plan.base,
-                last.cumIndexAfter - before.cumIndexAfter,
-                last.cumBaseIndexAfter - before.cumBaseIndexAfter
-            );
     }
 
     /// @dev Pulls `amount` of `token` from the caller and returns what arrived
-    function _pull(address token, uint256 amount) internal returns (uint256) {
+    function _pullToken(address token, uint256 amount) internal returns (uint256) {
         uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         return IERC20(token).balanceOf(address(this)) - balanceBefore;
     }
 
-    /// @dev Deposits `amount` of `token` into its source and returns the units minted, rounded down
-    function _deposit(address token, uint256 amount) internal returns (uint256 units) {
-        Source storage s = sources[token];
-        uint256 shares = _sourceDeposit(s, token, amount);
-        units = s.units == 0 || s.shares == 0 ? shares : Math.mulDiv(shares, s.units, s.shares);
-        s.shares += shares;
-        s.units += units;
+    /// @dev Checks and records the source of one side of a pair, and moves that side's holdings to it
+    function _setYieldSource(uint32 pairId, Pair storage pair, Side side, SourceKind kind, address source) internal {
+        if (source == address(0)) revert ZeroAddress();
+        address token = side == Side.Stable ? pair.stable : pair.asset;
+        if (kind == SourceKind.Hub) {
+            if (!HUB_REGISTRY.isHub(source) || IHub(source).asset() != token) revert InvalidSource(source);
+        } else if (kind == SourceKind.Core) {
+            (bool isListed, , ) = COMPTROLLER.markets(source);
+            if (!isListed || IVToken(source).underlying() != token) revert InvalidSource(source);
+        } else {
+            revert InvalidSource(source);
+        }
+        YieldSource storage current = yieldSources[pairId][side];
+        if (current.sourceAddress == source) revert SourceUnchanged();
+
+        // Holdings move in the same call; the number of units does not change, so no plan record changes
+        uint256 migrated;
+        uint256 oldShares = current.sharesHeld;
+        if (oldShares != 0) {
+            if (block.timestamp >= SmartDCAMath.lockTimeOf(pair.lastSettledRound + 1)) revert PairLocked(pairId);
+            current.sharesHeld = 0;
+            migrated = _sourceRedeem(current, token, oldShares);
+        }
+        address oldSource = current.sourceAddress;
+        current.kind = kind;
+        current.sourceAddress = source;
+        if (migrated != 0) current.sharesHeld = _sourceDeposit(current, token, migrated);
+
+        emit YieldSourceUpdated(pairId, side, oldSource, kind, source, migrated);
     }
 
-    /// @dev Redeems `units` of `token` from its source and returns the token received
-    function _redeem(address token, uint256 units) internal returns (uint256) {
-        Source storage s = sources[token];
-        uint256 shares = Math.mulDiv(units, s.shares, s.units);
-        s.units -= units;
-        s.shares -= shares;
+    /// @dev Deposits `amount` of `token` into the pair side's source `s` and returns the units minted, rounded down
+    function _deposit(YieldSource storage s, address token, uint256 amount) internal returns (uint256 units) {
+        uint256 shares = _sourceDeposit(s, token, amount);
+        units = s.unitsIssued == 0 || s.sharesHeld == 0 ? shares : Math.mulDiv(shares, s.unitsIssued, s.sharesHeld);
+        s.sharesHeld += shares;
+        s.unitsIssued += units;
+    }
+
+    /// @dev Redeems `units` from the pair side's source `s` and returns the amount of `token` received
+    function _redeem(YieldSource storage s, address token, uint256 units) internal returns (uint256) {
+        uint256 shares = Math.mulDiv(units, s.sharesHeld, s.unitsIssued);
+        s.unitsIssued -= units;
+        s.sharesHeld -= shares;
         return _sourceRedeem(s, token, shares);
     }
 
-    /// @dev Sends the source shares behind `units` of `token` (a Hub share or a vToken) and returns them
-    function _transferUnits(address token, uint256 units, address to) internal returns (uint256 shares) {
-        Source storage s = sources[token];
-        shares = Math.mulDiv(units, s.shares, s.units);
-        s.units -= units;
-        s.shares -= shares;
-        IERC20(s.source).safeTransfer(to, shares);
+    /// @dev Sends `to` the source shares behind `units` of `s` (Hub shares or vTokens) and returns them
+    function _transferUnits(YieldSource storage s, uint256 units, address to) internal returns (uint256 shares) {
+        shares = Math.mulDiv(units, s.sharesHeld, s.unitsIssued);
+        s.unitsIssued -= units;
+        s.sharesHeld -= shares;
+        IERC20(s.sourceAddress).safeTransfer(to, shares);
     }
 
-    /// @dev Units of `token` worth at least `amount`, rounded up. After a source switch the units to shares ratio
-    ///      is not 1, so the redeem that follows can pay a few wei less than `amount`.
-    function _unitsForAmount(address token, uint256 amount) internal returns (uint256) {
-        Source storage s = sources[token];
+    /// @dev Units of `s` worth at least `amount`, rounded up. After a source switch one unit is not one share,
+    ///      so the redeem that follows can pay a few wei less than `amount`. Not a view: Core's rate is accrued first.
+    function _unitsForAmount(YieldSource storage s, uint256 amount) internal returns (uint256) {
         uint256 shares = s.kind == SourceKind.Hub
-            ? IHub(s.source).previewWithdraw(amount)
-            : Math.mulDiv(amount, 1e18, IVToken(s.source).exchangeRateCurrent(), Math.Rounding.Up);
-        return Math.mulDiv(shares, s.units, s.shares, Math.Rounding.Up);
+            ? IHub(s.sourceAddress).previewWithdraw(amount)
+            : Math.mulDiv(amount, 1e18, IVToken(s.sourceAddress).exchangeRateCurrent(), Math.Rounding.Up);
+        return Math.mulDiv(shares, s.unitsIssued, s.sharesHeld, Math.Rounding.Up);
     }
 
     /// @dev Deposits into the source and returns the shares received, measured as a balance change
-    function _sourceDeposit(Source storage s, address token, uint256 amount) internal returns (uint256) {
-        address source = s.source;
+    function _sourceDeposit(YieldSource storage s, address token, uint256 amount) internal returns (uint256) {
+        address source = s.sourceAddress;
         uint256 sharesBefore = IERC20(source).balanceOf(address(this));
         IERC20(token).forceApprove(source, amount);
         if (s.kind == SourceKind.Hub) {
@@ -857,9 +829,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         return IERC20(source).balanceOf(address(this)) - sharesBefore;
     }
 
-    /// @dev Redeems shares from the source and returns the token received, measured as a balance change
-    function _sourceRedeem(Source storage s, address token, uint256 shares) internal returns (uint256) {
-        address source = s.source;
+    /// @dev Redeems shares from the source and returns the token amount received, measured as a balance change
+    function _sourceRedeem(YieldSource storage s, address token, uint256 shares) internal returns (uint256) {
+        address source = s.sourceAddress;
         uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         if (s.kind == SourceKind.Hub) {
             IHub(source).redeem(shares, address(this), address(this));
@@ -868,5 +840,67 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             if (err != 0) revert SourceCallFailed(source, err);
         }
         return IERC20(token).balanceOf(address(this)) - balanceBefore;
+    }
+
+    /// @dev Only keepers, and only from the round's lock time
+    function _checkRoundCaller(uint32 pairId, Pair storage pair) internal view {
+        if (!isKeeper[msg.sender]) revert NotRoundCaller(msg.sender);
+        uint256 lockTime = SmartDCAMath.lockTimeOf(pair.lastSettledRound + 1);
+        if (block.timestamp < lockTime) revert RoundNotLocked(pairId, lockTime);
+    }
+
+    /// @dev The round, once `startRound` has run for it
+    function _startedRound(uint32 pairId, uint32 round) internal view returns (Round storage r) {
+        r = rounds[pairId][round];
+        if (r.partsTotal == 0) revert RoundNotStarted(pairId);
+    }
+
+    /// @dev The pair, for a known id
+    function _pair(uint32 pairId) internal view returns (Pair storage pair) {
+        if (pairId == 0 || pairId > pairCount) revert UnknownPair(pairId);
+        pair = pairs[pairId];
+    }
+
+    /// @dev The plan, when the caller owns it and it is active
+    function _ownedActivePlan(uint256 planId) internal view returns (Plan storage plan) {
+        plan = plans[planId];
+        if (plan.owner != msg.sender) revert NotPlanOwner();
+        if (plan.status != PlanStatus.Active) revert PlanNotActive();
+    }
+
+    /// @dev Buys of the current schedule that have settled
+    function _buysSettled(Plan storage plan, Pair storage pair) internal view returns (uint8) {
+        return SmartDCAMath.buysSettled(pair.lastSettledRound, plan.scheduleFirstRound, plan.scheduleBuys);
+    }
+
+    /// @dev True from the lock time of a round the plan is in until that round settles
+    function _inRunningRound(Plan storage plan, Pair storage pair) internal view returns (bool) {
+        return
+            SmartDCAMath.inRunningRound(
+                pair.lastSettledRound + 1,
+                plan.scheduleFirstRound,
+                plan.scheduleBuys,
+                block.timestamp
+            );
+    }
+
+    /// @dev Asset units the plan holds now: bought and not yet paid out
+    function _assetUnitsOwed(Plan storage plan, Pair storage pair) internal view returns (uint256) {
+        uint256 fromIndex = _assetUnitsFromIndex(plan, plan.pairId, _buysSettled(plan, pair));
+        return plan.assetUnitsCarried + fromIndex - plan.assetUnitsPaid;
+    }
+
+    /// @dev Asset units bought in the first `buysSettled` rounds of the current schedule, read from the indexes
+    function _assetUnitsFromIndex(Plan storage plan, uint32 pairId, uint8 buysSettled) internal view returns (uint256) {
+        if (buysSettled == 0) return 0;
+        Round storage before = rounds[pairId][plan.scheduleFirstRound - 1];
+        Round storage last = rounds[pairId][plan.scheduleFirstRound + buysSettled - 1];
+        return
+            SmartDCAMath.assetUnitsBought(
+                plan.stableUnitsPerBuy,
+                plan.principalPerBuy,
+                last.assetPerUnitIndexAfter - before.assetPerUnitIndexAfter,
+                last.assetPerPrincipalIndexAfter - before.assetPerPrincipalIndexAfter
+            );
     }
 }
