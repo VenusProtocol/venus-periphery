@@ -47,13 +47,12 @@ abstract contract SmartDCABase is Test {
 
     address internal reserve = makeAddr("reserve");
     address internal keeper = makeAddr("keeper");
-    address internal backup = makeAddr("backup");
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
     address internal carol = makeAddr("carol");
 
     function setUp() public virtual {
-        vm.warp(SmartDCAMath.roundStart(OCT) + 5 days);
+        vm.warp(SmartDCAMath.lockTimeOf(OCT) + 5 days);
 
         acm = new MockACM();
         comptroller = new MockComptroller();
@@ -79,13 +78,17 @@ abstract contract SmartDCABase is Test {
         );
         acm.setAllowAll(address(this), true);
 
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Hub, address(hub));
-        dca.setYieldSource(address(btcb), ISmartDCA.SourceKind.Core, address(vBTC));
-        dca.setMinPerBuy(address(usdt), 10e18);
-        pairId = dca.addPair(address(usdt), address(btcb));
+        dca.setMinAmountPerBuy(address(usdt), 10e18);
+        pairId = _addPair(address(usdt), address(btcb), address(hub), address(vBTC));
         dca.setFeeRate(500);
         dca.setKeeper(keeper, true);
-        dca.setBackup(backup, true);
+    }
+
+    // ----- setup -----
+
+    /// @dev Adds a pair with a Hub for the stable and a Core vToken for the asset, the launch setup
+    function _addPair(address stable, address asset, address stableHub, address assetVToken) internal returns (uint32) {
+        return dca.addPair(stable, asset, ISmartDCA.SourceKind.Hub, stableHub, ISmartDCA.SourceKind.Core, assetVToken);
     }
 
     // ----- actions -----
@@ -102,17 +105,17 @@ abstract contract SmartDCABase is Test {
         usdt.mint(user, amount);
         vm.startPrank(user);
         usdt.approve(address(dca), amount);
-        dca.topUp(planId, amount);
+        dca.topUpPlan(planId, amount);
         vm.stopPrank();
     }
 
     /// @dev Warps to the pair's lock time and runs the whole round as the keeper
     function _runRound(uint8 parts) internal {
-        vm.warp(dca.lockTime(pairId));
+        vm.warp(dca.nextLockTime(pairId));
         vm.startPrank(keeper);
-        dca.startBuy(pairId, parts);
-        for (uint8 i; i < parts; ++i) dca.executeOrder(pairId, ANY_QUOTE, _swapData(pairId));
-        dca.settle(pairId);
+        dca.startRound(pairId, parts);
+        for (uint8 i; i < parts; ++i) dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        dca.settleRound(pairId);
         vm.stopPrank();
     }
 
@@ -130,14 +133,14 @@ abstract contract SmartDCABase is Test {
             p.owner,
             p.pairId,
             p.status,
-            p.buys,
-            p.buysDone,
-            p.firstRound,
-            p.stableUnits,
-            p.slice,
-            p.base,
-            p.carriedBought,
-            p.withdrawnBought
+            p.scheduleBuys,
+            p.buysBeforeSchedule,
+            p.scheduleFirstRound,
+            p.scheduleStableUnits,
+            p.stableUnitsPerBuy,
+            p.principalPerBuy,
+            p.assetUnitsCarried,
+            p.assetUnitsPaid
         ) = dca.plans(planId);
     }
 
@@ -147,11 +150,11 @@ abstract contract SmartDCABase is Test {
             p.asset,
             p.enabled,
             p.lastSettledRound,
-            p.lockEnteredRound,
-            p.dueUnits,
-            p.dueBase,
-            p.cumIndex,
-            p.cumBaseIndex
+            p.lockEmittedRound,
+            p.roundStableUnits,
+            p.roundPrincipal,
+            p.assetPerUnitIndex,
+            p.assetPerPrincipalIndex
         ) = dca.pairs(pairId);
     }
 
@@ -160,17 +163,17 @@ abstract contract SmartDCABase is Test {
             r.partsTotal,
             r.partsDone,
             r.resplitUsed,
-            r.feeRate,
-            r.stableOut,
-            r.net,
-            r.toSwap,
-            r.amountOut,
-            r.sliceStarting,
-            r.baseStarting,
-            r.sliceEnding,
-            r.baseEnding,
-            r.cumIndexAfter,
-            r.cumBaseIndexAfter
+            r.feeRateBps,
+            r.stableRedeemed,
+            r.stableNet,
+            r.stableToSwap,
+            r.assetBought,
+            r.stableUnitsJoining,
+            r.principalJoining,
+            r.stableUnitsEnding,
+            r.principalEnding,
+            r.assetPerUnitIndexAfter,
+            r.assetPerPrincipalIndexAfter
         ) = dca.rounds(pairId, round);
     }
 
@@ -179,8 +182,8 @@ abstract contract SmartDCABase is Test {
     function _quote(uint32 pid) internal view returns (uint256) {
         (, , , uint32 settled, , , , , ) = dca.pairs(pid);
         ISmartDCA.Round memory r;
-        (r.partsTotal, r.partsDone, , , , , r.toSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
-        return swapHelper.quote(r.toSwap / (r.partsTotal - r.partsDone));
+        (r.partsTotal, r.partsDone, , , , , r.stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
+        return swapHelper.quote(r.stableToSwap / (r.partsTotal - r.partsDone));
     }
 
     /// @dev Swap call for the mock SwapHelper: sells what it was sent of the pair's stable for its asset. Pure, so it

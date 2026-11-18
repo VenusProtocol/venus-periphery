@@ -17,22 +17,22 @@ contract SmartDCA_PlansTest is SmartDCABase {
         ISmartDCA.Plan memory p = _plan(id);
         assertEq(p.owner, alice);
         assertEq(uint8(p.status), uint8(ISmartDCA.PlanStatus.Active));
-        assertEq(p.firstRound, NOV);
-        assertEq(p.stableUnits, 1200e24);
-        assertEq(p.slice, 100e24);
-        assertEq(p.base, 100e18);
+        assertEq(p.scheduleFirstRound, NOV);
+        assertEq(p.scheduleStableUnits, 1200e24);
+        assertEq(p.stableUnitsPerBuy, 100e24);
+        assertEq(p.principalPerBuy, 100e18);
 
         ISmartDCA.Pair memory pair = _pair();
-        assertEq(pair.dueUnits, 100e24);
-        assertEq(pair.dueBase, 100e18);
-        assertEq(_round(NOV + 11).sliceEnding, 100e24);
+        assertEq(pair.roundStableUnits, 100e24);
+        assertEq(pair.roundPrincipal, 100e18);
+        assertEq(_round(NOV + 11).stableUnitsEnding, 100e24);
         assertEq(hub.balanceOf(address(dca)), 1200e24);
-        assertEq(dca.getPlansOf(alice).length, 1);
+        assertEq(dca.getPlanIds(alice).length, 1);
     }
 
     function test_createPlan_oneSecondBeforeLockJoinsThisRound() public {
         vm.warp(NOV_LOCK - 1);
-        assertEq(_plan(_create(alice, 1200e18, 12)).firstRound, NOV);
+        assertEq(_plan(_create(alice, 1200e18, 12)).scheduleFirstRound, NOV);
     }
 
     function test_createPlan_atLockJoinsNextRound() public {
@@ -40,9 +40,9 @@ contract SmartDCA_PlansTest is SmartDCABase {
         vm.warp(NOV_LOCK);
         uint256 id = _create(carol, 300e18, 3);
 
-        assertEq(_plan(id).firstRound, DEC);
-        assertEq(_pair().dueUnits, 100e24, "carol not in November");
-        assertEq(_round(NOV).sliceStarting, 100e24, "carol parked until November settles");
+        assertEq(_plan(id).scheduleFirstRound, DEC);
+        assertEq(_pair().roundStableUnits, 100e24, "carol not in November");
+        assertEq(_round(NOV).stableUnitsJoining, 100e24, "carol parked until November settles");
     }
 
     function test_createPlan_revertsOnBadInputsAndAcceptsTheMinimum() public {
@@ -50,17 +50,17 @@ contract SmartDCA_PlansTest is SmartDCABase {
         vm.startPrank(alice);
         usdt.approve(address(dca), type(uint256).max);
 
-        vm.expectRevert(ISmartDCA.InvalidBuys.selector);
+        vm.expectPartialRevert(ISmartDCA.InvalidBuys.selector);
         dca.createPlan(pairId, 100e18, 1);
-        vm.expectRevert(ISmartDCA.InvalidBuys.selector);
+        vm.expectPartialRevert(ISmartDCA.InvalidBuys.selector);
         dca.createPlan(pairId, 1000e18, 61);
-        vm.expectRevert(ISmartDCA.DepositTooSmall.selector);
+        vm.expectPartialRevert(ISmartDCA.DepositTooSmall.selector);
         dca.createPlan(pairId, 120e18 - 1, 12);
         // Exactly the minimum, 10 USDT per buy
         dca.createPlan(pairId, 120e18, 12);
-        vm.expectRevert(ISmartDCA.InvalidPair.selector);
+        vm.expectPartialRevert(ISmartDCA.UnknownPair.selector);
         dca.createPlan(0, 120e18, 12);
-        vm.expectRevert(ISmartDCA.InvalidPair.selector);
+        vm.expectPartialRevert(ISmartDCA.UnknownPair.selector);
         dca.createPlan(2, 120e18, 12);
         vm.stopPrank();
 
@@ -72,7 +72,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
 
     // ----- topUp (TD 3.3 worked example: fee 5%, unit value 1.000 then 1.001) -----
 
-    function test_topUp_restartsTheSchedule() public {
+    function test_topUpPlan_restartsTheSchedule() public {
         uint256 id = _create(alice, 1200e18, 12);
         hub.setPricePerShare(1.001e18);
         _runRound(1);
@@ -82,19 +82,19 @@ contract SmartDCA_PlansTest is SmartDCABase {
 
         ISmartDCA.Plan memory p = _plan(id);
         uint256 minted = 549_450_549_450_549_450_549_450_549; // 550 / 1.001, in 24-decimal units
-        assertEq(p.firstRound, DEC);
-        assertEq(p.buys, 11);
-        assertEq(p.buysDone, 1);
-        assertEq(p.stableUnits, 1100e24 + minted);
-        assertEq(p.slice, (1100e24 + minted) / 11);
-        assertEq(p.base, 150e18);
-        assertEq(p.carriedBought, 5_004_750, "November: 1.00095e15 BTCB in vBTC units");
-        assertEq(_pair().dueUnits, p.slice);
-        assertEq(_pair().dueBase, 150e18);
-        assertEq(_round(NOV + 11).sliceEnding, p.slice, "last round unchanged");
+        assertEq(p.scheduleFirstRound, DEC);
+        assertEq(p.scheduleBuys, 11);
+        assertEq(p.buysBeforeSchedule, 1);
+        assertEq(p.scheduleStableUnits, 1100e24 + minted);
+        assertEq(p.stableUnitsPerBuy, (1100e24 + minted) / 11);
+        assertEq(p.principalPerBuy, 150e18);
+        assertEq(p.assetUnitsCarried, 5_004_750, "November: 1.00095e15 BTCB in vBTC units");
+        assertEq(_pair().roundStableUnits, p.stableUnitsPerBuy);
+        assertEq(_pair().roundPrincipal, 150e18);
+        assertEq(_round(NOV + 11).stableUnitsEnding, p.stableUnitsPerBuy, "last round unchanged");
     }
 
-    function test_cancel_afterTopUp_matchesWorkedExample() public {
+    function test_cancelPlan_afterTopUp_matchesWorkedExample() public {
         uint256 id = _create(alice, 1200e18, 12);
         hub.setPricePerShare(1.001e18);
         _runRound(1);
@@ -102,7 +102,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 reserveBefore = usdt.balanceOf(reserve);
 
         vm.prank(alice);
-        dca.cancel(id);
+        dca.cancelPlan(id);
 
         // W = 1,651.10, fee = (1,651.10 - 150 x 11) x 5% = 0.055
         assertApproxEqAbs(usdt.balanceOf(alice), 1651.045e18, 1e12);
@@ -110,35 +110,35 @@ contract SmartDCA_PlansTest is SmartDCABase {
         // Everything bought in November: 100.095 USDT at 100,000, less up to one vBTC of rounding
         assertApproxEqAbs(btcb.balanceOf(alice), 1.00095e15, 2e8);
         assertEq(uint8(_plan(id).status), uint8(ISmartDCA.PlanStatus.Cancelled));
-        assertEq(_pair().dueUnits, 0);
-        assertEq(_pair().dueBase, 0);
+        assertEq(_pair().roundStableUnits, 0);
+        assertEq(_pair().roundPrincipal, 0);
     }
 
-    function test_cancel_beforeAnyBuy_returnsDepositWithoutFee() public {
+    function test_cancelPlan_beforeAnyBuy_returnsDepositWithoutFee() public {
         uint256 id = _create(alice, 1200e18, 12);
         assertEq(hub.balanceOf(address(dca)), 1200e24);
         vm.expectEmit(address(dca));
         emit ISmartDCA.PlanCancelled(id, 1200e18, 0, 0);
         vm.prank(alice);
-        dca.cancel(id);
+        dca.cancelPlan(id);
         assertEq(usdt.balanceOf(alice), 1200e18);
         assertEq(usdt.balanceOf(reserve), 0);
-        assertEq(_round(NOV + 11).sliceEnding, 0);
-        assertEq(_pair().dueUnits, 0);
-        assertEq(_pair().dueBase, 0);
+        assertEq(_round(NOV + 11).stableUnitsEnding, 0);
+        assertEq(_pair().roundStableUnits, 0);
+        assertEq(_pair().roundPrincipal, 0);
         assertEq(hub.balanceOf(address(dca)), 0, "Hub shares burned");
     }
 
-    function test_cancel_revertsForOthersAndTwice() public {
+    function test_cancelPlan_revertsForOthersAndTwice() public {
         uint256 id = _create(alice, 1200e18, 12);
         vm.prank(bob);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
-        dca.cancel(id);
+        dca.cancelPlan(id);
 
         vm.startPrank(alice);
-        dca.cancel(id);
+        dca.cancelPlan(id);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
-        dca.cancel(id);
+        dca.cancelPlan(id);
         vm.stopPrank();
     }
 
@@ -149,20 +149,20 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 id = _create(alice, 1200e18, 12);
         _runRound(1);
 
-        vm.warp(dca.lockTime(pairId));
+        vm.warp(dca.nextLockTime(pairId));
         vm.startPrank(keeper);
-        dca.startBuy(pairId, 1);
-        dca.executeOrder(pairId, ANY_QUOTE, _swapData(pairId));
+        dca.startRound(pairId, 1);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
         vm.stopPrank();
-        assertGt(_round(DEC).amountOut, 0, "December bought, not settled");
+        assertGt(_round(DEC).assetBought, 0, "December bought, not settled");
 
         usdt.mint(alice, 100e18);
         vm.startPrank(alice);
         usdt.approve(address(dca), 100e18);
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
-        dca.topUp(id, 100e18);
+        dca.topUpPlan(id, 100e18);
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
-        dca.cancel(id);
+        dca.cancelPlan(id);
         vm.expectEmit(address(dca));
         emit ISmartDCA.BoughtWithdrawn(id, 5e6, 1e15);
         dca.withdrawBought(id, type(uint256).max);
@@ -177,11 +177,11 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 id = _create(carol, 300e18, 3);
 
         vm.prank(carol);
-        dca.cancel(id);
+        dca.cancelPlan(id);
 
         assertEq(usdt.balanceOf(carol), 300e18);
-        assertEq(_round(NOV).sliceStarting, 0);
-        assertEq(_pair().dueUnits, 100e24, "alice untouched");
+        assertEq(_round(NOV).stableUnitsJoining, 0);
+        assertEq(_pair().roundStableUnits, 100e24, "alice untouched");
     }
 
     // ----- withdrawBought -----
@@ -215,40 +215,40 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 id = _create(alice, 1200e18, 12);
         _runRound(1);
         vm.prank(alice);
-        vm.expectRevert(ISmartDCA.InsufficientBought.selector);
+        vm.expectPartialRevert(ISmartDCA.WithdrawExceedsBought.selector);
         dca.withdrawBought(id, 1e18);
     }
 
     // ----- claim -----
 
-    function test_claim_toWalletAfterLastBuy() public {
+    function test_claimPlan_toWalletAfterLastBuy() public {
         uint256 id = _create(alice, 100e18, 2);
         _runRound(1);
 
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.PlanNotMatured.selector);
-        dca.claim(id, false);
+        dca.claimPlan(id, false);
 
         _runRound(1);
         vm.prank(alice);
-        dca.claim(id, false);
+        dca.claimPlan(id, false);
 
         assertApproxEqAbs(btcb.balanceOf(alice), 1e15, 4e8, "100 USDT at 100,000");
-        assertEq(uint8(_plan(id).status), uint8(ISmartDCA.PlanStatus.Done));
-        assertEq(_pair().dueUnits, 0, "plan left the pair after its last round");
+        assertEq(uint8(_plan(id).status), uint8(ISmartDCA.PlanStatus.Claimed));
+        assertEq(_pair().roundStableUnits, 0, "plan left the pair after its last round");
 
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
-        dca.claim(id, false);
+        dca.claimPlan(id, false);
     }
 
-    function test_claim_toCoreSendsVTokens() public {
+    function test_claimPlan_toCoreSendsVTokens() public {
         uint256 id = _create(alice, 100e18, 2);
         _runRound(1);
         _runRound(1);
 
         vm.prank(alice);
-        dca.claim(id, true);
+        dca.claimPlan(id, true);
 
         assertEq(btcb.balanceOf(alice), 0);
         assertApproxEqAbs(vBTC.balanceOf(alice), 5e6, 2, "1e15 BTCB at 2e26 per vBTC");
@@ -263,9 +263,9 @@ contract SmartDCA_PlansTest is SmartDCABase {
         vm.startPrank(alice);
         usdt.approve(address(dca), 100e18);
         vm.expectRevert(ISmartDCA.PlanMatured.selector);
-        dca.topUp(id, 100e18);
+        dca.topUpPlan(id, 100e18);
         vm.expectRevert(ISmartDCA.PlanMatured.selector);
-        dca.cancel(id);
+        dca.cancelPlan(id);
         vm.stopPrank();
     }
 
@@ -282,12 +282,12 @@ contract SmartDCA_PlansTest is SmartDCABase {
     }
 
     function test_createPlan_revertsWhenTheSliceIsZeroUnits() public {
-        dca.setMinPerBuy(address(usdt), 1);
+        dca.setMinAmountPerBuy(address(usdt), 1);
         hub.setPricePerShare(1e30); // 1 wei of USDT mints 1e-6 of a unit
         usdt.mint(alice, 2);
         vm.startPrank(alice);
         usdt.approve(address(dca), 2);
-        vm.expectRevert(ISmartDCA.DepositTooSmall.selector);
+        vm.expectPartialRevert(ISmartDCA.DepositTooSmall.selector);
         dca.createPlan(pairId, 2, 2);
         vm.stopPrank();
     }
@@ -304,14 +304,14 @@ contract SmartDCA_PlansTest is SmartDCABase {
 
     /// @dev Months with nothing due settle on the next call, so the plan joins the month after now
     function test_createPlan_afterEmptyMonthsSkipsThem() public {
-        vm.warp(SmartDCAMath.roundStart(DEC) + 1 days);
+        vm.warp(SmartDCAMath.lockTimeOf(DEC) + 1 days);
         uint256 id = _create(alice, 1200e18, 12);
         assertEq(_pair().lastSettledRound, DEC);
-        assertEq(_plan(id).firstRound, DEC + 1);
-        assertEq(_pair().dueUnits, 100e24, "joins the next round directly");
+        assertEq(_plan(id).scheduleFirstRound, DEC + 1);
+        assertEq(_pair().roundStableUnits, 100e24, "joins the next round directly");
     }
 
-    function test_topUp_ofAPlanParkedDuringLock() public {
+    function test_topUpPlan_ofAPlanParkedDuringLock() public {
         _create(alice, 1200e18, 12);
         vm.warp(NOV_LOCK + 1 hours);
         uint256 id = _create(carol, 300e18, 3);
@@ -321,23 +321,23 @@ contract SmartDCA_PlansTest is SmartDCABase {
         usdt.approve(address(dca), 300e18);
         vm.expectEmit(address(dca));
         emit ISmartDCA.PlanToppedUp(id, 300e18, 300e24, 200e24, 200e18, 3);
-        dca.topUp(id, 300e18);
+        dca.topUpPlan(id, 300e18);
         vm.stopPrank();
 
-        assertEq(_plan(id).firstRound, DEC);
-        assertEq(_round(NOV).sliceStarting, 200e24);
-        assertEq(_pair().dueUnits, 100e24, "November unchanged");
+        assertEq(_plan(id).scheduleFirstRound, DEC);
+        assertEq(_round(NOV).stableUnitsJoining, 200e24);
+        assertEq(_pair().roundStableUnits, 100e24, "November unchanged");
     }
 
-    function test_topUp_revertsBelowTheMinimumForTheBuysLeft() public {
+    function test_topUpPlan_revertsBelowTheMinimumForTheBuysLeft() public {
         uint256 id = _create(alice, 1200e18, 12);
         _runRound(1);
         usdt.mint(alice, 110e18);
         vm.startPrank(alice);
         usdt.approve(address(dca), 110e18);
-        vm.expectRevert(ISmartDCA.DepositTooSmall.selector);
-        dca.topUp(id, 110e18 - 1); // 11 buys left at 10 USDT each
-        dca.topUp(id, 110e18);
+        vm.expectPartialRevert(ISmartDCA.DepositTooSmall.selector);
+        dca.topUpPlan(id, 110e18 - 1); // 11 buys left at 10 USDT each
+        dca.topUpPlan(id, 110e18);
         vm.stopPrank();
     }
 
@@ -347,7 +347,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         _runRound(1);
         MockVToken vBTC2 = new MockVToken(address(btcb), 3e26 + 7);
         comptroller.list(address(vBTC2));
-        dca.setYieldSource(address(btcb), ISmartDCA.SourceKind.Core, address(vBTC2));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Core, address(vBTC2));
 
         vm.prank(alice);
         dca.withdrawBought(id, 0.3e15 + 7);
@@ -355,7 +355,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
     }
 
     /// @dev W = 1,100 units x 1.001 = 1,101.10. Fee = (1,101.10 - 100 x 11) x 5% = 0.055.
-    function test_cancel_afterASettledRoundChargesFeeOnTheBuysLeft() public {
+    function test_cancelPlan_afterASettledRoundChargesFeeOnTheBuysLeft() public {
         uint256 id = _create(alice, 1200e18, 12);
         hub.setPricePerShare(1.001e18);
         _runRound(1);
@@ -364,19 +364,19 @@ contract SmartDCA_PlansTest is SmartDCABase {
         vm.expectEmit(address(dca));
         emit ISmartDCA.PlanCancelled(id, 1101.045e18, 0.055e18, 1.00095e15);
         vm.prank(alice);
-        dca.cancel(id);
+        dca.cancelPlan(id);
 
         assertEq(usdt.balanceOf(alice), 1101.045e18);
         assertEq(usdt.balanceOf(reserve) - reserveBefore, 0.055e18);
         assertApproxEqAbs(btcb.balanceOf(alice), 1.00095e15, 2e8);
     }
 
-    function test_cancel_revertsWhenTheHubCannotPay() public {
+    function test_cancelPlan_revertsWhenTheHubCannotPay() public {
         uint256 id = _create(alice, 1200e18, 12);
         hub.setRedeemPaused(true);
         vm.prank(alice);
         vm.expectRevert(bytes("hub paused"));
-        dca.cancel(id);
+        dca.cancelPlan(id);
     }
 
     /// @dev The vToken rate moved after the buy, so units and shares no longer divide evenly
@@ -403,17 +403,17 @@ contract SmartDCA_PlansTest is SmartDCABase {
     }
 
     /// @dev The pair's next round is locked for other plans, but a matured plan is in none of it
-    function test_claim_duringTheNextLock() public {
+    function test_claimPlan_duringTheNextLock() public {
         uint256 id = _create(alice, 100e18, 2);
         _create(bob, 1200e18, 12);
         _runRound(1);
         _runRound(1);
-        vm.warp(dca.lockTime(pairId));
+        vm.warp(dca.nextLockTime(pairId));
 
         vm.expectEmit(address(dca));
         emit ISmartDCA.PlanClaimed(id, false, 1e15);
         vm.prank(alice);
-        dca.claim(id, false);
-        assertEq(uint8(_plan(id).status), uint8(ISmartDCA.PlanStatus.Done));
+        dca.claimPlan(id, false);
+        assertEq(uint8(_plan(id).status), uint8(ISmartDCA.PlanStatus.Claimed));
     }
 }

@@ -35,10 +35,9 @@ contract SmartDCA_FuzzTest is SmartDCABase {
         comptroller.list(address(vETH));
         // Same price as BTCB, so the one mock swapHelper rate fills both pairs
         oracle.setPrice(address(eth), BTC_PRICE);
-        dca.setYieldSource(address(eth), ISmartDCA.SourceKind.Core, address(vETH));
-        ethPairId = dca.addPair(address(usdt), address(eth));
+        ethPairId = _addPair(address(usdt), address(eth), address(hub), address(vETH));
         // Dust-sized plans too
-        dca.setMinPerBuy(address(usdt), 1e6);
+        dca.setMinAmountPerBuy(address(usdt), 1e6);
         users = [alice, bob, carol, makeAddr("dave")];
     }
 
@@ -87,14 +86,14 @@ contract SmartDCA_FuzzTest is SmartDCABase {
             usdt.mint(owner, amount);
             vm.prank(owner);
             usdt.approve(address(dca), amount);
-            _call(owner, abi.encodeCall(dca.topUp, (id, amount)));
+            _call(owner, abi.encodeCall(dca.topUpPlan, (id, amount)));
         } else if (action == 3) {
-            _call(owner, abi.encodeCall(dca.cancel, (id)));
+            _call(owner, abi.encodeCall(dca.cancelPlan, (id)));
         } else if (action == 4) {
             uint256 amount = _rnd(2) == 0 ? type(uint256).max : 1 + _rnd(1e12);
             _call(owner, abi.encodeCall(dca.withdrawBought, (id, amount)));
         } else {
-            _call(owner, abi.encodeCall(dca.claim, (id, _rnd(2) == 0)));
+            _call(owner, abi.encodeCall(dca.claimPlan, (id, _rnd(2) == 0)));
         }
     }
 
@@ -102,9 +101,9 @@ contract SmartDCA_FuzzTest is SmartDCABase {
     function _roundStep(uint32 pid) internal {
         uint32 round = _pairOf(pid).lastSettledRound + 1;
         (uint8 total, uint8 done, , , , , , , , , , , , ) = dca.rounds(pid, round);
-        if (total == 0) _call(keeper, abi.encodeCall(dca.startBuy, (pid, uint8(1 + _rnd(3)))));
-        else if (done < total) _call(keeper, abi.encodeCall(dca.executeOrder, (pid, ANY_QUOTE, _swapData(pid))));
-        else _call(keeper, abi.encodeCall(dca.settle, (pid)));
+        if (total == 0) _call(keeper, abi.encodeCall(dca.startRound, (pid, uint8(1 + _rnd(3)))));
+        else if (done < total) _call(keeper, abi.encodeCall(dca.swapRoundPart, (pid, ANY_QUOTE, _swapData(pid))));
+        else _call(keeper, abi.encodeCall(dca.settleRound, (pid)));
     }
 
     function _moveRates() internal {
@@ -124,44 +123,45 @@ contract SmartDCA_FuzzTest is SmartDCABase {
         for (uint256 i; i < ids.length; ++i) {
             ISmartDCA.Plan memory p = _plan(ids[i]);
             if (p.status == ISmartDCA.PlanStatus.Active) {
-                assertTrue(_call(p.owner, abi.encodeCall(dca.claim, (ids[i], false))), "claim failed");
+                assertTrue(_call(p.owner, abi.encodeCall(dca.claimPlan, (ids[i], false))), "claim failed");
             }
         }
-        (, , , uint256 usdtUnits) = dca.sources(address(usdt));
-        assertEq(usdtUnits, 0, "stable units left after every exit");
-        _checkHoldings(address(btcb), address(vBTC));
-        _checkHoldings(address(eth), address(vETH));
+        (, , , uint256 btcPairUsdtUnits) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
+        (, , , uint256 ethPairUsdtUnits) = dca.yieldSources(ethPairId, ISmartDCA.Side.Stable);
+        assertEq(btcPairUsdtUnits + ethPairUsdtUnits, 0, "stable units left after every exit");
+        _checkHoldings(pairId, address(vBTC));
+        _checkHoldings(ethPairId, address(vETH));
     }
 
     // ----- invariants -----
 
-    /// @dev `dueUnits` and `dueBase` are the sums over the plans in the pair's next round, and what the pair's
+    /// @dev `roundStableUnits` and `roundPrincipal` are the sums over the plans in the pair's next round, and what the pair's
     ///      plans own of the asset fits in the asset's units
     function _checkPair(uint32 pid) internal view {
         ISmartDCA.Pair memory pair = _pairOf(pid);
         uint32 open = pair.lastSettledRound + 1;
-        uint256 slices;
-        uint256 bases;
+        uint256 stableUnitsSum;
+        uint256 principalSum;
         for (uint256 i; i < ids.length; ++i) {
             ISmartDCA.Plan memory p = _plan(ids[i]);
             if (p.pairId != pid || p.status != ISmartDCA.PlanStatus.Active) continue;
-            if (p.firstRound <= open && open < p.firstRound + p.buys) {
-                slices += p.slice;
-                bases += p.base;
+            if (p.scheduleFirstRound <= open && open < p.scheduleFirstRound + p.scheduleBuys) {
+                stableUnitsSum += p.stableUnitsPerBuy;
+                principalSum += p.principalPerBuy;
             }
         }
-        assertEq(pair.dueUnits, slices, "dueUnits");
-        assertEq(pair.dueBase, bases, "dueBase");
-        _checkHoldings(pair.asset, pid == pairId ? address(vBTC) : address(vETH));
+        assertEq(pair.roundStableUnits, stableUnitsSum, "roundStableUnits");
+        assertEq(pair.roundPrincipal, principalSum, "roundPrincipal");
+        _checkHoldings(pid, pid == pairId ? address(vBTC) : address(vETH));
     }
 
     /// @dev The source balance covers the tracked shares, and the plans' bought units fit in the tracked units
-    function _checkHoldings(address asset, address vToken) internal view {
-        (, , uint256 shares, uint256 units) = dca.sources(asset);
+    function _checkHoldings(uint32 pid, address vToken) internal view {
+        (, , uint256 shares, uint256 units) = dca.yieldSources(pid, ISmartDCA.Side.Asset);
         assertEq(MockVToken(vToken).balanceOf(address(dca)), shares, "shares");
         uint256 owned;
         for (uint256 i; i < ids.length; ++i) {
-            if (_pairOf(_plan(ids[i]).pairId).asset == asset) owned += lens.getPlan(dca, ids[i]).boughtUnits;
+            if (_plan(ids[i]).pairId == pid) owned += lens.getPlan(dca, ids[i]).assetUnits;
         }
         assertLe(owned, units, "plans own more than the pool");
     }
@@ -178,7 +178,7 @@ contract SmartDCA_FuzzTest is SmartDCABase {
             ISmartDCA.Plan memory p = _plan(ids[i]);
             if (
                 p.status == ISmartDCA.PlanStatus.Active &&
-                _pairOf(p.pairId).lastSettledRound < p.firstRound + p.buys - 1
+                _pairOf(p.pairId).lastSettledRound < p.scheduleFirstRound + p.scheduleBuys - 1
             ) {
                 return true;
             }
@@ -209,11 +209,11 @@ contract SmartDCA_FuzzTest is SmartDCABase {
             p.asset,
             p.enabled,
             p.lastSettledRound,
-            p.lockEnteredRound,
-            p.dueUnits,
-            p.dueBase,
-            p.cumIndex,
-            p.cumBaseIndex
+            p.lockEmittedRound,
+            p.roundStableUnits,
+            p.roundPrincipal,
+            p.assetPerUnitIndex,
+            p.assetPerPrincipalIndex
         ) = dca.pairs(pid);
     }
 }

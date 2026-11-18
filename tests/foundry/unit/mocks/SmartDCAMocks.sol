@@ -192,10 +192,12 @@ interface ISmartDCAPairs {
 /// @notice SwapHelper stand-in for the swap call: `swap(pairId)` reads the pair from the caller (SmartDCA) and pays
 ///         `rate / 1e18` of its asset per unit of stable held, less a pool fee of `feeBps`, back to the caller.
 ///         `quote(amountIn)` returns the same amount, as an aggregator quote would. It applies no minimum, so the
-///         caller's own bound is what gets tested. With `fail` set it reverts.
+///         caller's own bound is what gets tested. With `fail` set it reverts. With `refundBps` set it sends that
+///         share of the stable back to the caller unswapped, as a route that ends with a sweep of the input does.
 contract MockSwapHelper {
     uint256 public rate;
     uint256 public feeBps = 25;
+    uint256 public refundBps;
     bool public fail;
 
     function setRate(uint256 value) external {
@@ -204,6 +206,10 @@ contract MockSwapHelper {
 
     function setFeeBps(uint256 value) external {
         feeBps = value;
+    }
+
+    function setRefundBps(uint256 value) external {
+        refundBps = value;
     }
 
     function setFail(bool value) external {
@@ -218,6 +224,9 @@ contract MockSwapHelper {
         require(!fail, "swap failed");
         (address tokenIn, address tokenOut, , , , , , , ) = ISmartDCAPairs(msg.sender).pairs(pairId);
         uint256 amountIn = IERC20(tokenIn).balanceOf(address(this));
+        uint256 refund = (amountIn * refundBps) / 10_000;
+        if (refund != 0) IERC20(tokenIn).transfer(msg.sender, refund);
+        amountIn -= refund;
         // Spent, so the next part starts from a zero balance
         IERC20(tokenIn).transfer(address(0xdead), amountIn);
         MockERC20(tokenOut).mint(msg.sender, quote(amountIn));

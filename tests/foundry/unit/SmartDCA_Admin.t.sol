@@ -30,11 +30,10 @@ contract SmartDCA_AdminTest is SmartDCABase {
         vm.expectRevert(bytes("Initializable: contract is already initialized"));
         dca.initialize(address(acm), reserve);
         assertEq(dca.reserve(), reserve);
-        assertEq(dca.maxSlippage(), 10);
-        assertEq(dca.maxSplitN(), 10);
+        assertEq(dca.maxSlippageBps(), 10);
+        assertEq(dca.maxParts(), 10);
         assertEq(dca.minBuys(), 2);
         assertEq(dca.maxBuys(), 60);
-        assertEq(dca.backupDelay(), 9 hours);
     }
 
     function test_setters_needAcmPermission() public {
@@ -45,24 +44,20 @@ contract SmartDCA_AdminTest is SmartDCABase {
         dca.setMaxFeeRate(1_000);
         _expectUnauthorized("setMaxSlippage(uint16)");
         dca.setMaxSlippage(1);
-        _expectUnauthorized("setMaxSplitN(uint8)");
-        dca.setMaxSplitN(1);
-        _expectUnauthorized("setBackup(address,bool)");
-        dca.setBackup(stranger, true);
+        _expectUnauthorized("setMaxParts(uint8)");
+        dca.setMaxParts(1);
         _expectUnauthorized("pause()");
         dca.pause();
-        _expectUnauthorized("setYieldSource(address,uint8,address)");
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Hub, address(hub));
+        _expectUnauthorized("setYieldSource(uint32,uint8,uint8,address)");
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub));
         _expectUnauthorized("setKeeper(address,bool)");
         dca.setKeeper(stranger, true);
-        _expectUnauthorized("setBackupDelay(uint32)");
-        dca.setBackupDelay(1);
-        _expectUnauthorized("setMinPerBuy(address,uint256)");
-        dca.setMinPerBuy(address(usdt), 1);
+        _expectUnauthorized("setMinAmountPerBuy(address,uint256)");
+        dca.setMinAmountPerBuy(address(usdt), 1);
         _expectUnauthorized("setBuyBounds(uint8,uint8)");
         dca.setBuyBounds(2, 3);
-        _expectUnauthorized("addPair(address,address)");
-        dca.addPair(address(usdt), address(btcb));
+        _expectUnauthorized("addPair(address,address,uint8,address,uint8,address)");
+        _addPair(address(usdt), address(btcb), address(hub), address(vBTC));
         _expectUnauthorized("setPairEnabled(uint32,bool)");
         dca.setPairEnabled(pairId, false);
         _expectUnauthorized("unpause()");
@@ -80,17 +75,15 @@ contract SmartDCA_AdminTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.AboveHardCap.selector);
         dca.setMaxSlippage(101);
         vm.expectRevert(ISmartDCA.AboveHardCap.selector);
-        dca.setMaxSplitN(51);
+        dca.setMaxParts(51);
         vm.expectRevert(ISmartDCA.InvalidParameter.selector);
-        dca.setMaxSplitN(0);
-        vm.expectRevert(ISmartDCA.AboveHardCap.selector);
-        dca.setBackupDelay(24 hours + 1);
+        dca.setMaxParts(0);
         vm.expectRevert(ISmartDCA.AboveHardCap.selector);
         dca.setBuyBounds(2, 121);
         vm.expectRevert(ISmartDCA.InvalidParameter.selector);
         dca.setBuyBounds(5, 4);
         vm.expectRevert(ISmartDCA.InvalidParameter.selector);
-        dca.setMinPerBuy(address(usdt), 0);
+        dca.setMinAmountPerBuy(address(usdt), 0);
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.setReserve(address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
@@ -100,26 +93,49 @@ contract SmartDCA_AdminTest is SmartDCABase {
     function test_addPair_rejectsBadInputsThenAdds() public {
         MockERC20 eth = new MockERC20("ETH", "ETH", 18);
 
-        vm.expectRevert(ISmartDCA.InvalidPair.selector);
-        dca.addPair(address(usdt), address(usdt));
-        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.NoYieldSource.selector, address(eth)));
-        dca.addPair(address(usdt), address(eth));
-        vm.expectRevert(ISmartDCA.PairExists.selector);
-        dca.addPair(address(usdt), address(btcb));
-
         MockVToken vETH = new MockVToken(address(eth), VBTC_RATE);
         comptroller.list(address(vETH));
-        dca.setYieldSource(address(eth), ISmartDCA.SourceKind.Core, address(vETH));
 
-        // No oracle price for vETH yet
+        vm.expectRevert(ISmartDCA.SameTokens.selector);
+        _addPair(address(usdt), address(usdt), address(hub), address(vETH));
+        vm.expectRevert(ISmartDCA.PairExists.selector);
+        _addPair(address(usdt), address(btcb), address(hub), address(vBTC));
+        // The asset source must hold the asset
+        // No oracle price for ETH yet
         vm.expectRevert(bytes("no price"));
-        dca.addPair(address(usdt), address(eth));
+        _addPair(address(usdt), address(eth), address(hub), address(vETH));
 
         oracle.setPrice(address(eth), 3_000e18);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.InvalidSource.selector, address(vBTC)));
+        _addPair(address(usdt), address(eth), address(hub), address(vBTC));
+        vm.expectRevert(ISmartDCA.ZeroAddress.selector);
+        _addPair(address(usdt), address(eth), address(0), address(vETH));
+
         vm.expectEmit(address(dca));
         emit ISmartDCA.PairAdded(2, address(usdt), address(eth));
-        assertEq(dca.addPair(address(usdt), address(eth)), 2);
-        assertEq(dca.pairIdOf(address(usdt), address(eth)), 2);
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.YieldSourceUpdated(
+            2,
+            ISmartDCA.Side.Stable,
+            address(0),
+            ISmartDCA.SourceKind.Hub,
+            address(hub),
+            0
+        );
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.YieldSourceUpdated(
+            2,
+            ISmartDCA.Side.Asset,
+            address(0),
+            ISmartDCA.SourceKind.Core,
+            address(vETH),
+            0
+        );
+        assertEq(_addPair(address(usdt), address(eth), address(hub), address(vETH)), 2);
+        assertEq(dca.pairIdByTokens(address(usdt), address(eth)), 2);
+        (ISmartDCA.SourceKind kind, address source, , ) = dca.yieldSources(2, ISmartDCA.Side.Asset);
+        assertEq(uint8(kind), uint8(ISmartDCA.SourceKind.Core));
+        assertEq(source, address(vETH));
     }
 
     function test_setPairEnabled_falseBlocksTopUps() public {
@@ -132,9 +148,9 @@ contract SmartDCA_AdminTest is SmartDCABase {
         vm.startPrank(alice);
         usdt.approve(address(dca), 120e18);
         vm.expectRevert(ISmartDCA.PairDisabled.selector);
-        dca.topUp(id, 120e18);
+        dca.topUpPlan(id, 120e18);
         // Leaving still works
-        dca.cancel(id);
+        dca.cancelPlan(id);
         vm.stopPrank();
     }
 
@@ -144,18 +160,18 @@ contract SmartDCA_AdminTest is SmartDCABase {
         MockHub unregistered = new MockHub(address(usdt));
         MockVToken unlisted = new MockVToken(address(usdt), 1e18);
 
-        vm.expectRevert(ISmartDCA.InvalidSource.selector);
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Hub, address(otherHub));
-        vm.expectRevert(ISmartDCA.InvalidSource.selector);
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Hub, address(unregistered));
-        vm.expectRevert(ISmartDCA.InvalidSource.selector);
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Core, address(unlisted));
-        vm.expectRevert(ISmartDCA.InvalidSource.selector);
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Core, address(vBTC));
-        vm.expectRevert(ISmartDCA.InvalidSource.selector);
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.None, address(hub));
-        vm.expectRevert(ISmartDCA.InvalidSource.selector);
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Hub, address(hub));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.InvalidSource.selector, address(otherHub)));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(otherHub));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.InvalidSource.selector, address(unregistered)));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(unregistered));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.InvalidSource.selector, address(unlisted)));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Core, address(unlisted));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.InvalidSource.selector, address(vBTC)));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Core, address(vBTC));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.InvalidSource.selector, address(hub)));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.None, address(hub));
+        vm.expectRevert(ISmartDCA.SourceUnchanged.selector);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub));
     }
 
     function test_setYieldSource_migratesWithoutChangingPlans() public {
@@ -163,17 +179,54 @@ contract SmartDCA_AdminTest is SmartDCABase {
         MockHub hub2 = new MockHub(address(usdt));
         registry.set(address(hub2), true);
 
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Hub, address(hub2));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub2));
 
         assertEq(hub.balanceOf(address(dca)), 0);
         assertEq(hub2.balanceOf(address(dca)), 1200e24);
-        assertEq(dca.tokenOfSource(address(hub)), address(0));
-        assertEq(dca.tokenOfSource(address(hub2)), address(usdt));
-        assertEq(_plan(id).stableUnits, 1200e24);
+        (, address source, uint256 shares, ) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
+        assertEq(source, address(hub2));
+        assertEq(shares, 1200e24);
+        assertEq(_plan(id).scheduleStableUnits, 1200e24);
 
         vm.prank(alice);
-        dca.cancel(id);
+        dca.cancelPlan(id);
         assertEq(usdt.balanceOf(alice), 1200e18);
+    }
+
+    /// @dev Two pairs sell USDT; moving one pair's USDT leaves the other pair's USDT where it is
+    function test_setYieldSource_movesOnlyThatPair() public {
+        MockERC20 eth = new MockERC20("ETH", "ETH", 18);
+        MockVToken vETH = new MockVToken(address(eth), VBTC_RATE);
+        comptroller.list(address(vETH));
+        oracle.setPrice(address(eth), 3_000e18);
+        uint32 ethPairId = _addPair(address(usdt), address(eth), address(hub), address(vETH));
+
+        uint256 btcPlan = _create(alice, 1200e18, 12);
+        usdt.mint(bob, 600e18);
+        vm.startPrank(bob);
+        usdt.approve(address(dca), 600e18);
+        dca.createPlan(ethPairId, 600e18, 6);
+        vm.stopPrank();
+
+        MockHub hub2 = new MockHub(address(usdt));
+        registry.set(address(hub2), true);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub2));
+
+        // Only the BTCB pair's 1,200 USDT moved; the ETH pair's 600 stayed in the first Hub
+        assertEq(hub2.balanceOf(address(dca)), 1200e24);
+        assertEq(hub.balanceOf(address(dca)), 600e24);
+        (, address ethSource, uint256 ethShares, ) = dca.yieldSources(ethPairId, ISmartDCA.Side.Stable);
+        assertEq(ethSource, address(hub));
+        assertEq(ethShares, 600e24);
+
+        // A pair locked on its round only blocks its own switch
+        vm.warp(NOV_LOCK);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.PairLocked.selector, ethPairId));
+        dca.setYieldSource(ethPairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub2));
+
+        vm.prank(alice);
+        vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
+        dca.cancelPlan(btcPlan);
     }
 
     function test_setYieldSource_blockedWhilePairLocked() public {
@@ -182,11 +235,11 @@ contract SmartDCA_AdminTest is SmartDCABase {
         registry.set(address(hub2), true);
         vm.warp(NOV_LOCK);
 
-        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.TokenLocked.selector, address(usdt)));
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Hub, address(hub2));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.PairLocked.selector, pairId));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub2));
     }
 
-    function test_sweep_onlyWhatIsNotOwed() public {
+    function test_sweepToken_onlyWhatIsNotOwed() public {
         _create(alice, 1200e18, 12);
 
         // Donated Hub shares are sweepable, the plan's are not
@@ -200,11 +253,11 @@ contract SmartDCA_AdminTest is SmartDCABase {
         // Mid-round stable is owed to the round
         vm.warp(NOV_LOCK);
         vm.prank(keeper);
-        dca.startBuy(pairId, 1);
+        dca.startRound(pairId, 1);
         usdt.mint(address(dca), 1e18);
         dca.sweepToken(address(usdt), stranger);
         assertEq(usdt.balanceOf(stranger), 1e18);
-        assertEq(usdt.balanceOf(address(dca)), _round(NOV).toSwap);
+        assertEq(usdt.balanceOf(address(dca)), _round(NOV).stableToSwap);
     }
 
     function test_claimRewards_sendsXvsToReserve() public {
@@ -222,14 +275,13 @@ contract SmartDCA_AdminTest is SmartDCABase {
         MockERC20 usdc = new MockERC20("USDC", "USDC", 18);
         MockHub usdcHub = new MockHub(address(usdc));
         registry.set(address(usdcHub), true);
-        dca.setYieldSource(address(usdc), ISmartDCA.SourceKind.Hub, address(usdcHub));
         oracle.setPrice(address(usdc), 1e18);
 
         vm.expectRevert(ISmartDCA.InvalidParameter.selector);
-        dca.addPair(address(usdc), address(btcb));
+        _addPair(address(usdc), address(btcb), address(usdcHub), address(vBTC));
 
-        dca.setMinPerBuy(address(usdc), 10e18);
-        assertEq(dca.addPair(address(usdc), address(btcb)), 2);
+        dca.setMinAmountPerBuy(address(usdc), 10e18);
+        assertEq(_addPair(address(usdc), address(btcb), address(usdcHub), address(vBTC)), 2);
     }
 
     function test_setters_storeValuesAtTheirCaps() public {
@@ -240,40 +292,34 @@ contract SmartDCA_AdminTest is SmartDCABase {
         emit ISmartDCA.MaxSlippageUpdated(10, 100);
         dca.setMaxSlippage(100);
         vm.expectEmit(address(dca));
-        emit ISmartDCA.MaxSplitNUpdated(10, 50);
-        dca.setMaxSplitN(50);
-        vm.expectEmit(address(dca));
-        emit ISmartDCA.BackupDelayUpdated(9 hours, 24 hours);
-        dca.setBackupDelay(24 hours);
+        emit ISmartDCA.MaxPartsUpdated(10, 50);
+        dca.setMaxParts(50);
         vm.expectEmit(address(dca));
         emit ISmartDCA.BuyBoundsUpdated(2, 60, 1, 120);
         dca.setBuyBounds(1, 120);
         vm.expectEmit(address(dca));
-        emit ISmartDCA.MinPerBuyUpdated(address(usdt), 10e18, 1);
-        dca.setMinPerBuy(address(usdt), 1);
+        emit ISmartDCA.MinAmountPerBuyUpdated(address(usdt), 10e18, 1);
+        dca.setMinAmountPerBuy(address(usdt), 1);
         vm.expectEmit(address(dca));
         emit ISmartDCA.ReserveUpdated(reserve, stranger);
         dca.setReserve(stranger);
 
-        assertEq(dca.feeRate(), 2_000);
-        assertEq(dca.maxSlippage(), 100);
-        assertEq(dca.maxSplitN(), 50);
-        assertEq(dca.backupDelay(), 24 hours);
+        assertEq(dca.feeRateBps(), 2_000);
+        assertEq(dca.maxSlippageBps(), 100);
+        assertEq(dca.maxParts(), 50);
         assertEq(dca.minBuys(), 1);
         assertEq(dca.maxBuys(), 120);
-        assertEq(dca.minPerBuy(address(usdt)), 1);
+        assertEq(dca.minAmountPerBuy(address(usdt)), 1);
         assertEq(dca.reserve(), stranger);
     }
 
     function test_setters_rejectZeroInputs() public {
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.UnknownPair.selector, 9));
+        dca.setYieldSource(9, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
-        dca.setBackup(address(0), true);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
-        dca.setYieldSource(address(0), ISmartDCA.SourceKind.Hub, address(hub));
-        vm.expectRevert(ISmartDCA.ZeroAddress.selector);
-        dca.setYieldSource(address(usdt), ISmartDCA.SourceKind.Hub, address(0));
-        vm.expectRevert(ISmartDCA.ZeroAddress.selector);
-        dca.setMinPerBuy(address(0), 1);
+        dca.setMinAmountPerBuy(address(0), 1);
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.sweepToken(address(usdt), address(0));
         vm.expectRevert(ISmartDCA.InvalidParameter.selector);
@@ -283,7 +329,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
     // ----- fee cap -----
 
     function test_setMaxFeeRate_startsAt20PercentAndRejectsBadValues() public {
-        assertEq(dca.maxFeeRate(), 2_000);
+        assertEq(dca.maxFeeRateBps(), 2_000);
         vm.expectRevert(ISmartDCA.AboveHardCap.selector);
         dca.setMaxFeeRate(10_001);
         // The fee rate is 5% (500 bps): a cap below it would leave the rate above its own cap
@@ -295,11 +341,11 @@ contract SmartDCA_AdminTest is SmartDCABase {
         vm.expectEmit(address(dca));
         emit ISmartDCA.MaxFeeRateUpdated(2_000, 3_000);
         dca.setMaxFeeRate(3_000);
-        assertEq(dca.maxFeeRate(), 3_000);
+        assertEq(dca.maxFeeRateBps(), 3_000);
 
         // Above the old 20%, allowed under the new cap
         dca.setFeeRate(3_000);
-        assertEq(dca.feeRate(), 3_000);
+        assertEq(dca.feeRateBps(), 3_000);
         vm.expectRevert(ISmartDCA.AboveHardCap.selector);
         dca.setFeeRate(3_001);
 
@@ -310,27 +356,20 @@ contract SmartDCA_AdminTest is SmartDCABase {
         dca.setFeeRate(501);
         dca.setMaxFeeRate(10_000);
         dca.setFeeRate(10_000);
-        assertEq(dca.feeRate(), 10_000);
+        assertEq(dca.feeRateBps(), 10_000);
     }
 
-    function test_setKeeperAndBackup_canBeRevoked() public {
+    function test_setKeeper_canBeRevoked() public {
         _create(alice, 1200e18, 12);
         vm.expectEmit(address(dca));
         emit ISmartDCA.KeeperUpdated(keeper, false);
         dca.setKeeper(keeper, false);
-        vm.expectEmit(address(dca));
-        emit ISmartDCA.BackupUpdated(backup, false);
-        dca.setBackup(backup, false);
         assertFalse(dca.isKeeper(keeper));
-        assertFalse(dca.isBackup(backup));
 
-        vm.warp(NOV_LOCK + 9 hours);
+        vm.warp(NOV_LOCK);
         vm.prank(keeper);
-        vm.expectRevert(ISmartDCA.NotAllowedCaller.selector);
-        dca.startBuy(pairId, 1);
-        vm.prank(backup);
-        vm.expectRevert(ISmartDCA.NotAllowedCaller.selector);
-        dca.startBuy(pairId, 1);
+        vm.expectPartialRevert(ISmartDCA.NotRoundCaller.selector);
+        dca.startRound(pairId, 1);
     }
 
     /// @dev Core to Hub and back: plans keep their units, and claim to Core needs a Core source
@@ -338,41 +377,42 @@ contract SmartDCA_AdminTest is SmartDCABase {
         uint256 id = _create(alice, 100e18, 2);
         _runRound(1);
         _runRound(1);
-        (, , , uint256 unitsBefore) = dca.sources(address(btcb));
+        (, , , uint256 unitsBefore) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
 
         MockHub btcHub = new MockHub(address(btcb));
         registry.set(address(btcHub), true);
         vm.expectEmit(address(dca));
         emit ISmartDCA.YieldSourceUpdated(
-            address(btcb),
+            pairId,
+            ISmartDCA.Side.Asset,
             address(vBTC),
             ISmartDCA.SourceKind.Hub,
             address(btcHub),
             1e15
         );
-        dca.setYieldSource(address(btcb), ISmartDCA.SourceKind.Hub, address(btcHub));
-        (, , , uint256 unitsAfter) = dca.sources(address(btcb));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Hub, address(btcHub));
+        (, , , uint256 unitsAfter) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
         assertEq(unitsAfter, unitsBefore);
         assertEq(vBTC.balanceOf(address(dca)), 0);
 
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.NotCoreSource.selector);
-        dca.claim(id, true);
+        dca.claimPlan(id, true);
 
         MockVToken vBTC2 = new MockVToken(address(btcb), 3e26);
         comptroller.list(address(vBTC2));
-        dca.setYieldSource(address(btcb), ISmartDCA.SourceKind.Core, address(vBTC2));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Core, address(vBTC2));
         vm.prank(alice);
-        dca.claim(id, true);
+        dca.claimPlan(id, true);
         assertApproxEqAbs(vBTC2.balanceOf(alice), uint256(1e15 * 1e18) / 3e26, 2);
     }
 
-    function test_sweep_keepsTheRoundsBoughtAsset() public {
+    function test_sweepToken_keepsTheRoundsBoughtAsset() public {
         _create(alice, 1200e18, 12);
         vm.warp(NOV_LOCK);
         vm.startPrank(keeper);
-        dca.startBuy(pairId, 2);
-        dca.executeOrder(pairId, ANY_QUOTE, _swapData(pairId));
+        dca.startRound(pairId, 2);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
         vm.stopPrank();
 
         btcb.mint(address(dca), 7);
@@ -380,7 +420,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
         emit ISmartDCA.TokenSwept(address(btcb), stranger, 7);
         dca.sweepToken(address(btcb), stranger);
         assertEq(btcb.balanceOf(stranger), 7);
-        assertEq(btcb.balanceOf(address(dca)), _round(NOV).amountOut);
+        assertEq(btcb.balanceOf(address(dca)), _round(NOV).assetBought);
     }
 
     function test_constructor_rejectsZeroAddresses() public {

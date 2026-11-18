@@ -26,18 +26,18 @@ contract SmartDCA_LensTest is SmartDCABase {
         assertEq(v.firstRound, NOV);
         assertEq(v.lastRound, NOV + 11);
         assertFalse(v.inRunningRound);
-        assertEq(v.T, 12);
-        assertEq(v.C, 0);
-        assertEq(v.n, 12);
-        assertEq(v.P, 0);
-        assertEq(v.W, 1201.2e18);
-        assertEq(v.E, 100.1e18);
-        assertEq(v.B, 100e18);
-        assertEq(v.F, 0.005e18);
-        assertEq(v.N, 100.095e18);
-        assertEq(v.NW, 1201.14e18);
-        assertEq(v.DW, 1201.14e18);
-        assertEq(v.bought, 0);
+        assertEq(v.totalBuys, 12);
+        assertEq(v.buysSettled, 0);
+        assertEq(v.buysLeft, 12);
+        assertEq(v.stablePending, 0);
+        assertEq(v.stableWaiting, 1201.2e18);
+        assertEq(v.nextBuyStable, 100.1e18);
+        assertEq(v.principalPerBuy, 100e18);
+        assertEq(v.nextBuyFee, 0.005e18);
+        assertEq(v.nextBuyNet, 100.095e18);
+        assertEq(v.netWaiting, 1201.14e18);
+        assertEq(v.displayedWaiting, 1201.14e18);
+        assertEq(v.assetValue, 0);
     }
 
     function test_getPlan_duringRound() public {
@@ -45,15 +45,15 @@ contract SmartDCA_LensTest is SmartDCABase {
         hub.setPricePerShare(1.001e18);
         vm.warp(NOV_LOCK);
         vm.prank(keeper);
-        dca.startBuy(pairId, 2);
+        dca.startRound(pairId, 2);
 
         SmartDCALens.PlanView memory v = lens.getPlan(dca, id);
         assertTrue(v.inRunningRound);
-        assertEq(v.P, 100.095e18);
-        assertEq(v.n, 11);
-        assertEq(v.W, 1101.1e18);
-        assertEq(v.N, 100.095e18);
-        assertEq(v.DW, 1201.14e18, "unchanged by the start of the round");
+        assertEq(v.stablePending, 100.095e18);
+        assertEq(v.buysLeft, 11);
+        assertEq(v.stableWaiting, 1101.1e18);
+        assertEq(v.nextBuyNet, 100.095e18);
+        assertEq(v.displayedWaiting, 1201.14e18, "unchanged by the start of the round");
     }
 
     function test_getPlan_afterSettle() public {
@@ -63,35 +63,35 @@ contract SmartDCA_LensTest is SmartDCABase {
 
         SmartDCALens.PlanView memory v = lens.getPlan(dca, id);
         assertFalse(v.inRunningRound);
-        assertEq(v.C, 1);
-        assertEq(v.n, 11);
-        assertEq(v.P, 0);
-        assertEq(v.DW, 1101.045e18);
-        assertApproxEqAbs(v.bought, 1.00095e15, 2e8);
+        assertEq(v.buysSettled, 1);
+        assertEq(v.buysLeft, 11);
+        assertEq(v.stablePending, 0);
+        assertEq(v.displayedWaiting, 1101.045e18);
+        assertApproxEqAbs(v.assetValue, 1.00095e15, 2e8);
 
         // The lens value is what a full withdraw pays
-        assertEq(_withdrawAll(alice, id), v.bought);
+        assertEq(_withdrawAll(alice, id), v.assetValue);
     }
 
     function test_getPlan_states() public {
         uint256 matured = _create(alice, 100e18, 2);
         uint256 cancelled = _create(bob, 100e18, 2);
         vm.prank(bob);
-        dca.cancel(cancelled);
+        dca.cancelPlan(cancelled);
         _runRound(1);
         _runRound(1);
 
         assertEq(uint8(lens.getPlan(dca, matured).state), uint8(SmartDCALens.PlanState.Matured));
-        assertEq(lens.getPlan(dca, matured).n, 0);
+        assertEq(lens.getPlan(dca, matured).buysLeft, 0);
         assertEq(uint8(lens.getPlan(dca, cancelled).state), uint8(SmartDCALens.PlanState.Cancelled));
 
         vm.prank(alice);
-        dca.claim(matured, false);
-        assertEq(uint8(lens.getPlan(dca, matured).state), uint8(SmartDCALens.PlanState.Done));
+        dca.claimPlan(matured, false);
+        assertEq(uint8(lens.getPlan(dca, matured).state), uint8(SmartDCALens.PlanState.Claimed));
         assertEq(lens.getPlan(dca, 999).owner, address(0));
     }
 
-    /// @dev topUp moves `firstRound` forward; the lens still shows the plan's first round, and a Done plan shows all buys
+    /// @dev A top up moves `scheduleFirstRound` forward; the lens still shows the plan's first round, and a claimed plan shows all buys
     function test_getPlan_firstRoundAfterTopUpAndCompletedBuysWhenDone() public {
         uint256 id = _create(alice, 300e18, 3);
         _runRound(1);
@@ -99,16 +99,16 @@ contract SmartDCA_LensTest is SmartDCABase {
         SmartDCALens.PlanView memory v = lens.getPlan(dca, id);
         assertEq(v.firstRound, NOV);
         assertEq(v.lastRound, NOV + 2);
-        assertEq(v.C, 1);
-        assertEq(v.T, 3);
+        assertEq(v.buysSettled, 1);
+        assertEq(v.totalBuys, 3);
 
         _runRound(1);
         _runRound(1);
         vm.prank(alice);
-        dca.claim(id, false);
+        dca.claimPlan(id, false);
         v = lens.getPlan(dca, id);
         assertEq(v.firstRound, NOV);
-        assertEq(v.C, 3);
+        assertEq(v.buysSettled, 3);
     }
 
     function test_getPair_phases() public {
@@ -117,68 +117,66 @@ contract SmartDCA_LensTest is SmartDCABase {
         assertEq(uint8(v.state), uint8(SmartDCALens.PairState.Open));
         assertEq(v.round, NOV);
         assertEq(v.lockTime, NOV_LOCK);
-        assertEq(v.backupTime, NOV_LOCK + 9 hours);
-        assertEq(v.dueUnits, 100e24);
-        assertEq(v.dueValue, 100e18);
+        assertEq(v.roundStableUnits, 100e24);
+        assertEq(v.roundStableValue, 100e18);
 
         vm.warp(NOV_LOCK);
         assertEq(uint8(lens.getPair(dca, pairId).state), uint8(SmartDCALens.PairState.Locked));
 
         vm.startPrank(keeper);
-        dca.startBuy(pairId, 3);
-        dca.executeOrder(pairId, ANY_QUOTE, _swapData(pairId));
+        dca.startRound(pairId, 3);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
         v = lens.getPair(dca, pairId);
         assertEq(uint8(v.state), uint8(SmartDCALens.PairState.Executing));
         assertEq(v.parts, 3);
         assertEq(v.partsDone, 1);
 
-        dca.executeOrder(pairId, ANY_QUOTE, _swapData(pairId));
-        dca.executeOrder(pairId, ANY_QUOTE, _swapData(pairId));
-        dca.settle(pairId);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        dca.settleRound(pairId);
         vm.stopPrank();
         v = lens.getPair(dca, pairId);
         assertEq(uint8(v.state), uint8(SmartDCALens.PairState.Open));
         assertEq(v.round, DEC);
-        assertEq(v.lockTime, SmartDCAMath.roundStart(DEC));
+        assertEq(v.lockTime, SmartDCAMath.lockTimeOf(DEC));
         assertEq(lens.getPair(dca, 99).stable, address(0));
     }
 
     function test_getConfig_returnsEveryParameter() public {
         dca.pause();
         SmartDCALens.Config memory c = lens.getConfig(dca);
-        assertEq(c.feeRate, 500);
-        assertEq(c.maxSlippage, 10);
-        assertEq(c.maxSplitN, 10);
+        assertEq(c.feeRateBps, 500);
+        assertEq(c.maxSlippageBps, 10);
+        assertEq(c.maxParts, 10);
         assertEq(c.minBuys, 2);
         assertEq(c.maxBuys, 60);
-        assertEq(c.backupDelay, 9 hours);
         assertEq(c.pairCount, 1);
         assertEq(c.reserve, reserve);
         assertTrue(c.paused);
     }
 
-    function test_getPlan_lockedBeforeStartBuy() public {
+    function test_getPlan_lockedBeforeStartRound() public {
         uint256 id = _create(alice, 1200e18, 12);
         vm.warp(NOV_LOCK);
         SmartDCALens.PlanView memory v = lens.getPlan(dca, id);
         assertTrue(v.inRunningRound);
         assertEq(uint8(v.state), uint8(SmartDCALens.PlanState.Active));
-        assertEq(v.P, 0);
-        assertEq(v.n, 12);
-        assertEq(v.N, 100e18);
+        assertEq(v.stablePending, 0);
+        assertEq(v.buysLeft, 12);
+        assertEq(v.nextBuyNet, 100e18);
     }
 
-    /// @dev On the last buy E is everything still waiting, not one slice
+    /// @dev On the last buy E is everything still waiting, not one buy's units
     function test_getPlan_lastBuyTakesWhatIsLeft() public {
         uint256 id = _create(alice, 100e18 + 1, 2);
         _runRound(1);
         SmartDCALens.PlanView memory v = lens.getPlan(dca, id);
-        assertEq(v.n, 1);
-        assertEq(v.E, v.W);
-        assertEq(v.W, 50e18);
+        assertEq(v.buysLeft, 1);
+        assertEq(v.nextBuyStable, v.stableWaiting);
+        assertEq(v.stableWaiting, 50e18);
     }
 
-    /// @dev Bob joined at a higher share price, then the price fell: the round redeems less than its bases,
+    /// @dev Bob joined at a higher share price, then the price fell: the round redeems less than its principalSum,
     ///      so no plan pays a fee, even Alice whose own E is above her B
     function test_getPlan_feeUsesTheRoundsRate() public {
         uint256 aliceId = _create(alice, 1200e18, 12);
@@ -187,23 +185,23 @@ contract SmartDCA_LensTest is SmartDCABase {
         hub.setPricePerShare(1.005e18);
 
         SmartDCALens.PlanView memory v = lens.getPlan(dca, aliceId);
-        assertEq(v.E, 100.5e18);
-        assertEq(v.F, 0);
-        assertEq(v.N, 100.5e18);
+        assertEq(v.nextBuyStable, 100.5e18);
+        assertEq(v.nextBuyFee, 0);
+        assertEq(v.nextBuyNet, 100.5e18);
 
         vm.warp(NOV_LOCK);
         vm.prank(keeper);
-        dca.startBuy(pairId, 1);
-        assertApproxEqAbs(lens.getPlan(dca, aliceId).P, v.N, 1);
+        dca.startRound(pairId, 1);
+        assertApproxEqAbs(lens.getPlan(dca, aliceId).stablePending, v.nextBuyNet, 1);
     }
 
     function test_getPair_skipsEmptyMonths() public {
-        vm.warp(SmartDCAMath.roundStart(DEC + 2) + 5 days);
+        vm.warp(SmartDCAMath.lockTimeOf(DEC + 2) + 5 days);
         SmartDCALens.PairView memory v = lens.getPair(dca, pairId);
         assertEq(v.round, DEC + 3);
         assertEq(uint8(v.state), uint8(SmartDCALens.PairState.Open));
 
-        dca.sync(pairId);
+        dca.syncPair(pairId);
         assertEq(lens.getPair(dca, pairId).round, v.round, "same as after the pair catches up");
     }
 
@@ -213,8 +211,8 @@ contract SmartDCA_LensTest is SmartDCABase {
         dca.setPairEnabled(pairId, false);
         vm.warp(NOV_LOCK);
         vm.startPrank(keeper);
-        dca.startBuy(pairId, 2);
-        dca.resplit(pairId, 3);
+        dca.startRound(pairId, 2);
+        dca.resplitRound(pairId, 3);
         vm.stopPrank();
 
         SmartDCALens.PairView memory v = lens.getPair(dca, pairId);
