@@ -120,10 +120,8 @@ contract Fork_SmartDCATest is Test {
         vm.prank(SwapHelper(SWAP_HELPER).owner());
         SwapHelper(SWAP_HELPER).setBackendSigner(vm.addr(SIGNER_KEY));
 
-        dca.setYieldSource(USDT, ISmartDCA.SourceKind.Hub, HUB_USDT);
-        dca.setYieldSource(BTCB, ISmartDCA.SourceKind.Core, VBTC);
-        dca.setMinPerBuy(USDT, 10e18);
-        pairId = dca.addPair(USDT, BTCB);
+        dca.setMinAmountPerBuy(USDT, 10e18);
+        pairId = _addPair(USDT, BTCB, HUB_USDT, VBTC);
         routeOf[pairId] = abi.encodePacked(USDT, FEE_500, BTCB);
         dca.setKeeper(keeper, true);
 
@@ -133,9 +131,9 @@ contract Fork_SmartDCATest is Test {
     /// @dev The Normal Timelock holds the ACM admin role, so it grants this test the setters it calls
     function _grantAdminCalls() internal {
         string[6] memory sigs = [
-            "setYieldSource(address,uint8,address)",
-            "setMinPerBuy(address,uint256)",
-            "addPair(address,address)",
+            "setYieldSource(uint32,uint8,uint8,address)",
+            "setMinAmountPerBuy(address,uint256)",
+            "addPair(address,address,uint8,address,uint8,address)",
             "setKeeper(address,bool)",
             "setFeeRate(uint16)",
             "sweepToken(address,address)"
@@ -147,6 +145,11 @@ contract Fork_SmartDCATest is Test {
         vm.stopPrank();
     }
 
+    /// @dev Adds a pair with its stable in a Hub and its asset in Core, the launch setup
+    function _addPair(address stable, address asset, address stableHub, address assetVToken) internal returns (uint32) {
+        return dca.addPair(stable, asset, ISmartDCA.SourceKind.Hub, stableHub, ISmartDCA.SourceKind.Core, assetVToken);
+    }
+
     modifier onlyFork() {
         if (!forkLive) vm.skip(true);
         _;
@@ -156,34 +159,34 @@ contract Fork_SmartDCATest is Test {
 
     function test_setYieldSource_checksTheLiveRegistryAndComptroller() public onlyFork {
         // vUSDT holds USDT but is not a registered Hub
-        vm.expectRevert(ISmartDCA.InvalidSource.selector);
-        dca.setYieldSource(USDT, ISmartDCA.SourceKind.Hub, VUSDT);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.InvalidSource.selector, VUSDT));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, VUSDT);
 
         // vBTC is a listed market, but of BTCB
-        vm.expectRevert(ISmartDCA.InvalidSource.selector);
-        dca.setYieldSource(USDT, ISmartDCA.SourceKind.Core, VBTC);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.InvalidSource.selector, VBTC));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Core, VBTC);
 
-        dca.setYieldSource(USDT, ISmartDCA.SourceKind.Core, VUSDT);
-        (ISmartDCA.SourceKind kind, address source, , ) = dca.sources(USDT);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Core, VUSDT);
+        (ISmartDCA.SourceKind kind, address source, , ) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
         assertEq(uint8(kind), uint8(ISmartDCA.SourceKind.Core));
         assertEq(source, VUSDT);
     }
 
     function test_setYieldSource_movesLiveFundsFromHubToCore() public onlyFork {
         uint256 planId = _create(alice, pairId, DEPOSIT, 2);
-        (, , , uint256 unitsBefore) = dca.sources(USDT);
+        (, , , uint256 unitsBefore) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
 
-        dca.setYieldSource(USDT, ISmartDCA.SourceKind.Core, VUSDT);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Core, VUSDT);
 
         // Every Hub share was redeemed and the USDT minted into vUSDT; units, and so every plan, are unchanged
-        (, , uint256 shares, uint256 units) = dca.sources(USDT);
+        (, , uint256 shares, uint256 units) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
         assertEq(IERC20(HUB_USDT).balanceOf(address(dca)), 0, "no Hub shares left");
         assertEq(IERC20(VUSDT).balanceOf(address(dca)), shares, "vUSDT tracked");
         assertEq(units, unitsBefore, "units unchanged");
 
         // The plan still exits in full from the new source
         vm.prank(alice);
-        dca.cancel(planId);
+        dca.cancelPlan(planId);
         assertApproxEqRel(IERC20(USDT).balanceOf(alice), DEPOSIT, 1e12, "deposit back from vUSDT");
     }
 
@@ -193,22 +196,22 @@ contract Fork_SmartDCATest is Test {
         uint256 planId = _create(alice, pairId, DEPOSIT, 2);
         _toLock(pairId);
         vm.startPrank(keeper);
-        dca.startBuy(pairId, 1);
+        dca.startRound(pairId, 1);
         uint256 quote = _quote(pairId);
         _execute(pairId);
-        dca.settle(pairId);
+        dca.settleRound(pairId);
         vm.stopPrank();
-        (, , , , , uint256 net, , uint256 amountOut, , , , , , ) = dca.rounds(pairId, _lastSettled(pairId));
+        (, , , , , uint256 stableNet, , uint256 amountOut, , , , , , ) = dca.rounds(pairId, _lastSettled(pairId));
 
         // Nothing traded between the quote and the swap, so the pool paid the quote, inside the 0.1% bound
-        assertEq(dca.maxSlippage(), 10, "launch slippage");
+        assertEq(dca.maxSlippageBps(), 10, "launch slippage");
         assertEq(amountOut, quote, "filled at the quote");
         // Half the deposit plus a month of Hub interest, fee rate 0
-        assertGe(net, DEPOSIT / 2 - 1, "half the deposit swapped");
-        assertApproxEqRel(net, DEPOSIT / 2, 0.01e18, "plus a month of interest");
+        assertGe(stableNet, DEPOSIT / 2 - 1, "half the deposit swapped");
+        assertApproxEqRel(stableNet, DEPOSIT / 2, 0.01e18, "plus a month of interest");
 
         // All of it went into vBTC, and the plan can take it out as BTCB
-        (, , uint256 shares, ) = dca.sources(BTCB);
+        (, , uint256 shares, ) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
         assertEq(IERC20(VBTC).balanceOf(address(dca)), shares, "vBTC tracked");
         vm.prank(alice);
         dca.withdrawBought(planId, type(uint256).max);
@@ -218,26 +221,29 @@ contract Fork_SmartDCATest is Test {
     function test_round_feeOnARealMonthOfHubYield() public onlyFork {
         dca.setFeeRate(1_000);
         _create(alice, pairId, DEPOSIT, 2);
-        (, , , , , , uint256 dueBase, , ) = dca.pairs(pairId);
+        (, , , , , , uint256 roundPrincipal, , ) = dca.pairs(pairId);
 
         _runRound(pairId, 1);
 
         // The Hub paid interest over the month, and 10% of it went to the Reserve
-        (, , , uint16 rate, uint256 stableOut, uint256 net, , , , , , , , ) = dca.rounds(pairId, _lastSettled(pairId));
-        assertGt(stableOut, dueBase, "Hub paid interest");
+        (, , , uint16 rate, uint256 stableRedeemed, uint256 stableNet, , , , , , , , ) = dca.rounds(
+            pairId,
+            _lastSettled(pairId)
+        );
+        assertGt(stableRedeemed, roundPrincipal, "Hub paid interest");
         assertEq(rate, 1_000, "pooled rate");
         uint256 fee = IERC20(USDT).balanceOf(reserve);
-        assertEq(fee, stableOut - net, "fee to Reserve");
-        assertEq(fee, ((stableOut - dueBase) * 1_000) / SmartDCAMath.BPS, "10% of the interest");
+        assertEq(fee, stableRedeemed - stableNet, "fee to Reserve");
+        assertEq(fee, ((stableRedeemed - roundPrincipal) * 1_000) / SmartDCAMath.BPS, "10% of the interest");
     }
 
     /// @dev A trade between the keeper's quote and its swap moves the pool past 0.1%: the part reverts, and a fresh
     ///      quote fills it
-    function test_executeOrder_revertsWhenThePoolMovesAfterTheQuote() public onlyFork {
+    function test_swapRoundPart_revertsWhenThePoolMovesAfterTheQuote() public onlyFork {
         _create(alice, pairId, DEPOSIT, 2);
         _toLock(pairId);
         vm.prank(keeper);
-        dca.startBuy(pairId, 1);
+        dca.startRound(pairId, 1);
         uint256 staleQuote = _quote(pairId);
         bytes memory swapData = _swapData(pairId);
 
@@ -253,7 +259,7 @@ contract Fork_SmartDCATest is Test {
 
         vm.startPrank(keeper);
         vm.expectPartialRevert(ISmartDCA.SlippageExceeded.selector);
-        dca.executeOrder(pairId, staleQuote, swapData);
+        dca.swapRoundPart(pairId, staleQuote, swapData);
         _execute(pairId);
         vm.stopPrank();
 
@@ -262,12 +268,12 @@ contract Fork_SmartDCATest is Test {
     }
 
     /// @dev The route is in the swap data, so the backend can change it between parts with no governance call
-    function test_executeOrder_routeChangesMidRoundToTwoHops() public onlyFork {
+    function test_swapRoundPart_routeChangesMidRoundToTwoHops() public onlyFork {
         _create(alice, pairId, DEPOSIT, 2);
         _toLock(pairId);
 
         vm.startPrank(keeper);
-        dca.startBuy(pairId, 2);
+        dca.startRound(pairId, 2);
         _execute(pairId);
         vm.stopPrank();
 
@@ -276,30 +282,30 @@ contract Fork_SmartDCATest is Test {
         vm.startPrank(keeper);
         _execute(pairId);
         assertGt(IERC20(BTCB).balanceOf(address(dca)), before, "second part bought through WBNB");
-        dca.settle(pairId);
+        dca.settleRound(pairId);
         vm.stopPrank();
 
-        assertEq(_lastSettled(pairId), SmartDCAMath.currentRound(block.timestamp), "round settled");
+        assertEq(_lastSettled(pairId), SmartDCAMath.latestLockedRound(block.timestamp), "round settled");
     }
 
     /// @dev SwapHelper runs only a multicall signed by its backend signer for SmartDCA as the caller
-    function test_executeOrder_rejectsSwapDataNotSignedByTheBackend() public onlyFork {
+    function test_swapRoundPart_rejectsSwapDataNotSignedByTheBackend() public onlyFork {
         _create(alice, pairId, DEPOSIT, 2);
         _toLock(pairId);
 
         vm.startPrank(keeper);
-        dca.startBuy(pairId, 1);
+        dca.startRound(pairId, 1);
         uint256 quote = _quote(pairId);
         bytes memory swapData = _signedSwapData(pairId, 0xB0B);
-        vm.expectRevert(ISmartDCA.TokenSwapCallFailed.selector);
-        dca.executeOrder(pairId, quote, swapData);
+        vm.expectRevert(ISmartDCA.SwapFailed.selector);
+        dca.swapRoundPart(pairId, quote, swapData);
         vm.stopPrank();
 
         (, uint8 partsDone, , , , , , , , , , , , ) = dca.rounds(pairId, _lastSettled(pairId) + 1);
         assertEq(partsDone, 0, "nothing swapped");
     }
 
-    function test_hubCap_roundOver10MRevertsAtStartBuy() public onlyFork {
+    function test_hubCap_roundOver10MRevertsAtStartRound() public onlyFork {
         // Each of the two rounds redeems 10.5M USDT from Hub_USDT in one call, over its 10M per-call cap
         uint256 big = 21_000_000e18;
         _fund(USDT, alice, big);
@@ -310,7 +316,7 @@ contract Fork_SmartDCATest is Test {
         // The Hub's maxRedeem already includes the per-call cap, so its ERC4626 check is what reverts
         vm.expectRevert(bytes("ERC4626: redeem more than max"));
         vm.prank(keeper);
-        dca.startBuy(pairId, 10);
+        dca.startRound(pairId, 10);
     }
 
     // ---------------------------------------------------------------- exits
@@ -321,7 +327,7 @@ contract Fork_SmartDCATest is Test {
         (, uint256 out2) = _runRound(pairId, 1);
 
         vm.prank(alice);
-        dca.claim(planId, true);
+        dca.claimPlan(planId, true);
 
         // Alice now supplies in Core: her vBTC is worth what the two rounds bought, plus the first round's
         // BTCB interest over a month
@@ -329,16 +335,16 @@ contract Fork_SmartDCATest is Test {
         uint256 underlying = (vBal * IVToken(VBTC).exchangeRateCurrent()) / 1e18;
         assertGe(underlying + 2, out1 + out2, "vBTC worth the bought BTCB");
         assertApproxEqRel(underlying, out1 + out2, 0.001e18, "plus a little interest");
-        (, , , uint256 usdtUnits) = dca.sources(USDT);
+        (, , , uint256 usdtUnits) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
         assertEq(usdtUnits, 0, "no stable left for the only plan");
     }
 
-    function test_cancel_afterFirstRound_returnsStableAndBought() public onlyFork {
+    function test_cancelPlan_afterFirstRound_returnsStableAndBought() public onlyFork {
         uint256 planId = _create(alice, pairId, DEPOSIT, 2);
         (, uint256 amountOut) = _runRound(pairId, 2);
 
         vm.prank(alice);
-        dca.cancel(planId);
+        dca.cancelPlan(planId);
 
         // The unswapped half comes back from the real Hub, plus a month of its yield
         assertGe(IERC20(USDT).balanceOf(alice), DEPOSIT / 2 - 1, "stable back");
@@ -364,8 +370,7 @@ contract Fork_SmartDCATest is Test {
     }
 
     function test_secondPair_sharesTheUsdtPool() public onlyFork {
-        dca.setYieldSource(WBNB, ISmartDCA.SourceKind.Core, VWBNB);
-        uint32 bnbPair = dca.addPair(USDT, WBNB);
+        uint32 bnbPair = _addPair(USDT, WBNB, HUB_USDT, VWBNB);
         routeOf[bnbPair] = abi.encodePacked(USDT, FEE_500, WBNB);
         _fund(USDT, bob, DEPOSIT);
         uint256 alicePlan = _create(alice, pairId, DEPOSIT, 2);
@@ -374,11 +379,13 @@ contract Fork_SmartDCATest is Test {
         (, uint256 btcOut) = _runRound(pairId, 1);
         (, uint256 bnbOut) = _runRound(bnbPair, 1);
 
-        // Each pair redeemed only its own plans' half from the shared Hub_USDT units
-        (, , , uint256 usdtUnits) = dca.sources(USDT);
+        // Each pair redeemed only its own plans' half; both pairs keep their USDT in Hub_USDT
+        (, , , uint256 btcPairUnits) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
+        (, , , uint256 bnbPairUnits) = dca.yieldSources(bnbPair, ISmartDCA.Side.Stable);
+        uint256 usdtUnits = btcPairUnits + bnbPairUnits;
         (, , , , , uint256 dueBtc, , , ) = dca.pairs(pairId);
         (, , , , , uint256 dueBnb, , , ) = dca.pairs(bnbPair);
-        // Plus each plan's slice rounding (under `buys` units), left until the plan exits
+        // Plus each plan's per-buy rounding (under `buys` units), left until the plan exits
         assertGe(usdtUnits, dueBtc + dueBnb, "USDT units cover what the two pairs still owe");
         assertLe(usdtUnits, dueBtc + dueBnb + 4, "and only rounding beyond it");
 
@@ -392,22 +399,20 @@ contract Fork_SmartDCATest is Test {
 
     /// @dev VPD-2672 scope: USDT, USDC and U into BTCB, ETH and WBNB. USDC and U route through USDT, the deep pools.
     function test_allNinePairs_buyThroughTheLivePools() public onlyFork {
-        dca.setYieldSource(USDC, ISmartDCA.SourceKind.Hub, HUB_USDC);
-        dca.setYieldSource(U, ISmartDCA.SourceKind.Hub, HUB_U);
-        dca.setYieldSource(ETH, ISmartDCA.SourceKind.Core, VETH);
-        dca.setYieldSource(WBNB, ISmartDCA.SourceKind.Core, VWBNB);
-        dca.setMinPerBuy(USDC, 10e18);
-        dca.setMinPerBuy(U, 10e18);
+        dca.setMinAmountPerBuy(USDC, 10e18);
+        dca.setMinAmountPerBuy(U, 10e18);
 
         address[3] memory stables = [USDT, USDC, U];
         address[3] memory assets = [BTCB, ETH, WBNB];
+        address[3] memory hubs = [HUB_USDT, HUB_USDC, HUB_U];
+        address[3] memory vTokens = [VBTC, VETH, VWBNB];
         uint24[3] memory toUsdtFee = [uint24(0), FEE_500, FEE_100];
         uint24[3] memory fromUsdtFee = [FEE_500, FEE_100, FEE_500];
         uint32[9] memory pids;
         uint256[9] memory planIds;
         for (uint256 i; i < 9; ++i) {
             (address stable, address asset) = (stables[i / 3], assets[i % 3]);
-            uint32 pid = i == 0 ? pairId : dca.addPair(stable, asset);
+            uint32 pid = i == 0 ? pairId : _addPair(stable, asset, hubs[i / 3], vTokens[i % 3]);
             routeOf[pid] = i / 3 == 0
                 ? abi.encodePacked(USDT, fromUsdtFee[i % 3], asset)
                 : abi.encodePacked(stable, toUsdtFee[i / 3], USDT, fromUsdtFee[i % 3], asset);
@@ -447,11 +452,11 @@ contract Fork_SmartDCATest is Test {
         assertEq(IERC20(XVS).balanceOf(address(dca)), 0, "none kept");
     }
 
-    function test_sweep_takesOnlyWhatNoPlanOwns() public onlyFork {
+    function test_sweepToken_takesOnlyWhatNoPlanOwns() public onlyFork {
         _create(alice, pairId, DEPOSIT, 2);
         _runRound(pairId, 1);
-        (, , uint256 vbtcShares, ) = dca.sources(BTCB);
-        (, , uint256 hubShares, ) = dca.sources(USDT);
+        (, , uint256 vbtcShares, ) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
+        (, , uint256 hubShares, ) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
 
         // Stray vBTC and Hub shares sent to the contract by mistake
         address to = makeAddr("to");
@@ -482,7 +487,7 @@ contract Fork_SmartDCATest is Test {
 
     /// @dev Moves time and blocks to the pair's lock time, so Core and the Hub accrue interest on the way
     function _toLock(uint32 pid) internal {
-        uint256 lock = dca.lockTime(pid);
+        uint256 lock = dca.nextLockTime(pid);
         if (block.timestamp < lock) {
             vm.roll(block.number + ((lock - block.timestamp) * BLOCKS_PER_20_SECONDS) / 20);
             vm.warp(lock);
@@ -490,15 +495,15 @@ contract Fork_SmartDCATest is Test {
     }
 
     /// @dev Runs the pair's next round at its lock time, in `parts` swaps, and returns what it swapped and bought
-    function _runRound(uint32 pid, uint8 parts) internal returns (uint256 net, uint256 amountOut) {
+    function _runRound(uint32 pid, uint8 parts) internal returns (uint256 stableNet, uint256 amountOut) {
         _toLock(pid);
         vm.startPrank(keeper);
-        dca.startBuy(pid, parts);
+        dca.startRound(pid, parts);
         for (uint8 i; i < parts; ++i) _execute(pid);
-        dca.settle(pid);
+        dca.settleRound(pid);
         vm.stopPrank();
 
-        (, , , , , net, , amountOut, , , , , , ) = dca.rounds(pid, _lastSettled(pid));
+        (, , , , , stableNet, , amountOut, , , , , , ) = dca.rounds(pid, _lastSettled(pid));
     }
 
     function _lastSettled(uint32 pid) internal view returns (uint32 settled) {
@@ -508,16 +513,16 @@ contract Fork_SmartDCATest is Test {
     /// @dev Runs the pair's next part the way the keeper does: a fresh quote, then the signed swap
     function _execute(uint32 pid) internal {
         uint256 quote = _quote(pid);
-        dca.executeOrder(pid, quote, _swapData(pid));
+        dca.swapRoundPart(pid, quote, _swapData(pid));
     }
 
     /// @dev QuoterV2 quote for the pair's next part on its route
     function _quote(uint32 pid) internal returns (uint256 amountOut) {
         (, , , uint32 settled, , , , , ) = dca.pairs(pid);
-        (uint8 partsTotal, uint8 partsDone, , , , , uint256 toSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
+        (uint8 partsTotal, uint8 partsDone, , , , , uint256 stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
         (amountOut, , , ) = IPancakeQuoterV2(PCS_V3_QUOTER).quoteExactInput(
             routeOf[pid],
-            toSwap / (partsTotal - partsDone)
+            stableToSwap / (partsTotal - partsDone)
         );
     }
 
@@ -530,8 +535,8 @@ contract Fork_SmartDCATest is Test {
     ///      SmartDCA as the caller, with `key`.
     function _signedSwapData(uint32 pid, uint256 key) internal view returns (bytes memory) {
         (address stable, address asset, , uint32 settled, , , , , ) = dca.pairs(pid);
-        (uint8 partsTotal, uint8 partsDone, , , , , uint256 toSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
-        uint256 amountIn = toSwap / (partsTotal - partsDone);
+        (uint8 partsTotal, uint8 partsDone, , , , , uint256 stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
+        uint256 amountIn = stableToSwap / (partsTotal - partsDone);
 
         bytes[] memory calls = new bytes[](4);
         calls[0] = abi.encodeCall(SwapHelper.approveMax, (IERC20Upgradeable(stable), PCS_V3_ROUTER));
