@@ -12,35 +12,56 @@ import { SmartDCA } from "./SmartDCA.sol";
 /**
  * @title SmartDCALens
  * @author Venus
- * @notice Read only views of SmartDCA plans, pairs and parameters for the FE and the keeper
- * @dev Stateless and not upgradeable; every view takes the SmartDCA to read. Values use the sources' stored rates, so they can trail the
- *      live value by the interest not yet accrued. The PRD names are used for plan values:
- *      - T: buys chosen at creation. C: buys settled. n: buys still waiting.
- *      - P: stable this plan put into the running round, after its fee (0 outside a round).
- *      - W: value of the stable still waiting. E: stable the next buy will sell, `W / n`.
- *      - B: base, the stable put into each buy. e: the round's fee rate, `feeRate` when the round redeems more
- *        than its bases and 0 otherwise. For the pair's next round it is estimated from the pair's totals now.
- *      - F: fee on the next buy, `max(0, E - B) x e`. N: next buy after the fee, `E x (1 - e) + B x e`.
- *        NW: `N x n`. DW: `NW + P`, the stable that will be swapped.
+ * @notice Read only views of SmartDCA plans, pairs and parameters, for the FE and the keeper.
+ * @dev Stateless and not upgradeable; every view takes the SmartDCA to read. Token values use each yield source's
+ *      stored rate, so they can trail the live value by the interest not accrued yet. Plan values follow the PRD,
+ *      and each field's doc gives its PRD letter.
  */
 contract SmartDCALens {
-    /// @notice Plan status as shown to users; Matured is Active with every buy settled
+    /// @notice Plan status as shown to users. Matured is Active with every buy settled.
     enum PlanState {
         None,
         Active,
         Matured,
         Cancelled,
-        Done
+        Claimed
     }
 
-    /// @notice Pair phase: Open until its lock time, Locked until `startBuy`, Executing until `settle`
+    /// @notice Phase of a pair's next round: Open until its lock time, Locked until `startRound`, Executing until
+    ///         `settleRound`
     enum PairState {
         Open,
         Locked,
         Executing
     }
 
-    /// @notice A plan with its PRD values
+    /**
+     * @notice A plan and the values the FE shows for it. Stable values are in the stable's decimals.
+     * @param owner Plan owner
+     * @param pairId Pair the plan buys on
+     * @param state Plan status
+     * @param firstRound First round the plan bought in, before any top up
+     * @param lastRound Round of the plan's last buy
+     * @param inRunningRound True while the plan's buy is in a locked round that has not settled
+     * @param totalBuys Buys in total, including those before a top up (PRD T)
+     * @param buysSettled Buys that have settled (PRD C)
+     * @param buysLeft Buys still to come, not counting a buy already running (PRD n)
+     * @param stablePending Stable this plan has in the running round, after its fee; 0 outside a running round
+     *        (PRD P)
+     * @param stableWaiting Value of the plan's stable still waiting in the yield source (PRD W)
+     * @param nextBuyStable Stable the next buy will sell, `stableWaiting / buysLeft` (PRD E). On the last buy it is
+     *        all of `stableWaiting`, which includes under 60 wei of rounding left that the contract drops at claim.
+     * @param principalPerBuy Principal in each buy (PRD B)
+     * @param nextBuyFee Fee on the next buy, `max(0, nextBuyStable - principalPerBuy) * e` (PRD F). `e` is the fee
+     *        rate when the round redeems more than its principal and 0 otherwise; for the pair's next round it is
+     *        estimated from the pair's totals now.
+     * @param nextBuyNet Next buy after its fee, `nextBuyStable * (1 - e) + principalPerBuy * e` (PRD N)
+     * @param netWaiting `nextBuyNet * buysLeft` (PRD NW)
+     * @param displayedWaiting Stable that will still be swapped, `netWaiting + stablePending` (PRD DW)
+     * @param assetUnits Asset units bought and not yet paid out
+     * @param assetValue `assetUnits` as an asset amount. A claim to Core pays vTokens instead, so the FE converts at
+     *        the vToken's exchange rate to show that amount.
+     */
     struct PlanView {
         address owner;
         uint32 pairId;
@@ -48,22 +69,35 @@ contract SmartDCALens {
         uint32 firstRound;
         uint32 lastRound;
         bool inRunningRound;
-        uint256 T;
-        uint256 C;
-        uint256 n;
-        uint256 P;
-        uint256 W;
-        uint256 E;
-        uint256 B;
-        uint256 F;
-        uint256 N;
-        uint256 NW;
-        uint256 DW;
-        uint256 boughtUnits;
-        uint256 bought;
+        uint256 totalBuys;
+        uint256 buysSettled;
+        uint256 buysLeft;
+        uint256 stablePending;
+        uint256 stableWaiting;
+        uint256 nextBuyStable;
+        uint256 principalPerBuy;
+        uint256 nextBuyFee;
+        uint256 nextBuyNet;
+        uint256 netWaiting;
+        uint256 displayedWaiting;
+        uint256 assetUnits;
+        uint256 assetValue;
     }
 
-    /// @notice A pair and its running round
+    /**
+     * @notice A pair and its next round
+     * @param stable Token sold
+     * @param asset Token bought
+     * @param enabled Whether new plans and top ups are allowed
+     * @param state Phase of the next round
+     * @param round Next round, after skipping the empty rounds the next call would settle
+     * @param lockTime Lock time of `round`
+     * @param parts Parts the round is split into; 0 before `startRound`
+     * @param partsDone Parts swapped
+     * @param resplitUsed Whether the round was resplit
+     * @param roundStableUnits Stable units the round sells
+     * @param roundStableValue Value of `roundStableUnits` in the stable
+     */
     struct PairView {
         address stable;
         address asset;
@@ -71,95 +105,107 @@ contract SmartDCALens {
         PairState state;
         uint32 round;
         uint256 lockTime;
-        uint256 backupTime;
         uint8 parts;
         uint8 partsDone;
         bool resplitUsed;
-        uint256 dueUnits;
-        uint256 dueValue;
+        uint256 roundStableUnits;
+        uint256 roundStableValue;
     }
 
-    /// @notice Global parameters
+    /// @notice SmartDCA's global parameters; see SmartDCA for each one
     struct Config {
-        uint16 feeRate;
-        uint16 maxSlippage;
-        uint8 maxSplitN;
+        uint16 feeRateBps;
+        uint16 maxSlippageBps;
+        uint8 maxParts;
         uint8 minBuys;
         uint8 maxBuys;
-        uint32 backupDelay;
         uint32 pairCount;
         address reserve;
         bool paused;
     }
 
-    /// @dev Plan and round fields the views need, read once
-    struct PlanCtx {
+    /// @dev Plan and pair fields `getPlan` needs, read once
+    struct PlanContext {
         SmartDCA dca;
         ISmartDCA.Plan plan;
         ISmartDCA.Pair pair;
-        uint32 openRound;
-        uint256 roundsDone;
+        uint32 nextRound;
+        uint256 buysSettled;
     }
 
     /**
-     * @notice A plan with its PRD values
+     * @notice A plan and the values the FE shows for it
      * @param dca SmartDCA to read
      * @param planId Plan id
      * @return v The plan; all zero for an unknown id
      */
     function getPlan(SmartDCA dca, uint256 planId) external view returns (PlanView memory v) {
-        PlanCtx memory c;
+        PlanContext memory c;
         c.dca = dca;
         c.plan = _plan(dca, planId);
         if (c.plan.status == ISmartDCA.PlanStatus.None) return v;
         c.pair = _pair(dca, c.plan.pairId);
-        c.openRound = c.pair.lastSettledRound + 1;
-        c.roundsDone = SmartDCAMath.roundsDone(c.pair.lastSettledRound, c.plan.firstRound, c.plan.buys);
+        c.nextRound = c.pair.lastSettledRound + 1;
+        c.buysSettled = SmartDCAMath.buysSettled(
+            c.pair.lastSettledRound,
+            c.plan.scheduleFirstRound,
+            c.plan.scheduleBuys
+        );
 
         ISmartDCA.Plan memory p = c.plan;
         v.owner = p.owner;
         v.pairId = p.pairId;
-        // topUp moves `firstRound` and `buysDone` forward by the same count
-        v.firstRound = p.firstRound - p.buysDone;
-        v.lastRound = p.firstRound + p.buys - 1;
-        v.T = p.buysDone + p.buys;
-        v.B = p.base;
-        v.state = _planState(p.status, c.roundsDone == p.buys);
-        if (p.status == ISmartDCA.PlanStatus.Done) v.C = v.T;
-        if (p.status == ISmartDCA.PlanStatus.Cancelled) v.C = p.buysDone;
+        // A top up moves `scheduleFirstRound` and `buysBeforeSchedule` forward by the same count
+        v.firstRound = p.scheduleFirstRound - p.buysBeforeSchedule;
+        v.lastRound = p.scheduleFirstRound + p.scheduleBuys - 1;
+        v.totalBuys = p.buysBeforeSchedule + p.scheduleBuys;
+        v.principalPerBuy = p.principalPerBuy;
+        v.state = _planState(p.status, c.buysSettled == p.scheduleBuys);
+        if (p.status == ISmartDCA.PlanStatus.Claimed) v.buysSettled = v.totalBuys;
+        if (p.status == ISmartDCA.PlanStatus.Cancelled) v.buysSettled = p.buysBeforeSchedule;
         if (p.status != ISmartDCA.PlanStatus.Active) return v;
 
-        v.C = p.buysDone + c.roundsDone;
-        v.inRunningRound = SmartDCAMath.inRunningRound(c.openRound, p.firstRound, p.buys, block.timestamp);
-        v.boughtUnits = p.carriedBought + _indexBought(dca, p, c.roundsDone) - p.withdrawnBought;
-        v.bought = _value(dca, c.pair.asset, v.boughtUnits);
+        v.buysSettled = p.buysBeforeSchedule + c.buysSettled;
+        v.inRunningRound = SmartDCAMath.inRunningRound(
+            c.nextRound,
+            p.scheduleFirstRound,
+            p.scheduleBuys,
+            block.timestamp
+        );
+        v.assetUnits = p.assetUnitsCarried + _assetUnitsFromIndex(dca, p, c.buysSettled) - p.assetUnitsPaid;
+        v.assetValue = _value(dca, p.pairId, ISmartDCA.Side.Asset, v.assetUnits);
 
-        // Stable units still waiting; a plan in an executing round has already sold that round's slice
-        uint256 waiting = p.stableUnits - p.slice * c.roundsDone;
-        uint256 left = p.buys - c.roundsDone;
+        // Stable units still waiting; a plan in a started round has already sold that round's units
+        uint256 stableUnitsWaiting = p.scheduleStableUnits - p.stableUnitsPerBuy * c.buysSettled;
+        uint256 buysLeft = p.scheduleBuys - c.buysSettled;
         if (v.inRunningRound) {
-            ISmartDCA.Round memory r = _round(dca, p.pairId, c.openRound);
+            ISmartDCA.Round memory r = _round(dca, p.pairId, c.nextRound);
             if (r.partsTotal != 0) {
-                v.P = _pending(p, r, c.pair.dueUnits);
-                waiting -= p.slice;
-                left -= 1;
+                v.stablePending = _pending(p, r, c.pair.roundStableUnits);
+                stableUnitsWaiting -= p.stableUnitsPerBuy;
+                buysLeft -= 1;
             }
         }
 
-        v.n = left;
-        v.W = _value(dca, c.pair.stable, waiting);
-        if (left != 0) {
-            v.E = left == 1 ? v.W : _value(dca, c.pair.stable, p.slice);
-            uint256 e = _nextFeeRate(c, p.firstRound + uint32(p.buys - left), v.E, v.B);
-            v.F = v.E > v.B ? ((v.E - v.B) * e) / SmartDCAMath.BPS : 0;
-            v.N = (v.E * (SmartDCAMath.BPS - e) + v.B * e) / SmartDCAMath.BPS;
-            v.NW = v.N * left;
+        v.buysLeft = buysLeft;
+        v.stableWaiting = _value(dca, p.pairId, ISmartDCA.Side.Stable, stableUnitsWaiting);
+        if (buysLeft != 0) {
+            v.nextBuyStable = buysLeft == 1
+                ? v.stableWaiting
+                : _value(dca, p.pairId, ISmartDCA.Side.Stable, p.stableUnitsPerBuy);
+            uint32 nextBuyRound = p.scheduleFirstRound + uint32(p.scheduleBuys - buysLeft);
+            uint256 e = _nextFeeRate(c, nextBuyRound, v.nextBuyStable, v.principalPerBuy);
+            v.nextBuyFee = v.nextBuyStable > v.principalPerBuy
+                ? ((v.nextBuyStable - v.principalPerBuy) * e) / SmartDCAMath.BPS
+                : 0;
+            v.nextBuyNet = (v.nextBuyStable * (SmartDCAMath.BPS - e) + v.principalPerBuy * e) / SmartDCAMath.BPS;
+            v.netWaiting = v.nextBuyNet * buysLeft;
         }
-        v.DW = v.NW + v.P;
+        v.displayedWaiting = v.netWaiting + v.stablePending;
     }
 
     /**
-     * @notice A pair and its running round
+     * @notice A pair and its next round
      * @param dca SmartDCA to read
      * @param pairId Pair id
      * @return v The pair; all zero for an unknown id
@@ -168,10 +214,10 @@ contract SmartDCALens {
         ISmartDCA.Pair memory pair = _pair(dca, pairId);
         if (pair.stable == address(0)) return v;
         uint32 round = pair.lastSettledRound + 1;
-        uint256 dueUnits = pair.dueUnits;
-        // Rounds with nothing due settle on the next call to the pair; skip them as that call would
-        while (dueUnits == 0 && block.timestamp >= SmartDCAMath.roundStart(round)) {
-            dueUnits = _round(dca, pairId, round).sliceStarting;
+        uint256 roundStableUnits = pair.roundStableUnits;
+        // Rounds with nothing to buy settle on the next call to the pair; skip them as that call would
+        while (roundStableUnits == 0 && block.timestamp >= SmartDCAMath.lockTimeOf(round)) {
+            roundStableUnits = _round(dca, pairId, round).stableUnitsJoining;
             ++round;
         }
         ISmartDCA.Round memory r = _round(dca, pairId, round);
@@ -180,78 +226,74 @@ contract SmartDCALens {
         v.asset = pair.asset;
         v.enabled = pair.enabled;
         v.round = round;
-        v.lockTime = SmartDCAMath.roundStart(round);
-        v.backupTime = v.lockTime + dca.backupDelay();
+        v.lockTime = SmartDCAMath.lockTimeOf(round);
         v.parts = r.partsTotal;
         v.partsDone = r.partsDone;
         v.resplitUsed = r.resplitUsed;
-        v.dueUnits = dueUnits;
-        v.dueValue = _value(dca, pair.stable, dueUnits);
+        v.roundStableUnits = roundStableUnits;
+        v.roundStableValue = _value(dca, pairId, ISmartDCA.Side.Stable, roundStableUnits);
         if (r.partsTotal != 0) v.state = PairState.Executing;
         else if (block.timestamp >= v.lockTime) v.state = PairState.Locked;
     }
 
-    /// @notice Global parameters
-    /// @param dca SmartDCA to read
-    /// @return c Current values
+    /**
+     * @notice SmartDCA's global parameters
+     * @param dca SmartDCA to read
+     * @return c Current values
+     */
     function getConfig(SmartDCA dca) external view returns (Config memory c) {
-        c.feeRate = dca.feeRate();
-        c.maxSlippage = dca.maxSlippage();
-        c.maxSplitN = dca.maxSplitN();
+        c.feeRateBps = dca.feeRateBps();
+        c.maxSlippageBps = dca.maxSlippageBps();
+        c.maxParts = dca.maxParts();
         c.minBuys = dca.minBuys();
         c.maxBuys = dca.maxBuys();
-        c.backupDelay = dca.backupDelay();
         c.pairCount = dca.pairCount();
         c.reserve = dca.reserve();
         c.paused = dca.paused();
     }
 
-    /// @dev P = slice x stableOut / dueUnits x (1 - e) + base x e, with e the round's fee rate
-    function _pending(
+    /// @dev Asset units bought in the first `buysSettled` rounds of the plan's current schedule
+    function _assetUnitsFromIndex(
+        SmartDCA dca,
         ISmartDCA.Plan memory p,
-        ISmartDCA.Round memory r,
-        uint256 dueUnits
-    ) internal pure returns (uint256) {
-        uint256 bySlice = Math.mulDiv(p.slice * r.stableOut, SmartDCAMath.BPS - r.feeRate, dueUnits * SmartDCAMath.BPS);
-        return bySlice + (p.base * r.feeRate) / SmartDCAMath.BPS;
-    }
-
-    function _indexBought(SmartDCA dca, ISmartDCA.Plan memory p, uint256 roundsDone) internal view returns (uint256) {
-        if (roundsDone == 0) return 0;
-        ISmartDCA.Round memory before = _round(dca, p.pairId, p.firstRound - 1);
-        ISmartDCA.Round memory last = _round(dca, p.pairId, uint32(p.firstRound + roundsDone - 1));
+        uint256 buysSettled
+    ) internal view returns (uint256) {
+        if (buysSettled == 0) return 0;
+        ISmartDCA.Round memory before = _round(dca, p.pairId, p.scheduleFirstRound - 1);
+        ISmartDCA.Round memory last = _round(dca, p.pairId, uint32(p.scheduleFirstRound + buysSettled - 1));
         return
-            SmartDCAMath.planBought(
-                p.slice,
-                p.base,
-                last.cumIndexAfter - before.cumIndexAfter,
-                last.cumBaseIndexAfter - before.cumBaseIndexAfter
+            SmartDCAMath.assetUnitsBought(
+                p.stableUnitsPerBuy,
+                p.principalPerBuy,
+                last.assetPerUnitIndexAfter - before.assetPerUnitIndexAfter,
+                last.assetPerPrincipalIndexAfter - before.assetPerPrincipalIndexAfter
             );
     }
 
-    /// @dev Token value of `units` of `token`, at the source's stored rate
-    function _value(SmartDCA dca, address token, uint256 units) internal view returns (uint256) {
+    /// @dev Token amount `units` of one side of a pair are worth, at the source's stored rate
+    function _value(SmartDCA dca, uint32 pairId, ISmartDCA.Side side, uint256 units) internal view returns (uint256) {
         if (units == 0) return 0;
-        (ISmartDCA.SourceKind kind, address source, uint256 shares, uint256 totalUnits) = dca.sources(token);
-        uint256 sourceShares = Math.mulDiv(units, shares, totalUnits);
-        if (kind == ISmartDCA.SourceKind.Hub) return IHub(source).previewRedeem(sourceShares);
-        return Math.mulDiv(sourceShares, IVToken(source).exchangeRateStored(), 1e18);
+        (ISmartDCA.SourceKind kind, address source, uint256 sharesHeld, uint256 unitsIssued) = dca.yieldSources(
+            pairId,
+            side
+        );
+        uint256 shares = Math.mulDiv(units, sharesHeld, unitsIssued);
+        if (kind == ISmartDCA.SourceKind.Hub) return IHub(source).previewRedeem(shares);
+        return Math.mulDiv(shares, IVToken(source).exchangeRateStored(), 1e18);
     }
 
     /// @dev Fee rate of the plan's next buy. Every plan in a round pays that round's one rate, so for the pair's
     ///      next round it is estimated from the pair's totals; a later round falls back to the plan's own values.
-    function _nextFeeRate(PlanCtx memory c, uint32 nextRound, uint256 E, uint256 B) internal view returns (uint256) {
-        bool hasInterest = nextRound == c.openRound
-            ? _value(c.dca, c.pair.stable, c.pair.dueUnits) > c.pair.dueBase
-            : E > B;
-        return hasInterest ? c.dca.feeRate() : 0;
-    }
-
-    function _planState(ISmartDCA.PlanStatus status, bool allSettled) internal pure returns (PlanState) {
-        if (status == ISmartDCA.PlanStatus.Active) return allSettled ? PlanState.Matured : PlanState.Active;
-        if (status == ISmartDCA.PlanStatus.Cancelled) return PlanState.Cancelled;
-        if (status == ISmartDCA.PlanStatus.Done) return PlanState.Done;
-        return PlanState.None;
+    function _nextFeeRate(
+        PlanContext memory c,
+        uint32 nextBuyRound,
+        uint256 nextBuyStable,
+        uint256 principalPerBuy
+    ) internal view returns (uint256) {
+        bool hasInterest = nextBuyRound == c.nextRound
+            ? _value(c.dca, c.plan.pairId, ISmartDCA.Side.Stable, c.pair.roundStableUnits) > c.pair.roundPrincipal
+            : nextBuyStable > principalPerBuy;
+        return hasInterest ? c.dca.feeRateBps() : 0;
     }
 
     function _plan(SmartDCA dca, uint256 planId) internal view returns (ISmartDCA.Plan memory p) {
@@ -259,14 +301,14 @@ contract SmartDCALens {
             p.owner,
             p.pairId,
             p.status,
-            p.buys,
-            p.buysDone,
-            p.firstRound,
-            p.stableUnits,
-            p.slice,
-            p.base,
-            p.carriedBought,
-            p.withdrawnBought
+            p.scheduleBuys,
+            p.buysBeforeSchedule,
+            p.scheduleFirstRound,
+            p.scheduleStableUnits,
+            p.stableUnitsPerBuy,
+            p.principalPerBuy,
+            p.assetUnitsCarried,
+            p.assetUnitsPaid
         ) = dca.plans(planId);
     }
 
@@ -276,11 +318,11 @@ contract SmartDCALens {
             p.asset,
             p.enabled,
             p.lastSettledRound,
-            p.lockEnteredRound,
-            p.dueUnits,
-            p.dueBase,
-            p.cumIndex,
-            p.cumBaseIndex
+            p.lockEmittedRound,
+            p.roundStableUnits,
+            p.roundPrincipal,
+            p.assetPerUnitIndex,
+            p.assetPerPrincipalIndex
         ) = dca.pairs(pairId);
     }
 
@@ -289,17 +331,39 @@ contract SmartDCALens {
             r.partsTotal,
             r.partsDone,
             r.resplitUsed,
-            r.feeRate,
-            r.stableOut,
-            r.net,
-            r.toSwap,
-            r.amountOut,
-            r.sliceStarting,
-            r.baseStarting,
-            r.sliceEnding,
-            r.baseEnding,
-            r.cumIndexAfter,
-            r.cumBaseIndexAfter
+            r.feeRateBps,
+            r.stableRedeemed,
+            r.stableNet,
+            r.stableToSwap,
+            r.assetBought,
+            r.stableUnitsJoining,
+            r.principalJoining,
+            r.stableUnitsEnding,
+            r.principalEnding,
+            r.assetPerUnitIndexAfter,
+            r.assetPerPrincipalIndexAfter
         ) = dca.rounds(pairId, round);
+    }
+
+    /// @dev PRD P: `stableUnitsPerBuy * stableRedeemed / roundStableUnits * (1 - e) + principalPerBuy * e`, with `e`
+    ///      the round's fee rate
+    function _pending(
+        ISmartDCA.Plan memory p,
+        ISmartDCA.Round memory r,
+        uint256 roundStableUnits
+    ) internal pure returns (uint256) {
+        uint256 fromUnits = Math.mulDiv(
+            p.stableUnitsPerBuy * r.stableRedeemed,
+            SmartDCAMath.BPS - r.feeRateBps,
+            roundStableUnits * SmartDCAMath.BPS
+        );
+        return fromUnits + (p.principalPerBuy * r.feeRateBps) / SmartDCAMath.BPS;
+    }
+
+    function _planState(ISmartDCA.PlanStatus status, bool allSettled) internal pure returns (PlanState) {
+        if (status == ISmartDCA.PlanStatus.Active) return allSettled ? PlanState.Matured : PlanState.Active;
+        if (status == ISmartDCA.PlanStatus.Cancelled) return PlanState.Cancelled;
+        if (status == ISmartDCA.PlanStatus.Claimed) return PlanState.Claimed;
+        return PlanState.None;
     }
 }
