@@ -232,3 +232,31 @@ contract MockSwapHelper {
         MockERC20(tokenOut).mint(msg.sender, quote(amountIn));
     }
 }
+
+/// @notice PancakeSwap V3 SwapRouter stand-in for `exactInput`: pulls `amountIn` of the path's first token and pays
+///         `rate / 1e18` of its last token per unit in. It applies no minimum, so SmartDCA's own floor is what gets
+///         tested.
+contract MockPancakeV3Router {
+    struct ExactInputParams {
+        bytes path;
+        address recipient;
+        uint256 deadline;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+    }
+
+    uint256 public rate;
+
+    function setRate(uint256 value) external {
+        rate = value;
+    }
+
+    function exactInput(ExactInputParams calldata params) external payable returns (uint256 amountOut) {
+        require(params.deadline >= block.timestamp, "expired");
+        address tokenIn = address(bytes20(params.path[:20]));
+        address tokenOut = address(bytes20(params.path[params.path.length - 20:]));
+        IERC20(tokenIn).transferFrom(msg.sender, address(0xdead), params.amountIn);
+        amountOut = (params.amountIn * rate) / 1e18;
+        MockERC20(tokenOut).mint(params.recipient, amountOut);
+    }
+}

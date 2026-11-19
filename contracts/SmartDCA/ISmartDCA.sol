@@ -124,6 +124,16 @@ interface ISmartDCA {
     }
 
     /**
+     * @notice A pair's PancakeSwap V3 route for `forceBuy`, set by governance
+     * @param router PancakeSwap V3 SwapRouter; zero means the pair has no route and `forceBuy` reverts
+     * @param path Pools from the stable to the asset, packed as `stable, fee, asset` or with more hops
+     */
+    struct FallbackRoute {
+        address router;
+        bytes path;
+    }
+
+    /**
      * @notice A plan. Round calls never write it; its progress is read from the pair and round records.
      * @dev A top up restarts the schedule: what was bought so far moves to `assetUnitsCarried`, and the `schedule`
      *      fields then describe only the buys still left. The plan's buys in total are
@@ -266,8 +276,9 @@ interface ISmartDCA {
      * @param part Number of the part, from 1
      * @param stableIn Stable amount sold
      * @param assetOut Asset amount received
-     * @param quotedOut Asset amount the keeper's quote promised for `stableIn`
-     * @param minOut Least asset amount allowed: `quotedOut` less `maxSlippageBps`
+     * @param quotedOut Asset amount the keeper's quote promised for `stableIn`, or in `forceBuy` its oracle value
+     * @param minOut Least asset amount allowed: `quotedOut` less `maxSlippageBps`, or in `forceBuy` less
+     *        `fallbackSlippageBps`
      */
     event RoundPartSwapped(
         uint32 indexed pairId,
@@ -432,6 +443,21 @@ interface ISmartDCA {
      */
     event TokenSwept(address indexed token, address indexed to, uint256 amount);
 
+    /**
+     * @notice Emitted when a pair's `forceBuy` route is set
+     * @param pairId The pair
+     * @param router PancakeSwap V3 SwapRouter, zero to remove the route
+     * @param path Packed pool path from the stable to the asset
+     */
+    event FallbackRouteUpdated(uint32 indexed pairId, address router, bytes path);
+
+    /**
+     * @notice Emitted when the `forceBuy` slippage bound changes
+     * @param oldSlippageBps Previous bound, in basis points
+     * @param newSlippageBps New bound, in basis points
+     */
+    event FallbackSlippageUpdated(uint16 oldSlippageBps, uint16 newSlippageBps);
+
     /// @notice An address argument was zero.
     error ZeroAddress();
 
@@ -528,6 +554,9 @@ interface ISmartDCA {
 
     /// @notice A parameter is outside its allowed range.
     error InvalidParameter();
+
+    /// @notice `forceBuy` was called on a pair with no route.
+    error NoFallbackRoute(uint32 pairId);
 
     /**
      * @notice Deposits `amount` of the pair's stable and starts a plan of `buys` monthly buys.
@@ -650,6 +679,23 @@ interface ISmartDCA {
      * @custom:event Emits RoundSettled.
      */
     function settleRound(uint32 pairId) external;
+
+    /**
+     * @notice Runs one part of the pair's round without the keeper or the backend: starts the round if needed, swaps
+     *         the next part on the pair's PancakeSwap V3 route, and settles the round after its last part.
+     * @dev Callable from the round's lock time until it settles; before the lock it reverts with `RoundNotStarted`.
+     *      For a crisis such as the keeper or the backend being down. The swap needs no signed route:
+     *      it approves only the part's stable, calls the router's `exactInput`, and reverts if the asset that arrived
+     *      is below the oracle value of the part less `fallbackSlippageBps`. `parts = 1` runs the whole round in one
+     *      call; a large round takes more parts so the pool can recover between them. The keeper can keep running
+     *      the same round, since both share its part count, and a round whose parts are all swapped only settles.
+     *      TBD with the team: PancakeSwap V3 SwapRouter as the router, and the 0.5% default.
+     * @param pairId The pair
+     * @param parts Parts to split the round into, 1 to `maxParts`; ignored once the round has started
+     * @custom:access Controlled by AccessControlManager (Guardian and Normal Timelock)
+     * @custom:event Emits RoundStarted on the first part, RoundPartSwapped, and RoundSettled after the last part.
+     */
+    function forceBuy(uint32 pairId, uint8 parts) external;
 
     /**
      * @notice Settles the pair's rounds with nothing to buy, and emits `RoundLocked` once the next round is locked.
@@ -795,6 +841,26 @@ interface ISmartDCA {
      * @custom:event Emits TokenSwept.
      */
     function sweepToken(address token, address to) external;
+
+    /**
+     * @notice Sets the route `forceBuy` swaps a pair on.
+     * @dev Not checked against the pair's tokens: a path that does not start with the stable cannot pull it, and one
+     *      that does not end with the asset adds nothing to SmartDCA's asset balance, so the swap reverts either way.
+     * @param pairId The pair
+     * @param router PancakeSwap V3 SwapRouter, zero to remove the route
+     * @param path Packed pool path from the stable to the asset, for example `abi.encodePacked(USDT, 500, BTCB)`
+     * @custom:access Controlled by AccessControlManager
+     * @custom:event Emits FallbackRouteUpdated.
+     */
+    function setFallbackRoute(uint32 pairId, address router, bytes calldata path) external;
+
+    /**
+     * @notice Sets how far below the oracle price a `forceBuy` swap can return.
+     * @param newSlippageBps New bound in basis points, up to `MAX_SLIPPAGE_BPS`
+     * @custom:access Controlled by AccessControlManager
+     * @custom:event Emits FallbackSlippageUpdated.
+     */
+    function setFallbackSlippage(uint16 newSlippageBps) external;
 
     /**
      * @notice Sets the address that receives fees and rewards.

@@ -2,12 +2,14 @@
 pragma solidity 0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ResilientOracleInterface } from "@venusprotocol/oracle/contracts/interfaces/OracleInterface.sol";
 
 import { IHub } from "../CollateralGateway/IHub.sol";
 import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IHubRegistry } from "../Interfaces/IHubLiquidity.sol";
+import { IPancakeV3SwapRouter } from "../Interfaces/IPancakeV3SwapRouter.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
 import { SmartDCAMath } from "./SmartDCAMath.sol";
 import { ISmartDCA } from "./ISmartDCA.sol";
@@ -15,7 +17,8 @@ import { ISmartDCA } from "./ISmartDCA.sol";
 /**
  * @title SmartDCAAdminLib
  * @author Venus
- * @notice Bodies of SmartDCA's larger governance calls, kept out of SmartDCA to fit the 24,576 byte size limit
+ * @notice Bodies of SmartDCA's larger governance and `forceBuy` calls, kept out of SmartDCA to fit the 24,576 byte
+ *         size limit
  * @dev The external functions run through DELEGATECALL, so they read and write SmartDCA's storage and their events
  *      come from SmartDCA. SmartDCA checks access before calling them. `sourceDeposit` and `sourceRedeem` are
  *      internal, so they are copied into each caller, SmartDCA included.
@@ -83,6 +86,65 @@ library SmartDCAAdminLib {
             hubRegistry,
             comptroller
         );
+    }
+
+    /**
+     * @notice Sets a pair's `forceBuy` route
+     * @param route The pair's route record
+     * @param pairId The pair
+     * @param router PancakeSwap V3 SwapRouter, zero to remove the route
+     * @param path Packed pool path from the stable to the asset
+     */
+    function setFallbackRoute(
+        ISmartDCA.FallbackRoute storage route,
+        uint32 pairId,
+        address router,
+        bytes calldata path
+    ) external {
+        route.router = router;
+        route.path = path;
+        emit ISmartDCA.FallbackRouteUpdated(pairId, router, path);
+    }
+
+    /**
+     * @notice Swaps `stableIn` of the pair's stable for its asset on the pair's route, for `forceBuy`
+     * @dev Approves only `stableIn`. Reverts if the asset that arrived, counted as a balance change, is below `minOut`.
+     *      TBD with the team: PancakeSwap V3 SwapRouter (`exactInput` with a deadline) as the router.
+     * @param route The pair's route
+     * @param pair The pair
+     * @param oracle Oracle for both tokens' prices
+     * @param stableIn Stable amount to sell
+     * @param slippageBps Most the swap can return below the oracle value, in basis points
+     * @return assetOut Asset amount received
+     * @return quotedOut Oracle value of `stableIn` in the asset
+     * @return minOut `quotedOut` less `slippageBps`
+     */
+    function fallbackSwap(
+        ISmartDCA.FallbackRoute storage route,
+        ISmartDCA.Pair storage pair,
+        ResilientOracleInterface oracle,
+        uint256 stableIn,
+        uint256 slippageBps
+    ) external returns (uint256 assetOut, uint256 quotedOut, uint256 minOut) {
+        address stable = pair.stable;
+        address asset = pair.asset;
+        // Oracle prices are scaled by 1e36 / decimals, so this converts across decimals
+        quotedOut = Math.mulDiv(stableIn, oracle.getPrice(stable), oracle.getPrice(asset));
+        minOut = Math.mulDiv(quotedOut, SmartDCAMath.BPS - slippageBps, SmartDCAMath.BPS);
+
+        uint256 assetBefore = IERC20(asset).balanceOf(address(this));
+        IERC20(stable).forceApprove(route.router, stableIn);
+        IPancakeV3SwapRouter(route.router).exactInput(
+            IPancakeV3SwapRouter.ExactInputParams({
+                path: route.path,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: stableIn,
+                amountOutMinimum: minOut
+            })
+        );
+        assetOut = IERC20(asset).balanceOf(address(this)) - assetBefore;
+        if (assetOut < minOut) revert ISmartDCA.SlippageExceeded(assetOut, minOut);
     }
 
     /**

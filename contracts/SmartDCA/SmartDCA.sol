@@ -48,7 +48,7 @@ import { ISmartDCA } from "./ISmartDCA.sol";
 contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
 
-    /// @notice Highest slippage bound governance can set, in basis points (1%)
+    /// @notice Highest slippage bound governance can set, for keeper swaps and for `forceBuy`, in basis points (1%)
     uint16 public constant MAX_SLIPPAGE_BPS = 100;
 
     /// @notice Highest number of parts a round can be split into
@@ -97,6 +97,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @notice Highest fee rate governance can set, in basis points; 20% at launch
     uint16 public maxFeeRateBps;
 
+    /// @notice Most a `forceBuy` swap can return below the oracle price, in basis points
+    uint16 public fallbackSlippageBps;
+
     /// @notice Id of the last plan created; plan ids start at 1
     uint256 public lastPlanId;
 
@@ -124,8 +127,11 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @dev Plan ids each owner holds
     mapping(address owner => uint256[] planIds) private _planIdsByOwner;
 
-    /// @dev Storage gap for future upgrades; with the 11 slots above, SmartDCA's own state takes 50 slots
-    uint256[39] private __gap;
+    /// @notice PancakeSwap V3 route of each pair, used only by `forceBuy`
+    mapping(uint32 pairId => FallbackRoute) public fallbackRoutes;
+
+    /// @dev Storage gap for future upgrades; with the 12 slots above, SmartDCA's own state takes 50 slots
+    uint256[38] private __gap;
 
     /**
      * @notice Sets the external contracts and disables initializers on the implementation
@@ -147,8 +153,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
     /**
      * @notice Initializes the proxy with the launch parameters
-     * @dev Fee rate 0 with a cap of 20%, slippage bound 0.1%, up to 10 parts per round, and 2 to 60 buys per
-     *      plan
+     * @dev Fee rate 0 with a cap of 20%, slippage bound 0.1%, up to 10 parts per round, 2 to 60 buys per plan, and a
+     *      0.5% slippage bound for `forceBuy`
      * @param accessControlManager_ AccessControlManager
      * @param reserve_ Receives fees and rewards
      */
@@ -163,6 +169,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         maxParts = 10;
         minBuys = 2;
         maxBuys = 60;
+        // TBD: slippage default to confirm with the team
+        fallbackSlippageBps = 50;
     }
 
     /// @inheritdoc ISmartDCA
@@ -385,42 +393,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     function startRound(uint32 pairId, uint8 parts) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
         _checkRoundCaller(pairId, pair);
-        if (parts == 0 || parts > maxParts) revert InvalidParts();
-
-        // Rounds with nothing to buy settle here with no swap
-        _settleEmptyRounds(pairId, pair);
-        uint32 round = pair.lastSettledRound + 1;
-        if (block.timestamp < SmartDCAMath.lockTimeOf(round)) return;
-        _emitRoundLocked(pairId, pair);
-
-        Round storage r = rounds[pairId][round];
-        if (r.partsTotal != 0) revert RoundAlreadyStarted(pairId);
-
-        uint256 stableRedeemed = _redeem(yieldSources[pairId][Side.Stable], pair.stable, pair.roundStableUnits);
-        if (stableRedeemed == 0) revert ZeroAmount();
-        (uint256 fee, uint16 rate) = SmartDCAMath.roundFee(stableRedeemed, pair.roundPrincipal, feeRateBps);
-        uint256 stableNet = stableRedeemed - fee;
-
-        r.partsTotal = parts;
-        r.feeRateBps = rate;
-        r.stableRedeemed = stableRedeemed;
-        r.stableNet = stableNet;
-        r.stableToSwap = stableNet;
-
-        if (fee != 0) {
-            IERC20(pair.stable).safeTransfer(reserve, fee);
-            emit RoundFeeCollected(pairId, round, fee);
-        }
-        emit RoundStarted(
-            pairId,
-            round,
-            parts,
-            pair.roundStableUnits,
-            stableRedeemed,
-            pair.roundPrincipal,
-            rate,
-            stableNet
-        );
+        _startRound(pairId, pair, parts);
     }
 
     /// @inheritdoc ISmartDCA
@@ -485,37 +458,36 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     function settleRound(uint32 pairId) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
         _checkRoundCaller(pairId, pair);
+        _settleRound(pairId, pair);
+    }
+
+    /// @inheritdoc ISmartDCA
+    function forceBuy(uint32 pairId, uint8 parts) external nonReentrant whenNotPaused {
+        _checkAccessAllowed("forceBuy(uint32,uint8)");
+        Pair storage pair = _pair(pairId);
+        if (fallbackRoutes[pairId].router == address(0)) revert NoFallbackRoute(pairId);
+
+        // Before the lock `_startRound` starts nothing, so `_startedRound` below reverts
+        if (rounds[pairId][pair.lastSettledRound + 1].partsTotal == 0) _startRound(pairId, pair, parts);
         uint32 round = pair.lastSettledRound + 1;
         Round storage r = _startedRound(pairId, round);
-        if (r.partsDone != r.partsTotal) revert PartsLeft();
-
-        uint256 assetUnits = _deposit(yieldSources[pairId][Side.Asset], pair.asset, r.assetBought);
-        (uint256 perUnitStep, uint256 perPrincipalStep) = SmartDCAMath.roundIndexSteps(
-            assetUnits,
-            r.stableRedeemed,
-            r.stableNet,
-            pair.roundStableUnits,
-            r.feeRateBps
-        );
-
-        // The rounding leftover stays in the pool: a plan rounds down once over all its rounds, so it can read
-        // up to one unit per round more than a per-round round-down would keep for it
-        pair.assetPerUnitIndex += perUnitStep;
-        pair.assetPerPrincipalIndex += perPrincipalStep;
-        _closeRound(pair, r, round);
-
-        emit RoundSettled(
-            pairId,
-            round,
-            r.stableRedeemed,
-            r.stableRedeemed - r.stableNet,
-            r.assetBought,
-            assetUnits,
-            pair.assetPerUnitIndex,
-            pair.assetPerPrincipalIndex
-        );
-
-        _settleEmptyRounds(pairId, pair);
+        // Skipped when the keeper swapped every part but did not settle
+        if (r.partsDone != r.partsTotal) {
+            // An even share of what is left; on the last part that is all of it
+            uint256 stableIn = r.stableToSwap / (r.partsTotal - r.partsDone);
+            (uint256 assetOut, uint256 quotedOut, uint256 minOut) = SmartDCAAdminLib.fallbackSwap(
+                fallbackRoutes[pairId],
+                pair,
+                ORACLE,
+                stableIn,
+                fallbackSlippageBps
+            );
+            r.stableToSwap -= stableIn;
+            r.assetBought += assetOut;
+            r.partsDone += 1;
+            emit RoundPartSwapped(pairId, round, r.partsDone, stableIn, assetOut, quotedOut, minOut);
+        }
+        if (r.partsDone == r.partsTotal) _settleRound(pairId, pair);
     }
 
     /// @inheritdoc ISmartDCA
@@ -675,6 +647,21 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
+    function setFallbackRoute(uint32 pairId, address router, bytes calldata path) external {
+        _checkAccessAllowed("setFallbackRoute(uint32,address,bytes)");
+        _pair(pairId);
+        SmartDCAAdminLib.setFallbackRoute(fallbackRoutes[pairId], pairId, router, path);
+    }
+
+    /// @inheritdoc ISmartDCA
+    function setFallbackSlippage(uint16 newSlippageBps) external {
+        _checkAccessAllowed("setFallbackSlippage(uint16)");
+        if (newSlippageBps > MAX_SLIPPAGE_BPS) revert AboveHardCap();
+        emit FallbackSlippageUpdated(fallbackSlippageBps, newSlippageBps);
+        fallbackSlippageBps = newSlippageBps;
+    }
+
+    /// @inheritdoc ISmartDCA
     function setReserve(address newReserve) external {
         _checkAccessAllowed("setReserve(address)");
         if (newReserve == address(0)) revert ZeroAddress();
@@ -690,6 +677,81 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @inheritdoc ISmartDCA
     function getPlanIds(address owner) external view returns (uint256[] memory) {
         return _planIdsByOwner[owner];
+    }
+
+    /// @dev Body of `startRound`, after the caller check
+    function _startRound(uint32 pairId, Pair storage pair, uint8 parts) internal {
+        if (parts == 0 || parts > maxParts) revert InvalidParts();
+
+        // Rounds with nothing to buy settle here with no swap
+        _settleEmptyRounds(pairId, pair);
+        uint32 round = pair.lastSettledRound + 1;
+        if (block.timestamp < SmartDCAMath.lockTimeOf(round)) return;
+        _emitRoundLocked(pairId, pair);
+
+        Round storage r = rounds[pairId][round];
+        if (r.partsTotal != 0) revert RoundAlreadyStarted(pairId);
+
+        uint256 stableRedeemed = _redeem(yieldSources[pairId][Side.Stable], pair.stable, pair.roundStableUnits);
+        if (stableRedeemed == 0) revert ZeroAmount();
+        (uint256 fee, uint16 rate) = SmartDCAMath.roundFee(stableRedeemed, pair.roundPrincipal, feeRateBps);
+        uint256 stableNet = stableRedeemed - fee;
+
+        r.partsTotal = parts;
+        r.feeRateBps = rate;
+        r.stableRedeemed = stableRedeemed;
+        r.stableNet = stableNet;
+        r.stableToSwap = stableNet;
+
+        if (fee != 0) {
+            IERC20(pair.stable).safeTransfer(reserve, fee);
+            emit RoundFeeCollected(pairId, round, fee);
+        }
+        emit RoundStarted(
+            pairId,
+            round,
+            parts,
+            pair.roundStableUnits,
+            stableRedeemed,
+            pair.roundPrincipal,
+            rate,
+            stableNet
+        );
+    }
+
+    /// @dev Body of `settleRound`, after the caller check
+    function _settleRound(uint32 pairId, Pair storage pair) internal {
+        uint32 round = pair.lastSettledRound + 1;
+        Round storage r = _startedRound(pairId, round);
+        if (r.partsDone != r.partsTotal) revert PartsLeft();
+
+        uint256 assetUnits = _deposit(yieldSources[pairId][Side.Asset], pair.asset, r.assetBought);
+        (uint256 perUnitStep, uint256 perPrincipalStep) = SmartDCAMath.roundIndexSteps(
+            assetUnits,
+            r.stableRedeemed,
+            r.stableNet,
+            pair.roundStableUnits,
+            r.feeRateBps
+        );
+
+        // The rounding leftover stays in the pool: a plan rounds down once over all its rounds, so it can read
+        // up to one unit per round more than a per-round round-down would keep for it
+        pair.assetPerUnitIndex += perUnitStep;
+        pair.assetPerPrincipalIndex += perPrincipalStep;
+        _closeRound(pair, r, round);
+
+        emit RoundSettled(
+            pairId,
+            round,
+            r.stableRedeemed,
+            r.stableRedeemed - r.stableNet,
+            r.assetBought,
+            assetUnits,
+            pair.assetPerUnitIndex,
+            pair.assetPerPrincipalIndex
+        );
+
+        _settleEmptyRounds(pairId, pair);
     }
 
     /// @dev Settles, with no swap, every round of the pair that has nothing to buy and whose lock time has passed
