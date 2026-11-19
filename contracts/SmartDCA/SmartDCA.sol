@@ -192,8 +192,10 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     function createPlan(
         uint32 pairId,
         uint256 amount,
-        uint8 buys
+        uint8 buys,
+        address owner
     ) external nonReentrant whenNotPaused returns (uint256 planId) {
+        if (owner == address(0)) revert ZeroAddress();
         Pair storage pair = _pair(pairId);
         if (!pair.enabled) revert PairDisabled();
         if (buys < minBuys || buys > maxBuys) revert InvalidBuys(buys, minBuys, maxBuys);
@@ -219,7 +221,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
         planId = ++lastPlanId;
         plans[planId] = Plan({
-            owner: msg.sender,
+            owner: owner,
             pairId: pairId,
             status: PlanStatus.Active,
             scheduleBuys: buys,
@@ -231,11 +233,11 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             assetUnitsCarried: 0,
             assetUnitsPaid: 0
         });
-        _planIdsByOwner[msg.sender].push(planId);
+        _planIdsByOwner[owner].push(planId);
 
         emit PlanCreated(
             planId,
-            msg.sender,
+            owner,
             pairId,
             received,
             stableUnits,
@@ -290,8 +292,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
-    function withdrawBought(uint256 planId, uint256 amount) external nonReentrant whenNotPaused {
+    function withdrawBought(uint256 planId, uint256 amount, address receiver) external nonReentrant whenNotPaused {
         Plan storage plan = _ownedActivePlan(planId);
+        if (receiver == address(0)) revert ZeroAddress();
         Pair storage pair = pairs[plan.pairId];
         YieldSource storage assetSource = yieldSources[plan.pairId][Side.Asset];
 
@@ -304,14 +307,15 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
         plan.assetUnitsPaid += assetUnits;
         uint256 assetAmount = _redeem(assetSource, pair.asset, assetUnits);
-        IERC20(pair.asset).safeTransfer(msg.sender, assetAmount);
+        IERC20(pair.asset).safeTransfer(receiver, assetAmount);
 
-        emit BoughtWithdrawn(planId, assetUnits, assetAmount);
+        emit BoughtWithdrawn(planId, receiver, assetUnits, assetAmount);
     }
 
     /// @inheritdoc ISmartDCA
-    function cancelPlan(uint256 planId) external nonReentrant whenNotPaused {
+    function cancelPlan(uint256 planId, address receiver) external nonReentrant whenNotPaused {
         Plan storage plan = _ownedActivePlan(planId);
+        if (receiver == address(0)) revert ZeroAddress();
         uint32 pairId = plan.pairId;
         Pair storage pair = pairs[pairId];
 
@@ -344,20 +348,21 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             IERC20(pair.stable).safeTransfer(reserve, fee);
             emit CancelFeeCollected(pairId, planId, fee);
         }
-        IERC20(pair.stable).safeTransfer(msg.sender, stableRedeemed - fee);
+        IERC20(pair.stable).safeTransfer(receiver, stableRedeemed - fee);
 
         uint256 assetAmount;
         if (assetUnitsOwed != 0) {
             assetAmount = _redeem(yieldSources[pairId][Side.Asset], pair.asset, assetUnitsOwed);
-            IERC20(pair.asset).safeTransfer(msg.sender, assetAmount);
+            IERC20(pair.asset).safeTransfer(receiver, assetAmount);
         }
 
-        emit PlanCancelled(planId, stableRedeemed - fee, fee, assetAmount);
+        emit PlanCancelled(planId, receiver, stableRedeemed - fee, fee, assetAmount);
     }
 
     /// @inheritdoc ISmartDCA
-    function claimPlan(uint256 planId, bool toCore) external nonReentrant whenNotPaused {
+    function claimPlan(uint256 planId, bool toCore, address receiver) external nonReentrant whenNotPaused {
         Plan storage plan = _ownedActivePlan(planId);
+        if (receiver == address(0)) revert ZeroAddress();
         Pair storage pair = pairs[plan.pairId];
         _settleEmptyRounds(plan.pairId, pair);
         _emitRoundLocked(plan.pairId, pair);
@@ -376,14 +381,14 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             YieldSource storage assetSource = yieldSources[plan.pairId][Side.Asset];
             if (toCore) {
                 if (assetSource.kind != SourceKind.Core) revert NotCoreSource();
-                amount = _transferUnits(assetSource, assetUnitsOwed, msg.sender);
+                amount = _transferUnits(assetSource, assetUnitsOwed, receiver);
             } else {
                 amount = _redeem(assetSource, pair.asset, assetUnitsOwed);
-                IERC20(pair.asset).safeTransfer(msg.sender, amount);
+                IERC20(pair.asset).safeTransfer(receiver, amount);
             }
         }
 
-        emit PlanClaimed(planId, toCore, amount);
+        emit PlanClaimed(planId, receiver, toCore, amount);
     }
 
     /// @inheritdoc ISmartDCA

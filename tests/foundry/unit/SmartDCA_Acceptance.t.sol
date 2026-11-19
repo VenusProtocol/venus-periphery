@@ -67,7 +67,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         usdt.approve(address(dca), 300e18);
         vm.expectEmit(address(dca));
         emit ISmartDCA.RoundLocked(pairId, NOV);
-        dca.createPlan(pairId, 300e18, 3);
+        dca.createPlan(pairId, 300e18, 3, carol);
         vm.stopPrank();
         assertEq(_pair().lockEmittedRound, NOV);
     }
@@ -82,7 +82,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         vm.expectEmit(address(dca));
         emit ISmartDCA.RoundLocked(pairId, JAN);
         vm.prank(alice);
-        dca.claimPlan(id, false);
+        dca.claimPlan(id, false, alice);
     }
 
     function test_claimPlan_settlesEmptyRoundsFirst() public {
@@ -92,7 +92,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
 
         vm.warp(SmartDCAMath.lockTimeOf(JAN) + 1);
         vm.prank(alice);
-        dca.claimPlan(id, false);
+        dca.claimPlan(id, false, alice);
         assertEq(_pair().lastSettledRound, JAN, "empty January settled by claim");
     }
 
@@ -103,11 +103,11 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         vm.startPrank(alice);
         usdt.approve(address(dca), type(uint256).max);
         vm.expectPartialRevert(ISmartDCA.DepositTooSmall.selector);
-        dca.createPlan(pairId, 20e18 - 1, 2);
-        dca.createPlan(pairId, 20e18, 2);
+        dca.createPlan(pairId, 20e18 - 1, 2, alice);
+        dca.createPlan(pairId, 20e18, 2, alice);
         vm.expectPartialRevert(ISmartDCA.DepositTooSmall.selector);
-        dca.createPlan(pairId, 600e18 - 1, 60);
-        dca.createPlan(pairId, 600e18, 60);
+        dca.createPlan(pairId, 600e18 - 1, 60, alice);
+        dca.createPlan(pairId, 600e18, 60, alice);
         vm.stopPrank();
     }
 
@@ -124,8 +124,8 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
         dca.topUpPlan(id, 100e18);
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
-        dca.cancelPlan(id);
-        dca.withdrawBought(id, type(uint256).max);
+        dca.cancelPlan(id, alice);
+        dca.withdrawBought(id, type(uint256).max, alice);
         vm.stopPrank();
         assertEq(btcb.balanceOf(alice), 1e15, "November only");
     }
@@ -247,7 +247,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         _runRound(1);
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.ZeroAmount.selector);
-        dca.withdrawBought(id, 0);
+        dca.withdrawBought(id, 0, alice);
     }
 
     function test_withdrawBought_partialWithAHubAssetSource() public {
@@ -260,7 +260,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         btcHub.setPricePerShare(1.25e18);
 
         vm.prank(alice);
-        dca.withdrawBought(id, 0.5e15);
+        dca.withdrawBought(id, 0.5e15, alice);
         assertGe(btcb.balanceOf(alice), 0.5e15);
         assertLe(btcb.balanceOf(alice), 0.5e15 + 2);
 
@@ -282,7 +282,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         usdt.mint(bob, 1200e18);
         vm.startPrank(bob);
         usdt.approve(address(dca), 1200e18);
-        dca.createPlan(ethPairId, 1200e18, 12);
+        dca.createPlan(ethPairId, 1200e18, 12, bob);
         vm.stopPrank();
 
         // Both pairs buy in November, so both tokens hold shares; in December only the ETH pair settles

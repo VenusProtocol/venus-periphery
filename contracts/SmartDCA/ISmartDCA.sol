@@ -214,27 +214,36 @@ interface ISmartDCA {
     /**
      * @notice Emitted when bought asset is withdrawn from an active plan
      * @param planId The plan
+     * @param receiver Address paid
      * @param assetUnits Asset units taken from the plan
-     * @param assetAmount Asset amount paid to the owner
+     * @param assetAmount Asset amount paid to `receiver`
      */
-    event BoughtWithdrawn(uint256 indexed planId, uint256 assetUnits, uint256 assetAmount);
+    event BoughtWithdrawn(uint256 indexed planId, address indexed receiver, uint256 assetUnits, uint256 assetAmount);
 
     /**
      * @notice Emitted when a plan is cancelled
      * @param planId The plan
-     * @param stableAmount Stable amount paid to the owner, after `fee`
+     * @param receiver Address paid
+     * @param stableAmount Stable amount paid to `receiver`, after `fee`
      * @param fee Stable amount sent to the Reserve
-     * @param assetAmount Bought asset paid to the owner
+     * @param assetAmount Bought asset paid to `receiver`
      */
-    event PlanCancelled(uint256 indexed planId, uint256 stableAmount, uint256 fee, uint256 assetAmount);
+    event PlanCancelled(
+        uint256 indexed planId,
+        address indexed receiver,
+        uint256 stableAmount,
+        uint256 fee,
+        uint256 assetAmount
+    );
 
     /**
      * @notice Emitted when a matured plan is claimed
      * @param planId The plan
+     * @param receiver Address paid
      * @param toCore True when paid as the asset's Core vToken, false when paid as the asset
-     * @param amount vTokens or asset amount paid to the owner
+     * @param amount vTokens or asset amount paid to `receiver`
      */
-    event PlanClaimed(uint256 indexed planId, bool toCore, uint256 amount);
+    event PlanClaimed(uint256 indexed planId, address indexed receiver, bool toCore, uint256 amount);
 
     /**
      * @notice Emitted when a plan moves to a new owner
@@ -571,23 +580,26 @@ interface ISmartDCA {
     error NoFallbackRoute(uint32 pairId);
 
     /**
-     * @notice Deposits `amount` of the pair's stable and starts a plan of `buys` buys, one per round.
-     * @dev Caller must first `approve` SmartDCA for `amount` of the stable. The deposit goes into the pair's stable
+     * @notice Deposits `amount` of the pair's stable and starts a plan of `buys` buys, one per round, owned by
+     *         `owner`.
+     * @dev The caller pays and must first `approve` SmartDCA for `amount` of the stable; `owner` can be another
+     *      address, so a contract can open a plan for a user. The deposit goes into the pair's stable
      *      source and the plan holds units of it. Each buy sells the same number of units, so a buy's stable amount
      *      grows with the interest earned while waiting.
      *
      *      The plan's first round is the pair's next round when called before that round's lock time, and the round
      *      after it from the lock time on.
      *
-     *      Reverts if the pair is unknown or disabled, if `buys` is outside `minBuys` to `maxBuys`, or if `amount` is
+     *      Reverts if `owner` is the zero address, if the pair is unknown or disabled, if `buys` is outside `minBuys` to `maxBuys`, or if `amount` is
      *      under `minAmountPerBuy` of the stable times `buys`.
      * @param pairId Pair to buy on
      * @param amount Stable amount to deposit, in the stable's decimals
      * @param buys Number of buys
+     * @param owner Owner of the new plan
      * @return planId The new plan
      * @custom:event Emits PlanCreated, and RoundLocked on the first call of a locked round.
      */
-    function createPlan(uint32 pairId, uint256 amount, uint8 buys) external returns (uint256 planId);
+    function createPlan(uint32 pairId, uint256 amount, uint8 buys, address owner) external returns (uint256 planId);
 
     /**
      * @notice Adds `amount` of stable to a plan and spreads everything still waiting over the buys left.
@@ -603,36 +615,40 @@ interface ISmartDCA {
     function topUpPlan(uint256 planId, uint256 amount) external;
 
     /**
-     * @notice Pays the plan owner `amount` of the asset bought so far, or all of it with `type(uint256).max`.
+     * @notice Pays `receiver` `amount` of the asset bought so far, or all of it with `type(uint256).max`.
      * @dev Allowed while the plan's round is running: a running round's buy only counts once it settles. A partial
-     *      amount is converted to units rounded up, so after a source switch the owner can receive a few wei less
-     *      than `amount`.
+     *      amount is converted to units rounded up, so after a source switch `receiver` can get a few wei less
+     *      than `amount`. Only the owner can call.
      * @param planId The plan
      * @param amount Asset amount to withdraw, in the asset's decimals
+     * @param receiver Address paid
      * @custom:event Emits BoughtWithdrawn.
      */
-    function withdrawBought(uint256 planId, uint256 amount) external;
+    function withdrawBought(uint256 planId, uint256 amount, address receiver) external;
 
     /**
-     * @notice Ends a plan. Pays back the stable still waiting, less the fee on its interest, and all bought asset.
+     * @notice Ends a plan. Pays `receiver` the stable still waiting, less the fee on its interest, and all bought
+     *         asset.
      * @dev The fee is `feeRateBps` of what the waiting stable redeems above its principal, so a cancel never takes a
      *      fee from principal. Reverts if the plan is in a round past its lock time that has not settled, or if
      *      every buy has settled (claim it instead).
      * @param planId The plan
+     * @param receiver Address paid
      * @custom:event Emits PlanCancelled, and CancelFeeCollected when the fee is not zero.
      */
-    function cancelPlan(uint256 planId) external;
+    function cancelPlan(uint256 planId, address receiver) external;
 
     /**
-     * @notice Pays out a plan whose buys have all settled, and closes it.
-     * @dev With `toCore`, the owner receives the asset's Core vTokens and keeps earning; collateral is not enabled for
+     * @notice Pays `receiver` the asset of a plan whose buys have all settled, and closes it.
+     * @dev With `toCore`, `receiver` gets the asset's Core vTokens and keeps earning; collateral is not enabled for
      *      them. Up to `scheduleBuys - 1` stable units are left by rounding the per-buy amount down; they are worth
      *      under 1 wei and are dropped here.
      * @param planId The plan
      * @param toCore True to pay as vTokens, false to pay as the asset
+     * @param receiver Address paid
      * @custom:event Emits PlanClaimed.
      */
-    function claimPlan(uint256 planId, bool toCore) external;
+    function claimPlan(uint256 planId, bool toCore, address receiver) external;
 
     /**
      * @notice Gives an active plan to `newOwner`, who can then top it up, withdraw, cancel and claim it.

@@ -192,7 +192,7 @@ contract Fork_SmartDCATest is Test {
 
         // The plan still exits in full from the new source
         vm.prank(alice);
-        dca.cancelPlan(planId);
+        dca.cancelPlan(planId, alice);
         assertApproxEqRel(IERC20(USDT).balanceOf(alice), DEPOSIT, 1e12, "deposit back from vUSDT");
     }
 
@@ -225,7 +225,7 @@ contract Fork_SmartDCATest is Test {
         assertEq(IERC20(USDT).allowance(address(dca), PCS_V3_ROUTER), 0, "approved only each part");
 
         vm.prank(alice);
-        dca.withdrawBought(planId, type(uint256).max);
+        dca.withdrawBought(planId, type(uint256).max, alice);
         assertApproxEqRel(IERC20(BTCB).balanceOf(alice), assetBought, 1e12, "BTCB out");
     }
 
@@ -253,7 +253,7 @@ contract Fork_SmartDCATest is Test {
         (, , uint256 shares, ) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
         assertEq(IERC20(VBTC).balanceOf(address(dca)), shares, "vBTC tracked");
         vm.prank(alice);
-        dca.withdrawBought(planId, type(uint256).max);
+        dca.withdrawBought(planId, type(uint256).max, alice);
         assertApproxEqRel(IERC20(BTCB).balanceOf(alice), amountOut, 1e12, "BTCB out");
     }
 
@@ -366,7 +366,7 @@ contract Fork_SmartDCATest is Test {
         (, uint256 out2) = _runRound(pairId, 1);
 
         vm.prank(alice);
-        dca.claimPlan(planId, true);
+        dca.claimPlan(planId, true, alice);
 
         // Alice now supplies in Core: her vBTC is worth what the two rounds bought, plus the first round's
         // BTCB interest over a month
@@ -383,7 +383,7 @@ contract Fork_SmartDCATest is Test {
         (, uint256 amountOut) = _runRound(pairId, 2);
 
         vm.prank(alice);
-        dca.cancelPlan(planId);
+        dca.cancelPlan(planId, alice);
 
         // The unswapped half comes back from the real Hub, plus a month of its yield
         assertGe(IERC20(USDT).balanceOf(alice), DEPOSIT / 2 - 1, "stable back");
@@ -397,14 +397,14 @@ contract Fork_SmartDCATest is Test {
 
         uint256 amount = amountOut / 3;
         vm.prank(alice);
-        dca.withdrawBought(planId, amount);
+        dca.withdrawBought(planId, amount, alice);
         assertGe(IERC20(BTCB).balanceOf(alice), amount, "at least the amount asked");
         // vBTC has 8 decimals, so rounding the shares up can add up to one share's worth of BTCB
         uint256 oneShare = IVToken(VBTC).exchangeRateStored() / 1e18 + 1;
         assertLe(IERC20(BTCB).balanceOf(alice), amount + oneShare, "and no more than one share");
 
         vm.prank(alice);
-        dca.withdrawBought(planId, type(uint256).max);
+        dca.withdrawBought(planId, type(uint256).max, alice);
         assertApproxEqRel(IERC20(BTCB).balanceOf(alice), amountOut, 1e12, "the rest");
     }
 
@@ -429,9 +429,9 @@ contract Fork_SmartDCATest is Test {
         assertLe(usdtUnits, dueBtc + dueBnb + 4, "and only rounding beyond it");
 
         vm.prank(alice);
-        dca.withdrawBought(alicePlan, type(uint256).max);
+        dca.withdrawBought(alicePlan, type(uint256).max, alice);
         vm.prank(bob);
-        dca.withdrawBought(bobPlan, type(uint256).max);
+        dca.withdrawBought(bobPlan, type(uint256).max, bob);
         assertApproxEqRel(IERC20(BTCB).balanceOf(alice), btcOut, 1e12, "BTCB to alice");
         assertApproxEqRel(IERC20(WBNB).balanceOf(bob), bnbOut, 1e12, "WBNB to bob");
     }
@@ -466,7 +466,7 @@ contract Fork_SmartDCATest is Test {
             assertGt(amountOut, 0, "bought");
             address user = address(uint160(0xD0CA + i));
             vm.prank(user);
-            dca.withdrawBought(planIds[i], type(uint256).max);
+            dca.withdrawBought(planIds[i], type(uint256).max, user);
             assertApproxEqRel(IERC20(assets[i % 3]).balanceOf(user), amountOut, 1e12, "asset out");
         }
     }
@@ -521,7 +521,7 @@ contract Fork_SmartDCATest is Test {
 
     function _create(address user, uint32 pid, uint256 amount, uint8 buys) internal returns (uint256 planId) {
         vm.prank(user);
-        planId = dca.createPlan(pid, amount, buys);
+        planId = dca.createPlan(pid, amount, buys, user);
     }
 
     /// @dev Moves time and blocks to the pair's lock time, so Core and the Hub accrue interest on the way

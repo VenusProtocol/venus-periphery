@@ -81,7 +81,7 @@ contract SmartDCAHandler is Test {
         _fund(user, amount);
         (bool ok, bytes memory ret) = _call(
             user,
-            abi.encodeCall(DCA.createPlan, (pairIds[pairSeed % 2], amount, uint8(bound(buys, 2, 6))))
+            abi.encodeCall(DCA.createPlan, (pairIds[pairSeed % 2], amount, uint8(bound(buys, 2, 6)), user))
         );
         if (!ok) return;
         ids.push(abi.decode(ret, (uint256)));
@@ -102,21 +102,21 @@ contract SmartDCAHandler is Test {
         if (ids.length == 0) return;
         uint256 id = ids[planSeed % ids.length];
         amount = all ? type(uint256).max : bound(amount, 1, 1e12);
-        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.withdrawBought, (id, amount)));
+        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.withdrawBought, (id, amount, _owner(id))));
         if (ok) ++withdraws;
     }
 
     function cancelPlan(uint256 planSeed) external {
         if (ids.length == 0) return;
         uint256 id = ids[planSeed % ids.length];
-        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.cancelPlan, (id)));
+        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.cancelPlan, (id, _owner(id))));
         if (ok) ++cancels;
     }
 
     function claimPlan(uint256 planSeed, bool toCore) external {
         if (ids.length == 0) return;
         uint256 id = ids[planSeed % ids.length];
-        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.claimPlan, (id, toCore)));
+        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.claimPlan, (id, toCore, _owner(id))));
         if (ok) ++claims;
     }
 

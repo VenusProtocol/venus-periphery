@@ -151,7 +151,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.PairDisabled.selector);
         dca.topUpPlan(id, 120e18);
         // Leaving still works
-        dca.cancelPlan(id);
+        dca.cancelPlan(id, alice);
         vm.stopPrank();
     }
 
@@ -190,7 +190,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
         assertEq(_plan(id).scheduleStableUnits, 1200e24);
 
         vm.prank(alice);
-        dca.cancelPlan(id);
+        dca.cancelPlan(id, alice);
         assertEq(usdt.balanceOf(alice), 1200e18);
     }
 
@@ -206,7 +206,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
         usdt.mint(bob, 600e18);
         vm.startPrank(bob);
         usdt.approve(address(dca), 600e18);
-        dca.createPlan(ethPairId, 600e18, 6);
+        dca.createPlan(ethPairId, 600e18, 6, bob);
         vm.stopPrank();
 
         MockHub hub2 = new MockHub(address(usdt));
@@ -227,7 +227,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
 
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
-        dca.cancelPlan(btcPlan);
+        dca.cancelPlan(btcPlan, alice);
     }
 
     function test_setYieldSource_blockedWhilePairLocked() public {
@@ -398,13 +398,13 @@ contract SmartDCA_AdminTest is SmartDCABase {
 
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.NotCoreSource.selector);
-        dca.claimPlan(id, true);
+        dca.claimPlan(id, true, alice);
 
         MockVToken vBTC2 = new MockVToken(address(btcb), 3e26);
         comptroller.list(address(vBTC2));
         dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Core, address(vBTC2));
         vm.prank(alice);
-        dca.claimPlan(id, true);
+        dca.claimPlan(id, true, alice);
         assertApproxEqAbs(vBTC2.balanceOf(alice), uint256(1e15 * 1e18) / 3e26, 2);
     }
 

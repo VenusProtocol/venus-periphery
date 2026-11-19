@@ -111,7 +111,7 @@ contract SmartDCA_FuzzTest is SmartDCABase {
         usdt.approve(address(dca), amount);
         vm.prank(user);
         (bool ok, bytes memory ret) = address(dca).call(
-            abi.encodeCall(dca.createPlan, (pid, amount, uint8(2 + _rnd(11))))
+            abi.encodeCall(dca.createPlan, (pid, amount, uint8(2 + _rnd(11)), user))
         );
         if (ok) ids.push(abi.decode(ret, (uint256)));
         else _countPanic(ret);
@@ -126,12 +126,12 @@ contract SmartDCA_FuzzTest is SmartDCABase {
             usdt.approve(address(dca), amount);
             _call(owner, abi.encodeCall(dca.topUpPlan, (id, amount)));
         } else if (action == 3) {
-            _call(owner, abi.encodeCall(dca.cancelPlan, (id)));
+            _call(owner, abi.encodeCall(dca.cancelPlan, (id, owner)));
         } else if (action == 4) {
             uint256 amount = _rnd(2) == 0 ? type(uint256).max : 1 + _rnd(1e12);
-            _call(owner, abi.encodeCall(dca.withdrawBought, (id, amount)));
+            _call(owner, abi.encodeCall(dca.withdrawBought, (id, amount, owner)));
         } else {
-            _call(owner, abi.encodeCall(dca.claimPlan, (id, _rnd(2) == 0)));
+            _call(owner, abi.encodeCall(dca.claimPlan, (id, _rnd(2) == 0, owner)));
         }
     }
 
@@ -161,7 +161,7 @@ contract SmartDCA_FuzzTest is SmartDCABase {
         for (uint256 i; i < ids.length; ++i) {
             ISmartDCA.Plan memory p = _plan(ids[i]);
             if (p.status == ISmartDCA.PlanStatus.Active) {
-                assertTrue(_call(p.owner, abi.encodeCall(dca.claimPlan, (ids[i], false))), "claim failed");
+                assertTrue(_call(p.owner, abi.encodeCall(dca.claimPlan, (ids[i], false, p.owner))), "claim failed");
             }
         }
         (, , , uint256 btcPairUsdtUnits) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);

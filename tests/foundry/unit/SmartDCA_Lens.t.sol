@@ -77,7 +77,7 @@ contract SmartDCA_LensTest is SmartDCABase {
         uint256 matured = _create(alice, 100e18, 2);
         uint256 cancelled = _create(bob, 100e18, 2);
         vm.prank(bob);
-        dca.cancelPlan(cancelled);
+        dca.cancelPlan(cancelled, bob);
         _runRound(1);
         _runRound(1);
 
@@ -86,7 +86,7 @@ contract SmartDCA_LensTest is SmartDCABase {
         assertEq(uint8(lens.getPlan(dca, cancelled).state), uint8(SmartDCALens.PlanState.Cancelled));
 
         vm.prank(alice);
-        dca.claimPlan(matured, false);
+        dca.claimPlan(matured, false, alice);
         assertEq(uint8(lens.getPlan(dca, matured).state), uint8(SmartDCALens.PlanState.Claimed));
         assertEq(lens.getPlan(dca, 999).owner, address(0));
     }
@@ -105,7 +105,7 @@ contract SmartDCA_LensTest is SmartDCABase {
         _runRound(1);
         _runRound(1);
         vm.prank(alice);
-        dca.claimPlan(id, false);
+        dca.claimPlan(id, false, alice);
         v = lens.getPlan(dca, id);
         assertEq(v.firstRound, NOV);
         assertEq(v.buysSettled, 3);

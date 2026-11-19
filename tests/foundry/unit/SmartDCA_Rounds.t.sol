@@ -49,7 +49,7 @@ contract SmartDCA_RoundsTest is SmartDCABase {
 
         // Carol is not in this round, so she can still leave
         vm.prank(carol);
-        dca.cancelPlan(carolId);
+        dca.cancelPlan(carolId, carol);
         assertApproxEqAbs(usdt.balanceOf(carol), 300e18, 1);
 
         vm.prank(keeper);
@@ -237,9 +237,9 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         _runRound(1);
 
         vm.prank(alice);
-        dca.claimPlan(aliceId, false);
+        dca.claimPlan(aliceId, false, alice);
         vm.prank(bob);
-        dca.claimPlan(bobId, false);
+        dca.claimPlan(bobId, false, bob);
 
         // What is left is the rounding leftover: a few units per plan per round
         (, , uint256 shares, uint256 units) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
@@ -414,7 +414,7 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         usdt.mint(bob, 1200e18);
         vm.startPrank(bob);
         usdt.approve(address(dca), 1200e18);
-        dca.createPlan(ethPairId, 1200e18, 12);
+        dca.createPlan(ethPairId, 1200e18, 12, bob);
         vm.stopPrank();
 
         vm.warp(NOV_LOCK);
@@ -560,15 +560,15 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         vm.stopPrank();
         vm.startPrank(alice);
         vm.expectRevert(bytes("Pausable: paused"));
-        dca.createPlan(pairId, 100e18, 2);
+        dca.createPlan(pairId, 100e18, 2, alice);
         vm.expectRevert(bytes("Pausable: paused"));
         dca.topUpPlan(id, 100e18);
         vm.expectRevert(bytes("Pausable: paused"));
-        dca.withdrawBought(id, type(uint256).max);
+        dca.withdrawBought(id, type(uint256).max, alice);
         vm.expectRevert(bytes("Pausable: paused"));
-        dca.cancelPlan(id);
+        dca.cancelPlan(id, alice);
         vm.expectRevert(bytes("Pausable: paused"));
-        dca.claimPlan(id, false);
+        dca.claimPlan(id, false, alice);
         vm.stopPrank();
         assertEq(_round(round).stableToSwap, before.stableToSwap, "stableToSwap frozen");
         assertEq(_round(round).assetBought, before.assetBought, "amountOut frozen");
@@ -581,6 +581,6 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         dca.settleRound(pairId);
         vm.stopPrank();
         vm.prank(alice);
-        dca.claimPlan(id, false);
+        dca.claimPlan(id, false, alice);
     }
 }

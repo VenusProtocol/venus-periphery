@@ -97,7 +97,7 @@ abstract contract SmartDCABase is Test {
         usdt.mint(user, amount);
         vm.startPrank(user);
         usdt.approve(address(dca), amount);
-        planId = dca.createPlan(pairId, amount, buys);
+        planId = dca.createPlan(pairId, amount, buys, user);
         vm.stopPrank();
     }
 
@@ -122,7 +122,7 @@ abstract contract SmartDCABase is Test {
     function _withdrawAll(address user, uint256 planId) internal returns (uint256 received) {
         uint256 before = btcb.balanceOf(user);
         vm.prank(user);
-        dca.withdrawBought(planId, type(uint256).max);
+        dca.withdrawBought(planId, type(uint256).max, user);
         received = btcb.balanceOf(user) - before;
     }
 
