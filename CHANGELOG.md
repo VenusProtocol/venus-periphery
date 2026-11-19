@@ -1,3 +1,13 @@
+## <small>1.4.2-dev.1 (2026-11-19)</small>
+
+* Merge pull request #111 from VenusProtocol/main ([125ae86](https://github.com/VenusProtocol/venus-periphery/commit/125ae86)), closes [#111](https://github.com/VenusProtocol/venus-periphery/issues/111)
+* Merge pull request #112 from VenusProtocol/ci/skip-republished-slim ([bfa350f](https://github.com/VenusProtocol/venus-periphery/commit/bfa350f)), closes [#112](https://github.com/VenusProtocol/venus-periphery/issues/112)
+* Merge pull request #95 from VenusProtocol/fix/apex-audit ([e711033](https://github.com/VenusProtocol/venus-periphery/commit/e711033)), closes [#95](https://github.com/VenusProtocol/venus-periphery/issues/95)
+* chore: deploy EBrake impl on Ethereum, Arbitrum and Base ([9841170](https://github.com/VenusProtocol/venus-periphery/commit/9841170))
+* chore: deploy EBrake impl with per-pool CF snapshot reset on BSC ([8fe8189](https://github.com/VenusProtocol/venus-periphery/commit/8fe8189))
+* ci: skip the slim publish when the version is already on npm ([8760a99](https://github.com/VenusProtocol/venus-periphery/commit/8760a99))
+* fix(ebrake): add per-pool CF snapshot reset ([b684ce4](https://github.com/VenusProtocol/venus-periphery/commit/b684ce4))
+
 ## <small>1.4.1 (2026-11-12)</small>
 
 * Merge branch 'develop' into ci/release-environment ([5884e2b](https://github.com/VenusProtocol/venus-periphery/commit/5884e2b))
