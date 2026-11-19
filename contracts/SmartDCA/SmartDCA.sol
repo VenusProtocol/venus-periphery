@@ -44,6 +44,9 @@ import { ISmartDCA } from "./ISmartDCA.sol";
  *      So every call costs the same gas however many plans a pair has.
  *
  *      SmartDCA never borrows and never enables a market as collateral, so nothing it holds can be liquidated.
+ *
+ *      {SmartDCAAdminLib} is linked for EIP-170 headroom; a library declares no state, so it cannot shift this layout.
+ * @custom:oz-upgrades-unsafe-allow external-library-linking
  */
 contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
