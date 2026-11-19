@@ -18,7 +18,8 @@ pragma solidity 0.8.28;
  *      - Stable: the token a plan pays with (USDT, USDC, U). Asset: the token it buys (BTCB, ETH, WBNB).
  *      - Pair: one stable and one asset. Each pair has its own rounds.
  *      - Round: one buy of a pair, numbered from a pair's first round on. The first round locks on the 15th at
- *        00:00 UTC+8; each later one locks `buyInterval` after the round before it started. From its lock time the
+ *        00:00 UTC+8; each later one locks `buyInterval` after the lock time of the round before it, however late
+ *        that round ran. From its lock time the
  *        keeper redeems, swaps and settles it.
  *      - Schedule: the buys a plan has left. A top up restarts the schedule over the buys left, so a plan stores
  *        its current schedule and, apart from it, what it bought before.
@@ -68,7 +69,7 @@ interface ISmartDCA {
      * @param stable Token sold
      * @param asset Token bought
      * @param enabled False stops new plans and top ups; running plans keep buying
-     * @param nextLockTime Lock time of the next round: the 15th at 00:00 UTC+8 for the first round, then the start
+     * @param nextLockTime Lock time of the next round: the 15th at 00:00 UTC+8 for the first round, then the lock
      *        time of the round before it plus `buyInterval`
      * @param lastSettledRound Last round that settled. The pair's next round is `lastSettledRound + 1`.
      * @param lockEmittedRound Last round `RoundLocked` was emitted for
@@ -97,7 +98,6 @@ interface ISmartDCA {
      * @param partsDone Parts swapped so far
      * @param resplitUsed Whether `resplitRound` was called
      * @param feeRateBps Fee rate the round charged, in basis points; 0 when it redeemed no more than its principal
-     * @param startedAt When `startRound` ran; the next round locks `buyInterval` after it
      * @param stableRedeemed Stable amount `startRound` redeemed for the round's stable units
      * @param stableNet `stableRedeemed` less the fee: the stable amount the round swaps
      * @param stableToSwap Part of `stableNet` not swapped yet
@@ -116,7 +116,6 @@ interface ISmartDCA {
         uint8 partsDone;
         bool resplitUsed;
         uint16 feeRateBps;
-        uint64 startedAt;
         uint256 stableRedeemed;
         uint256 stableNet;
         uint256 stableToSwap;
@@ -876,8 +875,8 @@ interface ISmartDCA {
 
     /**
      * @notice Sets the gap between buys, for every pair.
-     * @dev Each pair's next lock time is already stored, so it does not move. The new gap counts from the start of
-     *      the round that settles next.
+     * @dev Each pair's next lock time is already stored, so it does not move. The new gap applies from that lock
+     *      time on.
      * @param intervalDays New gap in whole days, from `MIN_BUY_INTERVAL_DAYS` to `MAX_BUY_INTERVAL_DAYS`. Whole days
      *        keep a round started on time at 00:00 UTC+8.
      * @custom:access Controlled by AccessControlManager
@@ -896,7 +895,7 @@ interface ISmartDCA {
     /**
      * @notice Lock time of the pair's next round.
      * @param pairId The pair
-     * @return Unix timestamp; the 15th at 00:00 UTC+8 for a pair's first round, then the start time of the round
+     * @return Unix timestamp; the 15th at 00:00 UTC+8 for a pair's first round, then the lock time of the round
      *         before plus `buyInterval`
      */
     function nextLockTime(uint32 pairId) external view returns (uint256);

@@ -28,7 +28,7 @@ import { ISmartDCA } from "./ISmartDCA.sol";
  *         the user takes it out. Each pair has its own two sources, set by governance.
  * @dev How one round runs for one pair:
  *      1. Lock. At the pair's `nextLockTime` the round locks: the 15th at 00:00 UTC+8 for the pair's first round,
- *         then `buyInterval` after the round before it started, so a late start pushes every later round. Plans in
+ *         then `buyInterval` after the round before it locked, so a late round does not move the next one. Plans in
  *         the round cannot top up or cancel until it settles, and new plans join the round after instead.
  *      2. `startRound`. A keeper redeems the round's stable from the yield source and sends the fee to the Reserve.
  *         The fee is a share of the interest only, never of principal.
@@ -722,7 +722,6 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
         r.partsTotal = parts;
         r.feeRateBps = rate;
-        r.startedAt = uint64(block.timestamp);
         r.stableRedeemed = stableRedeemed;
         r.stableNet = stableNet;
         r.stableToSwap = stableNet;
@@ -790,14 +789,15 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @dev Records the indexes for `round`, adds the plans that start next and removes the ones that ended, and
-    ///      sets the next lock time: `buyInterval` after the round started, or after its lock time if it was empty
+    ///      sets the next lock time `buyInterval` after this round's lock time. A round that ran past that time
+    ///      leaves the next one already locked.
     function _closeRound(Pair storage pair, Round storage r, uint32 round) internal {
         r.assetPerUnitIndexAfter = pair.assetPerUnitIndex;
         r.assetPerPrincipalIndexAfter = pair.assetPerPrincipalIndex;
         pair.roundStableUnits = pair.roundStableUnits - r.stableUnitsEnding + r.stableUnitsJoining;
         pair.roundPrincipal = pair.roundPrincipal - r.principalEnding + r.principalJoining;
         pair.lastSettledRound = round;
-        pair.nextLockTime = (r.startedAt != 0 ? r.startedAt : pair.nextLockTime) + buyInterval;
+        pair.nextLockTime += buyInterval;
     }
 
     /// @dev Emits `RoundLocked` once per round, from the round's lock time

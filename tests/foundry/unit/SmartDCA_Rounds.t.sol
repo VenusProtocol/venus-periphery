@@ -55,7 +55,7 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         vm.prank(keeper);
         dca.settleRound(pairId);
         assertEq(_pair().lastSettledRound, NOV);
-        assertEq(dca.nextLockTime(pairId), NOV_LOCK + 1 hours + 30 days, "30 days after the 1 hour late start");
+        assertEq(dca.nextLockTime(pairId), NOV_LOCK + 30 days, "30 days after the lock, the late start does not count");
 
         // Both put 100.095 into the round, so both get half of 200.19 USDT of BTCB
         uint256 aliceGot = _withdrawAll(alice, aliceId);
@@ -467,7 +467,7 @@ contract SmartDCA_RoundsTest is SmartDCABase {
     /// @dev Every whenNotPaused call stops, and a round paused halfway finishes after unpause
     // ----- buy interval -----
 
-    function test_buyInterval_lateStartPushesTheNextLock() public {
+    function test_buyInterval_lateStartDoesNotMoveTheNextLock() public {
         _create(alice, 1200e18, 12);
         vm.warp(NOV_LOCK + 3 hours);
         vm.startPrank(keeper);
@@ -475,9 +475,9 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
         dca.settleRound(pairId);
 
-        uint256 next = NOV_LOCK + 3 hours + 30 days;
+        uint256 next = NOV_LOCK + 30 days;
         assertEq(dca.nextLockTime(pairId), next);
-        // No second buy before the interval has passed since the last start
+        // No second buy before the next scheduled lock
         vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RoundNotLocked.selector, pairId, next));
         dca.startRound(pairId, 1);
         vm.warp(next - 1);
@@ -486,10 +486,10 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         vm.warp(next);
         dca.startRound(pairId, 1);
         vm.stopPrank();
-        assertEq(_round(DEC).startedAt, next);
+        assertEq(_round(DEC).partsTotal, 1);
     }
 
-    function test_setBuyInterval_keepsTheScheduledLockAndCountsFromTheNextStart() public {
+    function test_setBuyInterval_keepsTheScheduledLockAndAppliesAfterIt() public {
         _create(alice, 1200e18, 12);
         _runRound(1);
         uint256 decLock = NOV_LOCK + 30 days;

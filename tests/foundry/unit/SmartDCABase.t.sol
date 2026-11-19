@@ -165,7 +165,6 @@ abstract contract SmartDCABase is Test {
             r.partsDone,
             r.resplitUsed,
             r.feeRateBps,
-            r.startedAt,
             r.stableRedeemed,
             r.stableNet,
             r.stableToSwap,
@@ -184,7 +183,7 @@ abstract contract SmartDCABase is Test {
     function _quote(uint32 pid) internal view returns (uint256) {
         (, , , , uint32 settled, , , , , ) = dca.pairs(pid);
         ISmartDCA.Round memory r;
-        (r.partsTotal, r.partsDone, , , , , , r.stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
+        (r.partsTotal, r.partsDone, , , , , r.stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
         return swapHelper.quote(r.stableToSwap / (r.partsTotal - r.partsDone));
     }
 

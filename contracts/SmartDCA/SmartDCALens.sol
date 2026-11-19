@@ -338,7 +338,6 @@ contract SmartDCALens {
             r.partsDone,
             r.resplitUsed,
             r.feeRateBps,
-            r.startedAt,
             r.stableRedeemed,
             r.stableNet,
             r.stableToSwap,

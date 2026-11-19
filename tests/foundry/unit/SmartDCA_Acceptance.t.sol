@@ -34,9 +34,9 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         assertEq(_round(DEC).stableRedeemed, 200e18);
     }
 
-    /// @dev November stuck past December's lock: December starts right after November settles, and January waits a
-    ///      full interval after December's late start
-    function test_overrun_stuckRoundPushesTheRoundsAfter() public {
+    /// @dev November stuck past December's and January's locks: the rounds after keep their dates, so December and
+    ///      January each start right after the round before settles
+    function test_overrun_stuckRoundDoesNotMoveTheRoundsAfter() public {
         _create(alice, 1200e18, 12);
         _startAndSwap(1);
 
@@ -50,13 +50,10 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
         dca.settleRound(pairId);
         assertEq(_pair().lastSettledRound, DEC);
-        uint256 janLock = SmartDCAMath.lockTimeOf(JAN) + 6 days + 30 days;
-        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RoundNotLocked.selector, pairId, janLock));
-        dca.startRound(pairId, 1);
-        vm.warp(janLock);
+        assertEq(dca.nextLockTime(pairId), NOV_LOCK + 60 days, "two intervals after November's lock");
         dca.startRound(pairId, 1);
         vm.stopPrank();
-        assertEq(_round(JAN).partsTotal, 1, "January starts a full interval after December");
+        assertEq(_round(JAN).partsTotal, 1, "January's lock has passed, so it starts right away");
         assertEq(_round(DEC).stableRedeemed, 200e18, "carol bought in December");
     }
 

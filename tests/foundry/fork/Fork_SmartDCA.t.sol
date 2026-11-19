@@ -219,7 +219,7 @@ contract Fork_SmartDCATest is Test {
         dca.forceBuy(pairId, 2);
         assertEq(_lastSettled(pairId), settledBefore + 1, "settled after part 2");
 
-        (, , , , , , uint256 stableNet, , uint256 assetBought, , , , , , ) = dca.rounds(pairId, settledBefore + 1);
+        (, , , , , uint256 stableNet, , uint256 assetBought, , , , , , ) = dca.rounds(pairId, settledBefore + 1);
         uint256 oracleValue = (stableNet * usdtPrice) / btcbPrice;
         assertGe(assetBought, (oracleValue * 9_950) / 10_000, "at least the oracle floor");
         assertEq(IERC20(USDT).allowance(address(dca), PCS_V3_ROUTER), 0, "approved only each part");
@@ -240,7 +240,7 @@ contract Fork_SmartDCATest is Test {
         _execute(pairId);
         dca.settleRound(pairId);
         vm.stopPrank();
-        (, , , , , , uint256 stableNet, , uint256 amountOut, , , , , , ) = dca.rounds(pairId, _lastSettled(pairId));
+        (, , , , , uint256 stableNet, , uint256 amountOut, , , , , , ) = dca.rounds(pairId, _lastSettled(pairId));
 
         // Nothing traded between the quote and the swap, so the pool paid the quote, inside the 0.1% bound
         assertEq(dca.maxSlippageBps(), 10, "launch slippage");
@@ -265,7 +265,7 @@ contract Fork_SmartDCATest is Test {
         _runRound(pairId, 1);
 
         // The Hub paid interest over the month, and 10% of it went to the Reserve
-        (, , , uint16 rate, , uint256 stableRedeemed, uint256 stableNet, , , , , , , , ) = dca.rounds(
+        (, , , uint16 rate, uint256 stableRedeemed, uint256 stableNet, , , , , , , , ) = dca.rounds(
             pairId,
             _lastSettled(pairId)
         );
@@ -302,7 +302,7 @@ contract Fork_SmartDCATest is Test {
         _execute(pairId);
         vm.stopPrank();
 
-        (, uint8 partsDone, , , , , , , , , , , , , ) = dca.rounds(pairId, _lastSettled(pairId) + 1);
+        (, uint8 partsDone, , , , , , , , , , , , ) = dca.rounds(pairId, _lastSettled(pairId) + 1);
         assertEq(partsDone, 1, "filled on the fresh quote");
     }
 
@@ -340,7 +340,7 @@ contract Fork_SmartDCATest is Test {
         dca.swapRoundPart(pairId, quote, swapData);
         vm.stopPrank();
 
-        (, uint8 partsDone, , , , , , , , , , , , , ) = dca.rounds(pairId, _lastSettled(pairId) + 1);
+        (, uint8 partsDone, , , , , , , , , , , , ) = dca.rounds(pairId, _lastSettled(pairId) + 1);
         assertEq(partsDone, 0, "nothing swapped");
     }
 
@@ -542,7 +542,7 @@ contract Fork_SmartDCATest is Test {
         dca.settleRound(pid);
         vm.stopPrank();
 
-        (, , , , , , stableNet, , amountOut, , , , , , ) = dca.rounds(pid, _lastSettled(pid));
+        (, , , , , stableNet, , amountOut, , , , , , ) = dca.rounds(pid, _lastSettled(pid));
     }
 
     function _lastSettled(uint32 pid) internal view returns (uint32 settled) {
@@ -558,10 +558,7 @@ contract Fork_SmartDCATest is Test {
     /// @dev QuoterV2 quote for the pair's next part on its route
     function _quote(uint32 pid) internal returns (uint256 amountOut) {
         (, , , , uint32 settled, , , , , ) = dca.pairs(pid);
-        (uint8 partsTotal, uint8 partsDone, , , , , , uint256 stableToSwap, , , , , , , ) = dca.rounds(
-            pid,
-            settled + 1
-        );
+        (uint8 partsTotal, uint8 partsDone, , , , , uint256 stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
         (amountOut, , , ) = IPancakeQuoterV2(PCS_V3_QUOTER).quoteExactInput(
             routeOf[pid],
             stableToSwap / (partsTotal - partsDone)
@@ -577,10 +574,7 @@ contract Fork_SmartDCATest is Test {
     ///      SmartDCA as the caller, with `key`.
     function _signedSwapData(uint32 pid, uint256 key) internal view returns (bytes memory) {
         (address stable, , address asset, , uint32 settled, , , , , ) = dca.pairs(pid);
-        (uint8 partsTotal, uint8 partsDone, , , , , , uint256 stableToSwap, , , , , , , ) = dca.rounds(
-            pid,
-            settled + 1
-        );
+        (uint8 partsTotal, uint8 partsDone, , , , , uint256 stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
         uint256 amountIn = stableToSwap / (partsTotal - partsDone);
 
         bytes[] memory calls = new bytes[](4);
