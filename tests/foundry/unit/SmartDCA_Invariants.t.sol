@@ -11,7 +11,7 @@ import { ISmartDCA } from "../../../contracts/SmartDCA/ISmartDCA.sol";
 import { SmartDCALens } from "../../../contracts/SmartDCA/SmartDCALens.sol";
 import { SmartDCAMath } from "../../../contracts/SmartDCA/SmartDCAMath.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
-import { MockHub, MockSwapHelper, MockVToken } from "./mocks/SmartDCAMocks.sol";
+import { MockHub, MockPancakeV3Router, MockSwapHelper, MockVToken } from "./mocks/SmartDCAMocks.sol";
 import { SmartDCABase } from "./SmartDCABase.t.sol";
 
 /**
@@ -45,6 +45,8 @@ contract SmartDCAHandler is Test {
     uint256 public withdraws;
     uint256 public cancels;
     uint256 public claims;
+    uint256 public transfers;
+    uint256 public forceBuys;
     uint256 public buysStarted;
     uint256 public orders;
     uint256 public resplits;
@@ -118,6 +120,13 @@ contract SmartDCAHandler is Test {
         if (ok) ++claims;
     }
 
+    function transferPlan(uint256 planSeed, uint256 toSeed) external {
+        if (ids.length == 0) return;
+        uint256 id = ids[planSeed % ids.length];
+        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.transferPlan, (id, users[toSeed % 4])));
+        if (ok) ++transfers;
+    }
+
     // ----- keeper -----
 
     /// @notice Up to `steps` steps of the pair's next round: start it, swap one part each, settle it. Moves time
@@ -151,6 +160,18 @@ contract SmartDCAHandler is Test {
                 return;
             }
         }
+    }
+
+    /// @notice One `forceBuy` step on the pair, as the Guardian; mixes with the keeper's `roundStep` on the same round
+    function forceBuy(uint256 pairSeed, uint256 parts) external {
+        uint32 pid = pairIds[pairSeed % 2];
+        uint256 start = DCA.nextLockTime(pid);
+        if (time < start) {
+            time = start;
+            vm.warp(time);
+        }
+        (bool ok, ) = _call(address(this), abi.encodeCall(DCA.forceBuy, (pid, uint8(bound(parts, 1, 3)))));
+        if (ok) ++forceBuys;
     }
 
     function resplitRound(uint256 pairSeed, uint256 parts) external {
@@ -230,6 +251,7 @@ contract SmartDCA_InvariantsTest is SmartDCABase {
     MockERC20 internal eth;
     MockVToken internal vETH;
     uint32 internal ethPairId;
+    address internal dave = makeAddr("dave");
 
     // Ghosts: values at the previous invariant check, for the only-forward rule
     mapping(uint32 => uint32) internal lastSettled;
@@ -254,13 +276,19 @@ contract SmartDCA_InvariantsTest is SmartDCABase {
             [vBTC, vETH],
             [pairId, ethPairId],
             keeper,
-            [alice, bob, carol, makeAddr("dave")]
+            [alice, bob, carol, dave]
         );
-        // For `setFeeRate`
+        // For `setFeeRate` and `forceBuy`
         acm.setAllowAll(address(handler), true);
         targetContract(address(handler));
 
-        bytes4[] memory actions = new bytes4[](10);
+        // `forceBuy` swaps on a mock V3 router at the same rate as the mock SwapHelper
+        MockPancakeV3Router router = new MockPancakeV3Router();
+        router.setRate(1e18 / 100_000);
+        dca.setFallbackRoute(pairId, address(router), abi.encodePacked(address(usdt), uint24(500), address(btcb)));
+        dca.setFallbackRoute(ethPairId, address(router), abi.encodePacked(address(usdt), uint24(500), address(eth)));
+
+        bytes4[] memory actions = new bytes4[](12);
         actions[0] = SmartDCAHandler.createPlan.selector;
         actions[1] = SmartDCAHandler.topUpPlan.selector;
         actions[2] = SmartDCAHandler.withdrawBought.selector;
@@ -271,6 +299,8 @@ contract SmartDCA_InvariantsTest is SmartDCABase {
         actions[7] = SmartDCAHandler.moveRates.selector;
         actions[8] = SmartDCAHandler.setFeeRate.selector;
         actions[9] = SmartDCAHandler.passTime.selector;
+        actions[10] = SmartDCAHandler.transferPlan.selector;
+        actions[11] = SmartDCAHandler.forceBuy.selector;
         // Without this the fuzzer also spends calls on the handler's getters.
         targetSelector(FuzzSelector({ addr: address(handler), selectors: actions }));
     }
@@ -332,6 +362,18 @@ contract SmartDCA_InvariantsTest is SmartDCABase {
         assertEq(eth.balanceOf(address(dca)), e.assetBought, "ETH held");
     }
 
+    /// @notice Every plan is in exactly one owner list, the list of its current owner
+    function invariant_planIdsMatchOwners() public view {
+        address[4] memory owners = [alice, bob, carol, dave];
+        uint256 listed;
+        for (uint256 u; u < 4; ++u) {
+            uint256[] memory list = dca.getPlanIds(owners[u]);
+            listed += list.length;
+            for (uint256 i; i < list.length; ++i) assertEq(_plan(list[i]).owner, owners[u], "listed under its owner");
+        }
+        assertEq(listed, handler.planCount(), "each plan listed once");
+    }
+
     /// @notice A settled round stays settled, and the buy indexes never go down
     function invariant_roundsOnlyMoveForward() public {
         _checkForward(pairId);
@@ -344,7 +386,8 @@ contract SmartDCA_InvariantsTest is SmartDCABase {
         console.log("withdraws", handler.withdraws(), "cancels", handler.cancels());
         console.log("claims", handler.claims(), "buys started", handler.buysStarted());
         console.log("orders", handler.orders(), "resplits", handler.resplits());
-        console.log("settles", handler.settles());
+        console.log("settles", handler.settles(), "transfers", handler.transfers());
+        console.log("force buys", handler.forceBuys());
     }
 
     // ----- checks -----

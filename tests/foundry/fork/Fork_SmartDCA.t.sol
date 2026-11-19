@@ -47,6 +47,10 @@ interface IPancakeQuoterV2 {
     ) external returns (uint256 amountOut, uint160[] memory, uint32[] memory, uint256);
 }
 
+interface IOraclePrice {
+    function getPrice(address asset) external view returns (uint256);
+}
+
 interface IAccessControlManagerLike {
     function giveCallPermission(address contractAddress, string calldata functionSig, address accountToPermit) external;
 }
@@ -130,13 +134,15 @@ contract Fork_SmartDCATest is Test {
 
     /// @dev The Normal Timelock holds the ACM admin role, so it grants this test the setters it calls
     function _grantAdminCalls() internal {
-        string[6] memory sigs = [
+        string[8] memory sigs = [
             "setYieldSource(uint32,uint8,uint8,address)",
             "setMinAmountPerBuy(address,uint256)",
             "addPair(address,address,uint8,address,uint8,address)",
             "setKeeper(address,bool)",
             "setFeeRate(uint16)",
-            "sweepToken(address,address)"
+            "sweepToken(address,address)",
+            "setFallbackRoute(uint32,address,bytes)",
+            "forceBuy(uint32,uint8)"
         ];
         vm.startPrank(COMPTROLLER_ADMIN);
         for (uint256 i; i < sigs.length; ++i) {
@@ -188,6 +194,39 @@ contract Fork_SmartDCATest is Test {
         vm.prank(alice);
         dca.cancelPlan(planId);
         assertApproxEqRel(IERC20(USDT).balanceOf(alice), DEPOSIT, 1e12, "deposit back from vUSDT");
+    }
+
+    // ---------------------------------------------------------------- forceBuy
+
+    /// @dev Backend down (SwapHelper's signer replaced): the Guardian runs the round in 2 parts on the fixed
+    ///      USDT/BTCB 0.05% route, and each part clears the live oracle price less 0.5%
+    function test_forceBuy_buysBtcbOnTheFixedRouteWithoutTheBackend() public onlyFork {
+        uint256 planId = _create(alice, pairId, DEPOSIT, 2);
+        vm.prank(SwapHelper(SWAP_HELPER).owner());
+        SwapHelper(SWAP_HELPER).setBackendSigner(makeAddr("backend down"));
+        dca.setFallbackRoute(pairId, PCS_V3_ROUTER, routeOf[pairId]);
+        uint32 settledBefore = _lastSettled(pairId);
+        // Warping to the lock leaves the oracle's feeds stale on a fork, so its prices are kept at the fork block's.
+        // Nothing trades in between, so the pool still sits at those prices.
+        uint256 usdtPrice = IOraclePrice(ORACLE).getPrice(USDT);
+        uint256 btcbPrice = IOraclePrice(ORACLE).getPrice(BTCB);
+        _toLock(pairId);
+        vm.mockCall(ORACLE, abi.encodeCall(IOraclePrice.getPrice, (USDT)), abi.encode(usdtPrice));
+        vm.mockCall(ORACLE, abi.encodeCall(IOraclePrice.getPrice, (BTCB)), abi.encode(btcbPrice));
+
+        dca.forceBuy(pairId, 2);
+        assertEq(_lastSettled(pairId), settledBefore, "not settled after part 1");
+        dca.forceBuy(pairId, 2);
+        assertEq(_lastSettled(pairId), settledBefore + 1, "settled after part 2");
+
+        (, , , , , uint256 stableNet, , uint256 assetBought, , , , , , ) = dca.rounds(pairId, settledBefore + 1);
+        uint256 oracleValue = (stableNet * usdtPrice) / btcbPrice;
+        assertGe(assetBought, (oracleValue * 9_950) / 10_000, "at least the oracle floor");
+        assertEq(IERC20(USDT).allowance(address(dca), PCS_V3_ROUTER), 0, "approved only each part");
+
+        vm.prank(alice);
+        dca.withdrawBought(planId, type(uint256).max);
+        assertApproxEqRel(IERC20(BTCB).balanceOf(alice), assetBought, 1e12, "BTCB out");
     }
 
     // ---------------------------------------------------------------- rounds

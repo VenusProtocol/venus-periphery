@@ -6,7 +6,7 @@ pragma solidity 0.8.28;
 import { ISmartDCA } from "../../../contracts/SmartDCA/ISmartDCA.sol";
 import { SmartDCALens } from "../../../contracts/SmartDCA/SmartDCALens.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
-import { MockVToken } from "./mocks/SmartDCAMocks.sol";
+import { MockPancakeV3Router, MockVToken } from "./mocks/SmartDCAMocks.sol";
 import { SmartDCABase } from "./SmartDCABase.t.sol";
 
 /// @notice Random walks over two pairs that share USDT: plans of any size come and go, rounds run late or on
@@ -39,6 +39,44 @@ contract SmartDCA_FuzzTest is SmartDCABase {
         // Dust-sized plans too
         dca.setMinAmountPerBuy(address(usdt), 1e6);
         users = [alice, bob, carol, makeAddr("dave")];
+    }
+
+    /// @notice However many plans Alice holds, a transfer moves exactly that one id from her list to Bob's
+    function testFuzz_transferPlan_movesOneId(uint8 count, uint256 pick) public {
+        count = uint8(bound(count, 1, 8));
+        for (uint256 i; i < count; ++i) _create(alice, 120e18, 12);
+        uint256 id = dca.getPlanIds(alice)[pick % count];
+        vm.prank(alice);
+        dca.transferPlan(id, bob);
+
+        uint256[] memory left = dca.getPlanIds(alice);
+        assertEq(left.length, count - 1);
+        for (uint256 i; i < left.length; ++i) assertTrue(left[i] != id, "id left Alice's list");
+        assertEq(dca.getPlanIds(bob).length, 1);
+        assertEq(dca.getPlanIds(bob)[0], id);
+    }
+
+    /// @notice For any split and round size, forceBuy settles on its last part and not before, and sells the
+    ///         whole round at the route's price
+    function testFuzz_forceBuy_settlesOnTheLastPart(uint8 parts, uint256 amount) public {
+        parts = uint8(bound(parts, 1, 10));
+        amount = bound(amount, 120e18, 1e24);
+        MockPancakeV3Router router = new MockPancakeV3Router();
+        router.setRate(1e18 / 100_000);
+        dca.setFallbackRoute(pairId, address(router), abi.encodePacked(address(usdt), uint24(500), address(btcb)));
+        _create(alice, amount, 12);
+        vm.warp(dca.nextLockTime(pairId));
+        uint32 round = _pair().lastSettledRound + 1;
+
+        for (uint256 i = 1; i < parts; ++i) {
+            dca.forceBuy(pairId, parts);
+            assertEq(_pair().lastSettledRound, round - 1, "not settled before the last part");
+        }
+        dca.forceBuy(pairId, parts);
+        assertEq(_pair().lastSettledRound, round, "settled on the last part");
+        ISmartDCA.Round memory r = _round(round);
+        assertEq(r.stableToSwap, 0, "whole round sold");
+        assertApproxEqAbs(r.assetBought, r.stableNet / 100_000, parts, "at the route's price");
     }
 
     function testFuzz_poolMatchesPlansAndEveryoneExits(uint256 seed_) public {
