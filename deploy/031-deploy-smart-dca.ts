@@ -17,8 +17,8 @@ async function verify(address: string | undefined, constructorArguments: unknown
 }
 
 /**
- * Deploys SmartDCA behind a transparent proxy owned by DefaultProxyAdmin, with the Venus Treasury as the
- * reserve, and the read only SmartDCALens.
+ * Deploys SmartDCAAdminLib, then SmartDCA linked to it behind a transparent proxy owned by DefaultProxyAdmin,
+ * with the Venus Treasury as the reserve, and the read only SmartDCALens.
  *
  * The VIP accepts ownership, grants the ACM permissions, and sets the keepers and the pairs with their
  * yield sources. This script does none of that.
@@ -43,6 +43,18 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     "hardhat-deploy/solc_0.8/openzeppelin/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
   );
 
+  const adminLib = await deploy("SmartDCAAdminLib", {
+    contract: "SmartDCAAdminLib",
+    from: deployer,
+    log: true,
+    deterministicDeployment: false,
+    args: [],
+  });
+
+  if (adminLib.newlyDeployed && network.live) {
+    await verify(adminLib.address, []);
+  }
+
   const constructorArgs = [comptroller, hubRegistry, resilientOracle, swapHelper];
   console.log(
     `SmartDCA constructor args: Comptroller ${comptroller}, HubRegistry ${hubRegistry}, ResilientOracle ${resilientOracle}, SwapHelper ${swapHelper}`,
@@ -54,6 +66,7 @@ const func: DeployFunction = async function ({ getNamedAccounts, deployments, ne
     log: true,
     deterministicDeployment: false,
     args: constructorArgs,
+    libraries: { SmartDCAAdminLib: adminLib.address },
     proxy: {
       owner: network.live ? timelock : deployer,
       proxyContract: "OptimizedTransparentUpgradeableProxy",

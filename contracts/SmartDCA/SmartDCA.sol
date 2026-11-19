@@ -14,6 +14,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IHubRegistry } from "../Interfaces/IHubLiquidity.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
 import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
+import { SmartDCAAdminLib } from "./SmartDCAAdminLib.sol";
 import { SmartDCAMath } from "./SmartDCAMath.sol";
 import { ISmartDCA } from "./ISmartDCA.sol";
 
@@ -560,7 +561,16 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @inheritdoc ISmartDCA
     function setYieldSource(uint32 pairId, Side side, SourceKind kind, address source) external nonReentrant {
         _checkAccessAllowed("setYieldSource(uint32,uint8,uint8,address)");
-        _setYieldSource(pairId, _pair(pairId), side, kind, source);
+        SmartDCAAdminLib.setYieldSource(
+            _pair(pairId),
+            yieldSources[pairId][side],
+            pairId,
+            side,
+            kind,
+            source,
+            HUB_REGISTRY,
+            COMPTROLLER
+        );
     }
 
     /// @inheritdoc ISmartDCA
@@ -604,22 +614,22 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         if (pairIdByTokens[stable][asset] != 0) revert PairExists();
         // Without a minimum, a dust plan whose units per buy redeem 0 would revert every `startRound` of the pair
         if (minAmountPerBuy[stable] == 0) revert InvalidParameter();
-        // Reverts when the oracle cannot price either token
-        ORACLE.getPrice(stable);
-        ORACLE.getPrice(asset);
-
         pairId = ++pairCount;
         pairIdByTokens[stable][asset] = pairId;
-        Pair storage pair = pairs[pairId];
-        pair.stable = stable;
-        pair.asset = asset;
-        pair.enabled = true;
-        pair.lastSettledRound = SmartDCAMath.latestLockedRound(block.timestamp);
-
-        emit PairAdded(pairId, stable, asset);
-        // The pair holds nothing yet, so these only check and record the sources
-        _setYieldSource(pairId, pair, Side.Stable, stableKind, stableSource);
-        _setYieldSource(pairId, pair, Side.Asset, assetKind, assetSource);
+        SmartDCAAdminLib.addPair(
+            pairs[pairId],
+            yieldSources[pairId],
+            pairId,
+            stable,
+            asset,
+            ORACLE,
+            HUB_REGISTRY,
+            COMPTROLLER,
+            stableKind,
+            stableSource,
+            assetKind,
+            assetSource
+        );
     }
 
     /// @inheritdoc ISmartDCA
@@ -640,21 +650,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         _checkAccessAllowed("sweepToken(address,address)");
         if (to == address(0)) revert ZeroAddress();
 
-        // Several pairs can share one source, so their shares add up
-        uint256 owed;
-        for (uint32 id = 1; id <= pairCount; ++id) {
-            YieldSource storage stableSource = yieldSources[id][Side.Stable];
-            YieldSource storage assetSource = yieldSources[id][Side.Asset];
-            if (stableSource.sourceAddress == token) owed += stableSource.sharesHeld;
-            if (assetSource.sourceAddress == token) owed += assetSource.sharesHeld;
-
-            Pair storage pair = pairs[id];
-            Round storage r = rounds[id][pair.lastSettledRound + 1];
-            if (r.partsTotal == 0) continue;
-            if (pair.stable == token) owed += r.stableToSwap;
-            if (pair.asset == token) owed += r.assetBought;
-        }
-
+        uint256 owed = SmartDCAAdminLib.owedInToken(pairs, rounds, yieldSources, pairCount, token);
         uint256 balance = IERC20(token).balanceOf(address(this));
         uint256 amount = balance > owed ? balance - owed : 0;
         if (amount != 0) IERC20(token).safeTransfer(to, amount);
@@ -751,40 +747,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         return IERC20(token).balanceOf(address(this)) - balanceBefore;
     }
 
-    /// @dev Checks and records the source of one side of a pair, and moves that side's holdings to it
-    function _setYieldSource(uint32 pairId, Pair storage pair, Side side, SourceKind kind, address source) internal {
-        if (source == address(0)) revert ZeroAddress();
-        address token = side == Side.Stable ? pair.stable : pair.asset;
-        if (kind == SourceKind.Hub) {
-            if (!HUB_REGISTRY.isHub(source) || IHub(source).asset() != token) revert InvalidSource(source);
-        } else if (kind == SourceKind.Core) {
-            (bool isListed, , ) = COMPTROLLER.markets(source);
-            if (!isListed || IVToken(source).underlying() != token) revert InvalidSource(source);
-        } else {
-            revert InvalidSource(source);
-        }
-        YieldSource storage current = yieldSources[pairId][side];
-        if (current.sourceAddress == source) revert SourceUnchanged();
-
-        // Holdings move in the same call; the number of units does not change, so no plan record changes
-        uint256 migrated;
-        uint256 oldShares = current.sharesHeld;
-        if (oldShares != 0) {
-            if (block.timestamp >= SmartDCAMath.lockTimeOf(pair.lastSettledRound + 1)) revert PairLocked(pairId);
-            current.sharesHeld = 0;
-            migrated = _sourceRedeem(current, token, oldShares);
-        }
-        address oldSource = current.sourceAddress;
-        current.kind = kind;
-        current.sourceAddress = source;
-        if (migrated != 0) current.sharesHeld = _sourceDeposit(current, token, migrated);
-
-        emit YieldSourceUpdated(pairId, side, oldSource, kind, source, migrated);
-    }
-
     /// @dev Deposits `amount` of `token` into the pair side's source `s` and returns the units minted, rounded down
     function _deposit(YieldSource storage s, address token, uint256 amount) internal returns (uint256 units) {
-        uint256 shares = _sourceDeposit(s, token, amount);
+        uint256 shares = SmartDCAAdminLib.sourceDeposit(s, token, amount);
         units = s.unitsIssued == 0 || s.sharesHeld == 0 ? shares : Math.mulDiv(shares, s.unitsIssued, s.sharesHeld);
         s.sharesHeld += shares;
         s.unitsIssued += units;
@@ -795,7 +760,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         uint256 shares = Math.mulDiv(units, s.sharesHeld, s.unitsIssued);
         s.unitsIssued -= units;
         s.sharesHeld -= shares;
-        return _sourceRedeem(s, token, shares);
+        return SmartDCAAdminLib.sourceRedeem(s, token, shares);
     }
 
     /// @dev Sends `to` the source shares behind `units` of `s` (Hub shares or vTokens) and returns them
@@ -813,33 +778,6 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             ? IHub(s.sourceAddress).previewWithdraw(amount)
             : Math.mulDiv(amount, 1e18, IVToken(s.sourceAddress).exchangeRateCurrent(), Math.Rounding.Up);
         return Math.mulDiv(shares, s.unitsIssued, s.sharesHeld, Math.Rounding.Up);
-    }
-
-    /// @dev Deposits into the source and returns the shares received, measured as a balance change
-    function _sourceDeposit(YieldSource storage s, address token, uint256 amount) internal returns (uint256) {
-        address source = s.sourceAddress;
-        uint256 sharesBefore = IERC20(source).balanceOf(address(this));
-        IERC20(token).forceApprove(source, amount);
-        if (s.kind == SourceKind.Hub) {
-            IHub(source).deposit(amount, address(this));
-        } else {
-            uint256 err = IVToken(source).mint(amount);
-            if (err != 0) revert SourceCallFailed(source, err);
-        }
-        return IERC20(source).balanceOf(address(this)) - sharesBefore;
-    }
-
-    /// @dev Redeems shares from the source and returns the token amount received, measured as a balance change
-    function _sourceRedeem(YieldSource storage s, address token, uint256 shares) internal returns (uint256) {
-        address source = s.sourceAddress;
-        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
-        if (s.kind == SourceKind.Hub) {
-            IHub(source).redeem(shares, address(this), address(this));
-        } else {
-            uint256 err = IVToken(source).redeem(shares);
-            if (err != 0) revert SourceCallFailed(source, err);
-        }
-        return IERC20(token).balanceOf(address(this)) - balanceBefore;
     }
 
     /// @dev Only keepers, and only from the round's lock time
