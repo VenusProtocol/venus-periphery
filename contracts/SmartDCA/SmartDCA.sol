@@ -121,7 +121,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @notice Addresses that run rounds from the lock time
     mapping(address account => bool) public isKeeper;
 
-    /// @dev Plan ids each owner created, oldest first
+    /// @dev Plan ids each owner holds
     mapping(address owner => uint256[] planIds) private _planIdsByOwner;
 
     /// @dev Storage gap for future upgrades; with the 11 slots above, SmartDCA's own state takes 50 slots
@@ -362,6 +362,23 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         }
 
         emit PlanClaimed(planId, toCore, amount);
+    }
+
+    /// @inheritdoc ISmartDCA
+    function transferPlan(uint256 planId, address newOwner) external whenNotPaused {
+        Plan storage plan = _ownedActivePlan(planId);
+        if (newOwner == address(0)) revert ZeroAddress();
+
+        // The id is in the caller's list, since they own the plan: move the last id into its place and drop the last
+        uint256[] storage ids = _planIdsByOwner[msg.sender];
+        uint256 i;
+        while (ids[i] != planId) ++i;
+        ids[i] = ids[ids.length - 1];
+        ids.pop();
+
+        plan.owner = newOwner;
+        _planIdsByOwner[newOwner].push(planId);
+        emit PlanTransferred(planId, msg.sender, newOwner);
     }
 
     /// @inheritdoc ISmartDCA

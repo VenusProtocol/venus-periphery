@@ -416,4 +416,66 @@ contract SmartDCA_PlansTest is SmartDCABase {
         dca.claimPlan(id, false);
         assertEq(uint8(_plan(id).status), uint8(ISmartDCA.PlanStatus.Claimed));
     }
+
+    // ----- transferPlan -----
+
+    /// @dev Bob takes plan 2 during December's lock, then withdraws November's buy and cancels; Alice keeps 1 and 3
+    function test_transferPlan_movesThePlanAndItsFunds() public {
+        _create(alice, 1200e18, 12);
+        uint256 id = _create(alice, 1200e18, 12);
+        _create(alice, 1200e18, 12);
+        _runRound(1);
+        vm.warp(dca.nextLockTime(pairId));
+
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.PlanTransferred(id, alice, bob);
+        vm.prank(alice);
+        dca.transferPlan(id, bob);
+
+        assertEq(_plan(id).owner, bob);
+        uint256[] memory aliceIds = dca.getPlanIds(alice);
+        assertEq(aliceIds.length, 2);
+        assertEq(aliceIds[0], 1);
+        assertEq(aliceIds[1], 3, "last id moved into the gap");
+        assertEq(dca.getPlanIds(bob).length, 1);
+        assertEq(dca.getPlanIds(bob)[0], id);
+
+        vm.startPrank(alice);
+        vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
+        dca.withdrawBought(id, type(uint256).max);
+        vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
+        dca.transferPlan(id, alice);
+        vm.stopPrank();
+
+        assertApproxEqAbs(_withdrawAll(bob, id), 1e15, 2e8, "November's buy goes to bob");
+        _runRound(1);
+        vm.prank(bob);
+        dca.cancelPlan(id);
+        assertGt(usdt.balanceOf(bob), 0, "stable left goes to bob");
+        assertEq(btcb.balanceOf(alice), 0);
+    }
+
+    function test_transferPlan_reverts() public {
+        uint256 id = _create(alice, 1200e18, 12);
+
+        vm.prank(bob);
+        vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
+        dca.transferPlan(id, bob);
+
+        vm.prank(alice);
+        vm.expectRevert(ISmartDCA.ZeroAddress.selector);
+        dca.transferPlan(id, address(0));
+
+        dca.pause();
+        vm.prank(alice);
+        vm.expectRevert("Pausable: paused");
+        dca.transferPlan(id, bob);
+        dca.unpause();
+
+        vm.startPrank(alice);
+        dca.cancelPlan(id);
+        vm.expectRevert(ISmartDCA.PlanNotActive.selector);
+        dca.transferPlan(id, bob);
+        vm.stopPrank();
+    }
 }

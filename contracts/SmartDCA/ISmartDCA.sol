@@ -222,6 +222,14 @@ interface ISmartDCA {
     event PlanClaimed(uint256 indexed planId, bool toCore, uint256 amount);
 
     /**
+     * @notice Emitted when a plan moves to a new owner
+     * @param planId The plan
+     * @param from Previous owner
+     * @param to New owner
+     */
+    event PlanTransferred(uint256 indexed planId, address indexed from, address indexed to);
+
+    /**
      * @notice Emitted once per round, by the first call from the round's lock time that touches the pair
      *         (`createPlan`, `claimPlan`, `startRound` or `syncPair`)
      * @param pairId The pair
@@ -587,6 +595,15 @@ interface ISmartDCA {
     function claimPlan(uint256 planId, bool toCore) external;
 
     /**
+     * @notice Gives an active plan to `newOwner`, who can then top it up, withdraw, cancel and claim it.
+     * @dev Only the owner changes; no funds or round totals move, so it works during a lock too.
+     * @param planId The plan
+     * @param newOwner The new owner
+     * @custom:event Emits PlanTransferred.
+     */
+    function transferPlan(uint256 planId, address newOwner) external;
+
+    /**
      * @notice Starts the pair's next round: redeems its stable units from the yield source and sends the fee to the
      *         Reserve.
      * @dev Keepers can call from the round's lock time.
@@ -795,9 +812,9 @@ interface ISmartDCA {
     function nextLockTime(uint32 pairId) external view returns (uint256);
 
     /**
-     * @notice Ids of the plans `owner` created.
+     * @notice Ids of the plans `owner` holds.
      * @param owner The owner
-     * @return Plan ids, oldest first, including cancelled and claimed plans
+     * @return Plan ids, including cancelled and claimed plans; a transfer changes their order
      */
     function getPlanIds(address owner) external view returns (uint256[] memory);
 }
