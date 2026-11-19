@@ -741,7 +741,7 @@ export function marketStateTests(config: NetworkConfig, get: FixtureGetter): voi
         const snapshotBefore = await eBrake.getMarketCFSnapshot(config.vToken1, 0);
         expect(snapshotBefore.cf).to.be.gt(0);
 
-        await expect(eBrake.connect(whitelistedUser).resetCFSnapshot(config.vToken1))
+        await expect(eBrake.connect(whitelistedUser)["resetCFSnapshot(address)"](config.vToken1))
           .to.emit(eBrake, "CFSnapshotReset")
           .withArgs(config.vToken1);
 
@@ -754,7 +754,7 @@ export function marketStateTests(config: NetworkConfig, get: FixtureGetter): voi
         const { eBrake, whitelistedUser } = get();
 
         await eBrake.connect(whitelistedUser).setMarketBorrowCaps([config.vToken1], [0]);
-        await eBrake.connect(whitelistedUser).resetCFSnapshot(config.vToken1);
+        await eBrake.connect(whitelistedUser)["resetCFSnapshot(address)"](config.vToken1);
 
         const after = await eBrake.marketStates(config.vToken1);
         expect(after.borrowCapSnapshotted).to.be.true;
@@ -762,11 +762,35 @@ export function marketStateTests(config: NetworkConfig, get: FixtureGetter): voi
 
       it("should revert from unauthorized caller", async () => {
         const { eBrake, randomUser } = get();
-        await expect(eBrake.connect(randomUser).resetCFSnapshot(config.vToken1)).to.be.revertedWithCustomError(
-          eBrake,
-          "Unauthorized",
-        );
+        await expect(
+          eBrake.connect(randomUser)["resetCFSnapshot(address)"](config.vToken1),
+        ).to.be.revertedWithCustomError(eBrake, "Unauthorized");
       });
+
+      if (config.comptrollerType === "diamond") {
+        it("should clear a single pool's CF snapshot with resetCFSnapshot(address,uint96)", async () => {
+          const { eBrake, whitelistedUser } = get();
+          const CORE_POOL_ID = 0;
+
+          await eBrake.connect(whitelistedUser)["decreaseCF(address,uint96,uint256)"](config.vToken1, CORE_POOL_ID, 0);
+          expect((await eBrake.getMarketCFSnapshot(config.vToken1, CORE_POOL_ID)).cf).to.be.gt(0);
+
+          await expect(eBrake.connect(whitelistedUser)["resetCFSnapshot(address,uint96)"](config.vToken1, CORE_POOL_ID))
+            .to.emit(eBrake, "PoolCFSnapshotReset")
+            .withArgs(config.vToken1, CORE_POOL_ID);
+
+          const snapshotAfter = await eBrake.getMarketCFSnapshot(config.vToken1, CORE_POOL_ID);
+          expect(snapshotAfter.cf).to.equal(0);
+          expect(snapshotAfter.lt).to.equal(0);
+        });
+
+        it("should revert resetCFSnapshot(address,uint96) from unauthorized caller", async () => {
+          const { eBrake, randomUser } = get();
+          await expect(
+            eBrake.connect(randomUser)["resetCFSnapshot(address,uint96)"](config.vToken1, 0),
+          ).to.be.revertedWithCustomError(eBrake, "Unauthorized");
+        });
+      }
     });
 
     describe("resetBorrowCapSnapshot", () => {
