@@ -7,9 +7,10 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
  * @title SmartDCAMath
  * @author Venus
  * @notice Pure math for SmartDCA: round dates, the round fee and the index steps that credit plans.
- * @dev A round is a month, numbered as months since January 1970: `(year - 1970) * 12 + (month - 1)`. For example
- *      November 2026 is round 682. Round `r` locks on the 15th of its month at 00:00 UTC+8, which is the 14th at
- *      16:00 UTC. Fees, index steps and bought amounts round down, in favour of the contract.
+ * @dev The calendar functions give a pair's first round: month `r` counted from January 1970,
+ *      `(year - 1970) * 12 + (month - 1)`, locks on the 15th at 00:00 UTC+8, which is the 14th at 16:00 UTC. For
+ *      example November 2026 is month 682. Later rounds count on from it, one per `buyInterval`. Fees, index steps
+ *      and bought amounts round down, in favour of the contract.
  */
 library SmartDCAMath {
     /// @notice Time from the 1st of a month at 00:00 UTC to its lock time, the 14th at 16:00 UTC
@@ -105,16 +106,16 @@ library SmartDCAMath {
      * @param nextRound Pair's next round, `lastSettledRound + 1`
      * @param firstRound First round of the plan's schedule
      * @param buys Buys in the schedule
-     * @param timestamp Time to check at
+     * @param nextRoundLocked Whether the next round's lock time has passed
      * @return True while the plan's buy is in a locked round that has not settled
      */
     function inRunningRound(
         uint32 nextRound,
         uint32 firstRound,
         uint8 buys,
-        uint256 timestamp
+        bool nextRoundLocked
     ) internal pure returns (bool) {
-        return nextRound >= firstRound && nextRound < firstRound + buys && timestamp >= lockTimeOf(nextRound);
+        return nextRoundLocked && nextRound >= firstRound && nextRound < firstRound + buys;
     }
 
     /**

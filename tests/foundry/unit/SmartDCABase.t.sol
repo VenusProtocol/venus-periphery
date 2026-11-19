@@ -147,6 +147,7 @@ abstract contract SmartDCABase is Test {
     function _pair() internal view returns (ISmartDCA.Pair memory p) {
         (
             p.stable,
+            p.nextLockTime,
             p.asset,
             p.enabled,
             p.lastSettledRound,
@@ -164,6 +165,7 @@ abstract contract SmartDCABase is Test {
             r.partsDone,
             r.resplitUsed,
             r.feeRateBps,
+            r.startedAt,
             r.stableRedeemed,
             r.stableNet,
             r.stableToSwap,
@@ -180,9 +182,9 @@ abstract contract SmartDCABase is Test {
     /// @dev The mock's quote for the pair's next part. Reads the chain, so build it before `vm.prank` or
     ///      `vm.expectRevert`.
     function _quote(uint32 pid) internal view returns (uint256) {
-        (, , , uint32 settled, , , , , ) = dca.pairs(pid);
+        (, , , , uint32 settled, , , , , ) = dca.pairs(pid);
         ISmartDCA.Round memory r;
-        (r.partsTotal, r.partsDone, , , , , r.stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
+        (r.partsTotal, r.partsDone, , , , , , r.stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
         return swapHelper.quote(r.stableToSwap / (r.partsTotal - r.partsDone));
     }
 

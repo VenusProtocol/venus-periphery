@@ -186,7 +186,7 @@ contract MockOracle {
 interface ISmartDCAPairs {
     function pairs(
         uint32 pairId
-    ) external view returns (address, address, bool, uint32, uint32, uint256, uint256, uint256, uint256);
+    ) external view returns (address, uint64, address, bool, uint32, uint32, uint256, uint256, uint256, uint256);
 }
 
 /// @notice SwapHelper stand-in for the swap call: `swap(pairId)` reads the pair from the caller (SmartDCA) and pays
@@ -222,7 +222,7 @@ contract MockSwapHelper {
 
     function swap(uint32 pairId) external {
         require(!fail, "swap failed");
-        (address tokenIn, address tokenOut, , , , , , , ) = ISmartDCAPairs(msg.sender).pairs(pairId);
+        (address tokenIn, , address tokenOut, , , , , , , ) = ISmartDCAPairs(msg.sender).pairs(pairId);
         uint256 amountIn = IERC20(tokenIn).balanceOf(address(this));
         uint256 refund = (amountIn * refundBps) / 10_000;
         if (refund != 0) IERC20(tokenIn).transfer(msg.sender, refund);

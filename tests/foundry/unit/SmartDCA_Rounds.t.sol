@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 // solhint-disable func-name-mixedcase, ordering, import-path-check, gas-strict-inequalities
 
 import { Vm } from "forge-std/Vm.sol";
+import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
 import { ISmartDCA } from "../../../contracts/SmartDCA/ISmartDCA.sol";
 import { SmartDCAMath } from "../../../contracts/SmartDCA/SmartDCAMath.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
@@ -54,7 +55,7 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         vm.prank(keeper);
         dca.settleRound(pairId);
         assertEq(_pair().lastSettledRound, NOV);
-        assertEq(dca.nextLockTime(pairId), SmartDCAMath.lockTimeOf(DEC));
+        assertEq(dca.nextLockTime(pairId), NOV_LOCK + 1 hours + 30 days, "30 days after the 1 hour late start");
 
         // Both put 100.095 into the round, so both get half of 200.19 USDT of BTCB
         uint256 aliceGot = _withdrawAll(alice, aliceId);
@@ -464,6 +465,69 @@ contract SmartDCA_RoundsTest is SmartDCABase {
     }
 
     /// @dev Every whenNotPaused call stops, and a round paused halfway finishes after unpause
+    // ----- buy interval -----
+
+    function test_buyInterval_lateStartPushesTheNextLock() public {
+        _create(alice, 1200e18, 12);
+        vm.warp(NOV_LOCK + 3 hours);
+        vm.startPrank(keeper);
+        dca.startRound(pairId, 1);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        dca.settleRound(pairId);
+
+        uint256 next = NOV_LOCK + 3 hours + 30 days;
+        assertEq(dca.nextLockTime(pairId), next);
+        // No second buy before the interval has passed since the last start
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RoundNotLocked.selector, pairId, next));
+        dca.startRound(pairId, 1);
+        vm.warp(next - 1);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RoundNotLocked.selector, pairId, next));
+        dca.startRound(pairId, 1);
+        vm.warp(next);
+        dca.startRound(pairId, 1);
+        vm.stopPrank();
+        assertEq(_round(DEC).startedAt, next);
+    }
+
+    function test_setBuyInterval_keepsTheScheduledLockAndCountsFromTheNextStart() public {
+        _create(alice, 1200e18, 12);
+        _runRound(1);
+        uint256 decLock = NOV_LOCK + 30 days;
+        assertEq(dca.nextLockTime(pairId), decLock);
+
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.BuyIntervalUpdated(30 days, 17 days);
+        dca.setBuyInterval(17);
+        assertEq(dca.buyInterval(), 17 days);
+        assertEq(dca.nextLockTime(pairId), decLock, "the scheduled lock does not move");
+
+        _runRound(1);
+        assertEq(dca.nextLockTime(pairId), decLock + 17 days);
+    }
+
+    function test_setBuyInterval_boundsAndAccess() public {
+        vm.expectRevert(ISmartDCA.InvalidParameter.selector);
+        dca.setBuyInterval(6);
+        vm.expectRevert(ISmartDCA.InvalidParameter.selector);
+        dca.setBuyInterval(366);
+        dca.setBuyInterval(7);
+        dca.setBuyInterval(365);
+        assertEq(dca.buyInterval(), 365 days);
+
+        vm.prank(makeAddr("stranger"));
+        vm.expectPartialRevert(AccessControlledV8.Unauthorized.selector);
+        dca.setBuyInterval(30);
+    }
+
+    function test_emptyRounds_moveTheLockOneIntervalEach() public {
+        assertEq(dca.nextLockTime(pairId), NOV_LOCK, "first round locks on the 15th");
+        vm.warp(NOV_LOCK + 70 days);
+        dca.syncPair(pairId);
+        // Rounds at NOV_LOCK, +30 and +60 days had nothing to buy
+        assertEq(_pair().lastSettledRound, NOV + 2);
+        assertEq(dca.nextLockTime(pairId), NOV_LOCK + 90 days);
+    }
+
     function test_pause_stopsEveryCallAndARoundResumesAfter() public {
         uint256 id = _create(alice, 100e18, 2);
         _runRound(1);

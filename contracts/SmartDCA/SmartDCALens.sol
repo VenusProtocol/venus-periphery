@@ -122,6 +122,7 @@ contract SmartDCALens {
         uint32 pairCount;
         address reserve;
         bool paused;
+        uint32 buyInterval;
     }
 
     /// @dev Plan and pair fields `getPlan` needs, read once
@@ -170,7 +171,7 @@ contract SmartDCALens {
             c.nextRound,
             p.scheduleFirstRound,
             p.scheduleBuys,
-            block.timestamp
+            block.timestamp >= c.pair.nextLockTime
         );
         v.assetUnits = p.assetUnitsCarried + _assetUnitsFromIndex(dca, p, c.buysSettled) - p.assetUnitsPaid;
         v.assetValue = _value(dca, p.pairId, ISmartDCA.Side.Asset, v.assetUnits);
@@ -214,11 +215,14 @@ contract SmartDCALens {
         ISmartDCA.Pair memory pair = _pair(dca, pairId);
         if (pair.stable == address(0)) return v;
         uint32 round = pair.lastSettledRound + 1;
+        uint256 lockTime = pair.nextLockTime;
         uint256 roundStableUnits = pair.roundStableUnits;
-        // Rounds with nothing to buy settle on the next call to the pair; skip them as that call would
-        while (roundStableUnits == 0 && block.timestamp >= SmartDCAMath.lockTimeOf(round)) {
+        // Rounds with nothing to buy settle on the next call to the pair, each moving the lock by `buyInterval`;
+        // skip them as that call would
+        while (roundStableUnits == 0 && block.timestamp >= lockTime) {
             roundStableUnits = _round(dca, pairId, round).stableUnitsJoining;
             ++round;
+            lockTime += dca.buyInterval();
         }
         ISmartDCA.Round memory r = _round(dca, pairId, round);
 
@@ -226,7 +230,7 @@ contract SmartDCALens {
         v.asset = pair.asset;
         v.enabled = pair.enabled;
         v.round = round;
-        v.lockTime = SmartDCAMath.lockTimeOf(round);
+        v.lockTime = lockTime;
         v.parts = r.partsTotal;
         v.partsDone = r.partsDone;
         v.resplitUsed = r.resplitUsed;
@@ -250,6 +254,7 @@ contract SmartDCALens {
         c.pairCount = dca.pairCount();
         c.reserve = dca.reserve();
         c.paused = dca.paused();
+        c.buyInterval = dca.buyInterval();
     }
 
     /// @dev Asset units bought in the first `buysSettled` rounds of the plan's current schedule
@@ -315,6 +320,7 @@ contract SmartDCALens {
     function _pair(SmartDCA dca, uint32 pairId) internal view returns (ISmartDCA.Pair memory p) {
         (
             p.stable,
+            p.nextLockTime,
             p.asset,
             p.enabled,
             p.lastSettledRound,
@@ -332,6 +338,7 @@ contract SmartDCALens {
             r.partsDone,
             r.resplitUsed,
             r.feeRateBps,
+            r.startedAt,
             r.stableRedeemed,
             r.stableNet,
             r.stableToSwap,

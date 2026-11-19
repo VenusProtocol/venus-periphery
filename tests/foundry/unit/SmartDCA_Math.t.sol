@@ -37,11 +37,10 @@ contract SmartDCA_MathTest is Test {
         assertEq(SmartDCAMath.buysSettled(682, 682, 12), 1);
         assertEq(SmartDCAMath.buysSettled(700, 682, 12), 12);
 
-        uint256 lock = SmartDCAMath.lockTimeOf(682);
-        assertFalse(SmartDCAMath.inRunningRound(682, 682, 12, lock - 1));
-        assertTrue(SmartDCAMath.inRunningRound(682, 682, 12, lock));
-        assertFalse(SmartDCAMath.inRunningRound(682, 683, 12, lock), "parked for the next round");
-        assertFalse(SmartDCAMath.inRunningRound(694, 682, 12, SmartDCAMath.lockTimeOf(694)), "after its last round");
+        assertFalse(SmartDCAMath.inRunningRound(682, 682, 12, false), "before the lock");
+        assertTrue(SmartDCAMath.inRunningRound(682, 682, 12, true));
+        assertFalse(SmartDCAMath.inRunningRound(682, 683, 12, true), "parked for the next round");
+        assertFalse(SmartDCAMath.inRunningRound(694, 682, 12, true), "after its last round");
     }
 
     function test_roundFee_onInterestOnly() public pure {

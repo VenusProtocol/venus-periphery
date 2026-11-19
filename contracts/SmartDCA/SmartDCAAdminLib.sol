@@ -62,7 +62,9 @@ library SmartDCAAdminLib {
         pair.stable = stable;
         pair.asset = asset;
         pair.enabled = true;
+        // The first round locks on the next 15th at 00:00 UTC+8; later ones `buyInterval` after the one before started
         pair.lastSettledRound = SmartDCAMath.latestLockedRound(block.timestamp);
+        pair.nextLockTime = uint64(SmartDCAMath.lockTimeOf(pair.lastSettledRound + 1));
         emit ISmartDCA.PairAdded(pairId, stable, asset);
 
         // The pair holds nothing yet, so these only check and record the sources
@@ -216,7 +218,7 @@ library SmartDCAAdminLib {
         uint256 migrated;
         uint256 oldShares = current.sharesHeld;
         if (oldShares != 0) {
-            if (block.timestamp >= SmartDCAMath.lockTimeOf(pair.lastSettledRound + 1)) {
+            if (block.timestamp >= pair.nextLockTime) {
                 revert ISmartDCA.PairLocked(pairId);
             }
             current.sharesHeld = 0;

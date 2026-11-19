@@ -138,7 +138,7 @@ contract SmartDCA_FuzzTest is SmartDCABase {
     /// @dev One keeper step of the pair's next round: start, swap a part, or settle
     function _roundStep(uint32 pid) internal {
         uint32 round = _pairOf(pid).lastSettledRound + 1;
-        (uint8 total, uint8 done, , , , , , , , , , , , ) = dca.rounds(pid, round);
+        (uint8 total, uint8 done, , , , , , , , , , , , , ) = dca.rounds(pid, round);
         if (total == 0) _call(keeper, abi.encodeCall(dca.startRound, (pid, uint8(1 + _rnd(3)))));
         else if (done < total) _call(keeper, abi.encodeCall(dca.swapRoundPart, (pid, ANY_QUOTE, _swapData(pid))));
         else _call(keeper, abi.encodeCall(dca.settleRound, (pid)));
@@ -244,6 +244,7 @@ contract SmartDCA_FuzzTest is SmartDCABase {
     function _pairOf(uint32 pid) internal view returns (ISmartDCA.Pair memory p) {
         (
             p.stable,
+            p.nextLockTime,
             p.asset,
             p.enabled,
             p.lastSettledRound,

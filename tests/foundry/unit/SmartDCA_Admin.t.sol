@@ -34,6 +34,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
         assertEq(dca.maxParts(), 10);
         assertEq(dca.minBuys(), 2);
         assertEq(dca.maxBuys(), 60);
+        assertEq(dca.buyInterval(), 30 days);
     }
 
     function test_setters_needAcmPermission() public {
