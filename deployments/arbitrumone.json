@@ -2483,7 +2483,7 @@
       ]
     },
     "EBrake_Implementation": {
-      "address": "0x8A7d8589A597619A7842d3BC284b9a5a276FaE56",
+      "address": "0xb61D283D201C2bee9Ed38e9Fb8D919A5F0AFf3eA",
       "abi": [
         {
           "inputs": [
@@ -2990,6 +2990,25 @@
               "internalType": "address",
               "name": "market",
               "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
+            }
+          ],
+          "name": "PoolCFSnapshotReset",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
             }
           ],
           "name": "SupplyCapSnapshotReset",
@@ -3374,6 +3393,24 @@
               "internalType": "address",
               "name": "market",
               "type": "address"
+            }
+          ],
+          "name": "resetCFSnapshot",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "market",
+              "type": "address"
+            },
+            {
+              "internalType": "uint96",
+              "name": "poolId",
+              "type": "uint96"
             }
           ],
           "name": "resetCFSnapshot",
