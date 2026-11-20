@@ -284,6 +284,28 @@ contract SmartDCA_AdminTest is SmartDCABase {
         assertEq(usdt.balanceOf(address(dca)), _round(NOV).stableToSwap);
     }
 
+    function test_sweepToken_countsEveryPairOnTheSameHub() public {
+        MockERC20 eth = new MockERC20("ETH", "ETH", 18);
+        MockVToken vETH = new MockVToken(address(eth), VBTC_RATE);
+        comptroller.list(address(vETH));
+        oracle.setPrice(address(eth), BTC_PRICE);
+        uint32 ethPairId = _addPair(address(usdt), address(eth), address(hub), address(vETH));
+
+        _create(alice, 1200e18, 12);
+        usdt.mint(bob, 600e18);
+        vm.startPrank(bob);
+        usdt.approve(address(dca), 600e18);
+        dca.createPlan(ethPairId, 600e18, 6, bob);
+        vm.stopPrank();
+
+        usdt.mint(address(this), 5e18);
+        usdt.approve(address(hub), 5e18);
+        hub.deposit(5e18, address(dca));
+        dca.sweepToken(address(hub), stranger);
+        assertEq(hub.balanceOf(stranger), 5e24);
+        assertEq(hub.balanceOf(address(dca)), 1800e24);
+    }
+
     function test_claimRewards_sendsXvsToReserve() public {
         comptroller.setRewardPerClaim(3e18);
         address[] memory markets = new address[](1);

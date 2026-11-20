@@ -246,6 +246,33 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         assertLe(units, 2 * 3 * 2);
     }
 
+    /// @dev Alice joined at 1.00 and Bob at 1.02, so the fee rate decides how the bought asset is split.
+    ///      Changing the rate mid-round must not change that split.
+    function test_settleRound_usesTheFeeRateSavedAtStart() public {
+        uint256 aliceId = _create(alice, 1200e18, 12);
+        hub.setPricePerShare(1.02e18);
+        uint256 bobId = _create(bob, 1200e18, 12);
+
+        vm.warp(NOV_LOCK);
+        vm.prank(keeper);
+        dca.startRound(pairId, 1);
+        // Alice redeems 102 for 100 principal, so the round fee is 5% of 2
+        uint256 fee = usdt.balanceOf(reserve);
+        assertApproxEqAbs(fee, 0.1e18, 1);
+
+        dca.setFeeRate(2_000);
+
+        vm.startPrank(keeper);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        dca.settleRound(pairId);
+        vm.stopPrank();
+
+        assertEq(_round(NOV).feeRateBps, 500);
+        assertEq(usdt.balanceOf(reserve), fee);
+        // At 5% Alice nets 101.9 and Bob 100; at 20% Alice would net 101.6
+        assertApproxEqRel(_withdrawAll(alice, aliceId) * 100e18, _withdrawAll(bob, bobId) * 101.9e18, 1e12);
+    }
+
     // ----- swaps and the slippage bound -----
 
     function test_swapRoundPart_fillsInsideTheBound() public {
