@@ -50,8 +50,8 @@ contract SmartDCALens {
      *        (PRD P)
      * @param stableWaiting Value of the plan's stable still waiting in the yield source (PRD W)
      * @param nextBuyStable Stable the next buy will sell, `stableWaiting / buysLeft` (PRD E). On the last buy it is
-     *        all of `stableWaiting`, which includes fewer than `scheduleBuys` units of rounding left, worth under
-     *        1 wei, that the contract drops at claim.
+     *        all of `stableWaiting`, which includes fewer than `scheduleBuys` units of rounding left, each worth under
+     *        1 wei on a Hub and about 2e8 wei on a Core vToken, that the contract drops at claim.
      * @param principalPerBuy Principal in each buy (PRD B)
      * @param nextBuyFee Fee on the next buy, `max(0, nextBuyStable - principalPerBuy) * e` (PRD F). `e` is the fee
      *        rate when the round redeems more than its principal and 0 otherwise; for the pair's next round it is

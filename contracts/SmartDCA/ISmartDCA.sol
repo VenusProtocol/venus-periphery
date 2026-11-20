@@ -653,8 +653,8 @@ interface ISmartDCA {
     /**
      * @notice Pays `receiver` the asset of a plan whose buys have all settled, and closes it.
      * @dev With `toCore`, `receiver` gets the asset's Core vTokens and keeps earning; collateral is not enabled for
-     *      them. Up to `scheduleBuys - 1` stable units are left by rounding the per-buy amount down; they are worth
-     *      under 1 wei and are dropped here.
+     *      them. Up to `scheduleBuys - 1` stable units are left by rounding the per-buy amount down; each is worth
+     *      under 1 wei on a Hub and about 2e8 wei on a Core vToken, and they are dropped here.
      * @param planId The plan
      * @param toCore True to pay as vTokens, false to pay as the asset
      * @param receiver Address paid

@@ -371,7 +371,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         plan.status = PlanStatus.Claimed;
         plan.assetUnitsPaid += assetUnitsOwed;
 
-        // Stable units left by rounding `stableUnitsPerBuy` down: fewer than `scheduleBuys`, worth under 1 wei
+        // Stable units left by rounding `stableUnitsPerBuy` down: fewer than `scheduleBuys`, each worth under 1 wei
+        // on a Hub and about 2e8 wei on a Core vToken
         yieldSources[plan.pairId][Side.Stable].unitsIssued -=
             plan.scheduleStableUnits - plan.stableUnitsPerBuy * plan.scheduleBuys;
 
