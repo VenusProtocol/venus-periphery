@@ -340,9 +340,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
         uint256 stableRedeemed = _redeem(yieldSources[pairId][Side.Stable], pair.stable, stableUnitsLeft);
         uint256 principalLeft = plan.principalPerBuy * buysLeft;
-        uint256 fee = stableRedeemed > principalLeft
-            ? ((stableRedeemed - principalLeft) * feeRateBps) / SmartDCAMath.BPS
-            : 0;
+        (uint256 fee, ) = SmartDCAMath.roundFee(stableRedeemed, principalLeft, feeRateBps);
         if (fee != 0) {
             IERC20(pair.stable).safeTransfer(reserve, fee);
             emit CancelFeeCollected(pairId, planId, fee);
