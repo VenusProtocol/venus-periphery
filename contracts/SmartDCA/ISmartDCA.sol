@@ -258,8 +258,9 @@ interface ISmartDCA {
     event PlanTransferred(uint256 indexed planId, address indexed from, address indexed to);
 
     /**
-     * @notice Emitted once per round, by the first of `createPlan`, `claimPlan`, `startRound`, `forceBuy` or
-     *         `syncPair` called on the pair from the round's lock time
+     * @notice Emitted once per round that has plans to buy for, by the first of `createPlan`, `claimPlan`,
+     *         `startRound`, `forceBuy` or `syncPair` called on the pair from the round's lock time. An empty round
+     *         emits only `RoundSettled`.
      * @param pairId The pair
      * @param round The round that locked
      */
@@ -741,7 +742,7 @@ interface ISmartDCA {
      * @notice Settles the pair's rounds with nothing to buy, and emits `RoundLocked` once the next round is locked.
      *         Callable by anyone.
      * @param pairId The pair
-     * @custom:event Emits RoundSettled for each empty round, and RoundLocked once per round.
+     * @custom:event Emits RoundSettled for each empty round, and RoundLocked once for the next round with plans.
      */
     function syncPair(uint32 pairId) external;
 

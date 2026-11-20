@@ -800,7 +800,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         pair.lastSettledRound = round;
     }
 
-    /// @dev Emits `RoundLocked` once per round, from the round's lock time
+    /// @dev Emits `RoundLocked` once per round with plans, from the round's lock time
     function _emitRoundLocked(uint32 pairId, Pair storage pair) internal {
         uint32 round = pair.lastSettledRound + 1;
         if (pair.lockEmittedRound == round || block.timestamp < roundStart(round)) return;
