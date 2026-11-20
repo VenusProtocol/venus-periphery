@@ -229,7 +229,7 @@ library SmartDCAAdminLib {
      * @param source Hub or vToken to hold the side's token
      * @param hubRegistry Registry Hub sources must be in
      * @param comptroller Comptroller Core sources must be listed in
-     * @param nextRoundStarted Whether the pair's next round has started; holdings cannot move then
+     * @param nextRoundStarted Whether the pair's next round has started; the stable side's holdings cannot move then
      */
     function setYieldSource(
         ISmartDCA.Pair storage pair,
@@ -258,9 +258,9 @@ library SmartDCAAdminLib {
         uint256 migrated;
         uint256 oldShares = current.sharesHeld;
         if (oldShares != 0) {
-            if (nextRoundStarted) {
-                revert ISmartDCA.PairLocked(pairId);
-            }
+            // A running round holds its bought asset as tokens and settles into the current source, so only the
+            // stable side locks. The asset side can then move away from a source that refuses the settle deposit.
+            if (nextRoundStarted && side == ISmartDCA.Side.Stable) revert ISmartDCA.PairLocked(pairId);
             current.sharesHeld = 0;
             migrated = sourceRedeem(current, token, oldShares);
         }

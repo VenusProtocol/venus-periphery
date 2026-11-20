@@ -521,7 +521,7 @@ interface ISmartDCA {
     /// @notice The yield source is already the source of this pair side.
     error SourceUnchanged();
 
-    /// @notice A pair's source cannot move while the pair is past its lock time and not settled.
+    /// @notice A pair's stable source cannot move while the pair is past its lock time and not settled.
     error PairLocked(uint32 pairId);
 
     /// @notice A round function was called before `startsAt`: the round's start for the keeper, or 24 h later for
@@ -793,8 +793,9 @@ interface ISmartDCA {
     /**
      * @notice Sets where one side of a pair waits and earns, and moves that pair side's holdings there in the same
      *         call. Other pairs with the same token keep their own source.
-     * @dev Plans hold units, and the move keeps the number of units, so no plan changes. Reverts while the pair is
-     *      past its lock time and not settled.
+     * @dev Plans hold units, and the move keeps the number of units, so no plan changes. A stable move reverts while
+     *      the pair is past its lock time and not settled; an asset move does not, as a running round holds its
+     *      bought asset as tokens.
      * @param pairId The pair
      * @param side Stable or Asset
      * @param kind Hub or Core

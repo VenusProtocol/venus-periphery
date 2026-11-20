@@ -266,7 +266,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         assertApproxEqAbs(btcb.balanceOf(alice), 1.25e15, 2, "all of it at the new share price");
     }
 
-    /// @dev A locked pair blocks only its own sources: the ETH pair's asset moves while the BTCB pair is locked
+    /// @dev A locked pair blocks only its own stable source: the ETH pair's stable moves while the BTCB pair is locked
     function test_setYieldSource_lockCheckSkipsOtherPairs() public {
         MockERC20 eth = new MockERC20("ETH", "ETH", 18);
         MockVToken vETH = new MockVToken(address(eth), VBTC_RATE);
@@ -289,14 +289,14 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         vm.warp(dca.roundStart(DEC));
         _runEthRound(ethPairId);
 
-        dca.setYieldSource(ethPairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Core, address(vETH2));
-        (, address source, , ) = dca.yieldSources(ethPairId, ISmartDCA.Side.Asset);
-        assertEq(source, address(vETH2));
+        MockHub hub2 = new MockHub(address(usdt));
+        registry.set(address(hub2), true);
+        dca.setYieldSource(ethPairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub2));
+        (, address source, , ) = dca.yieldSources(ethPairId, ISmartDCA.Side.Stable);
+        assertEq(source, address(hub2));
 
-        MockVToken vBTC2 = new MockVToken(address(btcb), VBTC_RATE);
-        comptroller.list(address(vBTC2));
         vm.expectRevert(abi.encodeWithSelector(ISmartDCA.PairLocked.selector, pairId));
-        dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Core, address(vBTC2));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub2));
     }
 
     // ----- helpers -----

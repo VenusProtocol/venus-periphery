@@ -263,6 +263,49 @@ contract SmartDCA_AdminTest is SmartDCABase {
         dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, address(hub2));
     }
 
+    /// @dev Core refuses the settle deposit (a full supply cap or a mint pause); governance moves the asset to a
+    ///      Hub mid round and the round settles there
+    function test_setYieldSource_assetMovesMidRoundWhenCoreRefusesTheSettle() public {
+        uint256 id = _create(alice, 1200e18, 12);
+        _runRound(1);
+
+        vm.warp(dca.nextLockTime(pairId));
+        vm.startPrank(keeper);
+        dca.startRound(pairId, 1);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        vBTC.setErrors(1, 0);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.SourceCallFailed.selector, address(vBTC), 1));
+        dca.settleRound(pairId);
+        vm.stopPrank();
+
+        MockHub btcHub = new MockHub(address(btcb));
+        registry.set(address(btcHub), true);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Hub, address(btcHub));
+
+        vm.prank(keeper);
+        dca.settleRound(pairId);
+        assertEq(_pair().lastSettledRound, DEC);
+        assertEq(vBTC.balanceOf(address(dca)), 0);
+        assertGt(_withdrawAll(alice, id), 0);
+    }
+
+    /// @dev Every plan has bought everything and waits to claim; the next round is empty and its lock passed with
+    ///      nobody calling the pair. The asset still moves while paused, with no `syncPair` first.
+    function test_setYieldSource_assetMovesPastAStaleEmptyRoundWhilePaused() public {
+        _create(alice, 200e18, 2);
+        _runRound(1);
+        _runRound(1);
+        vm.warp(dca.roundStart(DEC + 1) + 1 days);
+        dca.pause();
+
+        MockHub btcHub = new MockHub(address(btcb));
+        registry.set(address(btcHub), true);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Hub, address(btcHub));
+        (, address source, uint256 shares, ) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
+        assertEq(source, address(btcHub));
+        assertGt(shares, 0);
+    }
+
     function test_sweepToken_onlyWhatIsNotOwed() public {
         _create(alice, 1200e18, 12);
 
