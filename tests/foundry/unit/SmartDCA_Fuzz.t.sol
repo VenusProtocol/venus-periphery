@@ -65,7 +65,7 @@ contract SmartDCA_FuzzTest is SmartDCABase {
         router.setRate(1e18 / 100_000);
         dca.setFallbackRoute(pairId, address(router), abi.encodePacked(address(usdt), uint24(500), address(btcb)));
         _create(alice, amount, 12);
-        vm.warp(dca.nextLockTime(pairId));
+        vm.warp(dca.nextLockTime(pairId) + dca.FALLBACK_DELAY());
         uint32 round = _pair().lastSettledRound + 1;
 
         for (uint256 i = 1; i < parts; ++i) {

@@ -515,7 +515,8 @@ interface ISmartDCA {
     /// @notice A pair's source cannot move while the pair is past its lock time and not settled.
     error PairLocked(uint32 pairId);
 
-    /// @notice A keeper called a round function before the round's start time, `startsAt`.
+    /// @notice A round function was called before `startsAt`: the round's start for the keeper, or 24 h later for
+    ///         `forceBuy`.
     error RoundNotStarted(uint256 startsAt);
 
     /// @notice The round function needs `startRound` to have run for the round, and it has not.
@@ -713,13 +714,13 @@ interface ISmartDCA {
     /**
      * @notice Runs one part of the pair's round without the keeper or the backend: starts the round if needed, swaps
      *         the next part on the pair's PancakeSwap V3 route, and settles the round after its last part.
-     * @dev Callable from the round's lock time until it settles; before the lock it reverts with `StartRoundNotCalled`.
-     *      For a crisis such as the keeper or the backend being down. The swap needs no signed route:
+     * @dev Callable from `FALLBACK_DELAY` (24 h) after the round's start until it settles; before that it reverts with
+     *      `RoundNotStarted`, carrying the time it opens. For a crisis such as the keeper or the backend being down. The swap needs no signed route:
      *      it approves only the part's stable, calls the router's `exactInput`, and reverts if the asset that arrived
      *      is below the oracle value of the part less `fallbackSlippageBps`. `parts = 1` runs the whole round in one
      *      call; a large round takes more parts so the pool can recover between them. The keeper can keep running
      *      the same round, since both share its part count, and a round whose parts are all swapped only settles.
-     *      TBD with the team: PancakeSwap V3 SwapRouter as the router, and the 0.5% default.
+     *      The router is the PancakeSwap V3 SwapRouter, and `fallbackSlippageBps` starts at 0.5%.
      * @param pairId The pair
      * @param parts Parts to split the round into, 1 to `maxParts`; ignored once the round has started
      * @custom:access Controlled by AccessControlManager (Guardian and Normal Timelock)

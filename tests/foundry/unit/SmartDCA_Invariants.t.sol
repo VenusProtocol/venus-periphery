@@ -165,7 +165,7 @@ contract SmartDCAHandler is Test {
     /// @notice One `forceBuy` step on the pair, as the Guardian; mixes with the keeper's `roundStep` on the same round
     function forceBuy(uint256 pairSeed, uint256 parts) external {
         uint32 pid = pairIds[pairSeed % 2];
-        uint256 start = DCA.nextLockTime(pid);
+        uint256 start = DCA.nextLockTime(pid) + DCA.FALLBACK_DELAY();
         if (time < start) {
             time = start;
             vm.warp(time);

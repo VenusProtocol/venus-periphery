@@ -60,6 +60,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @notice Highest number of buys a plan can have (10 years of monthly buys)
     uint8 public constant MAX_BUYS = 120;
 
+    /// @notice Time after a round's start before `forceBuy` can run it, so the keeper always goes first
+    uint256 public constant FALLBACK_DELAY = 24 hours;
+
     /// @notice Core pool Comptroller; Core yield sources must be listed in it
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IComptroller public immutable COMPTROLLER;
@@ -178,7 +181,6 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         maxParts = 10;
         minBuys = 2;
         maxBuys = 60;
-        // TBD: slippage default to confirm with the team
         fallbackSlippageBps = 50;
         // Round 0 is the latest 15th already passed, so every later round is still ahead
         anchorMonth = uint32(SmartDCAMath.latestStartedMonth(block.timestamp));
@@ -472,8 +474,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         _checkAccessAllowed("forceBuy(uint32,uint8)");
         Pair storage pair = _pair(pairId);
         if (fallbackRoutes[pairId].router == address(0)) revert NoFallbackRoute(pairId);
+        uint256 forceBuyFrom = roundStart(pair.lastSettledRound + 1) + FALLBACK_DELAY;
+        if (block.timestamp < forceBuyFrom) revert RoundNotStarted(forceBuyFrom);
 
-        // Before the lock `_startRound` starts nothing, so `_startedRound` below reverts
         if (rounds[pairId][pair.lastSettledRound + 1].partsTotal == 0) _startRound(pairId, pair, parts);
         uint32 round = pair.lastSettledRound + 1;
         Round storage r = _startedRound(pairId, round);

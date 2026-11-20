@@ -213,6 +213,7 @@ contract Fork_SmartDCATest is Test {
         uint256 usdtPrice = IOraclePrice(ORACLE).getPrice(USDT);
         uint256 btcbPrice = IOraclePrice(ORACLE).getPrice(BTCB);
         _toLock(pairId);
+        vm.warp(block.timestamp + dca.FALLBACK_DELAY());
         vm.mockCall(ORACLE, abi.encodeCall(IOraclePrice.getPrice, (USDT)), abi.encode(usdtPrice));
         vm.mockCall(ORACLE, abi.encodeCall(IOraclePrice.getPrice, (BTCB)), abi.encode(btcbPrice));
 

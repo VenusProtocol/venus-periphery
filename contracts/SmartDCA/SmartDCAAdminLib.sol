@@ -111,7 +111,7 @@ library SmartDCAAdminLib {
     /**
      * @notice Swaps `stableIn` of the pair's stable for its asset on the pair's route, for `forceBuy`
      * @dev Approves only `stableIn`. Reverts if the asset that arrived, counted as a balance change, is below `minOut`.
-     *      TBD with the team: PancakeSwap V3 SwapRouter (`exactInput` with a deadline) as the router.
+     *      The router is the PancakeSwap V3 SwapRouter (`exactInput` with a deadline).
      * @param route The pair's route
      * @param pair The pair
      * @param oracle Oracle for both tokens' prices

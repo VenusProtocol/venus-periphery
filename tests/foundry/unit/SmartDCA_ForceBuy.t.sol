@@ -10,6 +10,9 @@ import { SmartDCABase } from "./SmartDCABase.t.sol";
 
 /// @dev Alice's plan puts 100 USDT in each round; the router pays exactly the oracle price, 100,000 USDT per BTCB
 contract SmartDCA_ForceBuyTest is SmartDCABase {
+    /// @dev `forceBuy` opens 24 h after the November round's start
+    uint256 internal constant FORCE_BUY_AT = NOV_LOCK + 24 hours;
+
     MockPancakeV3Router internal router;
     address internal stranger = makeAddr("stranger");
     uint256 internal planId;
@@ -23,7 +26,7 @@ contract SmartDCA_ForceBuyTest is SmartDCABase {
     }
 
     function test_forceBuy_oneCallRunsTheWholeRound() public {
-        vm.warp(NOV_LOCK);
+        vm.warp(FORCE_BUY_AT);
         dca.forceBuy(pairId, 1);
 
         assertEq(_pair().lastSettledRound, NOV);
@@ -31,14 +34,22 @@ contract SmartDCA_ForceBuyTest is SmartDCABase {
         assertApproxEqAbs(_withdrawAll(alice, planId), 1e15, 2e8, "100 USDT at 100,000");
     }
 
-    function test_forceBuy_revertsBeforeTheLock() public {
-        vm.warp(NOV_LOCK - 1);
-        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.StartRoundNotCalled.selector, pairId));
+    function test_forceBuy_revertsUntil24HoursAfterTheStart() public {
+        vm.warp(NOV_LOCK);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RoundNotStarted.selector, FORCE_BUY_AT));
         dca.forceBuy(pairId, 1);
+
+        vm.warp(FORCE_BUY_AT - 1);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RoundNotStarted.selector, FORCE_BUY_AT));
+        dca.forceBuy(pairId, 1);
+
+        vm.warp(FORCE_BUY_AT);
+        dca.forceBuy(pairId, 1);
+        assertEq(_pair().lastSettledRound, NOV);
     }
 
     function test_forceBuy_onePartPerCall() public {
-        vm.warp(NOV_LOCK);
+        vm.warp(FORCE_BUY_AT);
         dca.forceBuy(pairId, 3);
         dca.forceBuy(pairId, 3);
         assertEq(_round(NOV).partsDone, 2);
@@ -50,7 +61,7 @@ contract SmartDCA_ForceBuyTest is SmartDCABase {
 
     /// @dev Floor is the oracle value less 0.5%: 0.4% under passes, 0.6% under reverts
     function test_forceBuy_revertsBelowTheOracleFloor() public {
-        vm.warp(NOV_LOCK);
+        vm.warp(FORCE_BUY_AT);
         router.setRate(((1e18 / 100_000) * 994) / 1000);
         vm.expectPartialRevert(ISmartDCA.SlippageExceeded.selector);
         dca.forceBuy(pairId, 1);
@@ -68,6 +79,7 @@ contract SmartDCA_ForceBuyTest is SmartDCABase {
         dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
         vm.stopPrank();
 
+        vm.warp(FORCE_BUY_AT);
         dca.forceBuy(pairId, 7);
         assertEq(_round(NOV).partsTotal, 2);
         assertEq(_pair().lastSettledRound, NOV);
@@ -80,13 +92,14 @@ contract SmartDCA_ForceBuyTest is SmartDCABase {
         dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
         vm.stopPrank();
 
+        vm.warp(FORCE_BUY_AT);
         router.setRate(0); // a swap here would miss the floor and revert
         dca.forceBuy(pairId, 1);
         assertEq(_pair().lastSettledRound, NOV);
     }
 
     function test_forceBuy_revertsWithoutARouteOrPermission() public {
-        vm.warp(NOV_LOCK);
+        vm.warp(FORCE_BUY_AT);
         vm.prank(stranger);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -104,7 +117,7 @@ contract SmartDCA_ForceBuyTest is SmartDCABase {
     }
 
     function test_forceBuy_revertsWhilePaused() public {
-        vm.warp(NOV_LOCK);
+        vm.warp(FORCE_BUY_AT);
         dca.pause();
         vm.expectRevert("Pausable: paused");
         dca.forceBuy(pairId, 1);
