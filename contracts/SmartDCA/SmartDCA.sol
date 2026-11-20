@@ -261,7 +261,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
         uint8 buysLeft = plan.scheduleBuys - buysSettled;
         uint256 minimum = minAmountPerBuy[pair.stable] * buysLeft;
-        if (amount == 0 || amount < minimum) revert DepositTooSmall(amount, minimum);
+        if (amount < minimum) revert DepositTooSmall(amount, minimum);
 
         // Restart the schedule from the next unsettled round, keeping what was bought so far
         plan.assetUnitsCarried += _assetUnitsFromIndex(plan, pairId, buysSettled);
