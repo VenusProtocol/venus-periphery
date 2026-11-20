@@ -232,7 +232,10 @@ contract SmartDCALens {
         v.partsDone = r.partsDone;
         v.resplitUsed = r.resplitUsed;
         v.roundStableUnits = roundStableUnits;
-        v.roundStableValue = _value(dca, pairId, ISmartDCA.Side.Stable, roundStableUnits);
+        // A started round has already redeemed its units, so show the stored amount
+        v.roundStableValue = r.partsTotal != 0
+            ? r.stableRedeemed
+            : _value(dca, pairId, ISmartDCA.Side.Stable, roundStableUnits);
         if (r.partsTotal != 0) v.state = PairState.Executing;
         else if (block.timestamp >= v.lockTime) v.state = PairState.Locked;
     }

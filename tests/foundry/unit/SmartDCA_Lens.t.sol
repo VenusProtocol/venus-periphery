@@ -195,7 +195,8 @@ contract SmartDCA_LensTest is SmartDCABase {
         assertApproxEqAbs(lens.getPlan(dca, aliceId).stablePending, v.nextBuyNet, 1);
     }
 
-    /// @dev The round holds every stable unit of the pair, so starting it leaves the stable source empty
+    /// @dev The round holds every stable unit of the pair, so starting it leaves the stable source empty; the lens
+    ///      shows what the round redeemed
     function test_getPair_whileTheRoundHoldsEveryUnit() public {
         uint256 id = _create(alice, 200e18, 2);
         _runRound(1);
@@ -207,7 +208,7 @@ contract SmartDCA_LensTest is SmartDCABase {
         SmartDCALens.PairView memory v = lens.getPair(dca, pairId);
         assertEq(uint8(v.state), uint8(SmartDCALens.PairState.Executing));
         assertEq(v.roundStableUnits, 100e24);
-        assertEq(v.roundStableValue, 0);
+        assertEq(v.roundStableValue, 100e18, "what startRound redeemed");
         assertEq(lens.getPlan(dca, id).buysLeft, 0);
     }
 
