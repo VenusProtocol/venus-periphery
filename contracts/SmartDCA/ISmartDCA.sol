@@ -24,6 +24,9 @@ pragma solidity 0.8.28;
  */
 interface ISmartDCA {
     /// @notice Kind of yield source a token waits and earns in
+    /// @param None No source set yet. This is the empty value; the admin can never set it.
+    /// @param Hub A Venus Liquidity Hub vault
+    /// @param Core A Core Pool vToken market
     enum SourceKind {
         None,
         Hub,
@@ -31,6 +34,8 @@ interface ISmartDCA {
     }
 
     /// @notice Side of a pair: the stable it sells or the asset it buys. Each side has its own yield source.
+    /// @param Stable The stable the plan sells, for example USDT
+    /// @param Asset The token the plan buys, for example BTCB
     enum Side {
         Stable,
         Asset
@@ -38,6 +43,10 @@ interface ISmartDCA {
 
     /// @notice Stored plan status. A plan is Matured when it is Active and every buy has settled; that is computed,
     ///         not stored.
+    /// @param None No plan with this id. This is the empty value.
+    /// @param Active Open: buying, or done buying and waiting to be claimed
+    /// @param Cancelled Ended early. The owner was paid the stable left and the asset bought so far.
+    /// @param Claimed Ended after the last buy. The owner was paid the asset bought.
     enum PlanStatus {
         None,
         Active,
