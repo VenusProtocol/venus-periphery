@@ -128,13 +128,14 @@ contract Fork_SmartDCATest is Test {
         pairId = _addPair(USDT, BTCB, HUB_USDT, VBTC);
         routeOf[pairId] = abi.encodePacked(USDT, FEE_500, BTCB);
         dca.setKeeper(keeper, true);
+        dca.setAllowedRouter(PCS_V3_ROUTER, true);
 
         _fund(USDT, alice, DEPOSIT);
     }
 
     /// @dev The Normal Timelock holds the ACM admin role, so it grants this test the setters it calls
     function _grantAdminCalls() internal {
-        string[8] memory sigs = [
+        string[9] memory sigs = [
             "setYieldSource(uint32,uint8,uint8,address)",
             "setMinAmountPerBuy(address,uint256)",
             "addPair(address,address,uint8,address,uint8,address)",
@@ -142,7 +143,8 @@ contract Fork_SmartDCATest is Test {
             "setFeeRate(uint16)",
             "sweepToken(address,address)",
             "setFallbackRoute(uint32,address,bytes)",
-            "forceBuy(uint32,uint8)"
+            "forceBuy(uint32,uint8)",
+            "setAllowedRouter(address,bool)"
         ];
         vm.startPrank(COMPTROLLER_ADMIN);
         for (uint256 i; i < sigs.length; ++i) {

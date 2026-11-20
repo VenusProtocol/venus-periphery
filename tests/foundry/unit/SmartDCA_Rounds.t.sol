@@ -7,7 +7,7 @@ import { Vm } from "forge-std/Vm.sol";
 import { ISmartDCA } from "../../../contracts/SmartDCA/ISmartDCA.sol";
 import { SmartDCAMath } from "../../../contracts/SmartDCA/SmartDCAMath.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
-import { MockVToken } from "./mocks/SmartDCAMocks.sol";
+import { MockSwapHelper, MockVToken, mockMulticall } from "./mocks/SmartDCAMocks.sol";
 import { SmartDCABase } from "./SmartDCABase.t.sol";
 
 contract SmartDCA_RoundsTest is SmartDCABase {
@@ -332,13 +332,78 @@ contract SmartDCA_RoundsTest is SmartDCABase {
 
     /// @dev A call that swaps nothing (here a view, which needs no backend signature) leaves the part in SwapHelper.
     ///      With a 1 wei quote, minOut is 0, so the slippage bound alone does not catch it.
+    function test_swapRoundPart_runsARouteOfAllowedCalls() public {
+        _create(alice, 1200e18, 12);
+        _startNovRound();
+        bytes[] memory calls = new bytes[](3);
+        calls[0] = abi.encodeCall(MockSwapHelper.approveMax, (address(usdt), address(swapHelper)));
+        calls[1] = abi.encodeCall(
+            MockSwapHelper.genericCall,
+            (address(swapHelper), abi.encodeCall(MockSwapHelper.swap, (pairId)))
+        );
+        calls[2] = abi.encodeCall(MockSwapHelper.sweep, (address(btcb), address(dca)));
+        vm.prank(keeper);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _multicall(calls));
+        assertEq(_round(NOV).partsDone, 1);
+    }
+
+    function test_swapRoundPart_revertsOnACallToARouterNotAllowed() public {
+        _create(alice, 1200e18, 12);
+        _startNovRound();
+        address evil = makeAddr("evil");
+        vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RouterNotAllowed.selector, evil));
+        dca.swapRoundPart(pairId, ANY_QUOTE, mockMulticall(evil, abi.encodeCall(MockSwapHelper.swap, (pairId))));
+    }
+
+    function test_swapRoundPart_revertsOnAnApprovalToARouterNotAllowed() public {
+        _create(alice, 1200e18, 12);
+        _startNovRound();
+        address evil = makeAddr("evil");
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(MockSwapHelper.approveMax, (address(usdt), evil));
+        vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RouterNotAllowed.selector, evil));
+        dca.swapRoundPart(pairId, ANY_QUOTE, _multicall(calls));
+    }
+
+    function test_swapRoundPart_revertsOnASweepAwayFromSmartDca() public {
+        _create(alice, 1200e18, 12);
+        _startNovRound();
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(MockSwapHelper.sweep, (address(usdt), alice));
+        vm.prank(keeper);
+        vm.expectRevert(ISmartDCA.SwapCallNotAllowed.selector);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _multicall(calls));
+    }
+
+    function test_swapRoundPart_revertsOnAnyOtherCall() public {
+        _create(alice, 1200e18, 12);
+        _startNovRound();
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(usdt.transfer, (alice, 1));
+        vm.startPrank(keeper);
+        vm.expectRevert(ISmartDCA.SwapCallNotAllowed.selector);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _multicall(calls));
+
+        // Short calls and a top level call that is not a multicall
+        calls[0] = abi.encodeCall(MockSwapHelper.setFail, (true));
+        vm.expectRevert(ISmartDCA.SwapCallNotAllowed.selector);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _multicall(calls));
+        vm.expectRevert(ISmartDCA.SwapCallNotAllowed.selector);
+        dca.swapRoundPart(pairId, ANY_QUOTE, abi.encodeCall(MockSwapHelper.swap, (pairId)));
+        vm.expectRevert(ISmartDCA.SwapCallNotAllowed.selector);
+        dca.swapRoundPart(pairId, ANY_QUOTE, "");
+        vm.stopPrank();
+    }
+
     function test_swapRoundPart_revertsWhenThePartStaysInSwapHelper() public {
         _create(alice, 1200e18, 12);
         vm.warp(NOV_LOCK);
         vm.startPrank(keeper);
         dca.startRound(pairId, 1);
         vm.expectRevert(abi.encodeWithSelector(ISmartDCA.PartNotFullySwapped.selector, 100e18, 0));
-        dca.swapRoundPart(pairId, ANY_QUOTE, abi.encodeCall(swapHelper.quote, (1)));
+        dca.swapRoundPart(pairId, ANY_QUOTE, mockMulticall(address(swapHelper), abi.encodeCall(swapHelper.quote, (1))));
         vm.stopPrank();
         assertEq(usdt.balanceOf(address(swapHelper)), 0, "nothing was stranded");
     }
@@ -518,5 +583,15 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         vm.stopPrank();
         vm.prank(alice);
         dca.claimPlan(id, false, alice);
+    }
+
+    function _startNovRound() internal {
+        vm.warp(NOV_LOCK);
+        vm.prank(keeper);
+        dca.startRound(pairId, 1);
+    }
+
+    function _multicall(bytes[] memory calls) internal pure returns (bytes memory) {
+        return abi.encodeCall(MockSwapHelper.multicall, (calls, 0, bytes32(0), ""));
     }
 }

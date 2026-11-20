@@ -17,7 +17,8 @@ import {
     MockHub,
     MockHubRegistry,
     MockSwapHelper,
-    MockVToken
+    MockVToken,
+    mockSwapData
 } from "./mocks/SmartDCAMocks.sol";
 
 /// @notice Shared setup: one USDT to BTCB pair, USDT in a Hub, BTCB in Core, fee 5%, BTCB at 100,000 USDT.
@@ -84,6 +85,8 @@ abstract contract SmartDCABase is Test {
         pairId = _addPair(address(usdt), address(btcb), address(hub), address(vBTC));
         dca.setFeeRate(500);
         dca.setKeeper(keeper, true);
+        // The mock SwapHelper is also the router its `genericCall` swaps on
+        dca.setAllowedRouter(address(swapHelper), true);
     }
 
     // ----- setup -----
@@ -188,9 +191,9 @@ abstract contract SmartDCABase is Test {
         return swapHelper.quote(r.stableToSwap / (r.partsTotal - r.partsDone));
     }
 
-    /// @dev Swap call for the mock SwapHelper: sells what it was sent of the pair's stable for its asset. Pure, so it
-    ///      can sit between `vm.expectRevert` or `vm.prank` and the call.
-    function _swapData(uint32 pid) internal pure returns (bytes memory) {
-        return abi.encodeCall(MockSwapHelper.swap, (pid));
+    /// @dev Swap call for the mock SwapHelper: sells what it was sent of the pair's stable for its asset. Makes no
+    ///      external call, so it can sit between `vm.expectRevert` or `vm.prank` and the call.
+    function _swapData(uint32 pid) internal view returns (bytes memory) {
+        return mockSwapData(address(swapHelper), pid);
     }
 }

@@ -467,6 +467,13 @@ interface ISmartDCA {
      */
     event FallbackSlippageUpdated(uint16 oldSlippageBps, uint16 newSlippageBps);
 
+    /**
+     * @notice Emitted when a router is added to or removed from the keeper swap allowlist
+     * @param router The router
+     * @param allowed True when added
+     */
+    event RouterAllowlisted(address indexed router, bool allowed);
+
     /// @notice An address argument was zero.
     error ZeroAddress();
 
@@ -487,6 +494,13 @@ interface ISmartDCA {
 
     /// @notice The call to SwapHelper reverted.
     error SwapFailed();
+
+    /// @notice A keeper swap calls or approves `router`, which is not on the allowlist.
+    error RouterNotAllowed(address router);
+
+    /// @notice The keeper swap data is not a `SwapHelper.multicall`, has a call other than `genericCall`,
+    ///         `approveMax` or `sweep`, or sweeps to an address other than SmartDCA.
+    error SwapCallNotAllowed();
 
     /// @notice The swap call did not sell the whole part: some of the stable came back to SmartDCA or stayed in
     ///         SwapHelper.
@@ -666,7 +680,8 @@ interface ISmartDCA {
      * @notice Swaps the next part of the running round through SwapHelper.
      * @dev Each part sells an even share of what is left, `stableToSwap / parts left`, so the last part sells the
      *      rest. The swap must return at least `quotedOut` less `maxSlippageBps`, and the whole part must be sold:
-     *      no stable may come back to SmartDCA or stay in SwapHelper.
+     *      no stable may come back to SmartDCA or stay in SwapHelper. Every `genericCall` target and `approveMax`
+     *      spender in the multicall must be on `allowedRouters`, and every `sweep` must send to SmartDCA.
      * @param pairId The pair
      * @param quotedOut Fresh quote for this part's stable, in the asset's decimals, with pool fees already taken;
      *        must not be 0
@@ -876,6 +891,15 @@ interface ISmartDCA {
      * @custom:event Emits FallbackSlippageUpdated.
      */
     function setFallbackSlippage(uint16 newSlippageBps) external;
+
+    /**
+     * @notice Adds or removes a router that keeper swaps may call or approve.
+     * @param router The router
+     * @param allowed True to add, false to remove
+     * @custom:access Controlled by AccessControlManager
+     * @custom:event Emits RouterAllowlisted.
+     */
+    function setAllowedRouter(address router, bool allowed) external;
 
     /**
      * @notice Sets the address that receives fees and rewards.

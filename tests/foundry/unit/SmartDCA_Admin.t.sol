@@ -73,6 +73,8 @@ contract SmartDCA_AdminTest is SmartDCABase {
         dca.sweepToken(address(usdt), stranger);
         _expectUnauthorized("setReserve(address)");
         dca.setReserve(stranger);
+        _expectUnauthorized("setAllowedRouter(address,bool)");
+        dca.setAllowedRouter(stranger, true);
         vm.stopPrank();
     }
 
@@ -95,6 +97,21 @@ contract SmartDCA_AdminTest is SmartDCABase {
         dca.setReserve(address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.setKeeper(address(0), true);
+        vm.expectRevert(ISmartDCA.ZeroAddress.selector);
+        dca.setAllowedRouter(address(0), true);
+    }
+
+    function test_setAllowedRouter_addsAndRemoves() public {
+        address router = makeAddr("router");
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.RouterAllowlisted(router, true);
+        dca.setAllowedRouter(router, true);
+        assertTrue(dca.allowedRouters(router));
+
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.RouterAllowlisted(router, false);
+        dca.setAllowedRouter(router, false);
+        assertFalse(dca.allowedRouters(router));
     }
 
     function test_addPair_rejectsBadInputsThenAdds() public {

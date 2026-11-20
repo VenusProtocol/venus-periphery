@@ -136,8 +136,11 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @notice PancakeSwap V3 route of each pair, used only by `forceBuy`
     mapping(uint32 pairId => FallbackRoute) public fallbackRoutes;
 
-    /// @dev Storage gap for future upgrades; with the 12 slots above, SmartDCA's own state takes 50 slots
-    uint256[38] private __gap;
+    /// @notice Routers a keeper swap may call or approve
+    mapping(address router => bool) public allowedRouters;
+
+    /// @dev Storage gap for future upgrades; with the 13 slots above, SmartDCA's own state takes 50 slots
+    uint256[37] private __gap;
 
     /**
      * @notice Sets the external contracts and disables initializers on the implementation
@@ -425,24 +428,14 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         // An even share of what is left; on the last part that is all of it
         uint256 stableIn = r.stableToSwap / (r.partsTotal - r.partsDone);
         uint256 minOut = Math.mulDiv(quotedOut, SmartDCAMath.BPS - maxSlippageBps, SmartDCAMath.BPS);
-
-        // Same flow as LeverageStrategiesManager._performSwap: the signed multicall swaps what SwapHelper holds
-        // and sends the asset back here
-        IERC20 stable = IERC20(pair.stable);
-        IERC20 asset = IERC20(pair.asset);
-        address swapHelper = address(SWAP_HELPER);
-        // Stable held here and in SwapHelper together only falls by what the swap sold, so a refund to this
-        // contract, a part left in SwapHelper and dust moved between the two all show as unspent
-        uint256 stableHeldBefore = stable.balanceOf(address(this)) + stable.balanceOf(swapHelper);
-        uint256 assetBefore = asset.balanceOf(address(this));
-        stable.safeTransfer(swapHelper, stableIn);
-        (bool success, ) = swapHelper.call(swapData);
-        if (!success) revert SwapFailed();
-        uint256 stableHeldAfter = stable.balanceOf(address(this)) + stable.balanceOf(swapHelper);
-        uint256 stableSpent = stableHeldBefore > stableHeldAfter ? stableHeldBefore - stableHeldAfter : 0;
-        if (stableSpent < stableIn) revert PartNotFullySwapped(stableIn, stableSpent);
-        uint256 assetOut = asset.balanceOf(address(this)) - assetBefore;
-        if (assetOut < minOut) revert SlippageExceeded(assetOut, minOut);
+        uint256 assetOut = SmartDCAAdminLib.keeperSwap(
+            allowedRouters,
+            pair,
+            address(SWAP_HELPER),
+            stableIn,
+            minOut,
+            swapData
+        );
 
         r.stableToSwap -= stableIn;
         r.assetBought += assetOut;
@@ -675,6 +668,14 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         if (newSlippageBps > MAX_SLIPPAGE_BPS) revert AboveHardCap();
         emit FallbackSlippageUpdated(fallbackSlippageBps, newSlippageBps);
         fallbackSlippageBps = newSlippageBps;
+    }
+
+    /// @inheritdoc ISmartDCA
+    function setAllowedRouter(address router, bool allowed) external {
+        _checkAccessAllowed("setAllowedRouter(address,bool)");
+        if (router == address(0)) revert ZeroAddress();
+        allowedRouters[router] = allowed;
+        emit RouterAllowlisted(router, allowed);
     }
 
     /// @inheritdoc ISmartDCA

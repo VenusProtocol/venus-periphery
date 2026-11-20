@@ -195,6 +195,7 @@ interface ISmartDCAPairs {
 ///         caller's own bound is what gets tested. With `fail` set it reverts. With `refundBps` set it sends that
 ///         share of the stable back to the caller unswapped, as a route that ends with a sweep of the input does.
 contract MockSwapHelper {
+    address internal caller;
     uint256 public rate;
     uint256 public feeBps = 25;
     uint256 public refundBps;
@@ -220,17 +221,52 @@ contract MockSwapHelper {
         return (((amountIn * rate) / 1e18) * (10_000 - feeBps)) / 10_000;
     }
 
+    /// @dev Runs each call on itself, like SwapHelper, without the signature check
+    function multicall(bytes[] calldata calls, uint256, bytes32, bytes calldata) external {
+        caller = msg.sender;
+        for (uint256 i; i < calls.length; ++i) {
+            (bool ok, ) = address(this).call(calls[i]);
+            require(ok, "call failed");
+        }
+    }
+
+    function approveMax(address token, address spender) external {
+        IERC20(token).approve(spender, type(uint256).max);
+    }
+
+    function sweep(address token, address to) external {
+        IERC20(token).transfer(to, IERC20(token).balanceOf(address(this)));
+    }
+
+    function genericCall(address target, bytes calldata data) external {
+        (bool ok, ) = target.call(data);
+        require(ok, "call failed");
+    }
+
+    /// @dev The router step: sells all of the pair's stable held here for its asset, sent to the multicall caller
     function swap(uint32 pairId) external {
         require(!fail, "swap failed");
-        (address tokenIn, address tokenOut, , , , , , , ) = ISmartDCAPairs(msg.sender).pairs(pairId);
+        (address tokenIn, address tokenOut, , , , , , , ) = ISmartDCAPairs(caller).pairs(pairId);
         uint256 amountIn = IERC20(tokenIn).balanceOf(address(this));
         uint256 refund = (amountIn * refundBps) / 10_000;
-        if (refund != 0) IERC20(tokenIn).transfer(msg.sender, refund);
+        if (refund != 0) IERC20(tokenIn).transfer(caller, refund);
         amountIn -= refund;
         // Spent, so the next part starts from a zero balance
         IERC20(tokenIn).transfer(address(0xdead), amountIn);
-        MockERC20(tokenOut).mint(msg.sender, quote(amountIn));
+        MockERC20(tokenOut).mint(caller, quote(amountIn));
     }
+}
+
+/// @dev Multicall for the mock SwapHelper with the mock itself as the router: one `genericCall` that runs `swap`
+function mockSwapData(address swapHelper, uint32 pairId) pure returns (bytes memory) {
+    return mockMulticall(swapHelper, abi.encodeCall(MockSwapHelper.swap, (pairId)));
+}
+
+/// @dev Multicall for the mock SwapHelper with one `genericCall` of `data` on `target`
+function mockMulticall(address target, bytes memory data) pure returns (bytes memory) {
+    bytes[] memory calls = new bytes[](1);
+    calls[0] = abi.encodeCall(MockSwapHelper.genericCall, (target, data));
+    return abi.encodeCall(MockSwapHelper.multicall, (calls, 0, bytes32(0), ""));
 }
 
 /// @notice PancakeSwap V3 SwapRouter stand-in for `exactInput`: pulls `amountIn` of the path's first token and pays

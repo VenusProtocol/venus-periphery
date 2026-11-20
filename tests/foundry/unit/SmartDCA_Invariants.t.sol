@@ -11,7 +11,7 @@ import { ISmartDCA } from "../../../contracts/SmartDCA/ISmartDCA.sol";
 import { SmartDCALens } from "../../../contracts/SmartDCA/SmartDCALens.sol";
 import { SmartDCAMath } from "../../../contracts/SmartDCA/SmartDCAMath.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
-import { MockHub, MockPancakeV3Router, MockSwapHelper, MockVToken } from "./mocks/SmartDCAMocks.sol";
+import { MockHub, MockPancakeV3Router, MockVToken, mockSwapData } from "./mocks/SmartDCAMocks.sol";
 import { SmartDCABase } from "./SmartDCABase.t.sol";
 
 /**
@@ -228,8 +228,8 @@ contract SmartDCAHandler is Test {
         (owner, , , , , , , , , , ) = DCA.plans(id);
     }
 
-    function _swapData(uint32 pid) internal pure returns (bytes memory) {
-        return abi.encodeCall(MockSwapHelper.swap, (pid));
+    function _swapData(uint32 pid) internal view returns (bytes memory) {
+        return mockSwapData(address(DCA.SWAP_HELPER()), pid);
     }
 
     function _round(uint32 pid) internal view returns (ISmartDCA.Round memory r) {

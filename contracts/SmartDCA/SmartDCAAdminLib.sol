@@ -11,6 +11,7 @@ import { IComptroller } from "../Interfaces/IComptroller.sol";
 import { IHubRegistry } from "../Interfaces/IHubLiquidity.sol";
 import { IPancakeV3SwapRouter } from "../Interfaces/IPancakeV3SwapRouter.sol";
 import { IVToken } from "../Interfaces/IVToken.sol";
+import { SwapHelper } from "../SwapHelper/SwapHelper.sol";
 import { SmartDCAMath } from "./SmartDCAMath.sol";
 import { ISmartDCA } from "./ISmartDCA.sol";
 
@@ -149,6 +150,44 @@ library SmartDCAAdminLib {
     }
 
     /**
+     * @notice Runs a keeper's signed swap of `stableIn` of the pair's stable through SwapHelper, for `swapRoundPart`
+     * @dev Same flow as `LeverageStrategiesManager._performSwap`: the signed multicall swaps what SwapHelper holds and
+     *      sends the asset back. Reverts if the route touches a router not on `allowedRouters`, if any of the part is
+     *      left unsold, or if the asset that arrived, counted as a balance change, is below `minOut`.
+     * @param allowedRouters Routers a keeper swap may call or approve
+     * @param pair The pair
+     * @param swapHelper SwapHelper that runs the multicall
+     * @param stableIn Stable amount to sell
+     * @param minOut Least asset the swap must return
+     * @param swapData The keeper's `SwapHelper.multicall` calldata
+     * @return assetOut Asset amount received
+     */
+    function keeperSwap(
+        mapping(address => bool) storage allowedRouters,
+        ISmartDCA.Pair storage pair,
+        address swapHelper,
+        uint256 stableIn,
+        uint256 minOut,
+        bytes calldata swapData
+    ) external returns (uint256 assetOut) {
+        _checkSwapRoute(allowedRouters, swapData);
+        IERC20 stable = IERC20(pair.stable);
+        IERC20 asset = IERC20(pair.asset);
+        // Stable held here and in SwapHelper together only falls by what the swap sold, so a refund to SmartDCA,
+        // a part left in SwapHelper and dust moved between the two all show as unspent
+        uint256 stableHeldBefore = stable.balanceOf(address(this)) + stable.balanceOf(swapHelper);
+        uint256 assetBefore = asset.balanceOf(address(this));
+        stable.safeTransfer(swapHelper, stableIn);
+        (bool success, ) = swapHelper.call(swapData);
+        if (!success) revert ISmartDCA.SwapFailed();
+        uint256 stableHeldAfter = stable.balanceOf(address(this)) + stable.balanceOf(swapHelper);
+        uint256 stableSpent = stableHeldBefore > stableHeldAfter ? stableHeldBefore - stableHeldAfter : 0;
+        if (stableSpent < stableIn) revert ISmartDCA.PartNotFullySwapped(stableIn, stableSpent);
+        assetOut = asset.balanceOf(address(this)) - assetBefore;
+        if (assetOut < minOut) revert ISmartDCA.SlippageExceeded(assetOut, minOut);
+    }
+
+    /**
      * @notice What SmartDCA owes in `token`: source shares of every pair, plus the stable left to swap and the
      *         asset bought in each running round
      * @dev Several pairs can share one source, so their shares add up
@@ -270,5 +309,51 @@ library SmartDCAAdminLib {
             if (err != 0) revert ISmartDCA.SourceCallFailed(source, err);
         }
         return IERC20(token).balanceOf(address(this)) - balanceBefore;
+    }
+
+    /**
+     * @notice Checks a keeper's swap before it runs: it must be a `SwapHelper.multicall` whose `genericCall` targets
+     *         and `approveMax` spenders are all on `allowedRouters`, and whose `sweep` calls all send to SmartDCA
+     * @dev Any other inner call reverts. The library runs through DELEGATECALL, so `address(this)` is SmartDCA.
+     * @param allowedRouters Routers a keeper swap may call or approve
+     * @param swapData The keeper's `SwapHelper.multicall` calldata
+     */
+    function _checkSwapRoute(mapping(address => bool) storage allowedRouters, bytes calldata swapData) private view {
+        if (swapData.length < 4 || bytes4(swapData[:4]) != SwapHelper.multicall.selector) {
+            revert ISmartDCA.SwapCallNotAllowed();
+        }
+        (bytes[] memory calls, , , ) = abi.decode(swapData[4:], (bytes[], uint256, bytes32, bytes));
+        for (uint256 i; i < calls.length; ++i) {
+            bytes memory data = calls[i];
+            // All three allowed calls take two arguments: (target, data), (token, spender) and (token, to)
+            if (data.length < 68) revert ISmartDCA.SwapCallNotAllowed();
+            bytes4 selector = bytes4(data);
+            if (selector == SwapHelper.genericCall.selector) {
+                address target = _argument(data, 0);
+                if (!allowedRouters[target]) revert ISmartDCA.RouterNotAllowed(target);
+            } else if (selector == SwapHelper.approveMax.selector) {
+                address spender = _argument(data, 1);
+                if (!allowedRouters[spender]) revert ISmartDCA.RouterNotAllowed(spender);
+            } else if (selector != SwapHelper.sweep.selector || _argument(data, 1) != address(this)) {
+                revert ISmartDCA.SwapCallNotAllowed();
+            }
+        }
+    }
+
+    /**
+     * @notice Reads argument `index` of an ABI encoded call as an address
+     * @dev Takes the low 20 bytes of the word. A word with dirty high bytes fails ABI decoding in SwapHelper, so the
+     *      call reverts there anyway.
+     * @param data Selector followed by the encoded arguments; at least `4 + 32 * (index + 1)` bytes long
+     * @param index Position of the argument
+     * @return The argument
+     */
+    function _argument(bytes memory data, uint256 index) private pure returns (address) {
+        uint256 word;
+        // Skips the 32 byte length and the 4 byte selector
+        assembly ("memory-safe") {
+            word := mload(add(data, add(36, mul(index, 32))))
+        }
+        return address(uint160(word));
     }
 }
