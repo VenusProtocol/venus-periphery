@@ -258,8 +258,8 @@ interface ISmartDCA {
     event PlanTransferred(uint256 indexed planId, address indexed from, address indexed to);
 
     /**
-     * @notice Emitted once per round, by the first call from the round's lock time that touches the pair
-     *         (`createPlan`, `claimPlan`, `startRound` or `syncPair`)
+     * @notice Emitted once per round, by the first of `createPlan`, `claimPlan`, `startRound`, `forceBuy` or
+     *         `syncPair` called on the pair from the round's lock time
      * @param pairId The pair
      * @param round The round that locked
      */
@@ -785,7 +785,7 @@ interface ISmartDCA {
     function setMaxParts(uint8 newMaxParts) external;
 
     /**
-     * @notice Pauses every user and round call. Views and admin setters keep working.
+     * @notice Pauses every user and round call. Views, admin setters and `claimRewards` keep working.
      * @custom:access Controlled by AccessControlManager
      */
     function pause() external;

@@ -18,8 +18,8 @@ import { ISmartDCA } from "./ISmartDCA.sol";
 /**
  * @title SmartDCAAdminLib
  * @author Venus
- * @notice Bodies of SmartDCA's larger governance and `forceBuy` calls, kept out of SmartDCA to fit the 24,576 byte
- *         size limit
+ * @notice Bodies of SmartDCA's larger governance, `forceBuy` and keeper swap calls, and the `sweepToken` count, kept
+ *         out of SmartDCA to fit the 24,576 byte size limit
  * @dev The external functions run through DELEGATECALL, so they read and write SmartDCA's storage and their events
  *      come from SmartDCA. SmartDCA checks access before calling them. `sourceDeposit` and `sourceRedeem` are
  *      internal, so they are copied into each caller, SmartDCA included.
