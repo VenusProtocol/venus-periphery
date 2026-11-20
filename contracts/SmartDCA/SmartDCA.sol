@@ -558,8 +558,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @inheritdoc ISmartDCA
     function setYieldSource(uint32 pairId, Side side, SourceKind kind, address source) external nonReentrant {
         _checkAccessAllowed("setYieldSource(uint32,uint8,uint8,address)");
+        Pair storage pair = _pair(pairId);
         SmartDCAAdminLib.setYieldSource(
-            _pair(pairId),
+            pair,
             yieldSources[pairId][side],
             pairId,
             side,
@@ -567,7 +568,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             source,
             HUB_REGISTRY,
             COMPTROLLER,
-            block.timestamp >= roundStart(_pair(pairId).lastSettledRound + 1)
+            block.timestamp >= roundStart(pair.lastSettledRound + 1)
         );
     }
 
