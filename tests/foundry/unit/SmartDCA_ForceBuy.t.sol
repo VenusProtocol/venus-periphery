@@ -33,7 +33,7 @@ contract SmartDCA_ForceBuyTest is SmartDCABase {
 
     function test_forceBuy_revertsBeforeTheLock() public {
         vm.warp(NOV_LOCK - 1);
-        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RoundNotStarted.selector, pairId));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.StartRoundNotCalled.selector, pairId));
         dca.forceBuy(pairId, 1);
     }
 

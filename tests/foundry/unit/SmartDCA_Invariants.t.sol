@@ -233,7 +233,7 @@ contract SmartDCAHandler is Test {
     }
 
     function _round(uint32 pid) internal view returns (ISmartDCA.Round memory r) {
-        (, , , , uint32 lastSettledRound, , , , , ) = DCA.pairs(pid);
+        (, , , uint32 lastSettledRound, , , , , ) = DCA.pairs(pid);
         (r.partsTotal, r.partsDone, , , , , , , , , , , , ) = DCA.rounds(pid, lastSettledRound + 1);
     }
 }
@@ -449,7 +449,6 @@ contract SmartDCA_InvariantsTest is SmartDCABase {
     function _pairOf(uint32 pid) internal view returns (ISmartDCA.Pair memory p) {
         (
             p.stable,
-            p.nextLockTime,
             p.asset,
             p.enabled,
             p.lastSettledRound,

@@ -62,9 +62,6 @@ library SmartDCAAdminLib {
         pair.stable = stable;
         pair.asset = asset;
         pair.enabled = true;
-        // The first round locks on the next 15th at 00:00 UTC+8; later ones `buyInterval` after the one before started
-        pair.lastSettledRound = SmartDCAMath.latestLockedRound(block.timestamp);
-        pair.nextLockTime = uint64(SmartDCAMath.lockTimeOf(pair.lastSettledRound + 1));
         emit ISmartDCA.PairAdded(pairId, stable, asset);
 
         // The pair holds nothing yet, so these only check and record the sources
@@ -76,7 +73,8 @@ library SmartDCAAdminLib {
             stableKind,
             stableSource,
             hubRegistry,
-            comptroller
+            comptroller,
+            false
         );
         setYieldSource(
             pair,
@@ -86,7 +84,8 @@ library SmartDCAAdminLib {
             assetKind,
             assetSource,
             hubRegistry,
-            comptroller
+            comptroller,
+            false
         );
     }
 
@@ -191,6 +190,7 @@ library SmartDCAAdminLib {
      * @param source Hub or vToken to hold the side's token
      * @param hubRegistry Registry Hub sources must be in
      * @param comptroller Comptroller Core sources must be listed in
+     * @param nextRoundStarted Whether the pair's next round has started; holdings cannot move then
      */
     function setYieldSource(
         ISmartDCA.Pair storage pair,
@@ -200,7 +200,8 @@ library SmartDCAAdminLib {
         ISmartDCA.SourceKind kind,
         address source,
         IHubRegistry hubRegistry,
-        IComptroller comptroller
+        IComptroller comptroller,
+        bool nextRoundStarted
     ) public {
         if (source == address(0)) revert ISmartDCA.ZeroAddress();
         address token = side == ISmartDCA.Side.Stable ? pair.stable : pair.asset;
@@ -218,7 +219,7 @@ library SmartDCAAdminLib {
         uint256 migrated;
         uint256 oldShares = current.sharesHeld;
         if (oldShares != 0) {
-            if (block.timestamp >= pair.nextLockTime) {
+            if (nextRoundStarted) {
                 revert ISmartDCA.PairLocked(pairId);
             }
             current.sharesHeld = 0;

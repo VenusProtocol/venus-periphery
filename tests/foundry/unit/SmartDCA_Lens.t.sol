@@ -138,7 +138,7 @@ contract SmartDCA_LensTest is SmartDCABase {
         v = lens.getPair(dca, pairId);
         assertEq(uint8(v.state), uint8(SmartDCALens.PairState.Open));
         assertEq(v.round, DEC);
-        assertEq(v.lockTime, SmartDCAMath.lockTimeOf(DEC));
+        assertEq(v.lockTime, dca.roundStart(DEC));
         assertEq(lens.getPair(dca, 99).stable, address(0));
     }
 
@@ -196,7 +196,7 @@ contract SmartDCA_LensTest is SmartDCABase {
     }
 
     function test_getPair_skipsEmptyMonths() public {
-        vm.warp(SmartDCAMath.lockTimeOf(DEC + 2) + 5 days);
+        vm.warp(dca.roundStart(DEC + 2) + 5 days);
         SmartDCALens.PairView memory v = lens.getPair(dca, pairId);
         assertEq(v.round, DEC + 3);
         assertEq(uint8(v.state), uint8(SmartDCALens.PairState.Open));

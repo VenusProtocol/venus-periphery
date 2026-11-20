@@ -7,27 +7,36 @@ import { Test } from "forge-std/Test.sol";
 import { SmartDCAMath } from "../../../contracts/SmartDCA/SmartDCAMath.sol";
 
 contract SmartDCA_MathTest is Test {
+    // Months counted as `year * 12 + (month - 1)`; anchor 0 makes the round number the month itself
+    uint256 internal constant NOV_2026 = 2026 * 12 + 10;
+
     function test_roundStart_isThe14thAt1600Utc() public pure {
-        assertEq(SmartDCAMath.lockTimeOf(682), 1_794_672_000); // 2026-11-14 16:00 UTC = Nov 15 00:00 UTC+8
-        assertEq(SmartDCAMath.lockTimeOf(684), 1_799_942_400); // 2027-01-14 16:00 UTC, year rollover
-        assertEq(SmartDCAMath.lockTimeOf(698), 1_836_662_400); // 2028-03-14 16:00 UTC, after a 29-day February
+        assertEq(SmartDCAMath.roundStart(0, uint32(NOV_2026)), 1_794_672_000); // 2026-11-14 16:00 UTC
+        assertEq(SmartDCAMath.roundStart(0, uint32(NOV_2026 + 2)), 1_799_942_400); // 2027-01-14, year rollover
+        assertEq(SmartDCAMath.roundStart(0, uint32(NOV_2026 + 16)), 1_836_662_400); // 2028-03-14 16:00 UTC, leap Feb
     }
 
-    function test_currentRound_cutoffSecond() public pure {
-        uint256 lock = SmartDCAMath.lockTimeOf(682);
-        assertEq(SmartDCAMath.latestLockedRound(lock - 1), 681);
-        assertEq(SmartDCAMath.latestLockedRound(lock), 682);
+    function test_roundStart_countsFromTheAnchor() public pure {
+        assertEq(SmartDCAMath.roundStart(NOV_2026, 0), 1_794_672_000);
+        assertEq(SmartDCAMath.roundStart(NOV_2026, 2), 1_799_942_400);
+        assertEq(SmartDCAMath.roundStart(NOV_2026 - 1, 1), 1_794_672_000);
     }
 
-    /// @dev Every month from Feb 1970 to Dec 2199. Months are 28 to 31 days apart.
-    function testFuzz_roundDates(uint32 round) public pure {
-        round = uint32(bound(round, 1, 2759));
-        uint256 lock = SmartDCAMath.lockTimeOf(round);
-        assertEq(SmartDCAMath.latestLockedRound(lock), round);
-        assertEq(SmartDCAMath.latestLockedRound(lock - 1), round - 1);
-        assertEq(SmartDCAMath.latestLockedRound(SmartDCAMath.lockTimeOf(round + 1) - 1), round);
-        assertEq((lock - 16 hours) % 1 days, 0);
-        uint256 gap = SmartDCAMath.lockTimeOf(round + 1) - lock;
+    function test_latestStartedMonth_cutoffSecond() public pure {
+        uint256 start = SmartDCAMath.roundStart(0, uint32(NOV_2026));
+        assertEq(SmartDCAMath.latestStartedMonth(start - 1), NOV_2026 - 1);
+        assertEq(SmartDCAMath.latestStartedMonth(start), NOV_2026);
+    }
+
+    /// @dev Every month from Feb 1970 to Dec 2199. Starts are 28 to 31 days apart, always at 16:00 UTC.
+    function testFuzz_roundDates(uint32 month) public pure {
+        month = uint32(bound(month, 1970 * 12 + 1, 2199 * 12 + 11));
+        uint256 start = SmartDCAMath.roundStart(0, month);
+        assertEq(SmartDCAMath.latestStartedMonth(start), month);
+        assertEq(SmartDCAMath.latestStartedMonth(start - 1), month - 1);
+        assertEq(SmartDCAMath.latestStartedMonth(SmartDCAMath.roundStart(0, month + 1) - 1), month);
+        assertEq((start - 16 hours) % 1 days, 0);
+        uint256 gap = SmartDCAMath.roundStart(0, month + 1) - start;
         assertGe(gap, 28 days);
         assertLe(gap, 31 days);
     }
@@ -37,7 +46,7 @@ contract SmartDCA_MathTest is Test {
         assertEq(SmartDCAMath.buysSettled(682, 682, 12), 1);
         assertEq(SmartDCAMath.buysSettled(700, 682, 12), 12);
 
-        assertFalse(SmartDCAMath.inRunningRound(682, 682, 12, false), "before the lock");
+        assertFalse(SmartDCAMath.inRunningRound(682, 682, 12, false), "before the start");
         assertTrue(SmartDCAMath.inRunningRound(682, 682, 12, true));
         assertFalse(SmartDCAMath.inRunningRound(682, 683, 12, true), "parked for the next round");
         assertFalse(SmartDCAMath.inRunningRound(694, 682, 12, true), "after its last round");

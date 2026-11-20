@@ -17,10 +17,8 @@ pragma solidity 0.8.28;
  *      Other terms:
  *      - Stable: the token a plan pays with (USDT, USDC, U). Asset: the token it buys (BTCB, ETH, WBNB).
  *      - Pair: one stable and one asset. Each pair has its own rounds.
- *      - Round: one buy of a pair, numbered from a pair's first round on. The first round locks on the 15th at
- *        00:00 UTC+8; each later one locks `buyInterval` after the lock time of the round before it, however late
- *        that round ran. From its lock time the
- *        keeper redeems, swaps and settles it.
+ *      - Round: one monthly buy of a pair. Round `r` is month `anchorMonth + r`; it starts (locks) on the 15th at
+ *        00:00 UTC+8, and from then the keeper redeems, swaps and settles it.
  *      - Schedule: the buys a plan has left. A top up restarts the schedule over the buys left, so a plan stores
  *        its current schedule and, apart from it, what it bought before.
  */
@@ -69,8 +67,6 @@ interface ISmartDCA {
      * @param stable Token sold
      * @param asset Token bought
      * @param enabled False stops new plans and top ups; running plans keep buying
-     * @param nextLockTime Lock time of the next round: the 15th at 00:00 UTC+8 for the first round, then the lock
-     *        time of the round before it plus `buyInterval`
      * @param lastSettledRound Last round that settled. The pair's next round is `lastSettledRound + 1`.
      * @param lockEmittedRound Last round `RoundLocked` was emitted for
      * @param roundStableUnits Stable units the next round sells: the sum of `stableUnitsPerBuy` over its plans
@@ -81,7 +77,6 @@ interface ISmartDCA {
      */
     struct Pair {
         address stable;
-        uint64 nextLockTime;
         address asset;
         bool enabled;
         uint32 lastSettledRound;
@@ -472,13 +467,6 @@ interface ISmartDCA {
      */
     event FallbackSlippageUpdated(uint16 oldSlippageBps, uint16 newSlippageBps);
 
-    /**
-     * @notice Emitted when the gap between buys changes
-     * @param oldInterval Previous gap, in seconds
-     * @param newInterval New gap, in seconds
-     */
-    event BuyIntervalUpdated(uint32 oldInterval, uint32 newInterval);
-
     /// @notice An address argument was zero.
     error ZeroAddress();
 
@@ -513,11 +501,11 @@ interface ISmartDCA {
     /// @notice A pair's source cannot move while the pair is past its lock time and not settled.
     error PairLocked(uint32 pairId);
 
-    /// @notice A keeper called a round function before the round's lock time.
-    error RoundNotLocked(uint32 pairId, uint256 lockTime);
+    /// @notice A keeper called a round function before the round's start time, `startsAt`.
+    error RoundNotStarted(uint256 startsAt);
 
-    /// @notice The round function needs a started round, and `startRound` has not run yet.
-    error RoundNotStarted(uint32 pairId);
+    /// @notice The round function needs `startRound` to have run for the round, and it has not.
+    error StartRoundNotCalled(uint32 pairId);
 
     /// @notice `startRound` already ran for the pair's next round.
     error RoundAlreadyStarted(uint32 pairId);
@@ -580,21 +568,21 @@ interface ISmartDCA {
     error NoFallbackRoute(uint32 pairId);
 
     /**
-     * @notice Deposits `amount` of the pair's stable and starts a plan of `buys` buys, one per round, owned by
-     *         `owner`.
+     * @notice Deposits `amount` of the pair's stable and starts a plan of `buys` monthly buys, owned by `owner`.
      * @dev The caller pays and must first `approve` SmartDCA for `amount` of the stable; `owner` can be another
      *      address, so a contract can open a plan for a user. The deposit goes into the pair's stable
      *      source and the plan holds units of it. Each buy sells the same number of units, so a buy's stable amount
      *      grows with the interest earned while waiting.
      *
      *      The plan's first round is the pair's next round when called before that round's lock time, and the round
-     *      after it from the lock time on.
+     *      after it from the lock time on. During an overrun (a round still running past the next 15th) that is the
+     *      round right after the running one, not the calendar month.
      *
      *      Reverts if `owner` is the zero address, if the pair is unknown or disabled, if `buys` is outside `minBuys` to `maxBuys`, or if `amount` is
      *      under `minAmountPerBuy` of the stable times `buys`.
      * @param pairId Pair to buy on
      * @param amount Stable amount to deposit, in the stable's decimals
-     * @param buys Number of buys
+     * @param buys Number of monthly buys
      * @param owner Owner of the new plan
      * @return planId The new plan
      * @custom:event Emits PlanCreated, and RoundLocked on the first call of a locked round.
@@ -710,7 +698,7 @@ interface ISmartDCA {
     /**
      * @notice Runs one part of the pair's round without the keeper or the backend: starts the round if needed, swaps
      *         the next part on the pair's PancakeSwap V3 route, and settles the round after its last part.
-     * @dev Callable from the round's lock time until it settles; before the lock it reverts with `RoundNotStarted`.
+     * @dev Callable from the round's lock time until it settles; before the lock it reverts with `StartRoundNotCalled`.
      *      For a crisis such as the keeper or the backend being down. The swap needs no signed route:
      *      it approves only the part's stable, calls the router's `exactInput`, and reverts if the asset that arrived
      *      is below the oracle value of the part less `fallbackSlippageBps`. `parts = 1` runs the whole round in one
@@ -890,17 +878,6 @@ interface ISmartDCA {
     function setFallbackSlippage(uint16 newSlippageBps) external;
 
     /**
-     * @notice Sets the gap between buys, for every pair.
-     * @dev Each pair's next lock time is already stored, so it does not move. The new gap applies from that lock
-     *      time on.
-     * @param intervalDays New gap in whole days, from `MIN_BUY_INTERVAL_DAYS` to `MAX_BUY_INTERVAL_DAYS`. Whole days
-     *        keep a round started on time at 00:00 UTC+8.
-     * @custom:access Controlled by AccessControlManager
-     * @custom:event Emits BuyIntervalUpdated.
-     */
-    function setBuyInterval(uint16 intervalDays) external;
-
-    /**
      * @notice Sets the address that receives fees and rewards.
      * @param newReserve New Reserve
      * @custom:access Controlled by AccessControlManager
@@ -911,10 +888,16 @@ interface ISmartDCA {
     /**
      * @notice Lock time of the pair's next round.
      * @param pairId The pair
-     * @return Unix timestamp; the 15th at 00:00 UTC+8 for a pair's first round, then the lock time of the round
-     *         before plus `buyInterval`
+     * @return Unix timestamp of the 15th at 00:00 UTC+8 of the next round's month
      */
     function nextLockTime(uint32 pairId) external view returns (uint256);
+
+    /**
+     * @notice Start (lock) time of a round: the 15th at 00:00 UTC+8 of month `anchorMonth + round`.
+     * @param round Round number
+     * @return Unix timestamp
+     */
+    function roundStart(uint32 round) external view returns (uint256);
 
     /**
      * @notice Ids of the plans `owner` holds.

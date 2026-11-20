@@ -23,9 +23,11 @@ import {
 /// @notice Shared setup: one USDT to BTCB pair, USDT in a Hub, BTCB in Core, fee 5%, BTCB at 100,000 USDT.
 ///         Time starts on Oct 19 2026, before the November lock (Nov 14 16:00 UTC).
 abstract contract SmartDCABase is Test {
-    uint32 internal constant OCT = 681;
-    uint32 internal constant NOV = 682;
-    uint32 internal constant DEC = 683;
+    // SmartDCA deploys in October 2026, so `anchorMonth` is October 2026 and October is round 0
+    uint256 internal constant ANCHOR_MONTH = 2026 * 12 + 9;
+    uint32 internal constant OCT = 0;
+    uint32 internal constant NOV = 1;
+    uint32 internal constant DEC = 2;
     uint256 internal constant NOV_LOCK = 1_794_672_000; // 2026-11-14 16:00:00 UTC
     uint256 internal constant BTC_PRICE = 100_000e18;
     // 1 vBTC (1e8) = 0.02 BTCB, so 1 BTCB = 50 vBTC
@@ -52,7 +54,7 @@ abstract contract SmartDCABase is Test {
     address internal carol = makeAddr("carol");
 
     function setUp() public virtual {
-        vm.warp(SmartDCAMath.lockTimeOf(OCT) + 5 days);
+        vm.warp(SmartDCAMath.roundStart(ANCHOR_MONTH, OCT) + 5 days);
 
         acm = new MockACM();
         comptroller = new MockComptroller();
@@ -147,7 +149,6 @@ abstract contract SmartDCABase is Test {
     function _pair() internal view returns (ISmartDCA.Pair memory p) {
         (
             p.stable,
-            p.nextLockTime,
             p.asset,
             p.enabled,
             p.lastSettledRound,
@@ -181,7 +182,7 @@ abstract contract SmartDCABase is Test {
     /// @dev The mock's quote for the pair's next part. Reads the chain, so build it before `vm.prank` or
     ///      `vm.expectRevert`.
     function _quote(uint32 pid) internal view returns (uint256) {
-        (, , , , uint32 settled, , , , , ) = dca.pairs(pid);
+        (, , , uint32 settled, , , , , ) = dca.pairs(pid);
         ISmartDCA.Round memory r;
         (r.partsTotal, r.partsDone, , , , , r.stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
         return swapHelper.quote(r.stableToSwap / (r.partsTotal - r.partsDone));

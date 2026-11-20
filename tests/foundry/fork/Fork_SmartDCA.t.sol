@@ -260,7 +260,7 @@ contract Fork_SmartDCATest is Test {
     function test_round_feeOnARealMonthOfHubYield() public onlyFork {
         dca.setFeeRate(1_000);
         _create(alice, pairId, DEPOSIT, 2);
-        (, , , , , , , uint256 roundPrincipal, , ) = dca.pairs(pairId);
+        (, , , , , , uint256 roundPrincipal, , ) = dca.pairs(pairId);
 
         _runRound(pairId, 1);
 
@@ -324,7 +324,11 @@ contract Fork_SmartDCATest is Test {
         dca.settleRound(pairId);
         vm.stopPrank();
 
-        assertEq(_lastSettled(pairId), SmartDCAMath.latestLockedRound(block.timestamp), "round settled");
+        assertEq(
+            _lastSettled(pairId),
+            uint32(SmartDCAMath.latestStartedMonth(block.timestamp) - dca.anchorMonth()),
+            "round settled"
+        );
     }
 
     /// @dev SwapHelper runs only a multicall signed by its backend signer for SmartDCA as the caller
@@ -422,8 +426,8 @@ contract Fork_SmartDCATest is Test {
         (, , , uint256 btcPairUnits) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
         (, , , uint256 bnbPairUnits) = dca.yieldSources(bnbPair, ISmartDCA.Side.Stable);
         uint256 usdtUnits = btcPairUnits + bnbPairUnits;
-        (, , , , , , uint256 dueBtc, , , ) = dca.pairs(pairId);
-        (, , , , , , uint256 dueBnb, , , ) = dca.pairs(bnbPair);
+        (, , , , , uint256 dueBtc, , , ) = dca.pairs(pairId);
+        (, , , , , uint256 dueBnb, , , ) = dca.pairs(bnbPair);
         // Plus each plan's per-buy rounding (under `buys` units), left until the plan exits
         assertGe(usdtUnits, dueBtc + dueBnb, "USDT units cover what the two pairs still owe");
         assertLe(usdtUnits, dueBtc + dueBnb + 4, "and only rounding beyond it");
@@ -546,7 +550,7 @@ contract Fork_SmartDCATest is Test {
     }
 
     function _lastSettled(uint32 pid) internal view returns (uint32 settled) {
-        (, , , , settled, , , , , ) = dca.pairs(pid);
+        (, , , settled, , , , , ) = dca.pairs(pid);
     }
 
     /// @dev Runs the pair's next part the way the keeper does: a fresh quote, then the signed swap
@@ -557,7 +561,7 @@ contract Fork_SmartDCATest is Test {
 
     /// @dev QuoterV2 quote for the pair's next part on its route
     function _quote(uint32 pid) internal returns (uint256 amountOut) {
-        (, , , , uint32 settled, , , , , ) = dca.pairs(pid);
+        (, , , uint32 settled, , , , , ) = dca.pairs(pid);
         (uint8 partsTotal, uint8 partsDone, , , , , uint256 stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
         (amountOut, , , ) = IPancakeQuoterV2(PCS_V3_QUOTER).quoteExactInput(
             routeOf[pid],
@@ -573,7 +577,7 @@ contract Fork_SmartDCATest is Test {
     ///      part SmartDCA will send, and sweeps the asset (and any stable left) back to SmartDCA. Signed for
     ///      SmartDCA as the caller, with `key`.
     function _signedSwapData(uint32 pid, uint256 key) internal view returns (bytes memory) {
-        (address stable, , address asset, , uint32 settled, , , , , ) = dca.pairs(pid);
+        (address stable, address asset, , uint32 settled, , , , , ) = dca.pairs(pid);
         (uint8 partsTotal, uint8 partsDone, , , , , uint256 stableToSwap, , , , , , , ) = dca.rounds(pid, settled + 1);
         uint256 amountIn = stableToSwap / (partsTotal - partsDone);
 

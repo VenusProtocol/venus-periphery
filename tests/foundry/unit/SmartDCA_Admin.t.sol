@@ -34,7 +34,13 @@ contract SmartDCA_AdminTest is SmartDCABase {
         assertEq(dca.maxParts(), 10);
         assertEq(dca.minBuys(), 2);
         assertEq(dca.maxBuys(), 60);
-        assertEq(dca.buyInterval(), 30 days);
+    }
+
+    function test_initialize_anchorsRoundZeroOnTheLatestPassed15th() public view {
+        // Deployed on Oct 19 2026, after Oct 15, so October is round 0 and November round 1
+        assertEq(dca.anchorMonth(), ANCHOR_MONTH);
+        assertEq(dca.roundStart(NOV), NOV_LOCK);
+        assertEq(dca.roundStart(NOV + 12), 1_826_208_000, "a year on, still the 15th: 2027-11-14 16:00 UTC");
     }
 
     function test_setters_needAcmPermission() public {

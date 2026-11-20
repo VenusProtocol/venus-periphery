@@ -244,7 +244,6 @@ contract SmartDCA_FuzzTest is SmartDCABase {
     function _pairOf(uint32 pid) internal view returns (ISmartDCA.Pair memory p) {
         (
             p.stable,
-            p.nextLockTime,
             p.asset,
             p.enabled,
             p.lastSettledRound,

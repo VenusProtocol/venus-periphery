@@ -7,14 +7,17 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
  * @title SmartDCAMath
  * @author Venus
  * @notice Pure math for SmartDCA: round dates, the round fee and the index steps that credit plans.
- * @dev The calendar functions give a pair's first round: month `r` counted from January 1970,
- *      `(year - 1970) * 12 + (month - 1)`, locks on the 15th at 00:00 UTC+8, which is the 14th at 16:00 UTC. For
- *      example November 2026 is month 682. Later rounds count on from it, one per `buyInterval`. Fees, index steps
- *      and bought amounts round down, in favour of the contract.
+ * @dev A month is counted as `year * 12 + (month - 1)`, so November 2026 is month 24322. Round `r` is month
+ *      `anchorMonth + r`, where `anchorMonth` is set once at deploy. It starts (locks) on the 15th of that month at
+ *      00:00 UTC+8, which is the 14th at 16:00 UTC. Fees, index steps and bought amounts round down, in favour of the
+ *      contract.
  */
 library SmartDCAMath {
-    /// @notice Time from the 1st of a month at 00:00 UTC to its lock time, the 14th at 16:00 UTC
-    uint256 internal constant LOCK_OFFSET = 13 days + 16 hours;
+    /// @notice Day of the month a round starts on
+    uint256 internal constant ROUND_DAY = 15;
+
+    /// @notice Rounds start at 00:00 UTC+8, this long before 00:00 UTC
+    uint256 internal constant UTC8_OFFSET = 8 hours;
 
     /// @notice Scale of the asset indexes, 1e36 like the Venus reward indexes
     uint256 internal constant INDEX_SCALE = 1e36;
@@ -23,25 +26,27 @@ library SmartDCAMath {
     uint256 internal constant BPS = 10_000;
 
     /**
-     * @notice Lock time of a round: the 15th of its month at 00:00 UTC+8
+     * @notice Start (lock) time of a round: the `ROUND_DAY` of its month at 00:00 UTC+8
+     * @param anchorMonth Month of round 0
      * @param round Round number
      * @return Unix timestamp
      */
-    function lockTimeOf(uint32 round) internal pure returns (uint256) {
-        uint256 year = 1970 + round / 12;
-        uint256 month = (round % 12) + 1;
-        return _daysFromCivil(year, month, 1) * 1 days + LOCK_OFFSET;
+    function roundStart(uint256 anchorMonth, uint32 round) internal pure returns (uint256) {
+        uint256 m = anchorMonth + round;
+        return _daysFromCivil(m / 12, (m % 12) + 1, ROUND_DAY) * 1 days - UTC8_OFFSET;
     }
 
     /**
-     * @notice Latest round whose lock time is at or before `timestamp`
-     * @dev A new pair starts with this round as its last settled one, so its first round is the next to lock
-     * @param timestamp Unix timestamp, at least `LOCK_OFFSET`
-     * @return Round number
+     * @notice Month of the latest round start at or before `timestamp`
+     * @dev Moving `timestamp` back by `ROUND_DAY - 1` days less `UTC8_OFFSET` lands in that month. Sets `anchorMonth`
+     *      at deploy, and a new pair's last settled round, so its first round is the next to start.
+     * @param timestamp Unix timestamp, at least `(ROUND_DAY - 1) days - UTC8_OFFSET`
+     * @return Month, counted as `year * 12 + (month - 1)`
      */
-    function latestLockedRound(uint256 timestamp) internal pure returns (uint32) {
-        (uint256 year, uint256 month) = _civilFromDays((timestamp - LOCK_OFFSET) / 1 days);
-        return uint32((year - 1970) * 12 + month - 1);
+    function latestStartedMonth(uint256 timestamp) internal pure returns (uint256) {
+        uint256 shift = (ROUND_DAY - 1) * 1 days - UTC8_OFFSET;
+        (uint256 year, uint256 month) = _civilFromDays((timestamp - shift) / 1 days);
+        return year * 12 + month - 1;
     }
 
     /**
@@ -106,16 +111,16 @@ library SmartDCAMath {
      * @param nextRound Pair's next round, `lastSettledRound + 1`
      * @param firstRound First round of the plan's schedule
      * @param buys Buys in the schedule
-     * @param nextRoundLocked Whether the next round's lock time has passed
+     * @param nextRoundStarted Whether the next round's start time has passed
      * @return True while the plan's buy is in a locked round that has not settled
      */
     function inRunningRound(
         uint32 nextRound,
         uint32 firstRound,
         uint8 buys,
-        bool nextRoundLocked
+        bool nextRoundStarted
     ) internal pure returns (bool) {
-        return nextRoundLocked && nextRound >= firstRound && nextRound < firstRound + buys;
+        return nextRoundStarted && nextRound >= firstRound && nextRound < firstRound + buys;
     }
 
     /**

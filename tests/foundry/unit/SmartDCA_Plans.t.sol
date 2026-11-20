@@ -304,7 +304,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
 
     /// @dev Months with nothing due settle on the next call, so the plan joins the month after now
     function test_createPlan_afterEmptyMonthsSkipsThem() public {
-        vm.warp(SmartDCAMath.lockTimeOf(DEC) + 1 days);
+        vm.warp(dca.roundStart(DEC) + 1 days);
         uint256 id = _create(alice, 1200e18, 12);
         assertEq(_pair().lastSettledRound, DEC);
         assertEq(_plan(id).scheduleFirstRound, DEC + 1);

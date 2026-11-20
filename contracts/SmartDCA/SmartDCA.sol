@@ -22,14 +22,13 @@ import { ISmartDCA } from "./ISmartDCA.sol";
  * @title SmartDCA
  * @author Venus
  * @notice Dollar cost averaging from a stable (USDT, USDC or U) into an asset (BTCB, ETH or WBNB). A user deposits
- *         once and picks how many buys to make. Until each buy, the deposit earns interest in the pair's stable
- *         source (a Liquidity Hub at launch). Once every `buyInterval` a keeper buys for every plan of a pair at once,
- *         and the asset bought is supplied to the pair's asset source (Core at launch), where it keeps earning until
+ *         once and picks how many monthly buys to make. Until each buy, the deposit earns interest in the pair's
+ *         stable source (a Liquidity Hub at launch). Once a month a keeper buys for every plan of a pair at once, and
+ *         the asset bought is supplied to the pair's asset source (Core at launch), where it keeps earning until
  *         the user takes it out. Each pair has its own two sources, set by governance.
- * @dev How one round runs for one pair:
- *      1. Lock. At the pair's `nextLockTime` the round locks: the 15th at 00:00 UTC+8 for the pair's first round,
- *         then `buyInterval` after the round before it locked, so a late round does not move the next one. Plans in
- *         the round cannot top up or cancel until it settles, and new plans join the round after instead.
+ * @dev How one month runs for one pair:
+ *      1. Lock. On the 15th at 00:00 UTC+8 the pair's round locks. Plans in it cannot top up or cancel until it
+ *         settles, and new plans join next month's round instead.
  *      2. `startRound`. A keeper redeems the round's stable from the yield source and sends the fee to the Reserve.
  *         The fee is a share of the interest only, never of principal.
  *      3. `swapRoundPart`. The keeper swaps that stable for the asset in 1 to `maxParts` parts through SwapHelper,
@@ -60,12 +59,6 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
     /// @notice Highest number of buys a plan can have (10 years of monthly buys)
     uint8 public constant MAX_BUYS = 120;
-
-    /// @notice Shortest gap between buys governance can set, in days. TBD: to confirm with the team.
-    uint16 public constant MIN_BUY_INTERVAL_DAYS = 7;
-
-    /// @notice Longest gap between buys governance can set, in days. TBD: to confirm with the team.
-    uint16 public constant MAX_BUY_INTERVAL_DAYS = 365;
 
     /// @notice Core pool Comptroller; Core yield sources must be listed in it
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
@@ -110,8 +103,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @notice Most a `forceBuy` swap can return below the oracle price, in basis points
     uint16 public fallbackSlippageBps;
 
-    /// @notice Gap between the start of a round and the lock of the next one, in seconds
-    uint32 public buyInterval;
+    /// @notice Month of round 0, counted as `year * 12 + (month - 1)`; set once at deploy
+    uint32 public anchorMonth;
 
     /// @notice Id of the last plan created; plan ids start at 1
     uint256 public lastPlanId;
@@ -166,8 +159,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
     /**
      * @notice Initializes the proxy with the launch parameters
-     * @dev Fee rate 0 with a cap of 20%, slippage bound 0.1%, up to 10 parts per round, 2 to 60 buys per plan, a
-     *      0.5% slippage bound for `forceBuy`, and 30 days between buys
+     * @dev Fee rate 0 with a cap of 20%, slippage bound 0.1%, up to 10 parts per round, 2 to 60 buys per plan, and a
+     *      0.5% slippage bound for `forceBuy`
      * @param accessControlManager_ AccessControlManager
      * @param reserve_ Receives fees and rewards
      */
@@ -184,8 +177,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         maxBuys = 60;
         // TBD: slippage default to confirm with the team
         fallbackSlippageBps = 50;
-        // TBD: 30 days at launch; governance can change it with `setBuyInterval`
-        buyInterval = 30 days;
+        // Round 0 is the latest 15th already passed, so every later round is still ahead
+        anchorMonth = uint32(SmartDCAMath.latestStartedMonth(block.timestamp));
     }
 
     /// @inheritdoc ISmartDCA
@@ -211,9 +204,10 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         uint256 principalPerBuy = received / buys;
         if (stableUnitsPerBuy == 0 || principalPerBuy == 0) revert DepositTooSmall(received, minimum);
 
-        // Before the next round's lock the plan joins it, from the lock on the round after
+        // Before the next round's lock the plan joins it, from the lock on the round after. During an overrun that
+        // is the round right after the running one, not the calendar month.
         uint32 nextRound = pair.lastSettledRound + 1;
-        uint32 firstRound = block.timestamp < pair.nextLockTime ? nextRound : nextRound + 1;
+        uint32 firstRound = block.timestamp < roundStart(nextRound) ? nextRound : nextRound + 1;
         _addToRound(pairId, pair, firstRound, stableUnitsPerBuy, principalPerBuy);
         Round storage last = rounds[pairId][firstRound + buys - 1];
         last.stableUnitsEnding += stableUnitsPerBuy;
@@ -411,7 +405,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @inheritdoc ISmartDCA
     function startRound(uint32 pairId, uint8 parts) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
-        _checkRoundCaller(pairId, pair);
+        _checkRoundCaller(pair);
         _startRound(pairId, pair, parts);
     }
 
@@ -422,7 +416,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         bytes calldata swapData
     ) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
-        _checkRoundCaller(pairId, pair);
+        _checkRoundCaller(pair);
         uint32 round = pair.lastSettledRound + 1;
         Round storage r = _startedRound(pairId, round);
         if (r.partsDone == r.partsTotal) revert NoPartsLeft();
@@ -460,7 +454,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @inheritdoc ISmartDCA
     function resplitRound(uint32 pairId, uint8 parts) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
-        _checkRoundCaller(pairId, pair);
+        _checkRoundCaller(pair);
         uint32 round = pair.lastSettledRound + 1;
         Round storage r = _startedRound(pairId, round);
         if (r.partsDone == r.partsTotal) revert NoPartsLeft();
@@ -476,7 +470,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @inheritdoc ISmartDCA
     function settleRound(uint32 pairId) external nonReentrant whenNotPaused {
         Pair storage pair = _pair(pairId);
-        _checkRoundCaller(pairId, pair);
+        _checkRoundCaller(pair);
         _settleRound(pairId, pair);
     }
 
@@ -577,7 +571,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             kind,
             source,
             HUB_REGISTRY,
-            COMPTROLLER
+            COMPTROLLER,
+            block.timestamp >= roundStart(_pair(pairId).lastSettledRound + 1)
         );
     }
 
@@ -624,6 +619,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         if (minAmountPerBuy[stable] == 0) revert InvalidParameter();
         pairId = ++pairCount;
         pairIdByTokens[stable][asset] = pairId;
+        // The pair's first round is the next to start
+        pairs[pairId].lastSettledRound = uint32(SmartDCAMath.latestStartedMonth(block.timestamp) - anchorMonth);
         SmartDCAAdminLib.addPair(
             pairs[pairId],
             yieldSources[pairId],
@@ -681,15 +678,6 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
-    function setBuyInterval(uint16 intervalDays) external {
-        _checkAccessAllowed("setBuyInterval(uint16)");
-        if (intervalDays < MIN_BUY_INTERVAL_DAYS || intervalDays > MAX_BUY_INTERVAL_DAYS) revert InvalidParameter();
-        uint32 newInterval = uint32(intervalDays) * 1 days;
-        emit BuyIntervalUpdated(buyInterval, newInterval);
-        buyInterval = newInterval;
-    }
-
-    /// @inheritdoc ISmartDCA
     function setReserve(address newReserve) external {
         _checkAccessAllowed("setReserve(address)");
         if (newReserve == address(0)) revert ZeroAddress();
@@ -699,12 +687,17 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
     /// @inheritdoc ISmartDCA
     function nextLockTime(uint32 pairId) external view returns (uint256) {
-        return pairs[pairId].nextLockTime;
+        return roundStart(pairs[pairId].lastSettledRound + 1);
     }
 
     /// @inheritdoc ISmartDCA
     function getPlanIds(address owner) external view returns (uint256[] memory) {
         return _planIdsByOwner[owner];
+    }
+
+    /// @inheritdoc ISmartDCA
+    function roundStart(uint32 round) public view returns (uint256) {
+        return SmartDCAMath.roundStart(anchorMonth, round);
     }
 
     /// @dev Body of `startRound`, after the caller check
@@ -714,7 +707,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         // Rounds with nothing to buy settle here with no swap
         _settleEmptyRounds(pairId, pair);
         uint32 round = pair.lastSettledRound + 1;
-        if (block.timestamp < pair.nextLockTime) return;
+        if (block.timestamp < roundStart(round)) return;
         _emitRoundLocked(pairId, pair);
 
         Round storage r = rounds[pairId][round];
@@ -786,29 +779,26 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     function _settleEmptyRounds(uint32 pairId, Pair storage pair) internal {
         while (pair.roundStableUnits == 0) {
             uint32 round = pair.lastSettledRound + 1;
-            if (block.timestamp < pair.nextLockTime) return;
+            if (block.timestamp < roundStart(round)) return;
             Round storage r = rounds[pairId][round];
             _closeRound(pair, r, round);
             emit RoundSettled(pairId, round, 0, 0, 0, 0, pair.assetPerUnitIndex, pair.assetPerPrincipalIndex);
         }
     }
 
-    /// @dev Records the indexes for `round`, adds the plans that start next and removes the ones that ended, and
-    ///      sets the next lock time `buyInterval` after this round's lock time. A round that ran past that time
-    ///      leaves the next one already locked.
+    /// @dev Records the indexes for `round`, adds the plans that start next and removes the ones that ended
     function _closeRound(Pair storage pair, Round storage r, uint32 round) internal {
         r.assetPerUnitIndexAfter = pair.assetPerUnitIndex;
         r.assetPerPrincipalIndexAfter = pair.assetPerPrincipalIndex;
         pair.roundStableUnits = pair.roundStableUnits - r.stableUnitsEnding + r.stableUnitsJoining;
         pair.roundPrincipal = pair.roundPrincipal - r.principalEnding + r.principalJoining;
         pair.lastSettledRound = round;
-        pair.nextLockTime += buyInterval;
     }
 
     /// @dev Emits `RoundLocked` once per round, from the round's lock time
     function _emitRoundLocked(uint32 pairId, Pair storage pair) internal {
         uint32 round = pair.lastSettledRound + 1;
-        if (pair.lockEmittedRound == round || block.timestamp < pair.nextLockTime) return;
+        if (pair.lockEmittedRound == round || block.timestamp < roundStart(round)) return;
         pair.lockEmittedRound = round;
         emit RoundLocked(pairId, round);
     }
@@ -890,16 +880,22 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         return Math.mulDiv(shares, s.unitsIssued, s.sharesHeld, Math.Rounding.Up);
     }
 
-    /// @dev Only keepers, and only from the round's lock time
-    function _checkRoundCaller(uint32 pairId, Pair storage pair) internal view {
+    /// @dev Only keepers, and only from the round's start time
+    function _checkRoundCaller(Pair storage pair) internal view {
         if (!isKeeper[msg.sender]) revert NotRoundCaller(msg.sender);
-        if (block.timestamp < pair.nextLockTime) revert RoundNotLocked(pairId, pair.nextLockTime);
+        _requireRoundStarted(pair.lastSettledRound + 1);
+    }
+
+    /// @dev Reverts before the round's start time
+    function _requireRoundStarted(uint32 round) internal view {
+        uint256 startsAt = roundStart(round);
+        if (block.timestamp < startsAt) revert RoundNotStarted(startsAt);
     }
 
     /// @dev The round, once `startRound` has run for it
     function _startedRound(uint32 pairId, uint32 round) internal view returns (Round storage r) {
         r = rounds[pairId][round];
-        if (r.partsTotal == 0) revert RoundNotStarted(pairId);
+        if (r.partsTotal == 0) revert StartRoundNotCalled(pairId);
     }
 
     /// @dev The pair, for a known id
@@ -927,7 +923,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
                 pair.lastSettledRound + 1,
                 plan.scheduleFirstRound,
                 plan.scheduleBuys,
-                block.timestamp >= pair.nextLockTime
+                block.timestamp >= roundStart(pair.lastSettledRound + 1)
             );
     }
 

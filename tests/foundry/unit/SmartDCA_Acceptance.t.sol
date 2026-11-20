@@ -21,7 +21,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         _create(alice, 1200e18, 12);
         _startAndSwap(1);
 
-        vm.warp(SmartDCAMath.lockTimeOf(DEC) + 6 days);
+        vm.warp(dca.roundStart(DEC) + 6 days);
         uint256 id = _create(carol, 300e18, 3);
         assertEq(_plan(id).scheduleFirstRound, DEC);
         assertEq(_round(NOV).stableUnitsJoining, 100e24, "parked until November settles");
@@ -34,13 +34,12 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         assertEq(_round(DEC).stableRedeemed, 200e18);
     }
 
-    /// @dev November stuck past December's and January's locks: the rounds after keep their dates, so December and
-    ///      January each start right after the round before settles
-    function test_overrun_stuckRoundDoesNotMoveTheRoundsAfter() public {
+    /// @dev November and December both stuck: both settle back to back on the same day, then January starts
+    function test_overrun_twoStuckRoundsSettleOnTheSameDay() public {
         _create(alice, 1200e18, 12);
         _startAndSwap(1);
 
-        vm.warp(SmartDCAMath.lockTimeOf(JAN) + 6 days);
+        vm.warp(dca.roundStart(JAN) + 6 days);
         uint256 id = _create(carol, 300e18, 3);
         assertEq(_plan(id).scheduleFirstRound, DEC, "joins the round after the stuck one");
 
@@ -50,10 +49,9 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
         dca.settleRound(pairId);
         assertEq(_pair().lastSettledRound, DEC);
-        assertEq(dca.nextLockTime(pairId), NOV_LOCK + 60 days, "two intervals after November's lock");
         dca.startRound(pairId, 1);
         vm.stopPrank();
-        assertEq(_round(JAN).partsTotal, 1, "January's lock has passed, so it starts right away");
+        assertEq(_round(JAN).partsTotal, 1, "January starts at once");
         assertEq(_round(DEC).stableRedeemed, 200e18, "carol bought in December");
     }
 
@@ -78,7 +76,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         _runRound(1);
         _runRound(1);
 
-        vm.warp(SmartDCAMath.lockTimeOf(JAN));
+        vm.warp(dca.roundStart(JAN));
         vm.expectEmit(address(dca));
         emit ISmartDCA.RoundLocked(pairId, JAN);
         vm.prank(alice);
@@ -90,7 +88,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         _runRound(1);
         _runRound(1);
 
-        vm.warp(SmartDCAMath.lockTimeOf(JAN) + 1);
+        vm.warp(dca.roundStart(JAN) + 1);
         vm.prank(alice);
         dca.claimPlan(id, false, alice);
         assertEq(_pair().lastSettledRound, JAN, "empty January settled by claim");
@@ -288,7 +286,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         // Both pairs buy in November, so both tokens hold shares; in December only the ETH pair settles
         _runRound(1);
         _runEthRound(ethPairId);
-        vm.warp(SmartDCAMath.lockTimeOf(DEC));
+        vm.warp(dca.roundStart(DEC));
         _runEthRound(ethPairId);
 
         dca.setYieldSource(ethPairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Core, address(vETH2));
