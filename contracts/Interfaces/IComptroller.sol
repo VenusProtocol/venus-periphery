@@ -152,4 +152,13 @@ interface IComptroller {
     function exitMarket(address vToken) external returns (uint256);
 
     function updateDelegate(address delegate, bool approved) external;
+
+    /// @notice Claim the XVS rewards `holder` accrued in the given markets.
+    /// @param holder The address whose rewards are claimed.
+    /// @param vTokens The vToken markets to claim in.
+    function claimVenus(address holder, address[] calldata vTokens) external;
+
+    /// @notice Get the XVS token address.
+    /// @return address The XVS token.
+    function getXVSAddress() external view returns (address);
 }
