@@ -1,3 +1,9 @@
+## 1.5.0-dev.1 (2026-11-20)
+
+* Merge pull request #115 from VenusProtocol/fix/format-ebrake-deployments ([3d074df](https://github.com/VenusProtocol/venus-periphery/commit/3d074df)), closes [#115](https://github.com/VenusProtocol/venus-periphery/issues/115)
+* feat: updating deployment files ([6d8ee2d](https://github.com/VenusProtocol/venus-periphery/commit/6d8ee2d))
+* style: format EBrake deployment files ([76fd575](https://github.com/VenusProtocol/venus-periphery/commit/76fd575))
+
 ## <small>1.4.2-dev.1 (2026-11-19)</small>
 
 * Merge pull request #111 from VenusProtocol/main ([125ae86](https://github.com/VenusProtocol/venus-periphery/commit/125ae86)), closes [#111](https://github.com/VenusProtocol/venus-periphery/issues/111)
