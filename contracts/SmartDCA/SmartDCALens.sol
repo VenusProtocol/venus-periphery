@@ -270,13 +270,15 @@ contract SmartDCALens {
             );
     }
 
-    /// @dev Token amount `units` of one side of a pair are worth, at the source's stored rate
+    /// @dev Token amount `units` of one side of a pair are worth, at the source's stored rate. Returns 0 while a
+    ///      started round has redeemed every unit of the source, as the units it counts are no longer in it.
     function _value(SmartDCA dca, uint32 pairId, ISmartDCA.Side side, uint256 units) internal view returns (uint256) {
         if (units == 0) return 0;
         (ISmartDCA.SourceKind kind, address source, uint256 sharesHeld, uint256 unitsIssued) = dca.yieldSources(
             pairId,
             side
         );
+        if (unitsIssued == 0) return 0;
         uint256 shares = Math.mulDiv(units, sharesHeld, unitsIssued);
         if (kind == ISmartDCA.SourceKind.Hub) return IHub(source).previewRedeem(shares);
         return Math.mulDiv(shares, IVToken(source).exchangeRateStored(), 1e18);

@@ -195,6 +195,22 @@ contract SmartDCA_LensTest is SmartDCABase {
         assertApproxEqAbs(lens.getPlan(dca, aliceId).stablePending, v.nextBuyNet, 1);
     }
 
+    /// @dev The round holds every stable unit of the pair, so starting it leaves the stable source empty
+    function test_getPair_whileTheRoundHoldsEveryUnit() public {
+        uint256 id = _create(alice, 200e18, 2);
+        _runRound(1);
+
+        vm.warp(dca.nextLockTime(pairId));
+        vm.prank(keeper);
+        dca.startRound(pairId, 1);
+
+        SmartDCALens.PairView memory v = lens.getPair(dca, pairId);
+        assertEq(uint8(v.state), uint8(SmartDCALens.PairState.Executing));
+        assertEq(v.roundStableUnits, 100e24);
+        assertEq(v.roundStableValue, 0);
+        assertEq(lens.getPlan(dca, id).buysLeft, 0);
+    }
+
     function test_getPair_skipsEmptyMonths() public {
         vm.warp(dca.roundStart(DEC + 2) + 5 days);
         SmartDCALens.PairView memory v = lens.getPair(dca, pairId);
