@@ -426,8 +426,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         if (r.partsDone == r.partsTotal) revert NoPartsLeft();
         if (quotedOut == 0) revert ZeroAmount();
 
-        // An even share of what is left; on the last part that is all of it
-        uint256 stableIn = r.stableToSwap / (r.partsTotal - r.partsDone);
+        uint256 stableIn = _nextPartStableIn(r);
         uint256 minOut = Math.mulDiv(quotedOut, SmartDCAMath.BPS - maxSlippageBps, SmartDCAMath.BPS);
         uint256 assetOut = SmartDCAAdminLib.keeperSwap(
             allowedRouters,
@@ -437,12 +436,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             minOut,
             swapData
         );
-
-        r.stableToSwap -= stableIn;
-        r.assetBought += assetOut;
-        r.partsDone += 1;
-
-        emit RoundPartSwapped(pairId, round, r.partsDone, stableIn, assetOut, quotedOut, minOut);
+        _recordPart(pairId, round, r, stableIn, assetOut, quotedOut, minOut);
     }
 
     /// @inheritdoc ISmartDCA
@@ -481,8 +475,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         Round storage r = _startedRound(pairId, round);
         // Skipped when the keeper swapped every part but did not settle
         if (r.partsDone != r.partsTotal) {
-            // An even share of what is left; on the last part that is all of it
-            uint256 stableIn = r.stableToSwap / (r.partsTotal - r.partsDone);
+            uint256 stableIn = _nextPartStableIn(r);
             (uint256 assetOut, uint256 quotedOut, uint256 minOut) = SmartDCAAdminLib.fallbackSwap(
                 fallbackRoutes[pairId],
                 pair,
@@ -490,10 +483,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
                 stableIn,
                 fallbackSlippageBps
             );
-            r.stableToSwap -= stableIn;
-            r.assetBought += assetOut;
-            r.partsDone += 1;
-            emit RoundPartSwapped(pairId, round, r.partsDone, stableIn, assetOut, quotedOut, minOut);
+            _recordPart(pairId, round, r, stableIn, assetOut, quotedOut, minOut);
         }
         if (r.partsDone == r.partsTotal) _settleRound(pairId, pair);
     }
@@ -744,6 +734,22 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         );
     }
 
+    /// @dev Books a swapped part of the round and emits `RoundPartSwapped`
+    function _recordPart(
+        uint32 pairId,
+        uint32 round,
+        Round storage r,
+        uint256 stableIn,
+        uint256 assetOut,
+        uint256 quotedOut,
+        uint256 minOut
+    ) internal {
+        r.stableToSwap -= stableIn;
+        r.assetBought += assetOut;
+        r.partsDone += 1;
+        emit RoundPartSwapped(pairId, round, r.partsDone, stableIn, assetOut, quotedOut, minOut);
+    }
+
     /// @dev Body of `settleRound`, after the caller check
     function _settleRound(uint32 pairId, Pair storage pair) internal {
         uint32 round = pair.lastSettledRound + 1;
@@ -900,6 +906,11 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     function _startedRound(uint32 pairId, uint32 round) internal view returns (Round storage r) {
         r = rounds[pairId][round];
         if (r.partsTotal == 0) revert StartRoundNotCalled(pairId);
+    }
+
+    /// @dev Stable the round's next part sells: an even share of what is left, so the last part sells all of it
+    function _nextPartStableIn(Round storage r) internal view returns (uint256) {
+        return r.stableToSwap / (r.partsTotal - r.partsDone);
     }
 
     /// @dev The pair, for a known id
