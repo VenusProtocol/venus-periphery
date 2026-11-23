@@ -551,14 +551,15 @@ interface ISmartDCA {
     /// @notice The round was already resplit once.
     error AlreadyResplit();
 
-    /// @notice The swap returned less than the quote less `maxSlippageBps`.
+    /// @notice The swap returned less than `minOut`: the keeper's quote less `maxSlippageBps` in a keeper swap, or the
+    ///         oracle value of the part less `fallbackSlippageBps` in `forceBuy`.
     error SlippageExceeded(uint256 assetOut, uint256 minOut);
 
     /// @notice The number of buys is outside `minBuys` to `maxBuys`.
     error InvalidBuys(uint8 buys, uint8 minBuys, uint8 maxBuys);
 
-    /// @notice The deposit is under `minAmountPerBuy` times the buys, or too small to sell one unit per buy.
-    error DepositTooSmall(uint256 amount, uint256 minimum);
+    /// @notice The stable received is under `minAmountPerBuy` times the buys, or too small to sell one unit per buy.
+    error DepositTooSmall(uint256 received, uint256 minimum);
 
     /// @notice The caller does not own the plan.
     error NotPlanOwner();
