@@ -296,3 +296,18 @@ contract MockPancakeV3Router {
         MockERC20(tokenOut).mint(params.recipient, amountOut);
     }
 }
+
+/// @notice ERC-20 that burns 1% of every transfer, for checks on the amount that arrives
+contract MockFeeOnTransferToken is ERC20 {
+    constructor() ERC20("Fee on transfer", "FOT") {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function _transfer(address from, address to, uint256 amount) internal override {
+        uint256 fee = amount / 100;
+        _burn(from, fee);
+        super._transfer(from, to, amount - fee);
+    }
+}

@@ -198,12 +198,12 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         if (!pair.enabled) revert PairDisabled();
         if (buys < minBuys || buys > maxBuys) revert InvalidBuys(buys, minBuys, maxBuys);
         uint256 minimum = minAmountPerBuy[pair.stable] * buys;
-        if (amount < minimum) revert DepositTooSmall(amount, minimum);
 
         _settleEmptyRounds(pairId, pair);
         _emitRoundLocked(pairId, pair);
 
         uint256 received = _pullToken(pair.stable, amount);
+        if (received < minimum) revert DepositTooSmall(received, minimum);
         uint256 stableUnits = _deposit(yieldSources[pairId][Side.Stable], pair.stable, received);
         uint256 stableUnitsPerBuy = stableUnits / buys;
         uint256 principalPerBuy = received / buys;
@@ -261,7 +261,6 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
         uint8 buysLeft = plan.scheduleBuys - buysSettled;
         uint256 minimum = minAmountPerBuy[pair.stable] * buysLeft;
-        if (amount < minimum) revert DepositTooSmall(amount, minimum);
 
         // Restart the schedule from the next unsettled round, keeping what was bought so far
         plan.assetUnitsCarried += _assetUnitsFromIndex(plan, pairId, buysSettled);
@@ -270,6 +269,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         plan.scheduleBuys = buysLeft;
 
         uint256 received = _pullToken(pair.stable, amount);
+        if (received < minimum) revert DepositTooSmall(received, minimum);
         uint256 stableUnitsAdded = _deposit(yieldSources[pairId][Side.Stable], pair.stable, received);
         uint256 stableUnits = plan.scheduleStableUnits - plan.stableUnitsPerBuy * buysSettled + stableUnitsAdded;
         uint256 stableUnitsPerBuy = stableUnits / buysLeft;

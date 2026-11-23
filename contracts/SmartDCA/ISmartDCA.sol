@@ -603,8 +603,9 @@ interface ISmartDCA {
      *      after it from the lock time on. During an overrun (a round still running past the next 15th) that is the
      *      round right after the running one, not the calendar month.
      *
-     *      Reverts if `owner` is the zero address, if the pair is unknown or disabled, if `buys` is outside `minBuys` to `maxBuys`, or if `amount` is
-     *      under `minAmountPerBuy` of the stable times `buys`.
+     *      Reverts if `owner` is the zero address, if the pair is unknown or disabled, if `buys` is outside `minBuys`
+     *      to `maxBuys`, or if the stable received is under `minAmountPerBuy` of the stable times `buys`. The stable
+     *      received is counted as a balance change, so for a token that charges a transfer fee it is below `amount`.
      * @param pairId Pair to buy on
      * @param amount Stable amount to deposit, in the stable's decimals
      * @param buys Number of monthly buys
@@ -620,7 +621,8 @@ interface ISmartDCA {
      *      so far is kept aside, and the stable still waiting plus the new deposit is split evenly over the buys left.
      *
      *      Reverts if the plan is in a round past its lock time that has not settled, if every buy has settled, if
-     *      the pair is disabled, or if `amount` is under `minAmountPerBuy` times the buys left.
+     *      the pair is disabled, or if the stable received, counted as a balance change, is under `minAmountPerBuy`
+     *      times the buys left.
      * @param planId The plan
      * @param amount Stable amount to add, in the stable's decimals
      * @custom:event Emits PlanToppedUp.

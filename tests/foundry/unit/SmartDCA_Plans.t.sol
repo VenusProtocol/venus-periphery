@@ -5,7 +5,7 @@ pragma solidity 0.8.28;
 
 import { SmartDCAMath } from "../../../contracts/SmartDCA/SmartDCAMath.sol";
 import { ISmartDCA } from "../../../contracts/SmartDCA/ISmartDCA.sol";
-import { MockVToken } from "./mocks/SmartDCAMocks.sol";
+import { MockFeeOnTransferToken, MockHub, MockVToken } from "./mocks/SmartDCAMocks.sol";
 import { SmartDCABase } from "./SmartDCABase.t.sol";
 
 contract SmartDCA_PlansTest is SmartDCABase {
@@ -529,5 +529,24 @@ contract SmartDCA_PlansTest is SmartDCABase {
 
         assertEq(usdt.balanceOf(alice), 0);
         assertEq(btcb.balanceOf(alice), 0);
+    }
+
+    /// @dev The minimum is checked on the stable that arrived: with a 1% transfer fee, 20 sent is 19.8 received,
+    ///      under the 2 x 10 minimum
+    function test_createPlan_minimumIsOnTheStableReceived() public {
+        MockFeeOnTransferToken fot = new MockFeeOnTransferToken();
+        MockHub fotHub = new MockHub(address(fot));
+        registry.set(address(fotHub), true);
+        oracle.setPrice(address(fot), 1e18);
+        dca.setMinAmountPerBuy(address(fot), 10e18);
+        uint32 fotPair = _addPair(address(fot), address(btcb), address(fotHub), address(vBTC));
+
+        fot.mint(alice, 100e18);
+        vm.startPrank(alice);
+        fot.approve(address(dca), 100e18);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.DepositTooSmall.selector, 19.8e18, 20e18));
+        dca.createPlan(fotPair, 20e18, 2, alice);
+        dca.createPlan(fotPair, 20.21e18, 2, alice);
+        vm.stopPrank();
     }
 }
