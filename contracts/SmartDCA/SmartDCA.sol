@@ -36,12 +36,13 @@ import { ISmartDCA } from "./ISmartDCA.sol";
  *         `maxSlippageBps`.
  *      4. `settleRound`. The asset bought is supplied to its yield source and the round closes.
  *
- *      No call loops over plans. Every plan sells the same number of stable units in each of its buys, so a pair
+ *      No round or plan call loops over the plans of a pair. Every plan sells the same number of stable units in each of its buys, so a pair
  *      only stores the totals of its next round (`roundStableUnits`, `roundPrincipal`). Settling a round adds the
  *      asset bought per stable unit sold to a running index, and a plan's asset is its units per buy times how much
  *      the index grew over its rounds. A plan that starts or ends in a later round is added to or removed from the
  *      totals when the round before it settles, through that round's `stableUnitsJoining` and `stableUnitsEnding`.
- *      So every call costs the same gas however many plans a pair has.
+ *      So their gas does not grow with the number of plans a pair has. `transferPlan` is the one call that walks
+ *      a list: the owner's plan ids.
  *
  *      SmartDCA never borrows and never enables a market as collateral, so nothing it holds can be liquidated.
  *
@@ -891,8 +892,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         IERC20(s.sourceAddress).safeTransfer(to, shares);
     }
 
-    /// @dev Units of `s` worth at least `amount`, rounded up. After a source switch one unit is not one share,
-    ///      so the redeem that follows can pay a few wei less than `amount`. Not a view: Core's rate is accrued first.
+    /// @dev Units of `s` worth at least `amount`: shares and units are both rounded up, so redeeming them pays at
+    ///      least `amount` unless Core takes a redeem fee. Not a view: Core's rate is accrued first.
     function _unitsForAmount(YieldSource storage s, uint256 amount) internal returns (uint256) {
         uint256 shares = s.kind == SourceKind.Hub
             ? IHub(s.sourceAddress).previewWithdraw(amount)

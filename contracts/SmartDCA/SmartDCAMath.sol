@@ -9,8 +9,8 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
  * @notice Pure math for SmartDCA: round dates, the round fee and the index steps that credit plans.
  * @dev A month is counted as `year * 12 + (month - 1)`, so November 2026 is month 24322. Round `r` is month
  *      `anchorMonth + r`, where `anchorMonth` is set once at deploy. It starts (locks) on the 15th of that month at
- *      00:00 UTC+8, which is the 14th at 16:00 UTC. Fees, index steps and bought amounts round down, in favour of the
- *      contract.
+ *      00:00 UTC+8, which is the 14th at 16:00 UTC. Fees, index steps and bought amounts round down: a fee never
+ *      takes more than its rate, and plans are never credited more asset than a round bought.
  */
 library SmartDCAMath {
     /// @notice Day of the month a round starts on

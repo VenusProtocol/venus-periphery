@@ -615,7 +615,8 @@ interface ISmartDCA {
      * @param buys Number of monthly buys
      * @param owner Owner of the new plan
      * @return planId The new plan
-     * @custom:event Emits PlanCreated, and RoundLocked on the first call of a locked round.
+     * @custom:event Emits RoundSettled for each empty round it settles first, RoundLocked on the first call of a
+     *      locked round, and PlanCreated.
      */
     function createPlan(uint32 pairId, uint256 amount, uint8 buys, address owner) external returns (uint256 planId);
 
@@ -629,15 +630,15 @@ interface ISmartDCA {
      *      times the buys left.
      * @param planId The plan
      * @param amount Stable amount to add, in the stable's decimals
-     * @custom:event Emits PlanToppedUp.
+     * @custom:event Emits RoundSettled for each empty round it settles first, and PlanToppedUp.
      */
     function topUpPlan(uint256 planId, uint256 amount) external;
 
     /**
      * @notice Pays `receiver` `amount` of the asset bought so far, or all of it with `type(uint256).max`.
      * @dev Allowed while the plan's round is running: a running round's buy only counts once it settles. A partial
-     *      amount is converted to units rounded up, so after a source switch `receiver` can get a few wei less
-     *      than `amount`. Only the owner can call.
+     *      amount is converted to units rounded up, so `receiver` gets at least `amount`, unless Core takes a
+     *      redeem fee (`treasuryPercent`). Only the owner can call.
      * @param planId The plan
      * @param amount Asset amount to withdraw, in the asset's decimals
      * @param receiver Address paid
@@ -658,7 +659,8 @@ interface ISmartDCA {
      * @param planId The plan
      * @param toCore True to pay the bought asset as vTokens, false to pay it as the asset
      * @param receiver Address paid
-     * @custom:event Emits PlanCancelled, and CancelFeeCollected when the fee is not zero.
+     * @custom:event Emits RoundSettled for each empty round it settles first, CancelFeeCollected when the fee is
+     *      not zero, and PlanCancelled.
      */
     function cancelPlan(uint256 planId, bool toCore, address receiver) external;
 
@@ -670,7 +672,8 @@ interface ISmartDCA {
      * @param planId The plan
      * @param toCore True to pay as vTokens, false to pay as the asset
      * @param receiver Address paid
-     * @custom:event Emits PlanClaimed.
+     * @custom:event Emits RoundSettled for each empty round it settles first, RoundLocked on the first call of a
+     *      locked round, and PlanClaimed.
      */
     function claimPlan(uint256 planId, bool toCore, address receiver) external;
 
@@ -694,7 +697,8 @@ interface ISmartDCA {
      *      round here. Reverts if the round already started, or if the redeem returns nothing.
      * @param pairId The pair
      * @param parts Parts to split the swap into, 1 to `maxParts`
-     * @custom:event Emits RoundStarted, and RoundFeeCollected when the fee is not zero.
+     * @custom:event Emits RoundSettled for each empty round it settles first, RoundLocked on the first call of a
+     *      locked round, RoundFeeCollected when the fee is not zero, and RoundStarted.
      */
     function startRound(uint32 pairId, uint8 parts) external;
 
@@ -751,7 +755,7 @@ interface ISmartDCA {
      * @param pairId The pair
      * @param parts Parts to split the round into, 1 to `maxParts`; on a started round, the most parts to leave
      * @custom:access Controlled by AccessControlManager (Guardian and Normal Timelock)
-     * @custom:event Emits RoundStarted on the first part, RoundResplit when it cuts the parts left,
+     * @custom:event On the first part, the events of `startRound`. Then RoundResplit when it cuts the parts left,
      *      RoundPartSwapped, and RoundSettled after the last part.
      */
     function forceBuy(uint32 pairId, uint8 parts) external;
@@ -812,9 +816,9 @@ interface ISmartDCA {
     /**
      * @notice Sets where one side of a pair waits and earns, and moves that pair side's holdings there in the same
      *         call. Other pairs with the same token keep their own source.
-     * @dev Plans hold units, and the move keeps the number of units, so no plan changes. A stable move reverts while
-     *      the pair is past its lock time and not settled; an asset move does not, as a running round holds its
-     *      bought asset as tokens.
+     * @dev Plans hold units, and the move keeps the number of units, so no plan changes. A stable side that holds
+     *      shares cannot move from its next round's lock time until that round settles (`PairLocked`); an asset
+     *      move can, as a running round holds its bought asset as tokens.
      * @param pairId The pair
      * @param side Stable or Asset
      * @param kind Hub or Core
@@ -940,9 +944,11 @@ interface ISmartDCA {
     function setReserve(address newReserve) external;
 
     /**
-     * @notice Lock time of the pair's next round.
+     * @notice Lock time of the round after the pair's last settled round.
+     * @dev Read from stored state, so on a pair with empty rounds not settled yet it can be in the past, and a plan
+     *      created now joins a later round. An unknown `pairId` returns the lock time of round 1.
      * @param pairId The pair
-     * @return Unix timestamp of the 15th at 00:00 UTC+8 of the next round's month
+     * @return Unix timestamp of the 15th at 00:00 UTC+8 of that round's month
      */
     function nextLockTime(uint32 pairId) external view returns (uint256);
 

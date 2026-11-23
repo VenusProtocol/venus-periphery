@@ -45,7 +45,8 @@ contract SmartDCALens {
      * @param inRunningRound True while the plan's buy is in a locked round that has not settled
      * @param totalBuys Buys in total, including those before a top up (PRD T)
      * @param buysSettled Buys that have settled (PRD C)
-     * @param buysLeft Buys still to come, not counting a buy already running (PRD n)
+     * @param buysLeft Buys still to come, not counting the buy of a round that has started (PRD n). A buy in a
+     *        locked round that has not started yet is still counted
      * @param stablePending Stable this plan has in the running round, after its fee; 0 outside a running round
      *        (PRD P)
      * @param stableWaiting Value of the plan's stable still waiting in the yield source (PRD W)
