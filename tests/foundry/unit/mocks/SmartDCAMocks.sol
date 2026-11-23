@@ -271,7 +271,8 @@ function mockMulticall(address target, bytes memory data) pure returns (bytes me
 
 /// @notice PancakeSwap V3 SwapRouter stand-in for `exactInput`: pulls `amountIn` of the path's first token and pays
 ///         `rate / 1e18` of its last token per unit in. It applies no minimum, so SmartDCA's own floor is what gets
-///         tested.
+///         tested. With `fillBps` below 10,000 it pulls only that share of `amountIn` and does not revert, as a
+///         pool that runs out of liquidity does.
 contract MockPancakeV3Router {
     struct ExactInputParams {
         bytes path;
@@ -287,12 +288,19 @@ contract MockPancakeV3Router {
         rate = value;
     }
 
+    uint256 public fillBps = 10_000;
+
+    function setFillBps(uint256 value) external {
+        fillBps = value;
+    }
+
     function exactInput(ExactInputParams calldata params) external payable returns (uint256 amountOut) {
         require(params.deadline >= block.timestamp, "expired");
         address tokenIn = address(bytes20(params.path[:20]));
         address tokenOut = address(bytes20(params.path[params.path.length - 20:]));
-        IERC20(tokenIn).transferFrom(msg.sender, address(0xdead), params.amountIn);
-        amountOut = (params.amountIn * rate) / 1e18;
+        uint256 used = (params.amountIn * fillBps) / 10_000;
+        IERC20(tokenIn).transferFrom(msg.sender, address(0xdead), used);
+        amountOut = (used * rate) / 1e18;
         MockERC20(tokenOut).mint(params.recipient, amountOut);
     }
 }

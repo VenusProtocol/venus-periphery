@@ -110,8 +110,10 @@ library SmartDCAAdminLib {
 
     /**
      * @notice Swaps `stableIn` of the pair's stable for its asset on the pair's route, for `forceBuy`
-     * @dev Approves only `stableIn`. Reverts if the asset that arrived, counted as a balance change, is below `minOut`.
-     *      The router is the PancakeSwap V3 SwapRouter (`exactInput` with a deadline).
+     * @dev Approves only `stableIn`. Reverts if the router took less than `stableIn`, or if the asset that arrived,
+     *      counted as a balance change, is below `minOut`. The router is the PancakeSwap V3 SwapRouter (`exactInput`
+     *      with a deadline). It stops without reverting when the pool runs out of liquidity, so a part filled 99.6%
+     *      would clear a 0.5% floor; the stable spent check makes it revert.
      * @param route The pair's route
      * @param pair The pair
      * @param oracle Oracle for both tokens' prices
@@ -134,6 +136,7 @@ library SmartDCAAdminLib {
         quotedOut = Math.mulDiv(stableIn, oracle.getPrice(stable), oracle.getPrice(asset));
         minOut = Math.mulDiv(quotedOut, SmartDCAMath.BPS - slippageBps, SmartDCAMath.BPS);
 
+        uint256 stableBefore = IERC20(stable).balanceOf(address(this));
         uint256 assetBefore = IERC20(asset).balanceOf(address(this));
         IERC20(stable).forceApprove(route.router, stableIn);
         IPancakeV3SwapRouter(route.router).exactInput(
@@ -145,6 +148,9 @@ library SmartDCAAdminLib {
                 amountOutMinimum: minOut
             })
         );
+        uint256 stableAfter = IERC20(stable).balanceOf(address(this));
+        uint256 stableSpent = stableBefore > stableAfter ? stableBefore - stableAfter : 0;
+        if (stableSpent < stableIn) revert ISmartDCA.PartNotFullySwapped(stableIn, stableSpent);
         assetOut = IERC20(asset).balanceOf(address(this)) - assetBefore;
         if (assetOut < minOut) revert ISmartDCA.SlippageExceeded(assetOut, minOut);
     }

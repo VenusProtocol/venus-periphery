@@ -169,4 +169,40 @@ contract SmartDCA_ForceBuyTest is SmartDCABase {
         );
         dca.setFallbackRoute(pairId, address(router), path);
     }
+
+    /// @dev A router that fills only part of the part reverts, so no stable is left behind unowed
+    function test_forceBuy_revertsOnAPartialFill() public {
+        router.setFillBps(9_960); // 99.6% would clear the 0.5% floor
+        vm.warp(FORCE_BUY_AT);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.PartNotFullySwapped.selector, 100e18, 99.6e18));
+        dca.forceBuy(pairId, 1);
+    }
+
+    /// @dev On a round the keeper started in 50 parts, `parts = 1` cuts the parts left to 1 and finishes it
+    function test_forceBuy_cutsTheKeepersPartsLeft() public {
+        dca.setMaxParts(50);
+        vm.warp(NOV_LOCK);
+        vm.prank(keeper);
+        dca.startRound(pairId, 50);
+        vm.warp(FORCE_BUY_AT);
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.RoundResplit(pairId, NOV, 0, 1);
+        dca.forceBuy(pairId, 1);
+        assertEq(_pair().lastSettledRound, NOV);
+    }
+
+    /// @dev A `parts` at or above the parts left, or 0, keeps the split
+    function test_forceBuy_higherOrZeroPartsKeepTheSplit() public {
+        vm.warp(NOV_LOCK);
+        vm.prank(keeper);
+        dca.startRound(pairId, 4);
+        vm.warp(FORCE_BUY_AT);
+        dca.forceBuy(pairId, 9);
+        assertEq(_round(NOV).partsTotal, 4, "9 is above the 4 left");
+        dca.forceBuy(pairId, 0);
+        assertEq(_round(NOV).partsTotal, 4, "0 keeps it");
+        dca.forceBuy(pairId, 2);
+        assertEq(_round(NOV).partsTotal, 4, "2 equals the 2 left");
+        assertEq(_round(NOV).partsDone, 3);
+    }
 }

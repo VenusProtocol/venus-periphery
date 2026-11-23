@@ -473,6 +473,10 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         if (rounds[pairId][pair.lastSettledRound + 1].partsTotal == 0) _startRound(pairId, pair, parts);
         uint32 round = pair.lastSettledRound + 1;
         Round storage r = _startedRound(pairId, round);
+        if (parts != 0 && parts < r.partsTotal - r.partsDone) {
+            r.partsTotal = r.partsDone + parts;
+            emit RoundResplit(pairId, round, r.partsDone, parts);
+        }
         // Skipped when the keeper swapped every part but did not settle
         if (r.partsDone != r.partsTotal) {
             uint256 stableIn = _nextPartStableIn(r);

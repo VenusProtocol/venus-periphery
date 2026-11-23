@@ -512,8 +512,8 @@ interface ISmartDCA {
     ///         `approveMax` or `sweep`, or sweeps to an address other than SmartDCA.
     error SwapCallNotAllowed();
 
-    /// @notice The swap call did not sell the whole part: some of the stable came back to SmartDCA or stayed in
-    ///         SwapHelper.
+    /// @notice The swap did not sell the whole part: in a keeper swap some of the stable came back to SmartDCA or
+    ///         stayed in SwapHelper; in `forceBuy` the router took less than the part.
     error PartNotFullySwapped(uint256 stableIn, uint256 stableSpent);
 
     /// @notice The yield source is not a registered Hub, or not a listed Core vToken, of the token.
@@ -728,15 +728,21 @@ interface ISmartDCA {
      *         the next part on the pair's PancakeSwap V3 route, and settles the round after its last part.
      * @dev Callable from `FALLBACK_DELAY` (24 h) after the round's start until it settles; before that it reverts with
      *      `RoundNotStarted`, carrying the time it opens. For a crisis such as the keeper or the backend being down. The swap needs no signed route:
-     *      it approves only the part's stable, calls the router's `exactInput`, and reverts if the asset that arrived
-     *      is below the oracle value of the part less `fallbackSlippageBps`. `parts = 1` runs the whole round in one
-     *      call; a large round takes more parts so the pool can recover between them. The keeper can keep running
-     *      the same round, since both share its part count, and a round whose parts are all swapped only settles.
-     *      The router is the PancakeSwap V3 SwapRouter, and `fallbackSlippageBps` starts at 0.5%.
+     *      it approves only the part's stable, calls the router's `exactInput`, and reverts if the router took less
+     *      than the part or if the asset that arrived is below the oracle value of the part less
+     *      `fallbackSlippageBps`. `parts = 1` runs the whole round in one call; a large round takes more parts so the
+     *      pool can recover between them. The keeper can keep running the same round, since both share its part
+     *      count, and a round whose parts are all swapped only settles. The router is the PancakeSwap V3 SwapRouter,
+     *      and `fallbackSlippageBps` starts at 0.5%.
+     *
+     *      On a round that has started, `parts` below the parts left cuts the parts left to `parts`; a higher value
+     *      or 0 keeps them. A round the keeper started in 50 parts finishes in one call with `parts = 1`, and calling
+     *      again with the same `parts` swaps the next part.
      * @param pairId The pair
-     * @param parts Parts to split the round into, 1 to `maxParts`; ignored once the round has started
+     * @param parts Parts to split the round into, 1 to `maxParts`; on a started round, the most parts to leave
      * @custom:access Controlled by AccessControlManager (Guardian and Normal Timelock)
-     * @custom:event Emits RoundStarted on the first part, RoundPartSwapped, and RoundSettled after the last part.
+     * @custom:event Emits RoundStarted on the first part, RoundResplit when it cuts the parts left,
+     *      RoundPartSwapped, and RoundSettled after the last part.
      */
     function forceBuy(uint32 pairId, uint8 parts) external;
 
