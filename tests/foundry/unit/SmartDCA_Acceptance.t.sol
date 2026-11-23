@@ -122,7 +122,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
         dca.topUpPlan(id, 100e18);
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         dca.withdrawBought(id, type(uint256).max, alice);
         vm.stopPrank();
         assertEq(btcb.balanceOf(alice), 1e15, "November only");

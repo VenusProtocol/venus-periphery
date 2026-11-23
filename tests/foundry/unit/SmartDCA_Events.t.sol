@@ -46,9 +46,9 @@ contract SmartDCA_EventsTest is SmartDCABase {
         vm.expectEmit(address(dca));
         emit ISmartDCA.CancelFeeCollected(pairId, a, 0.6e18);
         vm.expectEmit(address(dca));
-        emit ISmartDCA.PlanCancelled(a, carol, 1211.4e18, 0.6e18, 0);
+        emit ISmartDCA.PlanCancelled(a, carol, 1211.4e18, 0.6e18, false, 0);
         vm.prank(alice);
-        dca.cancelPlan(a, carol);
+        dca.cancelPlan(a, false, carol);
     }
 
     /// @dev 200 USDT at 100,000 per BTCB is 0.002 BTCB, which is 0.1 vBTC or 1e7 vBTC wei

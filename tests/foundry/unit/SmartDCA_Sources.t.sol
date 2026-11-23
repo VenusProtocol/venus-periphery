@@ -102,7 +102,7 @@ contract SmartDCA_SourcesTest is SmartDCABase {
 
         dca.setFeeRate(0);
         vm.prank(alice);
-        dca.cancelPlan(a, alice);
+        dca.cancelPlan(a, false, alice);
         assertApproxEqAbs(usdt.balanceOf(alice), 1000e18, 2 * 2e8);
         assertLe(usdt.balanceOf(alice), 1000e18, "never more than deposited");
     }

@@ -127,7 +127,7 @@ contract SmartDCA_FuzzTest is SmartDCABase {
             usdt.approve(address(dca), amount);
             _call(owner, abi.encodeCall(dca.topUpPlan, (id, amount)));
         } else if (action == 3) {
-            _call(owner, abi.encodeCall(dca.cancelPlan, (id, owner)));
+            _call(owner, abi.encodeCall(dca.cancelPlan, (id, _rnd(2) == 0, owner)));
         } else if (action == 4) {
             uint256 amount = _rnd(2) == 0 ? type(uint256).max : 1 + _rnd(1e12);
             _call(owner, abi.encodeCall(dca.withdrawBought, (id, amount, owner)));

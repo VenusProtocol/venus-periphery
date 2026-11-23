@@ -102,7 +102,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 reserveBefore = usdt.balanceOf(reserve);
 
         vm.prank(alice);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
 
         // W = 1,651.10, fee = (1,651.10 - 150 x 11) x 5% = 0.055
         assertApproxEqAbs(usdt.balanceOf(alice), 1651.045e18, 1e12);
@@ -118,9 +118,9 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 id = _create(alice, 1200e18, 12);
         assertEq(hub.balanceOf(address(dca)), 1200e24);
         vm.expectEmit(address(dca));
-        emit ISmartDCA.PlanCancelled(id, alice, 1200e18, 0, 0);
+        emit ISmartDCA.PlanCancelled(id, alice, 1200e18, 0, false, 0);
         vm.prank(alice);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         assertEq(usdt.balanceOf(alice), 1200e18);
         assertEq(usdt.balanceOf(reserve), 0);
         assertEq(_round(NOV + 11).stableUnitsEnding, 0);
@@ -133,12 +133,12 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 id = _create(alice, 1200e18, 12);
         vm.prank(bob);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
-        dca.cancelPlan(id, bob);
+        dca.cancelPlan(id, false, bob);
 
         vm.startPrank(alice);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         vm.stopPrank();
     }
 
@@ -162,7 +162,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
         dca.topUpPlan(id, 100e18);
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         vm.expectEmit(address(dca));
         emit ISmartDCA.BoughtWithdrawn(id, alice, 5e6, 1e15);
         dca.withdrawBought(id, type(uint256).max, alice);
@@ -177,7 +177,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 id = _create(carol, 300e18, 3);
 
         vm.prank(carol);
-        dca.cancelPlan(id, carol);
+        dca.cancelPlan(id, false, carol);
 
         assertEq(usdt.balanceOf(carol), 300e18);
         assertEq(_round(NOV).stableUnitsJoining, 0);
@@ -265,7 +265,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.PlanMatured.selector);
         dca.topUpPlan(id, 100e18);
         vm.expectRevert(ISmartDCA.PlanMatured.selector);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         vm.stopPrank();
     }
 
@@ -362,9 +362,9 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 reserveBefore = usdt.balanceOf(reserve);
 
         vm.expectEmit(address(dca));
-        emit ISmartDCA.PlanCancelled(id, alice, 1101.045e18, 0.055e18, 1.00095e15);
+        emit ISmartDCA.PlanCancelled(id, alice, 1101.045e18, 0.055e18, false, 1.00095e15);
         vm.prank(alice);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
 
         assertEq(usdt.balanceOf(alice), 1101.045e18);
         assertEq(usdt.balanceOf(reserve) - reserveBefore, 0.055e18);
@@ -376,7 +376,47 @@ contract SmartDCA_PlansTest is SmartDCABase {
         hub.setRedeemPaused(true);
         vm.prank(alice);
         vm.expectRevert(bytes("hub paused"));
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
+    }
+
+    /// @dev With vBTC refusing redeems, a cancel to the wallet reverts whole; with `toCore` it pays the 11 buys left
+    ///      of stable and the 0.001 BTCB bought as 5e6 vBTC wei
+    function test_cancelPlan_toCorePaysVTokensWhenCoreCannotRedeem() public {
+        uint256 id = _create(alice, 1200e18, 12);
+        _runRound(1);
+        vBTC.setErrors(0, 14);
+
+        vm.startPrank(alice);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.SourceCallFailed.selector, address(vBTC), 14));
+        dca.cancelPlan(id, false, alice);
+
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.PlanCancelled(id, alice, 1100e18, 0, true, 5e6);
+        dca.cancelPlan(id, true, alice);
+        vm.stopPrank();
+
+        assertEq(usdt.balanceOf(alice), 1100e18);
+        assertEq(vBTC.balanceOf(alice), 5e6);
+        (, , uint256 sharesHeld, uint256 unitsIssued) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
+        assertEq(unitsIssued, 0);
+        assertEq(vBTC.balanceOf(address(dca)), sharesHeld);
+    }
+
+    /// @dev `toCore` needs the asset in Core once the plan has bought asset; before any buy there is nothing to pay
+    function test_cancelPlan_toCoreRevertsForAHubAsset() public {
+        MockHub btcHub = new MockHub(address(btcb));
+        registry.set(address(btcHub), true);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Hub, address(btcHub));
+        uint256 bought = _create(alice, 1200e18, 12);
+        uint256 waiting = _create(bob, 1200e18, 12);
+        vm.prank(bob);
+        dca.cancelPlan(waiting, true, bob);
+        assertEq(usdt.balanceOf(bob), 1200e18);
+
+        _runRound(1);
+        vm.prank(alice);
+        vm.expectRevert(ISmartDCA.NotCoreSource.selector);
+        dca.cancelPlan(bought, true, alice);
     }
 
     /// @dev The vToken rate moved after the buy, so units and shares no longer divide evenly
@@ -450,7 +490,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         assertApproxEqAbs(_withdrawAll(bob, id), 1e15, 2e8, "November's buy goes to bob");
         _runRound(1);
         vm.prank(bob);
-        dca.cancelPlan(id, bob);
+        dca.cancelPlan(id, false, bob);
         assertGt(usdt.balanceOf(bob), 0, "stable left goes to bob");
         assertEq(btcb.balanceOf(alice), 0);
     }
@@ -473,7 +513,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         dca.unpause();
 
         vm.startPrank(alice);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
         dca.transferPlan(id, bob);
         vm.stopPrank();
@@ -497,7 +537,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         assertEq(dca.getPlanIds(zap).length, 0);
         vm.prank(zap);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
-        dca.cancelPlan(id, zap);
+        dca.cancelPlan(id, false, zap);
     }
 
     function test_payouts_goToTheReceiver() public {
@@ -512,14 +552,14 @@ contract SmartDCA_PlansTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.withdrawBought(withdrawn, type(uint256).max, address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
-        dca.cancelPlan(cancelled, address(0));
+        dca.cancelPlan(cancelled, false, address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.claimPlan(claimed, false, address(0));
 
         dca.withdrawBought(withdrawn, type(uint256).max, receiver);
         uint256 afterWithdraw = btcb.balanceOf(receiver);
         assertGt(afterWithdraw, 0);
-        dca.cancelPlan(cancelled, receiver);
+        dca.cancelPlan(cancelled, false, receiver);
         assertGt(usdt.balanceOf(receiver), 0, "waiting stable");
         assertGt(btcb.balanceOf(receiver), afterWithdraw, "bought asset");
         uint256 afterCancel = btcb.balanceOf(receiver);

@@ -194,7 +194,7 @@ contract Fork_SmartDCATest is Test {
 
         // The plan still exits in full from the new source
         vm.prank(alice);
-        dca.cancelPlan(planId, alice);
+        dca.cancelPlan(planId, false, alice);
         assertApproxEqRel(IERC20(USDT).balanceOf(alice), DEPOSIT, 1e12, "deposit back from vUSDT");
     }
 
@@ -390,7 +390,7 @@ contract Fork_SmartDCATest is Test {
         (, uint256 amountOut) = _runRound(pairId, 2);
 
         vm.prank(alice);
-        dca.cancelPlan(planId, alice);
+        dca.cancelPlan(planId, false, alice);
 
         // The unswapped half comes back from the real Hub, plus a month of its yield
         assertGe(IERC20(USDT).balanceOf(alice), DEPOSIT / 2 - 1, "stable back");

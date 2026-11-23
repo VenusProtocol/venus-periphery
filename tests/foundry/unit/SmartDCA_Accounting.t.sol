@@ -42,7 +42,7 @@ contract SmartDCA_AccountingTest is SmartDCABase {
         assertEq(s.sharesHeld, leftover + 300e24);
 
         vm.prank(bob);
-        dca.cancelPlan(b, bob);
+        dca.cancelPlan(b, false, bob);
         assertGe(usdt.balanceOf(bob), 300e18 - dca.feeRateBps(), "deposit back");
     }
 
@@ -82,7 +82,7 @@ contract SmartDCA_AccountingTest is SmartDCABase {
         assertEq(_round(NOV).stableRedeemed, 50e18);
 
         vm.prank(alice);
-        dca.cancelPlan(planId, alice);
+        dca.cancelPlan(planId, false, alice);
         assertEq(usdt.balanceOf(alice), 550e18, "11 buys left at half value");
     }
 
@@ -99,7 +99,7 @@ contract SmartDCA_AccountingTest is SmartDCABase {
             uint256 id = _create(carol, amount, 2);
             spent += amount;
             vm.prank(carol);
-            dca.cancelPlan(id, carol);
+            dca.cancelPlan(id, false, carol);
             got += usdt.balanceOf(carol) - before;
         }
         assertLe(got, spent);
@@ -150,10 +150,10 @@ contract SmartDCA_AccountingTest is SmartDCABase {
         hub.setPricePerShare(1.1e18);
         uint256 b = _create(bob, 1100e18, 10);
         vm.prank(bob);
-        dca.cancelPlan(b, bob);
+        dca.cancelPlan(b, false, bob);
         assertEq(usdt.balanceOf(reserve), 0, "no interest, no fee");
         vm.prank(alice);
-        dca.cancelPlan(a, alice);
+        dca.cancelPlan(a, false, alice);
         assertApproxEqAbs(usdt.balanceOf(reserve), 6e18, 1, "5% of 120 interest");
     }
 
@@ -163,7 +163,7 @@ contract SmartDCA_AccountingTest is SmartDCABase {
         hub.setPricePerShare(1.01e18);
         dca.setFeeRate(2_000);
         vm.prank(alice);
-        dca.cancelPlan(planId, alice);
+        dca.cancelPlan(planId, false, alice);
         assertApproxEqAbs(usdt.balanceOf(reserve), 2.4e18, 1e6, "20% of 12 USDT interest");
     }
 
@@ -198,7 +198,7 @@ contract SmartDCA_AccountingTest is SmartDCABase {
         uint256 bobPlan = _create(bob, 300e18, 3);
         assertEq(_plan(bobPlan).scheduleFirstRound, DEC);
         vm.prank(bob);
-        dca.cancelPlan(bobPlan, bob);
+        dca.cancelPlan(bobPlan, false, bob);
         assertEq(usdt.balanceOf(bob), 300e18);
     }
 }

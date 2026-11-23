@@ -79,7 +79,7 @@ contract SmartDCA_LensTest is SmartDCABase {
         uint256 matured = _create(alice, 100e18, 2);
         uint256 cancelled = _create(bob, 100e18, 2);
         vm.prank(bob);
-        dca.cancelPlan(cancelled, bob);
+        dca.cancelPlan(cancelled, false, bob);
         _runRound(1);
         _runRound(1);
 
@@ -261,7 +261,7 @@ contract SmartDCA_LensTest is SmartDCABase {
         SmartDCALens.PlanView memory v = lens.getPlan(dca, a);
         uint256 fee = ((v.stableWaiting - v.principalPerBuy * v.buysLeft) * dca.feeRateBps()) / 10_000;
         vm.prank(alice);
-        dca.cancelPlan(a, alice);
+        dca.cancelPlan(a, false, alice);
         assertEq(usdt.balanceOf(alice), v.stableWaiting - fee);
     }
 
@@ -334,7 +334,7 @@ contract SmartDCA_LensTest is SmartDCABase {
         assertEq(va.buysSettled, 2);
 
         vm.prank(bob);
-        dca.cancelPlan(b, bob);
+        dca.cancelPlan(b, false, bob);
         SmartDCALens.PlanView memory vb = lens.getPlan(dca, b);
         assertEq(uint8(vb.state), uint8(SmartDCALens.PlanState.Cancelled));
         assertEq(vb.buysSettled, 2);

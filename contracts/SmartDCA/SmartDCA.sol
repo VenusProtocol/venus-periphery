@@ -312,7 +312,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
-    function cancelPlan(uint256 planId, address receiver) external nonReentrant whenNotPaused {
+    function cancelPlan(uint256 planId, bool toCore, address receiver) external nonReentrant whenNotPaused {
         Plan storage plan = _ownedActivePlan(planId);
         if (receiver == address(0)) revert ZeroAddress();
         uint32 pairId = plan.pairId;
@@ -347,13 +347,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         }
         IERC20(pair.stable).safeTransfer(receiver, stableRedeemed - fee);
 
-        uint256 assetAmount;
-        if (assetUnitsOwed != 0) {
-            assetAmount = _redeem(yieldSources[pairId][Side.Asset], pair.asset, assetUnitsOwed);
-            IERC20(pair.asset).safeTransfer(receiver, assetAmount);
-        }
+        uint256 assetAmount = _payAsset(pairId, pair, assetUnitsOwed, toCore, receiver);
 
-        emit PlanCancelled(planId, receiver, stableRedeemed - fee, fee, assetAmount);
+        emit PlanCancelled(planId, receiver, stableRedeemed - fee, fee, toCore, assetAmount);
     }
 
     /// @inheritdoc ISmartDCA
@@ -374,17 +370,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         yieldSources[plan.pairId][Side.Stable].unitsIssued -=
             plan.scheduleStableUnits - plan.stableUnitsPerBuy * plan.scheduleBuys;
 
-        uint256 amount;
-        if (assetUnitsOwed != 0) {
-            YieldSource storage assetSource = yieldSources[plan.pairId][Side.Asset];
-            if (toCore) {
-                if (assetSource.kind != SourceKind.Core) revert NotCoreSource();
-                amount = _transferUnits(assetSource, assetUnitsOwed, receiver);
-            } else {
-                amount = _redeem(assetSource, pair.asset, assetUnitsOwed);
-                IERC20(pair.asset).safeTransfer(receiver, amount);
-            }
-        }
+        uint256 amount = _payAsset(plan.pairId, pair, assetUnitsOwed, toCore, receiver);
 
         emit PlanClaimed(planId, receiver, toCore, amount);
     }
@@ -875,6 +861,26 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         s.unitsIssued -= units;
         s.sharesHeld -= shares;
         return SmartDCAAdminLib.sourceRedeem(s, token, shares);
+    }
+
+    /// @dev Pays `receiver` `units` of the pair's asset side, as Core vTokens with `toCore` or else as the asset, and
+    ///      returns the vTokens or asset amount paid. Pays nothing for 0 units. Reverts with `NotCoreSource` for
+    ///      `toCore` when the asset side is not in Core.
+    function _payAsset(
+        uint32 pairId,
+        Pair storage pair,
+        uint256 units,
+        bool toCore,
+        address receiver
+    ) internal returns (uint256 amount) {
+        if (units == 0) return 0;
+        YieldSource storage assetSource = yieldSources[pairId][Side.Asset];
+        if (toCore) {
+            if (assetSource.kind != SourceKind.Core) revert NotCoreSource();
+            return _transferUnits(assetSource, units, receiver);
+        }
+        amount = _redeem(assetSource, pair.asset, units);
+        IERC20(pair.asset).safeTransfer(receiver, amount);
     }
 
     /// @dev Sends `to` the source shares behind `units` of `s` (Hub shares or vTokens) and returns them

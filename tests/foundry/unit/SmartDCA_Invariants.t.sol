@@ -106,10 +106,10 @@ contract SmartDCAHandler is Test {
         if (ok) ++withdraws;
     }
 
-    function cancelPlan(uint256 planSeed) external {
+    function cancelPlan(uint256 planSeed, bool toCore) external {
         if (ids.length == 0) return;
         uint256 id = ids[planSeed % ids.length];
-        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.cancelPlan, (id, _owner(id))));
+        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.cancelPlan, (id, toCore, _owner(id))));
         if (ok) ++cancels;
     }
 

@@ -48,7 +48,7 @@ contract SmartDCA_RoundsTest is SmartDCABase {
 
         // Carol is not in this round, so she can still leave
         vm.prank(carol);
-        dca.cancelPlan(carolId, carol);
+        dca.cancelPlan(carolId, false, carol);
         assertApproxEqAbs(usdt.balanceOf(carol), 300e18, 1);
 
         vm.prank(keeper);
@@ -594,7 +594,7 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         vm.expectRevert(bytes("Pausable: paused"));
         dca.withdrawBought(id, type(uint256).max, alice);
         vm.expectRevert(bytes("Pausable: paused"));
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         vm.expectRevert(bytes("Pausable: paused"));
         dca.claimPlan(id, false, alice);
         vm.stopPrank();

@@ -76,7 +76,7 @@ contract SmartDCA_GovernanceTest is SmartDCABase {
         _runRound(1);
         assertEq(_pair().lastSettledRound, NOV);
         vm.prank(alice);
-        dca.cancelPlan(planId, alice);
+        dca.cancelPlan(planId, false, alice);
         assertEq(uint8(_plan(planId).status), uint8(ISmartDCA.PlanStatus.Cancelled));
     }
 
@@ -212,7 +212,7 @@ contract SmartDCA_GovernanceTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
         dca.withdrawBought(planId, type(uint256).max, stranger);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
-        dca.cancelPlan(planId, stranger);
+        dca.cancelPlan(planId, false, stranger);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
         dca.claimPlan(planId, false, stranger);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
@@ -222,13 +222,13 @@ contract SmartDCA_GovernanceTest is SmartDCABase {
 
     function test_cancelledPlanRefusesEveryCall() public {
         vm.startPrank(alice);
-        dca.cancelPlan(planId, alice);
+        dca.cancelPlan(planId, false, alice);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
         dca.topUpPlan(planId, 1200e18);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
         dca.withdrawBought(planId, type(uint256).max, alice);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
-        dca.cancelPlan(planId, alice);
+        dca.cancelPlan(planId, false, alice);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
         dca.claimPlan(planId, false, alice);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
@@ -242,7 +242,7 @@ contract SmartDCA_GovernanceTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.withdrawBought(planId, type(uint256).max, address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
-        dca.cancelPlan(planId, address(0));
+        dca.cancelPlan(planId, false, address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.transferPlan(planId, address(0));
         vm.stopPrank();

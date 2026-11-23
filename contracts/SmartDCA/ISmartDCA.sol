@@ -230,13 +230,15 @@ interface ISmartDCA {
      * @param receiver Address paid
      * @param stableAmount Stable amount paid to `receiver`, after `fee`
      * @param fee Stable amount sent to the Reserve
-     * @param assetAmount Bought asset paid to `receiver`
+     * @param toCore True when the bought asset was paid as the asset's Core vToken, false when paid as the asset
+     * @param assetAmount vTokens or asset amount paid to `receiver`
      */
     event PlanCancelled(
         uint256 indexed planId,
         address indexed receiver,
         uint256 stableAmount,
         uint256 fee,
+        bool toCore,
         uint256 assetAmount
     );
 
@@ -579,7 +581,7 @@ interface ISmartDCA {
     /// @notice The withdraw asks for more asset units than the plan has bought.
     error WithdrawExceedsBought(uint256 requestedUnits, uint256 availableUnits);
 
-    /// @notice A claim to Core was asked for while the asset is not held in Core.
+    /// @notice A claim or cancel paid as vTokens was asked for while the asset is not held in Core.
     error NotCoreSource();
 
     /// @notice A Core vToken returned a non-zero error code.
@@ -649,11 +651,16 @@ interface ISmartDCA {
      * @dev The fee is `feeRateBps` of what the waiting stable redeems above its principal, so a cancel never takes a
      *      fee from principal. Reverts if the plan is in a round past its lock time that has not settled, or if
      *      every buy has settled (claim it instead).
+     *
+     *      With `toCore`, the bought asset is paid as the asset's Core vTokens; reverts with `NotCoreSource` if the
+     *      asset side is not in Core and the plan has bought asset. Use it when Core cannot redeem the asset, for
+     *      example with too little cash or redeem paused: without `toCore` the whole cancel reverts, the stable too.
      * @param planId The plan
+     * @param toCore True to pay the bought asset as vTokens, false to pay it as the asset
      * @param receiver Address paid
      * @custom:event Emits PlanCancelled, and CancelFeeCollected when the fee is not zero.
      */
-    function cancelPlan(uint256 planId, address receiver) external;
+    function cancelPlan(uint256 planId, bool toCore, address receiver) external;
 
     /**
      * @notice Pays `receiver` the asset of a plan whose buys have all settled, and closes it.

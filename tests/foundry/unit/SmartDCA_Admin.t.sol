@@ -174,7 +174,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.PairDisabled.selector);
         dca.topUpPlan(id, 120e18);
         // Leaving still works
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         vm.stopPrank();
     }
 
@@ -213,7 +213,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
         assertEq(_plan(id).scheduleStableUnits, 1200e24);
 
         vm.prank(alice);
-        dca.cancelPlan(id, alice);
+        dca.cancelPlan(id, false, alice);
         assertEq(usdt.balanceOf(alice), 1200e18);
     }
 
@@ -250,7 +250,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
 
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
-        dca.cancelPlan(btcPlan, alice);
+        dca.cancelPlan(btcPlan, false, alice);
     }
 
     function test_setYieldSource_blockedWhilePairLocked() public {
