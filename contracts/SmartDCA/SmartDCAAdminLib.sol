@@ -158,8 +158,9 @@ library SmartDCAAdminLib {
     /**
      * @notice Runs a keeper's signed swap of `stableIn` of the pair's stable through SwapHelper, for `swapRoundPart`
      * @dev Same flow as `LeverageStrategiesManager._performSwap`: the signed multicall swaps what SwapHelper holds and
-     *      sends the asset back. Reverts if the route touches a router not on `allowedRouters`, if any of the part is
-     *      left unsold, or if the asset that arrived, counted as a balance change, is below `minOut`.
+     *      sends the asset back. Reverts if the route touches a router not on `allowedRouters`, sweeps a token other
+     *      than the pair's stable or asset, leaves any of the part unsold, or returns less asset than `minOut`,
+     *      counted as a balance change.
      * @param allowedRouters Routers a keeper swap may call or approve
      * @param pair The pair
      * @param swapHelper SwapHelper that runs the multicall
@@ -176,9 +177,9 @@ library SmartDCAAdminLib {
         uint256 minOut,
         bytes calldata swapData
     ) external returns (uint256 assetOut) {
-        _checkSwapRoute(allowedRouters, swapData);
         IERC20 stable = IERC20(pair.stable);
         IERC20 asset = IERC20(pair.asset);
+        _checkSwapRoute(allowedRouters, address(stable), address(asset), swapData);
         // Stable held here and in SwapHelper together only falls by what the swap sold, so a refund to SmartDCA,
         // a part left in SwapHelper and dust moved between the two all show as unspent
         uint256 stableHeldBefore = stable.balanceOf(address(this)) + stable.balanceOf(swapHelper);
@@ -319,12 +320,22 @@ library SmartDCAAdminLib {
 
     /**
      * @notice Checks a keeper's swap before it runs: it must be a `SwapHelper.multicall` whose `genericCall` targets
-     *         and `approveMax` spenders are all on `allowedRouters`, and whose `sweep` calls all send to SmartDCA
+     *         and `approveMax` spenders are all on `allowedRouters`, and whose `sweep` calls all send the pair's
+     *         stable or asset to SmartDCA
      * @dev Any other inner call reverts. The library runs through DELEGATECALL, so `address(this)` is SmartDCA.
+     *      The sweep token check stops a route signed for one pair from running as a part of another pair that sells
+     *      the same stable: a USDT to ETH part whose route sweeps BTCB reverts here.
      * @param allowedRouters Routers a keeper swap may call or approve
+     * @param stable The pair's stable
+     * @param asset The pair's asset
      * @param swapData The keeper's `SwapHelper.multicall` calldata
      */
-    function _checkSwapRoute(mapping(address => bool) storage allowedRouters, bytes calldata swapData) private view {
+    function _checkSwapRoute(
+        mapping(address => bool) storage allowedRouters,
+        address stable,
+        address asset,
+        bytes calldata swapData
+    ) private view {
         if (swapData.length < 4 || bytes4(swapData[:4]) != SwapHelper.multicall.selector) {
             revert ISmartDCA.SwapCallNotAllowed();
         }
@@ -340,7 +351,12 @@ library SmartDCAAdminLib {
             } else if (selector == SwapHelper.approveMax.selector) {
                 address spender = _argument(data, 1);
                 if (!allowedRouters[spender]) revert ISmartDCA.RouterNotAllowed(spender);
-            } else if (selector != SwapHelper.sweep.selector || _argument(data, 1) != address(this)) {
+            } else if (selector == SwapHelper.sweep.selector) {
+                address token = _argument(data, 0);
+                if (_argument(data, 1) != address(this) || (token != stable && token != asset)) {
+                    revert ISmartDCA.SwapCallNotAllowed();
+                }
+            } else {
                 revert ISmartDCA.SwapCallNotAllowed();
             }
         }

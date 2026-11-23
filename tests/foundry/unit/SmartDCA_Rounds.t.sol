@@ -621,4 +621,23 @@ contract SmartDCA_RoundsTest is SmartDCABase {
     function _multicall(bytes[] memory calls) internal pure returns (bytes memory) {
         return abi.encodeCall(MockSwapHelper.multicall, (calls, 0, bytes32(0), ""));
     }
+
+    /// @dev A route may sweep only the pair's stable or asset, so a route that sweeps another token reverts
+    function test_swapRoundPart_revertsOnASweepOfAnotherToken() public {
+        _create(alice, 1200e18, 12);
+        MockERC20 eth = new MockERC20("ETH", "ETH", 18);
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeCall(
+            MockSwapHelper.genericCall,
+            (address(swapHelper), abi.encodeCall(MockSwapHelper.swap, (pairId)))
+        );
+        calls[1] = abi.encodeCall(MockSwapHelper.sweep, (address(eth), address(dca)));
+        bytes memory data = _multicall(calls);
+        vm.warp(NOV_LOCK);
+        vm.startPrank(keeper);
+        dca.startRound(pairId, 1);
+        vm.expectRevert(ISmartDCA.SwapCallNotAllowed.selector);
+        dca.swapRoundPart(pairId, ANY_QUOTE, data);
+        vm.stopPrank();
+    }
 }

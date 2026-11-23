@@ -509,7 +509,8 @@ interface ISmartDCA {
     error RouterNotAllowed(address router);
 
     /// @notice The keeper swap data is not a `SwapHelper.multicall`, has a call other than `genericCall`,
-    ///         `approveMax` or `sweep`, or sweeps to an address other than SmartDCA.
+    ///         `approveMax` or `sweep`, or sweeps a token other than the pair's stable or asset, or to an address
+    ///         other than SmartDCA.
     error SwapCallNotAllowed();
 
     /// @notice The swap did not sell the whole part: in a keeper swap some of the stable came back to SmartDCA or
@@ -694,7 +695,8 @@ interface ISmartDCA {
      * @dev Each part sells an even share of what is left, `stableToSwap / parts left`, so the last part sells the
      *      rest. The swap must return at least `quotedOut` less `maxSlippageBps`, and the whole part must be sold:
      *      no stable may come back to SmartDCA or stay in SwapHelper. Every `genericCall` target and `approveMax`
-     *      spender in the multicall must be on `allowedRouters`, and every `sweep` must send to SmartDCA.
+     *      spender in the multicall must be on `allowedRouters`, and every `sweep` must send the pair's stable or
+     *      asset to SmartDCA.
      * @param pairId The pair
      * @param quotedOut Fresh quote for this part's stable, in the asset's decimals, with pool fees already taken;
      *        must not be 0
