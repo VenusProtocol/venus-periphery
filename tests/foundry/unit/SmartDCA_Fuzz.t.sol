@@ -5,8 +5,9 @@ pragma solidity 0.8.28;
 
 import { ISmartDCA } from "../../../contracts/SmartDCA/ISmartDCA.sol";
 import { SmartDCALens } from "../../../contracts/SmartDCA/SmartDCALens.sol";
+import { SmartDCAMath } from "../../../contracts/SmartDCA/SmartDCAMath.sol";
 import { MockERC20 } from "./mocks/MockERC20.sol";
-import { MockPancakeV3Router, MockVToken } from "./mocks/SmartDCAMocks.sol";
+import { MockHub, MockPancakeV3Router, MockVToken } from "./mocks/SmartDCAMocks.sol";
 import { SmartDCABase } from "./SmartDCABase.t.sol";
 
 /// @notice Random walks over two pairs that share USDT: plans of any size come and go, rounds run late or on
@@ -253,5 +254,109 @@ contract SmartDCA_FuzzTest is SmartDCABase {
             p.assetPerUnitIndex,
             p.assetPerPrincipalIndex
         ) = dca.pairs(pid);
+    }
+
+    // ----- the walk with every action -----
+
+    MockHub internal hub2;
+    /// @dev Successful governance calls by selector
+    mapping(bytes4 => uint256) internal govOk;
+
+    function _routesAndSecondHub() internal {
+        hub2 = new MockHub(address(usdt));
+        registry.set(address(hub2), true);
+        MockPancakeV3Router router = new MockPancakeV3Router();
+        router.setRate(1e18 / 100_000);
+        dca.setFallbackRoute(pairId, address(router), abi.encodePacked(address(usdt), uint24(500), address(btcb)));
+        dca.setFallbackRoute(ethPairId, address(router), abi.encodePacked(address(usdt), uint24(500), address(eth)));
+        dca.setMaxSlippage(100);
+    }
+
+    /// @notice The random walk with `forceBuy`, resplit, transfer, pause, stable moves between two Hubs, sweeps of
+    ///         every token, and jumps long enough to overrun. After every step the pair checks hold, both Hubs hold
+    ///         exactly the shares the pairs track, and the plans' pending stable in a started round adds up to the
+    ///         round's net. At the end every plan still exits.
+    function testFuzz_walkWithEveryAction(uint256 seed_) public {
+        _routesAndSecondHub();
+        seed = seed_;
+        time = block.timestamp;
+        address sweepTo = makeAddr("sweepTo");
+        for (uint256 k; k < 80; ++k) {
+            uint256 pick = _rnd(14);
+            uint32 pid = _rnd(2) == 0 ? pairId : ethPairId;
+            if (pick < 8) _randomStep();
+            else if (pick == 8) _govCall(abi.encodeCall(dca.forceBuy, (pid, uint8(1 + _rnd(3)))));
+            else if (pick == 9) _call(keeper, abi.encodeCall(dca.resplitRound, (pid, uint8(1 + _rnd(4)))));
+            else if (pick == 10 && ids.length != 0) {
+                uint256 id = ids[_rnd(ids.length)];
+                _call(_plan(id).owner, abi.encodeCall(dca.transferPlan, (id, users[_rnd(4)])));
+            } else if (pick == 11) {
+                (, address current, , ) = dca.yieldSources(pairId, ISmartDCA.Side.Stable);
+                address next = current == address(hub) ? address(hub2) : address(hub);
+                _govCall(
+                    abi.encodeCall(dca.setYieldSource, (pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Hub, next))
+                );
+            } else if (pick == 12) {
+                address[5] memory tokens = [address(usdt), address(btcb), address(hub), address(hub2), address(vBTC)];
+                _govCall(abi.encodeCall(dca.sweepToken, (tokens[_rnd(5)], sweepTo)));
+            } else {
+                dca.pause();
+                _randomStep();
+                dca.unpause();
+                _warp(20 days + _rnd(50 days));
+            }
+            _checkPair(pairId);
+            _checkPair(ethPairId);
+            _checkPending(pairId);
+            _checkPending(ethPairId);
+            _checkStableShares();
+        }
+        _drain();
+        assertEq(panics, 0, "arithmetic panic");
+    }
+
+    /// @notice One fixed seed reaches `forceBuy` and a source move, so the walk above is known to exercise them
+    function test_walkWithEveryAction_reachesForceBuyAndSourceMoves() public {
+        testFuzz_walkWithEveryAction(42);
+        assertGt(govOk[dca.forceBuy.selector], 0, "forceBuy never ran");
+        assertGt(govOk[dca.setYieldSource.selector], 0, "no source move ran");
+    }
+
+    function _govCall(bytes memory data) internal {
+        (bool ok, bytes memory ret) = address(dca).call(data);
+        if (ok) ++govOk[bytes4(data)];
+        else _countPanic(ret);
+    }
+
+    /// @dev In a started round, the plans' pending stable adds up to the round's net, less each plan's rounding
+    function _checkPending(uint32 pid) internal view {
+        uint32 round = _pairOf(pid).lastSettledRound + 1;
+        (uint8 total, , , , , uint256 net, , , , , , , , ) = dca.rounds(pid, round);
+        if (total == 0) return;
+        uint256 sum;
+        uint256 n;
+        for (uint256 i; i < ids.length; ++i) {
+            ISmartDCA.Plan memory p = _plan(ids[i]);
+            if (p.pairId != pid || p.status != ISmartDCA.PlanStatus.Active) continue;
+            if (!SmartDCAMath.inRunningRound(round, p.scheduleFirstRound, p.scheduleBuys, true)) continue;
+            sum += lens.getPlan(dca, ids[i]).stablePending;
+            ++n;
+        }
+        assertLe(sum, net, "pending above the round's net");
+        assertGe(sum + 2 * n + 2, net, "pending below the round's net");
+    }
+
+    /// @dev Both USDT Hubs hold exactly the shares the two pairs track
+    function _checkStableShares() internal view {
+        uint256 inHub;
+        uint256 inHub2;
+        uint32[2] memory pids = [pairId, ethPairId];
+        for (uint256 i; i < 2; ++i) {
+            (, address src, uint256 shares, ) = dca.yieldSources(pids[i], ISmartDCA.Side.Stable);
+            if (src == address(hub)) inHub += shares;
+            else inHub2 += shares;
+        }
+        assertEq(hub.balanceOf(address(dca)), inHub, "hub shares");
+        assertEq(hub2.balanceOf(address(dca)), inHub2, "hub2 shares");
     }
 }

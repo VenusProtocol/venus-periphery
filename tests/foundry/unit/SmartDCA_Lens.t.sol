@@ -3,8 +3,10 @@ pragma solidity 0.8.28;
 
 // solhint-disable func-name-mixedcase, ordering, import-path-check
 
+import { ISmartDCA } from "../../../contracts/SmartDCA/ISmartDCA.sol";
 import { SmartDCALens } from "../../../contracts/SmartDCA/SmartDCALens.sol";
 import { SmartDCAMath } from "../../../contracts/SmartDCA/SmartDCAMath.sol";
+import { MockHub } from "./mocks/SmartDCAMocks.sol";
 import { SmartDCABase } from "./SmartDCABase.t.sol";
 
 /// @notice PRD worked example 2.3 through the lens: 1,200 USDT x 12, fee 5%, unit value 1.001
@@ -236,5 +238,113 @@ contract SmartDCA_LensTest is SmartDCABase {
         assertFalse(v.enabled);
         assertTrue(v.resplitUsed);
         assertEq(v.parts, 3);
+    }
+
+    // ----- lens values against what the contract pays -----
+
+    /// @dev `assetValue` is exactly what a full withdrawal pays
+    function test_getPlan_assetValueEqualsWithdrawAll() public {
+        uint256 a = _create(alice, 1234e18, 7);
+        _create(bob, 999e18, 5);
+        _runRound(3);
+        vBTC.setExchangeRate(2.013e26);
+        uint256 shown = lens.getPlan(dca, a).assetValue;
+        assertEq(_withdrawAll(alice, a), shown);
+    }
+
+    /// @dev `stableWaiting` is exactly what a cancel redeems, before its fee
+    function test_getPlan_stableWaitingEqualsCancelRedeem() public {
+        uint256 a = _create(alice, 1234e18, 7);
+        _create(bob, 999e18, 5);
+        _runRound(1);
+        hub.setPricePerShare(1.0137e18);
+        SmartDCALens.PlanView memory v = lens.getPlan(dca, a);
+        uint256 fee = ((v.stableWaiting - v.principalPerBuy * v.buysLeft) * dca.feeRateBps()) / 10_000;
+        vm.prank(alice);
+        dca.cancelPlan(a, alice);
+        assertEq(usdt.balanceOf(alice), v.stableWaiting - fee);
+    }
+
+    /// @dev Withdrawing exactly the shown `assetValue` after the asset moved to a Hub never reverts
+    function testFuzz_withdrawBought_theShownValueAfterASourceMove(uint256 price) public {
+        price = bound(price, 0.5e18, 3e18);
+        MockHub btcHub = new MockHub(address(btcb));
+        registry.set(address(btcHub), true);
+        uint256 a = _create(alice, 1200e18, 12);
+        _create(bob, 777e18, 7);
+        _runRound(1);
+        btcHub.setPricePerShare(price);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Hub, address(btcHub));
+
+        uint256 value = lens.getPlan(dca, a).assetValue;
+        vm.prank(alice);
+        dca.withdrawBought(a, value, alice);
+    }
+
+    /// @dev The next buy shown before the lock is what the plan has pending once the round starts, for plans that
+    ///      joined at different share prices
+    function test_getPlan_nextBuyNetMatchesPendingOnceStarted() public {
+        uint256 a = _create(alice, 1200e18, 12);
+        hub.setPricePerShare(1.1e18);
+        uint256 b = _create(bob, 1100e18, 10);
+        hub.setPricePerShare(1.12e18);
+
+        SmartDCALens.PlanView memory pa = lens.getPlan(dca, a);
+        SmartDCALens.PlanView memory pb = lens.getPlan(dca, b);
+        vm.warp(NOV_LOCK);
+        vm.prank(keeper);
+        dca.startRound(pairId, 1);
+
+        assertApproxEqAbs(lens.getPlan(dca, a).stablePending, pa.nextBuyNet, 2, "alice");
+        assertApproxEqAbs(lens.getPlan(dca, b).stablePending, pb.nextBuyNet, 2, "bob");
+        assertEq(lens.getPlan(dca, a).buysLeft, pa.buysLeft - 1, "running buy no longer left");
+    }
+
+    /// @dev While November runs past December's 15th, a plan for December shows all its buys left and nothing
+    ///      pending, and the pair still shows November executing
+    function test_getPlan_duringAnOverrunForTheRoundAfter() public {
+        _create(alice, 1200e18, 12);
+        vm.warp(NOV_LOCK);
+        vm.prank(keeper);
+        dca.startRound(pairId, 1);
+        vm.warp(dca.roundStart(DEC) + 1 days);
+        uint256 b = _create(bob, 300e18, 3);
+
+        SmartDCALens.PlanView memory v = lens.getPlan(dca, b);
+        assertFalse(v.inRunningRound);
+        assertEq(v.buysLeft, 3);
+        assertEq(v.stablePending, 0);
+        assertEq(v.firstRound, DEC);
+
+        SmartDCALens.PairView memory pv = lens.getPair(dca, pairId);
+        assertEq(pv.round, NOV);
+        assertEq(uint8(pv.state), uint8(SmartDCALens.PairState.Executing));
+    }
+
+    /// @dev A matured plan shows no buys left and no next buy; a cancelled one keeps its schedule window
+    function test_getPlan_maturedAndCancelledFields() public {
+        uint256 a = _create(alice, 200e18, 2);
+        uint256 b = _create(bob, 1200e18, 12);
+        _runRound(1);
+        _runRound(1);
+        SmartDCALens.PlanView memory va = lens.getPlan(dca, a);
+        assertEq(uint8(va.state), uint8(SmartDCALens.PlanState.Matured));
+        assertEq(va.buysLeft, 0);
+        assertEq(va.nextBuyStable, 0);
+        assertEq(va.buysSettled, 2);
+
+        vm.prank(bob);
+        dca.cancelPlan(b, bob);
+        SmartDCALens.PlanView memory vb = lens.getPlan(dca, b);
+        assertEq(uint8(vb.state), uint8(SmartDCALens.PlanState.Cancelled));
+        assertEq(vb.buysSettled, 2);
+        assertEq(vb.totalBuys, 12);
+        assertEq(vb.firstRound, NOV);
+        assertEq(vb.lastRound, NOV + 11);
+    }
+
+    function test_unknownIdsReadAsZero() public view {
+        assertEq(lens.getPlan(dca, 999).owner, address(0));
+        assertEq(lens.getPair(dca, 999).stable, address(0));
     }
 }
