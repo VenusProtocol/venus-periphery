@@ -426,6 +426,13 @@ interface ISmartDCA {
     event MaxSlippageUpdated(uint16 oldMaxSlippageBps, uint16 newMaxSlippageBps);
 
     /**
+     * @notice Emitted when the most a keeper swap's `minOut` can be below the oracle changes
+     * @param oldMaxOracleDeviationBps Previous value, in basis points
+     * @param newMaxOracleDeviationBps New value, in basis points
+     */
+    event MaxOracleDeviationUpdated(uint16 oldMaxOracleDeviationBps, uint16 newMaxOracleDeviationBps);
+
+    /**
      * @notice Emitted when the most parts one `startRound` or `resplitRound` call can split a round into changes
      * @param oldMaxParts Previous value
      * @param newMaxParts New value
@@ -564,6 +571,9 @@ interface ISmartDCA {
     /// @notice The swap returned less than `minOut`: the keeper's quote less `maxSlippageBps` in a keeper swap, or the
     ///         oracle value of the part less `fallbackSlippageBps` in `forceBuy`.
     error SlippageExceeded(uint256 assetOut, uint256 minOut);
+
+    /// @notice A keeper swap's `minOut` is more than `maxOracleDeviationBps` below the oracle value of the part.
+    error QuoteBelowOracle(uint256 minOut, uint256 floor);
 
     /// @notice The number of buys is outside `minBuys` to `maxBuys`.
     error InvalidBuys(uint8 buys, uint8 minBuys, uint8 maxBuys);
@@ -721,7 +731,9 @@ interface ISmartDCA {
     /**
      * @notice Swaps the next part of the running round through SwapHelper.
      * @dev Each part sells an even share of what is left, `stableToSwap / parts left`, so the last part sells the
-     *      rest. The swap must return at least `quotedOut` less `maxSlippageBps`, and the whole part must be sold:
+     *      rest. `quotedOut` less `maxSlippageBps` is the swap's `minOut`, and it may be at most
+     *      `maxOracleDeviationBps` below the oracle value of the part (`QuoteBelowOracle`). The swap must return at
+     *      least `minOut`, and the whole part must be sold:
      *      no stable may come back to SmartDCA or stay in SwapHelper. Every `genericCall` target and `approveMax`
      *      spender in the multicall must be on `allowedRouters`, and every `sweep` must send the pair's stable or
      *      asset to SmartDCA.
@@ -760,17 +772,17 @@ interface ISmartDCA {
      *      `RoundNotStarted`, carrying the time it opens. For a crisis such as the keeper or the backend being down. The swap needs no signed route:
      *      it approves only the part's stable, calls the router's `exactInput`, and reverts if the router took less
      *      than the part or if the asset that arrived is below the oracle value of the part less
-     *      `fallbackSlippageBps`. `parts = 1` runs the whole round in one call; a large round takes more parts so the
-     *      pool can recover between them. The keeper can keep running the same round, since both share its part
-     *      count, and a round whose parts are all swapped only settles. The router is the PancakeSwap V3 SwapRouter,
-     *      and `fallbackSlippageBps` starts at 0.5%.
+     *      `fallbackSlippageBps`. `parts = 1` runs the whole round in one call; a large round can take more parts, sent
+     *      apart, so each one moves the pool less. The keeper can keep running the same round, since both share its
+     *      part count, and a round whose parts are all swapped only settles. The router is the PancakeSwap V3
+     *      SwapRouter, and `fallbackSlippageBps` starts at 0.5%.
      *
      *      On a round that has started, `parts` below the parts left cuts the parts left to `parts`; a higher value
      *      or 0 keeps them. A round the keeper started in 50 parts finishes in one call with `parts = 1`, and calling
      *      again with the same `parts` swaps the next part.
      * @param pairId The pair
      * @param parts Parts to split the round into, 1 to `maxParts`; on a started round, the most parts to leave
-     * @custom:access Controlled by AccessControlManager (Guardian and Normal Timelock)
+     * @custom:access Controlled by AccessControlManager (Guardian)
      * @custom:event On the first part, the events of `startRound`. Then RoundResplit when it cuts the parts left,
      *      RoundPartSwapped, and RoundSettled after the last part.
      */
@@ -814,6 +826,15 @@ interface ISmartDCA {
      * @custom:event Emits MaxSlippageUpdated.
      */
     function setMaxSlippage(uint16 newMaxSlippageBps) external;
+
+    /**
+     * @notice Sets how far below the oracle value of a part a keeper swap's `minOut` can be.
+     * @dev 10,000 turns the check off, and the oracle is then not read.
+     * @param newMaxOracleDeviationBps New value in basis points, up to 10,000
+     * @custom:access Controlled by AccessControlManager
+     * @custom:event Emits MaxOracleDeviationUpdated.
+     */
+    function setMaxOracleDeviation(uint16 newMaxOracleDeviationBps) external;
 
     /**
      * @notice Sets the most parts one `startRound` or `resplitRound` call can split a round into.

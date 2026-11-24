@@ -135,7 +135,7 @@ contract Fork_SmartDCATest is Test {
 
     /// @dev The Normal Timelock holds the ACM admin role, so it grants this test the setters it calls
     function _grantAdminCalls() internal {
-        string[9] memory sigs = [
+        string[10] memory sigs = [
             "setYieldSource(uint32,uint8,uint8,address)",
             "setMinAmountPerBuy(address,uint256)",
             "addPair(address,address,uint8,address,uint8,address)",
@@ -144,7 +144,8 @@ contract Fork_SmartDCATest is Test {
             "sweepToken(address,address)",
             "setFallbackRoute(uint32,address,bytes)",
             "forceBuy(uint32,uint8)",
-            "setAllowedRouter(address,bool)"
+            "setAllowedRouter(address,bool)",
+            "setMaxOracleDeviation(uint16)"
         ];
         vm.startPrank(COMPTROLLER_ADMIN);
         for (uint256 i; i < sigs.length; ++i) {
@@ -307,6 +308,34 @@ contract Fork_SmartDCATest is Test {
 
         (, uint8 partsDone, , , , , , , , , , , , ) = dca.rounds(pairId, _lastSettled(pairId) + 1);
         assertEq(partsDone, 1, "filled on the fresh quote");
+    }
+
+    /// @dev Someone pushes the pool far from the oracle before the keeper quotes: even a fresh quote on the moved
+    ///      pool is more than 3% below the oracle and reverts, until governance widens the band
+    function test_swapRoundPart_oracleBandStopsAFreshQuoteOnAPoolMovedFar() public onlyFork {
+        _create(alice, pairId, DEPOSIT, 2);
+        _toLock(pairId);
+        vm.prank(keeper);
+        dca.startRound(pairId, 1);
+
+        address whale = makeAddr("whale");
+        deal(USDT, whale, 20_000_000e18);
+        vm.startPrank(whale);
+        IERC20(USDT).approve(PCS_V3_ROUTER, type(uint256).max);
+        IPancakeV3Router(PCS_V3_ROUTER).exactInput(
+            IPancakeV3Router.ExactInputParams(routeOf[pairId], whale, block.timestamp, 20_000_000e18, 0)
+        );
+        vm.stopPrank();
+
+        uint256 freshQuote = _quote(pairId);
+        bytes memory swapData = _swapData(pairId);
+        vm.prank(keeper);
+        vm.expectPartialRevert(ISmartDCA.QuoteBelowOracle.selector);
+        dca.swapRoundPart(pairId, freshQuote, swapData);
+
+        dca.setMaxOracleDeviation(10_000);
+        vm.prank(keeper);
+        dca.swapRoundPart(pairId, freshQuote, swapData);
     }
 
     /// @dev The route is in the swap data, so the backend can change it between parts with no governance call
@@ -531,12 +560,24 @@ contract Fork_SmartDCATest is Test {
         planId = dca.createPlan(pid, amount, buys, user);
     }
 
-    /// @dev Moves time and blocks to the pair's lock time, so Core and the Hub accrue interest on the way
+    /// @dev Moves time and blocks to the pair's lock time, so Core and the Hub accrue interest on the way. The
+    ///      oracle's feeds would go stale on the warp, so its prices are kept at the fork block's, where the pools
+    ///      still sit as nothing trades in between.
     function _toLock(uint32 pid) internal {
+        _pinOraclePrices();
         uint256 lock = dca.nextLockTime(pid);
         if (block.timestamp < lock) {
             vm.roll(block.number + ((lock - block.timestamp) * BLOCKS_PER_20_SECONDS) / 20);
             vm.warp(lock);
+        }
+    }
+
+    /// @dev Keeps the oracle's price of every pair token at its current value; a second call keeps the same values
+    function _pinOraclePrices() internal {
+        address[6] memory tokens = [USDT, USDC, U, BTCB, ETH, WBNB];
+        for (uint256 i; i < tokens.length; ++i) {
+            uint256 price = IOraclePrice(ORACLE).getPrice(tokens[i]);
+            vm.mockCall(ORACLE, abi.encodeCall(IOraclePrice.getPrice, (tokens[i])), abi.encode(price));
         }
     }
 

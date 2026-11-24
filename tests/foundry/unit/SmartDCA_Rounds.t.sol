@@ -316,7 +316,8 @@ contract SmartDCA_RoundsTest is SmartDCABase {
 
     /// @dev minOut = quotedOut x 9,990 / 10,000, rounded down. The swap pays 0.001 BTCB; a quote of 1,001,001,001,001,002
     ///      wei gives minOut exactly 0.001 and fills, one wei more of quote makes minOut 1 wei above the fill and
-    ///      reverts. The oracle price (80,000 here, not the swap's 100,000) plays no part.
+    ///      reverts. With the oracle check off, as in setUp, the oracle price (80,000 here, not the swap's 100,000)
+    ///      plays no part.
     function test_swapRoundPart_minOutIsTheQuoteLessMaxSlippage() public {
         _create(alice, 1200e18, 12);
         oracle.setPrice(address(btcb), 80_000e18);
@@ -332,6 +333,37 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         emit ISmartDCA.RoundPartSwapped(pairId, NOV, 1, 100e18, 1e15, quote, 1e15);
         dca.swapRoundPart(pairId, quote, _swapData(pairId));
         vm.stopPrank();
+    }
+
+    /// @dev Oracle value of the 100 USDT part is 0.001 BTCB, so at 3% the floor is 0.00097. A quote of 0.00097 gives
+    ///      minOut 0.00096903 and reverts; 0.000971 gives 0.000970029 and fills at the pool's 0.001.
+    function test_swapRoundPart_minOutMoreThanTheBandBelowTheOracleReverts() public {
+        dca.setMaxOracleDeviation(300);
+        _create(alice, 1200e18, 12);
+        vm.warp(NOV_LOCK);
+        vm.startPrank(keeper);
+        dca.startRound(pairId, 1);
+
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.QuoteBelowOracle.selector, 0, 0.97e15));
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.QuoteBelowOracle.selector, 0.96903e15, 0.97e15));
+        dca.swapRoundPart(pairId, 0.97e15, _swapData(pairId));
+
+        dca.swapRoundPart(pairId, 0.971e15, _swapData(pairId));
+        vm.stopPrank();
+        assertEq(_round(NOV).assetBought, 1e15);
+    }
+
+    /// @dev At 10,000 the check is off and the oracle is not read: a token with no price still swaps
+    function test_swapRoundPart_oracleCheckOffDoesNotReadTheOracle() public {
+        _create(alice, 1200e18, 12);
+        vm.warp(NOV_LOCK);
+        vm.startPrank(keeper);
+        dca.startRound(pairId, 1);
+        oracle.setPrice(address(btcb), 0);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        vm.stopPrank();
+        assertEq(_round(NOV).assetBought, 1e15);
     }
 
     /// @dev Pool fee 0.25%: each 100 USDT part pays 0.0009975 BTCB, which is the quote, so minOut is 0.0009965025.

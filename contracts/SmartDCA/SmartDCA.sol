@@ -33,7 +33,7 @@ import { ISmartDCA } from "./ISmartDCA.sol";
  *         The fee is a share of the interest only, never of principal.
  *      3. `swapRoundPart`. The keeper swaps that stable for the asset in 1 to `maxParts` parts through SwapHelper,
  *         on routes built and signed off chain. Each part must return at least the keeper's fresh quote less
- *         `maxSlippageBps`.
+ *         `maxSlippageBps`, and that minimum can be at most `maxOracleDeviationBps` below the oracle value.
  *      4. `settleRound`. The asset bought is supplied to its yield source and the round closes.
  *
  *      No round or plan call loops over the plans of a pair. Every plan sells the same number of stable units in each of its buys, so a pair
@@ -110,6 +110,10 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @notice Month of round 0, counted as `year * 12 + (month - 1)`; set once at deploy
     uint32 public anchorMonth;
 
+    /// @notice Most a keeper swap's `minOut` can be below the oracle value of its part, in basis points; 10,000 turns
+    ///         the check off
+    uint16 public maxOracleDeviationBps;
+
     /// @notice Id of the last plan created; plan ids start at 1
     uint256 public lastPlanId;
 
@@ -166,8 +170,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
     /**
      * @notice Initializes the proxy with the launch parameters
-     * @dev Fee rate 0 with a cap of 20%, slippage bound 0.1%, up to 10 parts per round, 2 to 60 buys per plan, and a
-     *      0.5% slippage bound for `forceBuy`
+     * @dev Fee rate 0 with a cap of 20%, slippage bound 0.1%, up to 10 parts per round, 2 to 60 buys per plan, a
+     *      0.5% slippage bound for `forceBuy`, and a keeper swap's `minOut` at most 3% below the oracle value
      * @param accessControlManager_ AccessControlManager
      * @param reserve_ Receives fees and rewards
      */
@@ -183,6 +187,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         minBuys = 2;
         maxBuys = 60;
         fallbackSlippageBps = 50;
+        maxOracleDeviationBps = 300;
         // Round 0 is the latest 15th already passed, so every later round is still ahead
         anchorMonth = uint32(SmartDCAMath.latestStartedMonth(block.timestamp));
     }
@@ -423,8 +428,10 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             allowedRouters,
             pair,
             address(SWAP_HELPER),
+            ORACLE,
             stableIn,
             minOut,
+            maxOracleDeviationBps,
             swapData
         );
         _recordPart(pairId, round, r, stableIn, assetOut, quotedOut, minOut);
@@ -523,6 +530,14 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         if (newMaxSlippageBps > MAX_SLIPPAGE_BPS) revert AboveHardCap();
         emit MaxSlippageUpdated(maxSlippageBps, newMaxSlippageBps);
         maxSlippageBps = newMaxSlippageBps;
+    }
+
+    /// @inheritdoc ISmartDCA
+    function setMaxOracleDeviation(uint16 newMaxOracleDeviationBps) external {
+        _checkAccessAllowed("setMaxOracleDeviation(uint16)");
+        if (newMaxOracleDeviationBps > SmartDCAMath.BPS) revert AboveHardCap();
+        emit MaxOracleDeviationUpdated(maxOracleDeviationBps, newMaxOracleDeviationBps);
+        maxOracleDeviationBps = newMaxOracleDeviationBps;
     }
 
     /// @inheritdoc ISmartDCA

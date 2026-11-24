@@ -36,6 +36,14 @@ contract SmartDCA_AdminTest is SmartDCABase {
         assertEq(dca.maxBuys(), 60);
     }
 
+    function test_initialize_setsTheOracleBandTo3Percent() public {
+        SmartDCA impl = new SmartDCA(address(comptroller), address(registry), address(oracle), address(swapHelper));
+        SmartDCA fresh = SmartDCA(
+            address(new ERC1967Proxy(address(impl), abi.encodeCall(SmartDCA.initialize, (address(acm), reserve))))
+        );
+        assertEq(fresh.maxOracleDeviationBps(), 300);
+    }
+
     function test_initialize_anchorsRoundZeroOnTheLatestPassed15th() public view {
         // Deployed on Oct 19 2026, after Oct 15, so October is round 0 and November round 1
         assertEq(dca.anchorMonth(), ANCHOR_MONTH);
@@ -51,6 +59,8 @@ contract SmartDCA_AdminTest is SmartDCABase {
         dca.setMaxFeeRate(1_000);
         _expectUnauthorized("setMaxSlippage(uint16)");
         dca.setMaxSlippage(1);
+        _expectUnauthorized("setMaxOracleDeviation(uint16)");
+        dca.setMaxOracleDeviation(1);
         _expectUnauthorized("setMaxParts(uint8)");
         dca.setMaxParts(1);
         _expectUnauthorized("pause()");
@@ -83,6 +93,8 @@ contract SmartDCA_AdminTest is SmartDCABase {
         dca.setFeeRate(2_001);
         vm.expectRevert(ISmartDCA.AboveHardCap.selector);
         dca.setMaxSlippage(101);
+        vm.expectRevert(ISmartDCA.AboveHardCap.selector);
+        dca.setMaxOracleDeviation(10_001);
         vm.expectRevert(ISmartDCA.AboveHardCap.selector);
         dca.setMaxParts(51);
         vm.expectRevert(ISmartDCA.InvalidParameter.selector);
@@ -381,6 +393,9 @@ contract SmartDCA_AdminTest is SmartDCABase {
         emit ISmartDCA.MaxSlippageUpdated(10, 100);
         dca.setMaxSlippage(100);
         vm.expectEmit(address(dca));
+        emit ISmartDCA.MaxOracleDeviationUpdated(10_000, 0);
+        dca.setMaxOracleDeviation(0);
+        vm.expectEmit(address(dca));
         emit ISmartDCA.MaxPartsUpdated(10, 50);
         dca.setMaxParts(50);
         vm.expectEmit(address(dca));
@@ -395,6 +410,7 @@ contract SmartDCA_AdminTest is SmartDCABase {
 
         assertEq(dca.feeRateBps(), 2_000);
         assertEq(dca.maxSlippageBps(), 100);
+        assertEq(dca.maxOracleDeviationBps(), 0);
         assertEq(dca.maxParts(), 50);
         assertEq(dca.minBuys(), 1);
         assertEq(dca.maxBuys(), 120);

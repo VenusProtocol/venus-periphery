@@ -87,6 +87,8 @@ abstract contract SmartDCABase is Test {
         dca.setKeeper(keeper, true);
         // The mock SwapHelper is also the router its `genericCall` swaps on
         dca.setAllowedRouter(address(swapHelper), true);
+        // Tests pass `ANY_QUOTE`, so the oracle check is off here; its own tests turn it back on
+        dca.setMaxOracleDeviation(10_000);
     }
 
     // ----- setup -----

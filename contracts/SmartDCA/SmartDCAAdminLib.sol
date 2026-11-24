@@ -132,8 +132,7 @@ library SmartDCAAdminLib {
     ) external returns (uint256 assetOut, uint256 quotedOut, uint256 minOut) {
         address stable = pair.stable;
         address asset = pair.asset;
-        // Oracle prices are scaled by 10^(36 - decimals), so this converts across decimals
-        quotedOut = Math.mulDiv(stableIn, oracle.getPrice(stable), oracle.getPrice(asset));
+        quotedOut = _oracleValue(oracle, stable, asset, stableIn);
         minOut = Math.mulDiv(quotedOut, SmartDCAMath.BPS - slippageBps, SmartDCAMath.BPS);
 
         uint256 stableBefore = IERC20(stable).balanceOf(address(this));
@@ -162,11 +161,16 @@ library SmartDCAAdminLib {
      *      touches a router not on `allowedRouters`, sweeps a token other than the pair's stable or asset or sends a
      *      sweep anywhere but SmartDCA, if the swap call reverts, leaves any of the part unsold, or returns less
      *      asset than `minOut`, counted as a balance change.
+     *
+     *      Before the swap, reverts with `QuoteBelowOracle` if `minOut` is more than `maxOracleDeviationBps` below
+     *      the oracle value of `stableIn`. At `maxOracleDeviationBps` = 10,000 the oracle is not read.
      * @param allowedRouters Routers a keeper swap may call or approve
      * @param pair The pair
      * @param swapHelper SwapHelper that runs the multicall
+     * @param oracle Oracle that prices both tokens of the pair
      * @param stableIn Stable amount to sell
      * @param minOut Least asset the swap must return
+     * @param maxOracleDeviationBps Most `minOut` can be below the oracle value of `stableIn`, in basis points
      * @param swapData The keeper's `SwapHelper.multicall` calldata
      * @return assetOut Asset amount received
      */
@@ -174,12 +178,19 @@ library SmartDCAAdminLib {
         mapping(address => bool) storage allowedRouters,
         ISmartDCA.Pair storage pair,
         address swapHelper,
+        ResilientOracleInterface oracle,
         uint256 stableIn,
         uint256 minOut,
+        uint256 maxOracleDeviationBps,
         bytes calldata swapData
     ) external returns (uint256 assetOut) {
         IERC20 stable = IERC20(pair.stable);
         IERC20 asset = IERC20(pair.asset);
+        if (maxOracleDeviationBps < SmartDCAMath.BPS) {
+            uint256 oracleValue = _oracleValue(oracle, address(stable), address(asset), stableIn);
+            uint256 floor = Math.mulDiv(oracleValue, SmartDCAMath.BPS - maxOracleDeviationBps, SmartDCAMath.BPS);
+            if (minOut < floor) revert ISmartDCA.QuoteBelowOracle(minOut, floor);
+        }
         _checkSwapRoute(allowedRouters, address(stable), address(asset), swapData);
         // Stable held here and in SwapHelper together only falls by what the swap sold, so a refund to SmartDCA,
         // a part left in SwapHelper and dust moved between the two all show as unspent
@@ -324,6 +335,17 @@ library SmartDCAAdminLib {
             if (err != 0) revert ISmartDCA.SourceCallFailed(source, err);
         }
         return IERC20(token).balanceOf(address(this)) - balanceBefore;
+    }
+
+    /// @dev Oracle value of `amount` of `stable` in `asset`. Oracle prices are scaled by 10^(36 - decimals), so this
+    ///      converts across decimals.
+    function _oracleValue(
+        ResilientOracleInterface oracle,
+        address stable,
+        address asset,
+        uint256 amount
+    ) private view returns (uint256) {
+        return Math.mulDiv(amount, oracle.getPrice(stable), oracle.getPrice(asset));
     }
 
     /**
