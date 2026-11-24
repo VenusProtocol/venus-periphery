@@ -185,8 +185,15 @@ library SmartDCAAdminLib {
         uint256 stableHeldBefore = stable.balanceOf(address(this)) + stable.balanceOf(swapHelper);
         uint256 assetBefore = asset.balanceOf(address(this));
         stable.safeTransfer(swapHelper, stableIn);
-        (bool success, ) = swapHelper.call(swapData);
-        if (!success) revert ISmartDCA.SwapFailed();
+        (bool success, bytes memory returnData) = swapHelper.call(swapData);
+        if (!success) {
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(returnData, 32), mload(returnData))
+                }
+            }
+            revert ISmartDCA.SwapFailed();
+        }
         uint256 stableHeldAfter = stable.balanceOf(address(this)) + stable.balanceOf(swapHelper);
         uint256 stableSpent = stableHeldBefore > stableHeldAfter ? stableHeldBefore - stableHeldAfter : 0;
         if (stableSpent < stableIn) revert ISmartDCA.PartNotFullySwapped(stableIn, stableSpent);

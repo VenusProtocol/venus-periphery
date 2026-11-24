@@ -296,11 +296,22 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         vm.warp(NOV_LOCK);
         vm.startPrank(keeper);
         dca.startRound(pairId, 1);
-        vm.expectRevert(ISmartDCA.SwapFailed.selector);
+        vm.expectRevert(bytes("call failed"));
         dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
         vm.stopPrank();
         assertEq(_round(NOV).partsDone, 0);
         assertEq(usdt.balanceOf(address(dca)), 100e18, "the stable stays here");
+    }
+
+    function test_swapRoundPart_revertsSwapFailedWhenTheSwapRevertsWithNoReason() public {
+        _create(alice, 1200e18, 12);
+        vm.warp(NOV_LOCK);
+        vm.startPrank(keeper);
+        dca.startRound(pairId, 1);
+        vm.mockCallRevert(address(swapHelper), bytes(""), bytes(""));
+        vm.expectRevert(ISmartDCA.SwapFailed.selector);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        vm.stopPrank();
     }
 
     /// @dev minOut = quotedOut x 9,990 / 10,000, rounded down. The swap pays 0.001 BTCB; a quote of 1,001,001,001,001,002

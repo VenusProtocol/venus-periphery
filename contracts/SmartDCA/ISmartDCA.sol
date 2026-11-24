@@ -511,7 +511,8 @@ interface ISmartDCA {
     /// @notice A pair with this stable and asset already exists.
     error PairExists();
 
-    /// @notice The call to SwapHelper reverted.
+    /// @notice The call to SwapHelper reverted with no reason. A revert with a reason, such as SwapHelper's
+    ///         `Unauthorized` or a router error, is passed on as it is.
     error SwapFailed();
 
     /// @notice A keeper swap calls or approves `router`, which is not on the allowlist.

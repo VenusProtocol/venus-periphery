@@ -343,7 +343,7 @@ contract Fork_SmartDCATest is Test {
         dca.startRound(pairId, 1);
         uint256 quote = _quote(pairId);
         bytes memory swapData = _signedSwapData(pairId, 0xB0B);
-        vm.expectRevert(ISmartDCA.SwapFailed.selector);
+        vm.expectRevert(SwapHelper.Unauthorized.selector);
         dca.swapRoundPart(pairId, quote, swapData);
         vm.stopPrank();
 
