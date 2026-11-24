@@ -171,7 +171,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /**
      * @notice Initializes the proxy with the launch parameters
      * @dev Fee rate 0 with a cap of 20%, slippage bound 0.1%, up to 10 parts per round, 2 to 60 buys per plan, a
-     *      0.5% slippage bound for `forceBuy`, and a keeper swap's `minOut` at most 3% below the oracle value
+     *      0.5% slippage bound for `forceBuy`, and a keeper swap's `minOut` at most 1% below the oracle value
      * @param accessControlManager_ AccessControlManager
      * @param reserve_ Receives fees and rewards
      */
@@ -187,7 +187,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         minBuys = 2;
         maxBuys = 60;
         fallbackSlippageBps = 50;
-        maxOracleDeviationBps = 300;
+        maxOracleDeviationBps = 100;
         // Round 0 is the latest 15th already passed, so every later round is still ahead
         anchorMonth = uint32(SmartDCAMath.latestStartedMonth(block.timestamp));
     }

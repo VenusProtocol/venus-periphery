@@ -335,21 +335,21 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         vm.stopPrank();
     }
 
-    /// @dev Oracle value of the 100 USDT part is 0.001 BTCB, so at 3% the floor is 0.00097. A quote of 0.00097 gives
-    ///      minOut 0.00096903 and reverts; 0.000971 gives 0.000970029 and fills at the pool's 0.001.
+    /// @dev Oracle value of the 100 USDT part is 0.001 BTCB, so at 1% the floor is 0.00099. A quote of 0.00099 gives
+    ///      minOut 0.00098901 and reverts; 0.000991 gives 0.000990009 and fills at the pool's 0.001.
     function test_swapRoundPart_minOutMoreThanTheBandBelowTheOracleReverts() public {
-        dca.setMaxOracleDeviation(300);
+        dca.setMaxOracleDeviation(100);
         _create(alice, 1200e18, 12);
         vm.warp(NOV_LOCK);
         vm.startPrank(keeper);
         dca.startRound(pairId, 1);
 
-        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.QuoteBelowOracle.selector, 0, 0.97e15));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.QuoteBelowOracle.selector, 0, 0.99e15));
         dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
-        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.QuoteBelowOracle.selector, 0.96903e15, 0.97e15));
-        dca.swapRoundPart(pairId, 0.97e15, _swapData(pairId));
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.QuoteBelowOracle.selector, 0.98901e15, 0.99e15));
+        dca.swapRoundPart(pairId, 0.99e15, _swapData(pairId));
 
-        dca.swapRoundPart(pairId, 0.971e15, _swapData(pairId));
+        dca.swapRoundPart(pairId, 0.991e15, _swapData(pairId));
         vm.stopPrank();
         assertEq(_round(NOV).assetBought, 1e15);
     }

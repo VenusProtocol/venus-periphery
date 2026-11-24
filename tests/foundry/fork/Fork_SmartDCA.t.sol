@@ -311,7 +311,7 @@ contract Fork_SmartDCATest is Test {
     }
 
     /// @dev Someone pushes the pool far from the oracle before the keeper quotes: even a fresh quote on the moved
-    ///      pool is more than 3% below the oracle and reverts, until governance widens the band
+    ///      pool is more than 1% below the oracle and reverts, until governance widens the band
     function test_swapRoundPart_oracleBandStopsAFreshQuoteOnAPoolMovedFar() public onlyFork {
         _create(alice, pairId, DEPOSIT, 2);
         _toLock(pairId);

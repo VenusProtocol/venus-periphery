@@ -36,12 +36,12 @@ contract SmartDCA_AdminTest is SmartDCABase {
         assertEq(dca.maxBuys(), 60);
     }
 
-    function test_initialize_setsTheOracleBandTo3Percent() public {
+    function test_initialize_setsTheOracleBandTo1Percent() public {
         SmartDCA impl = new SmartDCA(address(comptroller), address(registry), address(oracle), address(swapHelper));
         SmartDCA fresh = SmartDCA(
             address(new ERC1967Proxy(address(impl), abi.encodeCall(SmartDCA.initialize, (address(acm), reserve))))
         );
-        assertEq(fresh.maxOracleDeviationBps(), 300);
+        assertEq(fresh.maxOracleDeviationBps(), 100);
     }
 
     function test_initialize_anchorsRoundZeroOnTheLatestPassed15th() public view {
