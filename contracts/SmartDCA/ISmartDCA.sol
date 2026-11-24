@@ -830,14 +830,15 @@ interface ISmartDCA {
      *         call. Other pairs with the same token keep their own source.
      * @dev Plans hold units, and the move keeps the number of units, so no plan changes. A stable side that holds
      *      shares cannot move from its next round's lock time until that round settles (`PairLocked`); an asset
-     *      move can, as a running round holds its bought asset as tokens.
+     *      move can, as a running round holds its bought asset as tokens. Empty rounds whose lock time has passed
+     *      are settled first, so they do not block the move. Works while paused.
      * @param pairId The pair
      * @param side Stable or Asset
      * @param kind Hub or Core
      * @param source A Hub registered in the Hub registry for the side's token, or a Core vToken listed in the
      *        Comptroller whose underlying is that token
      * @custom:access Controlled by AccessControlManager
-     * @custom:event Emits YieldSourceUpdated.
+     * @custom:event Emits RoundSettled for each empty round it settles first, and YieldSourceUpdated.
      */
     function setYieldSource(uint32 pairId, Side side, SourceKind kind, address source) external;
 

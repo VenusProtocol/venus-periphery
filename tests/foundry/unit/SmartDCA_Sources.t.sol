@@ -130,4 +130,34 @@ contract SmartDCA_SourcesTest is SmartDCABase {
         (uint256 shares, ) = _shares(ISmartDCA.Side.Stable);
         assertEq(vUSDT.balanceOf(address(dca)), shares);
     }
+
+    /// @dev Every plan has ended, so only claim dust is left, and nobody touched the pair after the next 15th
+    function test_setYieldSource_stableMovesPastAStaleEmptyRound() public {
+        uint256 id = _create(alice, 1000e18, 12);
+        for (uint256 i; i < 12; ++i) _runRound(1);
+        vm.prank(alice);
+        dca.claimPlan(id, false, alice);
+        (uint256 dust, ) = _shares(ISmartDCA.Side.Stable);
+        assertGt(dust, 0, "claim dust stays");
+        vm.warp(dca.nextLockTime(pairId) + 1);
+        uint32 staleRound = _pair().lastSettledRound + 1;
+        dca.pause();
+
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.RoundSettled(
+            pairId,
+            staleRound,
+            0,
+            0,
+            0,
+            0,
+            _pair().assetPerUnitIndex,
+            _pair().assetPerPrincipalIndex
+        );
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Core, address(vUSDT));
+
+        assertEq(_pair().lastSettledRound, staleRound);
+        (uint256 shares, ) = _shares(ISmartDCA.Side.Stable);
+        assertEq(vUSDT.balanceOf(address(dca)), shares);
+    }
 }

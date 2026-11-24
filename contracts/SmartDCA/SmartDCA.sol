@@ -544,6 +544,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     function setYieldSource(uint32 pairId, Side side, SourceKind kind, address source) external nonReentrant {
         _checkAccessAllowed("setYieldSource(uint32,uint8,uint8,address)");
         Pair storage pair = _pair(pairId);
+        // A past lock time on an empty round must not count as a running round
+        _settleEmptyRounds(pairId, pair);
         SmartDCAAdminLib.setYieldSource(
             pair,
             yieldSources[pairId][side],
