@@ -164,8 +164,8 @@ contract SmartDCA_PlansTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
         dca.cancelPlan(id, false, alice);
         vm.expectEmit(address(dca));
-        emit ISmartDCA.BoughtWithdrawn(id, alice, 5e6, 1e15);
-        dca.withdrawBought(id, type(uint256).max, alice);
+        emit ISmartDCA.BoughtWithdrawn(id, alice, 5e6, false, 1e15);
+        dca.withdrawBought(id, type(uint256).max, false, alice);
         vm.stopPrank();
 
         assertEq(btcb.balanceOf(alice), 1e15, "November's 100 USDT at 100,000 only");
@@ -191,7 +191,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         _runRound(1);
 
         vm.prank(alice);
-        dca.withdrawBought(id, 0.0005e15, alice);
+        dca.withdrawBought(id, 0.0005e15, false, alice);
         assertGe(btcb.balanceOf(alice), 0.0005e15);
 
         uint256 rest = _withdrawAll(alice, id);
@@ -200,7 +200,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
 
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.ZeroAmount.selector);
-        dca.withdrawBought(id, type(uint256).max, alice);
+        dca.withdrawBought(id, type(uint256).max, false, alice);
     }
 
     /// @dev Nothing bought yet, so the asset's pool is empty: a clean revert, not a division by zero
@@ -208,7 +208,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         uint256 id = _create(alice, 1200e18, 12);
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.ZeroAmount.selector);
-        dca.withdrawBought(id, 1, alice);
+        dca.withdrawBought(id, 1, false, alice);
     }
 
     function test_withdrawBought_revertsAboveBought() public {
@@ -216,7 +216,41 @@ contract SmartDCA_PlansTest is SmartDCABase {
         _runRound(1);
         vm.prank(alice);
         vm.expectPartialRevert(ISmartDCA.WithdrawExceedsBought.selector);
-        dca.withdrawBought(id, 1e18, alice);
+        dca.withdrawBought(id, 1e18, false, alice);
+    }
+
+    function test_withdrawBought_toCorePaysVTokensWhenCoreCannotRedeem() public {
+        uint256 id = _create(alice, 1200e18, 12);
+        _runRound(1);
+        vBTC.setErrors(0, 14);
+
+        vm.startPrank(alice);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.SourceCallFailed.selector, address(vBTC), 14));
+        dca.withdrawBought(id, 0.5e15, false, alice);
+
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.BoughtWithdrawn(id, alice, 2.5e6, true, 2.5e6);
+        dca.withdrawBought(id, 0.5e15, true, alice);
+        dca.withdrawBought(id, type(uint256).max, true, alice);
+        vm.stopPrank();
+
+        assertEq(vBTC.balanceOf(alice), 5e6, "all of November's 1e15 BTCB as vBTC");
+        assertEq(btcb.balanceOf(alice), 0);
+        (, , uint256 sharesHeld, uint256 unitsIssued) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
+        assertEq(unitsIssued, 0);
+        assertEq(vBTC.balanceOf(address(dca)), sharesHeld);
+    }
+
+    function test_withdrawBought_toCoreRevertsForAHubAsset() public {
+        MockHub btcHub = new MockHub(address(btcb));
+        registry.set(address(btcHub), true);
+        dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Hub, address(btcHub));
+        uint256 id = _create(alice, 1200e18, 12);
+        _runRound(1);
+
+        vm.prank(alice);
+        vm.expectRevert(ISmartDCA.NotCoreSource.selector);
+        dca.withdrawBought(id, type(uint256).max, true, alice);
     }
 
     // ----- claim -----
@@ -350,7 +384,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         dca.setYieldSource(pairId, ISmartDCA.Side.Asset, ISmartDCA.SourceKind.Core, address(vBTC2));
 
         vm.prank(alice);
-        dca.withdrawBought(id, 0.3e15 + 7, alice);
+        dca.withdrawBought(id, 0.3e15 + 7, false, alice);
         assertGe(btcb.balanceOf(alice), 0.3e15 + 7);
     }
 
@@ -427,9 +461,9 @@ contract SmartDCA_PlansTest is SmartDCABase {
 
         // 0.3e15 + 7 BTCB at the new rate rounds up to 1.5e6 vBTC, which pays 0.3e15 + 45e6
         vm.expectEmit(address(dca));
-        emit ISmartDCA.BoughtWithdrawn(id, alice, 1.5e6, 0.3e15 + 45e6);
+        emit ISmartDCA.BoughtWithdrawn(id, alice, 1.5e6, false, 0.3e15 + 45e6);
         vm.prank(alice);
-        dca.withdrawBought(id, 0.3e15 + 7, alice);
+        dca.withdrawBought(id, 0.3e15 + 7, false, alice);
         assertGe(btcb.balanceOf(alice), 0.3e15 + 7);
     }
 
@@ -439,7 +473,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
         vBTC.setErrors(0, 14);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(ISmartDCA.SourceCallFailed.selector, address(vBTC), 14));
-        dca.withdrawBought(id, type(uint256).max, alice);
+        dca.withdrawBought(id, type(uint256).max, false, alice);
     }
 
     /// @dev The pair's next round is locked for other plans, but a matured plan is in none of it
@@ -482,7 +516,7 @@ contract SmartDCA_PlansTest is SmartDCABase {
 
         vm.startPrank(alice);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
-        dca.withdrawBought(id, type(uint256).max, alice);
+        dca.withdrawBought(id, type(uint256).max, false, alice);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
         dca.transferPlan(id, alice);
         vm.stopPrank();
@@ -550,13 +584,13 @@ contract SmartDCA_PlansTest is SmartDCABase {
 
         vm.startPrank(alice);
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
-        dca.withdrawBought(withdrawn, type(uint256).max, address(0));
+        dca.withdrawBought(withdrawn, type(uint256).max, false, address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.cancelPlan(cancelled, false, address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.claimPlan(claimed, false, address(0));
 
-        dca.withdrawBought(withdrawn, type(uint256).max, receiver);
+        dca.withdrawBought(withdrawn, type(uint256).max, false, receiver);
         uint256 afterWithdraw = btcb.balanceOf(receiver);
         assertGt(afterWithdraw, 0);
         dca.cancelPlan(cancelled, false, receiver);

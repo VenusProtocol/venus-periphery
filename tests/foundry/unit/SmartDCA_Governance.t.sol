@@ -210,7 +210,7 @@ contract SmartDCA_GovernanceTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
         dca.topUpPlan(planId, 1200e18);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
-        dca.withdrawBought(planId, type(uint256).max, stranger);
+        dca.withdrawBought(planId, type(uint256).max, false, stranger);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
         dca.cancelPlan(planId, false, stranger);
         vm.expectRevert(ISmartDCA.NotPlanOwner.selector);
@@ -226,7 +226,7 @@ contract SmartDCA_GovernanceTest is SmartDCABase {
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
         dca.topUpPlan(planId, 1200e18);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
-        dca.withdrawBought(planId, type(uint256).max, alice);
+        dca.withdrawBought(planId, type(uint256).max, false, alice);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
         dca.cancelPlan(planId, false, alice);
         vm.expectRevert(ISmartDCA.PlanNotActive.selector);
@@ -240,7 +240,7 @@ contract SmartDCA_GovernanceTest is SmartDCABase {
         _runRound(1);
         vm.startPrank(alice);
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
-        dca.withdrawBought(planId, type(uint256).max, address(0));
+        dca.withdrawBought(planId, type(uint256).max, false, address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);
         dca.cancelPlan(planId, false, address(0));
         vm.expectRevert(ISmartDCA.ZeroAddress.selector);

@@ -592,7 +592,7 @@ contract SmartDCA_RoundsTest is SmartDCABase {
         vm.expectRevert(bytes("Pausable: paused"));
         dca.topUpPlan(id, 100e18);
         vm.expectRevert(bytes("Pausable: paused"));
-        dca.withdrawBought(id, type(uint256).max, alice);
+        dca.withdrawBought(id, type(uint256).max, false, alice);
         vm.expectRevert(bytes("Pausable: paused"));
         dca.cancelPlan(id, false, alice);
         vm.expectRevert(bytes("Pausable: paused"));

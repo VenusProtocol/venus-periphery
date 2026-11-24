@@ -278,7 +278,7 @@ contract SmartDCA_LensTest is SmartDCABase {
 
         uint256 value = lens.getPlan(dca, a).assetValue;
         vm.prank(alice);
-        dca.withdrawBought(a, value, alice);
+        dca.withdrawBought(a, value, false, alice);
     }
 
     /// @dev The next buy shown before the lock is what the plan has pending once the round starts, for plans that

@@ -34,9 +34,9 @@ contract SmartDCA_EventsTest is SmartDCABase {
         _runRound(1);
         SmartDCALens.PlanView memory v = lens.getPlan(dca, a);
         vm.expectEmit(address(dca));
-        emit ISmartDCA.BoughtWithdrawn(a, carol, v.assetUnits, v.assetValue);
+        emit ISmartDCA.BoughtWithdrawn(a, carol, v.assetUnits, false, v.assetValue);
         vm.prank(alice);
-        dca.withdrawBought(a, type(uint256).max, carol);
+        dca.withdrawBought(a, type(uint256).max, false, carol);
     }
 
     /// @dev 1,212 USDT redeemed for 1,200 principal: a 0.6 fee and 1,211.4 paid

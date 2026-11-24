@@ -228,7 +228,7 @@ contract Fork_SmartDCATest is Test {
         assertEq(IERC20(USDT).allowance(address(dca), PCS_V3_ROUTER), 0, "approved only each part");
 
         vm.prank(alice);
-        dca.withdrawBought(planId, type(uint256).max, alice);
+        dca.withdrawBought(planId, type(uint256).max, false, alice);
         assertApproxEqRel(IERC20(BTCB).balanceOf(alice), assetBought, 1e12, "BTCB out");
     }
 
@@ -256,7 +256,7 @@ contract Fork_SmartDCATest is Test {
         (, , uint256 shares, ) = dca.yieldSources(pairId, ISmartDCA.Side.Asset);
         assertEq(IERC20(VBTC).balanceOf(address(dca)), shares, "vBTC tracked");
         vm.prank(alice);
-        dca.withdrawBought(planId, type(uint256).max, alice);
+        dca.withdrawBought(planId, type(uint256).max, false, alice);
         assertApproxEqRel(IERC20(BTCB).balanceOf(alice), amountOut, 1e12, "BTCB out");
     }
 
@@ -404,14 +404,14 @@ contract Fork_SmartDCATest is Test {
 
         uint256 amount = amountOut / 3;
         vm.prank(alice);
-        dca.withdrawBought(planId, amount, alice);
+        dca.withdrawBought(planId, amount, false, alice);
         assertGe(IERC20(BTCB).balanceOf(alice), amount, "at least the amount asked");
         // vBTC has 8 decimals, so rounding the shares up can add up to one share's worth of BTCB
         uint256 oneShare = IVToken(VBTC).exchangeRateStored() / 1e18 + 1;
         assertLe(IERC20(BTCB).balanceOf(alice), amount + oneShare, "and no more than one share");
 
         vm.prank(alice);
-        dca.withdrawBought(planId, type(uint256).max, alice);
+        dca.withdrawBought(planId, type(uint256).max, false, alice);
         assertApproxEqRel(IERC20(BTCB).balanceOf(alice), amountOut, 1e12, "the rest");
     }
 
@@ -436,9 +436,9 @@ contract Fork_SmartDCATest is Test {
         assertLe(usdtUnits, dueBtc + dueBnb + 4, "and only rounding beyond it");
 
         vm.prank(alice);
-        dca.withdrawBought(alicePlan, type(uint256).max, alice);
+        dca.withdrawBought(alicePlan, type(uint256).max, false, alice);
         vm.prank(bob);
-        dca.withdrawBought(bobPlan, type(uint256).max, bob);
+        dca.withdrawBought(bobPlan, type(uint256).max, false, bob);
         assertApproxEqRel(IERC20(BTCB).balanceOf(alice), btcOut, 1e12, "BTCB to alice");
         assertApproxEqRel(IERC20(WBNB).balanceOf(bob), bnbOut, 1e12, "WBNB to bob");
     }
@@ -473,7 +473,7 @@ contract Fork_SmartDCATest is Test {
             assertGt(amountOut, 0, "bought");
             address user = address(uint160(0xD0CA + i));
             vm.prank(user);
-            dca.withdrawBought(planIds[i], type(uint256).max, user);
+            dca.withdrawBought(planIds[i], type(uint256).max, false, user);
             assertApproxEqRel(IERC20(assets[i % 3]).balanceOf(user), amountOut, 1e12, "asset out");
         }
     }

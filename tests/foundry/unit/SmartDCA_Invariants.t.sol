@@ -98,11 +98,11 @@ contract SmartDCAHandler is Test {
         if (ok) ++topUps;
     }
 
-    function withdrawBought(uint256 planSeed, uint256 amount, bool all) external {
+    function withdrawBought(uint256 planSeed, uint256 amount, bool all, bool toCore) external {
         if (ids.length == 0) return;
         uint256 id = ids[planSeed % ids.length];
         amount = all ? type(uint256).max : bound(amount, 1, 1e12);
-        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.withdrawBought, (id, amount, _owner(id))));
+        (bool ok, ) = _call(_owner(id), abi.encodeCall(DCA.withdrawBought, (id, amount, toCore, _owner(id))));
         if (ok) ++withdraws;
     }
 

@@ -292,7 +292,12 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
-    function withdrawBought(uint256 planId, uint256 amount, address receiver) external nonReentrant whenNotPaused {
+    function withdrawBought(
+        uint256 planId,
+        uint256 amount,
+        bool toCore,
+        address receiver
+    ) external nonReentrant whenNotPaused {
         Plan storage plan = _ownedActivePlan(planId);
         if (receiver == address(0)) revert ZeroAddress();
         Pair storage pair = pairs[plan.pairId];
@@ -306,10 +311,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         if (assetUnits > assetUnitsOwed) revert WithdrawExceedsBought(assetUnits, assetUnitsOwed);
 
         plan.assetUnitsPaid += assetUnits;
-        uint256 assetAmount = _redeem(assetSource, pair.asset, assetUnits);
-        IERC20(pair.asset).safeTransfer(receiver, assetAmount);
+        uint256 paid = _payAsset(plan.pairId, pair, assetUnits, toCore, receiver);
 
-        emit BoughtWithdrawn(planId, receiver, assetUnits, assetAmount);
+        emit BoughtWithdrawn(planId, receiver, assetUnits, toCore, paid);
     }
 
     /// @inheritdoc ISmartDCA

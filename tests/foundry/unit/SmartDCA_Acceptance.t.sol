@@ -123,7 +123,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         dca.topUpPlan(id, 100e18);
         vm.expectRevert(ISmartDCA.PlanInRunningRound.selector);
         dca.cancelPlan(id, false, alice);
-        dca.withdrawBought(id, type(uint256).max, alice);
+        dca.withdrawBought(id, type(uint256).max, false, alice);
         vm.stopPrank();
         assertEq(btcb.balanceOf(alice), 1e15, "November only");
     }
@@ -245,7 +245,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         _runRound(1);
         vm.prank(alice);
         vm.expectRevert(ISmartDCA.ZeroAmount.selector);
-        dca.withdrawBought(id, 0, alice);
+        dca.withdrawBought(id, 0, false, alice);
     }
 
     function test_withdrawBought_partialWithAHubAssetSource() public {
@@ -258,7 +258,7 @@ contract SmartDCA_AcceptanceTest is SmartDCABase {
         btcHub.setPricePerShare(1.25e18);
 
         vm.prank(alice);
-        dca.withdrawBought(id, 0.5e15, alice);
+        dca.withdrawBought(id, 0.5e15, false, alice);
         assertGe(btcb.balanceOf(alice), 0.5e15);
         assertLe(btcb.balanceOf(alice), 0.5e15 + 2);
 

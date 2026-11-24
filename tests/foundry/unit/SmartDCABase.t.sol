@@ -127,7 +127,7 @@ abstract contract SmartDCABase is Test {
     function _withdrawAll(address user, uint256 planId) internal returns (uint256 received) {
         uint256 before = btcb.balanceOf(user);
         vm.prank(user);
-        dca.withdrawBought(planId, type(uint256).max, user);
+        dca.withdrawBought(planId, type(uint256).max, false, user);
         received = btcb.balanceOf(user) - before;
     }
 

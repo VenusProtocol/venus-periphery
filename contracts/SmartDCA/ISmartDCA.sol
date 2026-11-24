@@ -220,9 +220,16 @@ interface ISmartDCA {
      * @param planId The plan
      * @param receiver Address paid
      * @param assetUnits Asset units taken from the plan
-     * @param assetAmount Asset amount paid to `receiver`
+     * @param toCore True when paid as the asset's Core vToken, false when paid as the asset
+     * @param amount vTokens or asset amount paid to `receiver`
      */
-    event BoughtWithdrawn(uint256 indexed planId, address indexed receiver, uint256 assetUnits, uint256 assetAmount);
+    event BoughtWithdrawn(
+        uint256 indexed planId,
+        address indexed receiver,
+        uint256 assetUnits,
+        bool toCore,
+        uint256 amount
+    );
 
     /**
      * @notice Emitted when a plan is cancelled
@@ -581,7 +588,7 @@ interface ISmartDCA {
     /// @notice The withdraw asks for more asset units than the plan has bought.
     error WithdrawExceedsBought(uint256 requestedUnits, uint256 availableUnits);
 
-    /// @notice A claim or cancel paid as vTokens was asked for while the asset is not held in Core.
+    /// @notice A withdraw, claim or cancel paid as vTokens was asked for while the asset is not held in Core.
     error NotCoreSource();
 
     /// @notice A Core vToken returned a non-zero error code.
@@ -639,12 +646,17 @@ interface ISmartDCA {
      * @dev Allowed while the plan's round is running: a running round's buy only counts once it settles. A partial
      *      amount is converted to units rounded up, so `receiver` gets at least `amount`, unless Core takes a
      *      redeem fee (`treasuryPercent`). Only the owner can call.
+     *
+     *      With `toCore`, the asset is paid as the asset's Core vTokens worth at least `amount`, and no redeem fee
+     *      applies; reverts with `NotCoreSource` if the asset side is not in Core. Use it when Core cannot redeem the
+     *      asset, for example with too little cash or redeem paused.
      * @param planId The plan
-     * @param amount Asset amount to withdraw, in the asset's decimals
+     * @param amount Asset amount to withdraw, in the asset's decimals, also with `toCore`
+     * @param toCore True to pay as vTokens, false to pay as the asset
      * @param receiver Address paid
      * @custom:event Emits BoughtWithdrawn.
      */
-    function withdrawBought(uint256 planId, uint256 amount, address receiver) external;
+    function withdrawBought(uint256 planId, uint256 amount, bool toCore, address receiver) external;
 
     /**
      * @notice Ends a plan. Pays `receiver` the stable still waiting, less the fee on its interest, and all bought

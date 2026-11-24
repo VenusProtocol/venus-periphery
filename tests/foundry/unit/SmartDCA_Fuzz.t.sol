@@ -130,7 +130,7 @@ contract SmartDCA_FuzzTest is SmartDCABase {
             _call(owner, abi.encodeCall(dca.cancelPlan, (id, _rnd(2) == 0, owner)));
         } else if (action == 4) {
             uint256 amount = _rnd(2) == 0 ? type(uint256).max : 1 + _rnd(1e12);
-            _call(owner, abi.encodeCall(dca.withdrawBought, (id, amount, owner)));
+            _call(owner, abi.encodeCall(dca.withdrawBought, (id, amount, _rnd(2) == 0, owner)));
         } else {
             _call(owner, abi.encodeCall(dca.claimPlan, (id, _rnd(2) == 0, owner)));
         }

@@ -61,7 +61,7 @@ contract SmartDCALens {
      * @param netWaiting `nextBuyNet * buysLeft` (PRD NW)
      * @param displayedWaiting Stable that will still be swapped, `netWaiting + stablePending` (PRD DW)
      * @param assetUnits Asset units bought and not yet paid out
-     * @param assetValue `assetUnits` as an asset amount. A claim to Core pays vTokens instead, so the FE converts at
+     * @param assetValue `assetUnits` as an asset amount. A payout to Core pays vTokens instead, so the FE converts at
      *        the vToken's exchange rate to show that amount.
      */
     struct PlanView {

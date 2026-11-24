@@ -117,7 +117,7 @@ contract SmartDCA_AccountingTest is SmartDCABase {
         for (uint256 i; i < 50; ++i) {
             uint256 before = btcb.balanceOf(alice);
             vm.prank(alice);
-            dca.withdrawBought(planId, 1, alice);
+            dca.withdrawBought(planId, 1, false, alice);
             uint256 p = btcb.balanceOf(alice) - before;
             assertGe(p, 1, "paid at least the amount");
             paid += p;
