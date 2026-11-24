@@ -55,7 +55,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @notice Highest slippage bound governance can set, for keeper swaps and for `forceBuy`, in basis points (1%)
     uint16 public constant MAX_SLIPPAGE_BPS = 100;
 
-    /// @notice Highest number of parts a round can be split into
+    /// @notice Highest value governance can set `maxParts` to
     uint8 public constant MAX_PARTS = 50;
 
     /// @notice Highest number of buys a plan can have (10 years of monthly buys)
@@ -86,7 +86,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     /// @notice Most a swap can return below the keeper's quote, in basis points
     uint16 public maxSlippageBps;
 
-    /// @notice Most parts a round can be split into
+    /// @notice Most parts one `startRound` or `resplitRound` call can split a round into
     uint8 public maxParts;
 
     /// @notice Fewest buys a new plan can have
@@ -370,8 +370,8 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         plan.status = PlanStatus.Claimed;
         plan.assetUnitsPaid += assetUnitsOwed;
 
-        // Stable units left by rounding `stableUnitsPerBuy` down: fewer than `scheduleBuys`, each worth under 1 wei
-        // on a Hub and about 2e8 wei on a Core vToken
+        // Stable units left by rounding `stableUnitsPerBuy` down: fewer than `scheduleBuys`, each worth about one
+        // share of the first source the stable side used (under 1 wei for a Hub, about 2e8 wei for a Core vToken)
         yieldSources[plan.pairId][Side.Stable].unitsIssued -=
             plan.scheduleStableUnits - plan.stableUnitsPerBuy * plan.scheduleBuys;
 

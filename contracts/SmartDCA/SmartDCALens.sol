@@ -41,18 +41,18 @@ contract SmartDCALens {
      * @param pairId Pair the plan buys on
      * @param state Plan status
      * @param firstRound First round the plan bought in, before any top up
-     * @param lastRound Round of the plan's last buy
+     * @param lastRound Last round of the plan's schedule; for a cancelled plan, the round it would have ended in
      * @param inRunningRound True while the plan's buy is in a locked round that has not settled
      * @param totalBuys Buys in total, including those before a top up (PRD T)
      * @param buysSettled Buys that have settled (PRD C)
      * @param buysLeft Buys still to come, not counting the buy of a round that has started (PRD n). A buy in a
      *        locked round that has not started yet is still counted
-     * @param stablePending Stable this plan has in the running round, after its fee; 0 outside a running round
-     *        (PRD P)
+     * @param stablePending Stable this plan has in the running round, after its fee; 0 until `startRound` has run
+     *        for that round (PRD P)
      * @param stableWaiting Value of the plan's stable still waiting in the yield source (PRD W)
      * @param nextBuyStable Stable the next buy will sell, `stableWaiting / buysLeft` (PRD E). On the last buy it is
-     *        all of `stableWaiting`, which includes fewer than `scheduleBuys` units of rounding left, each worth under
-     *        1 wei on a Hub and about 2e8 wei on a Core vToken, that the contract drops at claim.
+     *        all of `stableWaiting`, which includes fewer than `scheduleBuys` units of rounding left that the contract
+     *        drops at claim, each worth about one share of the first source the stable side used.
      * @param principalPerBuy Principal in each buy (PRD B)
      * @param nextBuyFee Fee on the next buy, `max(0, nextBuyStable - principalPerBuy) * e` (PRD F). `e` is the fee
      *        rate when the round redeems more than its principal and 0 otherwise; for the pair's next round it is
@@ -114,7 +114,7 @@ contract SmartDCALens {
         uint256 roundStableValue;
     }
 
-    /// @notice SmartDCA's global parameters; see SmartDCA for each one
+    /// @notice Main SmartDCA parameters; see SmartDCA for each one and for the rest
     struct Config {
         uint16 feeRateBps;
         uint16 maxSlippageBps;

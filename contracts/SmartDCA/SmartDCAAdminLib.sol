@@ -132,7 +132,7 @@ library SmartDCAAdminLib {
     ) external returns (uint256 assetOut, uint256 quotedOut, uint256 minOut) {
         address stable = pair.stable;
         address asset = pair.asset;
-        // Oracle prices are scaled by 1e36 / decimals, so this converts across decimals
+        // Oracle prices are scaled by 10^(36 - decimals), so this converts across decimals
         quotedOut = Math.mulDiv(stableIn, oracle.getPrice(stable), oracle.getPrice(asset));
         minOut = Math.mulDiv(quotedOut, SmartDCAMath.BPS - slippageBps, SmartDCAMath.BPS);
 
@@ -158,9 +158,10 @@ library SmartDCAAdminLib {
     /**
      * @notice Runs a keeper's signed swap of `stableIn` of the pair's stable through SwapHelper, for `swapRoundPart`
      * @dev Same flow as `LeverageStrategiesManager._performSwap`: the signed multicall swaps what SwapHelper holds and
-     *      sends the asset back. Reverts if the route touches a router not on `allowedRouters`, sweeps a token other
-     *      than the pair's stable or asset, leaves any of the part unsold, or returns less asset than `minOut`,
-     *      counted as a balance change.
+     *      sends the asset back. Reverts if the route makes a call other than `genericCall`, `approveMax` or `sweep`,
+     *      touches a router not on `allowedRouters`, sweeps a token other than the pair's stable or asset or sends a
+     *      sweep anywhere but SmartDCA, if the swap call reverts, leaves any of the part unsold, or returns less
+     *      asset than `minOut`, counted as a balance change.
      * @param allowedRouters Routers a keeper swap may call or approve
      * @param pair The pair
      * @param swapHelper SwapHelper that runs the multicall
@@ -330,8 +331,8 @@ library SmartDCAAdminLib {
      *         and `approveMax` spenders are all on `allowedRouters`, and whose `sweep` calls all send the pair's
      *         stable or asset to SmartDCA
      * @dev Any other inner call reverts. The library runs through DELEGATECALL, so `address(this)` is SmartDCA.
-     *      The sweep token check stops a route signed for one pair from running as a part of another pair that sells
-     *      the same stable: a USDT to ETH part whose route sweeps BTCB reverts here.
+     *      The sweep token check rejects a route that sweeps another pair's asset, such as a USDT to ETH part whose
+     *      route sweeps BTCB. A route whose router pays SmartDCA directly is not checked here; `minOut` bounds it.
      * @param allowedRouters Routers a keeper swap may call or approve
      * @param stable The pair's stable
      * @param asset The pair's asset

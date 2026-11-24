@@ -82,7 +82,7 @@ interface ISmartDCA {
      * @param roundPrincipal Principal of the next round: the sum of `principalPerBuy` over its plans
      * @param assetPerUnitIndex Asset units bought per stable unit sold, summed over every settled round, scaled 1e36
      * @param assetPerPrincipalIndex Asset units bought per wei of principal, summed over every settled round, scaled
-     *        1e36. It only grows in rounds that took a fee.
+     *        1e36. It only grows in rounds that redeemed more than their principal with a fee rate above 0.
      */
     struct Pair {
         address stable;
@@ -426,7 +426,7 @@ interface ISmartDCA {
     event MaxSlippageUpdated(uint16 oldMaxSlippageBps, uint16 newMaxSlippageBps);
 
     /**
-     * @notice Emitted when the most parts a round can be split into changes
+     * @notice Emitted when the most parts one `startRound` or `resplitRound` call can split a round into changes
      * @param oldMaxParts Previous value
      * @param newMaxParts New value
      */
@@ -574,7 +574,7 @@ interface ISmartDCA {
     /// @notice The caller does not own the plan.
     error NotPlanOwner();
 
-    /// @notice The plan is cancelled, claimed or unknown.
+    /// @notice The plan is cancelled or claimed.
     error PlanNotActive();
 
     /// @notice The plan is in a round past its lock time that has not settled.
@@ -680,8 +680,11 @@ interface ISmartDCA {
     /**
      * @notice Pays `receiver` the asset of a plan whose buys have all settled, and closes it.
      * @dev With `toCore`, `receiver` gets the asset's Core vTokens and keeps earning; collateral is not enabled for
-     *      them. Up to `scheduleBuys - 1` stable units are left by rounding the per-buy amount down; each is worth
-     *      under 1 wei on a Hub and about 2e8 wei on a Core vToken, and they are dropped here.
+     *      them. Up to `scheduleBuys - 1` stable units are left by rounding the per-buy amount down and are dropped
+     *      here; each is worth about one share of the first source the stable side used (under 1 wei for a Hub,
+     *      about 2e8 wei for a Core vToken).
+     *
+     *      With `toCore`, reverts with `NotCoreSource` if the asset side is not in Core.
      * @param planId The plan
      * @param toCore True to pay as vTokens, false to pay as the asset
      * @param receiver Address paid
@@ -813,7 +816,7 @@ interface ISmartDCA {
     function setMaxSlippage(uint16 newMaxSlippageBps) external;
 
     /**
-     * @notice Sets the most parts a round can be split into.
+     * @notice Sets the most parts one `startRound` or `resplitRound` call can split a round into.
      * @param newMaxParts New value, 1 to `MAX_PARTS`
      * @custom:access Controlled by AccessControlManager
      * @custom:event Emits MaxPartsUpdated.
@@ -823,6 +826,7 @@ interface ISmartDCA {
     /**
      * @notice Pauses every user and round call. Views, admin setters and `claimRewards` keep working.
      * @custom:access Controlled by AccessControlManager
+     * @custom:event Emits Paused.
      */
     function pause() external;
 
@@ -906,6 +910,7 @@ interface ISmartDCA {
     /**
      * @notice Unpauses user and round calls.
      * @custom:access Controlled by AccessControlManager
+     * @custom:event Emits Unpaused.
      */
     function unpause() external;
 
