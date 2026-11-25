@@ -294,6 +294,8 @@ library SmartDCAAdminLib {
         current.kind = kind;
         current.sourceAddress = source;
         if (migrated != 0) current.sharesHeld = sourceDeposit(current, token, migrated);
+        // Units with no shares behind them would let the next deposit mint units 1:1 and lose most of its value
+        if (current.unitsIssued != 0 && current.sharesHeld == 0) revert ISmartDCA.InvalidSource(source);
 
         emit ISmartDCA.YieldSourceUpdated(pairId, side, oldSource, kind, source, migrated);
     }

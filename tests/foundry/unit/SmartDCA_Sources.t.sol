@@ -160,4 +160,14 @@ contract SmartDCA_SourcesTest is SmartDCABase {
         (uint256 shares, ) = _shares(ISmartDCA.Side.Stable);
         assertEq(vUSDT.balanceOf(address(dca)), shares);
     }
+
+    /// @dev A move that leaves units with no shares behind them reverts. Otherwise the next deposit would mint units
+    ///      1:1 with its shares and the old units would take most of it.
+    function test_setYieldSource_revertsWhenTheNewSourceMintsNoShares() public {
+        _create(alice, 1000e18, 10);
+        vUSDT.setExchangeRate(1e40); // 1000 USDT is worth less than 1 vToken wei, so the mint rounds to 0
+
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.InvalidSource.selector, address(vUSDT)));
+        dca.setYieldSource(pairId, ISmartDCA.Side.Stable, ISmartDCA.SourceKind.Core, address(vUSDT));
+    }
 }
