@@ -213,16 +213,13 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         uint256 stableUnits = _deposit(yieldSources[pairId][Side.Stable], pair.stable, received);
         uint256 stableUnitsPerBuy = stableUnits / buys;
         uint256 principalPerBuy = received / buys;
-        if (stableUnitsPerBuy == 0 || principalPerBuy == 0) revert DepositTooSmall(received, minimum);
+        if (stableUnitsPerBuy == 0) revert DepositTooSmall(received, minimum);
 
         // Before the next round's lock the plan joins it, from the lock on the round after. During an overrun that
         // is the round right after the running one, not the calendar month.
         uint32 nextRound = pair.lastSettledRound + 1;
         uint32 firstRound = block.timestamp < roundStart(nextRound) ? nextRound : nextRound + 1;
-        _addToRound(pairId, pair, firstRound, stableUnitsPerBuy, principalPerBuy);
-        Round storage last = rounds[pairId][firstRound + buys - 1];
-        last.stableUnitsEnding += stableUnitsPerBuy;
-        last.principalEnding += principalPerBuy;
+        _addToRound(pairId, pair, firstRound, buys, stableUnitsPerBuy, principalPerBuy);
 
         planId = ++lastPlanId;
         plans[planId] = Plan({
@@ -260,19 +257,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         Pair storage pair = pairs[pairId];
         if (!pair.enabled) revert PairDisabled();
 
-        _settleEmptyRounds(pairId, pair);
-        uint8 buysSettled = _buysSettled(plan, pair);
-        if (buysSettled == plan.scheduleBuys) revert PlanMatured();
-        if (_inRunningRound(plan, pair)) revert PlanInRunningRound();
-
-        uint8 buysLeft = plan.scheduleBuys - buysSettled;
+        uint8 buysSettled = _restartSchedule(plan, pairId, pair);
+        uint8 buysLeft = plan.scheduleBuys;
         uint256 minimum = minAmountPerBuy[pair.stable] * buysLeft;
-
-        // Restart the schedule from the next unsettled round, keeping what was bought so far
-        plan.assetUnitsCarried += _assetUnitsFromIndex(plan, pairId, buysSettled);
-        plan.buysBeforeSchedule += buysSettled;
-        plan.scheduleFirstRound += buysSettled;
-        plan.scheduleBuys = buysLeft;
 
         uint256 received = _pullToken(pair.stable, amount);
         if (received < minimum) revert DepositTooSmall(received, minimum);
@@ -284,10 +271,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         // Only the increase per buy moves; the plan's old amounts are already in the round totals
         uint256 perBuyIncrease = stableUnitsPerBuy - plan.stableUnitsPerBuy;
         uint256 principalIncrease = principalPerBuy - plan.principalPerBuy;
-        _addToRound(pairId, pair, plan.scheduleFirstRound, perBuyIncrease, principalIncrease);
-        Round storage last = rounds[pairId][plan.scheduleFirstRound + buysLeft - 1];
-        last.stableUnitsEnding += perBuyIncrease;
-        last.principalEnding += principalIncrease;
+        _addToRound(pairId, pair, plan.scheduleFirstRound, buysLeft, perBuyIncrease, principalIncrease);
 
         plan.scheduleStableUnits = stableUnits;
         plan.stableUnitsPerBuy = stableUnitsPerBuy;
@@ -309,9 +293,16 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         YieldSource storage assetSource = yieldSources[plan.pairId][Side.Asset];
 
         uint256 assetUnitsOwed = _assetUnitsOwed(plan, pair);
-        // Checked first: with nothing bought the asset's source can hold nothing, and `_unitsForAmount` divides by it
+        // Checked first: with nothing bought the asset's source can hold nothing, and the units math divides by it
         if (assetUnitsOwed == 0) revert ZeroAmount();
-        uint256 assetUnits = amount == type(uint256).max ? assetUnitsOwed : _unitsForAmount(assetSource, amount);
+        uint256 assetUnits = assetUnitsOwed;
+        if (amount != type(uint256).max) {
+            // Shares and units both round up, so redeeming them pays at least `amount` unless Core takes a redeem fee
+            uint256 shares = assetSource.kind == SourceKind.Hub
+                ? IHub(assetSource.sourceAddress).previewWithdraw(amount)
+                : Math.mulDiv(amount, 1e18, IVToken(assetSource.sourceAddress).exchangeRateCurrent(), Math.Rounding.Up);
+            assetUnits = Math.mulDiv(shares, assetSource.unitsIssued, assetSource.sharesHeld, Math.Rounding.Up);
+        }
         if (assetUnits == 0) revert ZeroAmount();
         if (assetUnits > assetUnitsOwed) revert WithdrawExceedsBought(assetUnits, assetUnitsOwed);
 
@@ -328,24 +319,13 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         uint32 pairId = plan.pairId;
         Pair storage pair = pairs[pairId];
 
-        _settleEmptyRounds(pairId, pair);
-        uint8 buysSettled = _buysSettled(plan, pair);
-        if (buysSettled == plan.scheduleBuys) revert PlanMatured();
-        if (_inRunningRound(plan, pair)) revert PlanInRunningRound();
+        uint8 buysSettled = _restartSchedule(plan, pairId, pair);
+        uint8 buysLeft = plan.scheduleBuys;
+        _removeFromRound(pairId, pair, plan.scheduleFirstRound, buysLeft, plan.stableUnitsPerBuy, plan.principalPerBuy);
 
-        _removeFromRound(pairId, pair, plan.scheduleFirstRound, plan.stableUnitsPerBuy, plan.principalPerBuy);
-        Round storage last = rounds[pairId][plan.scheduleFirstRound + plan.scheduleBuys - 1];
-        last.stableUnitsEnding -= plan.stableUnitsPerBuy;
-        last.principalEnding -= plan.principalPerBuy;
-
-        uint256 assetUnitsOwed = _assetUnitsOwed(plan, pair);
+        uint256 assetUnitsOwed = plan.assetUnitsCarried - plan.assetUnitsPaid;
         uint256 stableUnitsLeft = plan.scheduleStableUnits - plan.stableUnitsPerBuy * buysSettled;
-        uint8 buysLeft = plan.scheduleBuys - buysSettled;
         plan.status = PlanStatus.Cancelled;
-        // Moved the same way as a top up, so the record keeps how many buys settled
-        plan.buysBeforeSchedule += buysSettled;
-        plan.scheduleFirstRound += buysSettled;
-        plan.scheduleBuys = buysLeft;
         plan.assetUnitsPaid += assetUnitsOwed;
 
         uint256 stableRedeemed = _redeem(yieldSources[pairId][Side.Stable], pair.stable, stableUnitsLeft);
@@ -825,12 +805,32 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         emit RoundLocked(pairId, round);
     }
 
+    /// @dev Settles empty rounds, then restarts the plan's schedule from its next unsettled round: buys already
+    ///      settled move into `buysBeforeSchedule` and what they bought into `assetUnitsCarried`. Returns the number
+    ///      of buys settled. Reverts with `PlanMatured` when every buy settled, or `PlanInRunningRound` while the plan
+    ///      is in the running round.
+    function _restartSchedule(
+        Plan storage plan,
+        uint32 pairId,
+        Pair storage pair
+    ) internal returns (uint8 buysSettled) {
+        _settleEmptyRounds(pairId, pair);
+        buysSettled = _buysSettled(plan, pair);
+        if (buysSettled == plan.scheduleBuys) revert PlanMatured();
+        if (_inRunningRound(plan, pair)) revert PlanInRunningRound();
+        plan.assetUnitsCarried += _assetUnitsFromIndex(plan, pairId, buysSettled);
+        plan.buysBeforeSchedule += buysSettled;
+        plan.scheduleFirstRound += buysSettled;
+        plan.scheduleBuys -= buysSettled;
+    }
+
     /// @dev Adds a plan's amounts per buy to the pair's next round, or, for a later first round, to the joining
-    ///      totals of the round before it
+    ///      totals of the round before it, and to the ending totals of its last round, `firstRound + buys - 1`
     function _addToRound(
         uint32 pairId,
         Pair storage pair,
         uint32 firstRound,
+        uint8 buys,
         uint256 stableUnitsPerBuy,
         uint256 principalPerBuy
     ) internal {
@@ -842,6 +842,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             r.stableUnitsJoining += stableUnitsPerBuy;
             r.principalJoining += principalPerBuy;
         }
+        Round storage last = rounds[pairId][firstRound + buys - 1];
+        last.stableUnitsEnding += stableUnitsPerBuy;
+        last.principalEnding += principalPerBuy;
     }
 
     /// @dev Reverse of `_addToRound`
@@ -849,6 +852,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         uint32 pairId,
         Pair storage pair,
         uint32 firstRound,
+        uint8 buys,
         uint256 stableUnitsPerBuy,
         uint256 principalPerBuy
     ) internal {
@@ -860,6 +864,9 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
             r.stableUnitsJoining -= stableUnitsPerBuy;
             r.principalJoining -= principalPerBuy;
         }
+        Round storage last = rounds[pairId][firstRound + buys - 1];
+        last.stableUnitsEnding -= stableUnitsPerBuy;
+        last.principalEnding -= principalPerBuy;
     }
 
     /// @dev Pulls `amount` of `token` from the caller and returns what arrived
@@ -879,10 +886,14 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
 
     /// @dev Redeems `units` from the pair side's source `s` and returns the amount of `token` received
     function _redeem(YieldSource storage s, address token, uint256 units) internal returns (uint256) {
-        uint256 shares = Math.mulDiv(units, s.sharesHeld, s.unitsIssued);
+        return SmartDCAAdminLib.sourceRedeem(s, token, _burnUnits(s, units));
+    }
+
+    /// @dev Removes `units` from `s` and returns the source shares behind them, which the caller then pays out
+    function _burnUnits(YieldSource storage s, uint256 units) internal returns (uint256 shares) {
+        shares = Math.mulDiv(units, s.sharesHeld, s.unitsIssued);
         s.unitsIssued -= units;
         s.sharesHeld -= shares;
-        return SmartDCAAdminLib.sourceRedeem(s, token, shares);
     }
 
     /// @dev Pays `receiver` `units` of the pair's asset side, as Core vTokens with `toCore` or else as the asset, and
@@ -899,38 +910,18 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         YieldSource storage assetSource = yieldSources[pairId][Side.Asset];
         if (toCore) {
             if (assetSource.kind != SourceKind.Core) revert NotCoreSource();
-            return _transferUnits(assetSource, units, receiver);
+            amount = _burnUnits(assetSource, units);
+            IERC20(assetSource.sourceAddress).safeTransfer(receiver, amount);
+            return amount;
         }
         amount = _redeem(assetSource, pair.asset, units);
         IERC20(pair.asset).safeTransfer(receiver, amount);
     }
 
-    /// @dev Sends `to` the source shares behind `units` of `s` (Hub shares or vTokens) and returns them
-    function _transferUnits(YieldSource storage s, uint256 units, address to) internal returns (uint256 shares) {
-        shares = Math.mulDiv(units, s.sharesHeld, s.unitsIssued);
-        s.unitsIssued -= units;
-        s.sharesHeld -= shares;
-        IERC20(s.sourceAddress).safeTransfer(to, shares);
-    }
-
-    /// @dev Units of `s` worth at least `amount`: shares and units are both rounded up, so redeeming them pays at
-    ///      least `amount` unless Core takes a redeem fee. Not a view: Core's rate is accrued first.
-    function _unitsForAmount(YieldSource storage s, uint256 amount) internal returns (uint256) {
-        uint256 shares = s.kind == SourceKind.Hub
-            ? IHub(s.sourceAddress).previewWithdraw(amount)
-            : Math.mulDiv(amount, 1e18, IVToken(s.sourceAddress).exchangeRateCurrent(), Math.Rounding.Up);
-        return Math.mulDiv(shares, s.unitsIssued, s.sharesHeld, Math.Rounding.Up);
-    }
-
     /// @dev Only keepers, and only from the round's start time
     function _checkRoundCaller(Pair storage pair) internal view {
         if (!isKeeper[msg.sender]) revert NotRoundCaller(msg.sender);
-        _requireRoundStarted(pair.lastSettledRound + 1);
-    }
-
-    /// @dev Reverts before the round's start time
-    function _requireRoundStarted(uint32 round) internal view {
-        uint256 startsAt = roundStart(round);
+        uint256 startsAt = roundStart(pair.lastSettledRound + 1);
         if (block.timestamp < startsAt) revert RoundNotStarted(startsAt);
     }
 
