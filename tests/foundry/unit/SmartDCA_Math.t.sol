@@ -17,31 +17,6 @@ contract SmartDCA_MathTest is Test {
         assertEq(SmartDCAMath.roundStart(0, uint32(NOV_2026 + 16)), 1_836_662_400); // 2028-03-14 16:00 UTC, leap Feb
     }
 
-    function test_roundStart_countsFromTheAnchor() public pure {
-        assertEq(SmartDCAMath.roundStart(NOV_2026, 0), 1_794_672_000);
-        assertEq(SmartDCAMath.roundStart(NOV_2026, 2), 1_799_942_400);
-        assertEq(SmartDCAMath.roundStart(NOV_2026 - 1, 1), 1_794_672_000);
-    }
-
-    function test_latestStartedMonth_cutoffSecond() public pure {
-        uint256 start = SmartDCAMath.roundStart(0, uint32(NOV_2026));
-        assertEq(SmartDCAMath.latestStartedMonth(start - 1), NOV_2026 - 1);
-        assertEq(SmartDCAMath.latestStartedMonth(start), NOV_2026);
-    }
-
-    /// @dev Every month from Feb 1970 to Dec 2199. Starts are 28 to 31 days apart, always at 16:00 UTC.
-    function testFuzz_roundDates(uint32 month) public pure {
-        month = uint32(bound(month, 1970 * 12 + 1, 2199 * 12 + 11));
-        uint256 start = SmartDCAMath.roundStart(0, month);
-        assertEq(SmartDCAMath.latestStartedMonth(start), month);
-        assertEq(SmartDCAMath.latestStartedMonth(start - 1), month - 1);
-        assertEq(SmartDCAMath.latestStartedMonth(SmartDCAMath.roundStart(0, month + 1) - 1), month);
-        assertEq((start - 16 hours) % 1 days, 0);
-        uint256 gap = SmartDCAMath.roundStart(0, month + 1) - start;
-        assertGe(gap, 28 days);
-        assertLe(gap, 31 days);
-    }
-
     function test_roundsDone_capsAtBuys_inRunningRound_onlyFromLockInsideTheSchedule() public pure {
         assertEq(SmartDCAMath.buysSettled(681, 682, 12), 0);
         assertEq(SmartDCAMath.buysSettled(682, 682, 12), 1);
@@ -65,38 +40,6 @@ contract SmartDCA_MathTest is Test {
         assertEq(rate, 0);
     }
 
-    /// @dev The two index steps never hand out more than was bought, and lose only rounding
-    function testFuzz_indexSteps_neverOverAllocate(
-        uint256 boughtUnits,
-        uint256 roundStableUnits,
-        uint256 roundPrincipal,
-        uint256 interestBps,
-        uint16 feeRateBps
-    ) public pure {
-        boughtUnits = bound(boughtUnits, 1, 1e24);
-        roundStableUnits = bound(roundStableUnits, 1e24, 1e36);
-        roundPrincipal = bound(roundPrincipal, 1e12, 1e30);
-        interestBps = bound(interestBps, 0, 5_000);
-        feeRateBps = uint16(bound(feeRateBps, 0, 2_000));
-
-        uint256 stableRedeemed = roundPrincipal + (roundPrincipal * interestBps) / 10_000;
-        (uint256 fee, uint16 rate) = SmartDCAMath.roundFee(stableRedeemed, roundPrincipal, feeRateBps);
-        uint256 stableNet = stableRedeemed - fee;
-        (uint256 step, uint256 baseStep) = SmartDCAMath.roundIndexSteps(
-            boughtUnits,
-            stableRedeemed,
-            stableNet,
-            roundStableUnits,
-            rate
-        );
-
-        uint256 allocated = (roundStableUnits * step) / 1e36 + (roundPrincipal * baseStep) / 1e36;
-        assertLe(allocated, boughtUnits);
-        // Lower bound: three floors lose at most 3 units, and the floored fee makes `stableNet` at most 1 too big,
-        // which shrinks the split by at most `boughtUnits / stableNet`
-        assertGe(allocated + boughtUnits / stableNet + 3, boughtUnits);
-    }
-
     // ----- dates against a separate calendar count -----
 
     /// @dev Days from 1970-01-01, counted year by year and month by month
@@ -111,35 +54,37 @@ contract SmartDCA_MathTest is Test {
         return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
     }
 
-    /// @dev Every round start from 1970 to 2199 is the 15th at 00:00 UTC+8 by the year and month count
-    function testFuzz_roundStart_matchesACalendarCount(uint32 month) public pure {
-        month = uint32(bound(month, 1970 * 12 + 1, 2199 * 12 + 11));
-        uint256 expected = _refDays(month / 12, (month % 12) + 1, 15) * 1 days - 8 hours;
-        assertEq(SmartDCAMath.roundStart(0, month), expected);
+    /// @dev Every month from Feb 1970 to Dec 2199, with none skipped: the round starts on the 15th at 00:00 UTC+8 by
+    ///      the year and month count, both from anchor 0 and from a Feb 1970 anchor
+    function test_roundStart_everyMonthMatchesACalendarCount() public pure {
+        uint256 first = 1970 * 12 + 1;
+        uint256 expected = _refDays(1970, 2, 15) * 1 days - 8 hours;
+        for (uint256 month = first; month <= 2199 * 12 + 11; ++month) {
+            assertEq(SmartDCAMath.roundStart(0, uint32(month)), expected, "from anchor 0");
+            assertEq(SmartDCAMath.roundStart(first, uint32(month - first)), expected, "from a later anchor");
+            expected += _monthDays(month / 12, (month % 12) + 1) * 1 days;
+        }
     }
 
-    /// @dev 2100 is not a leap year, 2000 is
-    function test_roundStart_centuryLeapRules() public pure {
-        uint32 mar2100 = 2100 * 12 + 2;
-        uint32 mar2000 = 2000 * 12 + 2;
-        assertEq(SmartDCAMath.roundStart(0, mar2100) - SmartDCAMath.roundStart(0, mar2100 - 1), 28 days);
-        assertEq(SmartDCAMath.roundStart(0, mar2000) - SmartDCAMath.roundStart(0, mar2000 - 1), 29 days);
+    /// @dev Every second from Feb 1970 to Dec 2199 maps to the month of the latest round start, with none skipped.
+    ///      The result only changes at a day boundary that starts at a round start, so the first and last second of
+    ///      each day stand for every second of it.
+    function test_latestStartedMonth_everySecondMapsToItsRound() public pure {
+        uint256 start = _refDays(1970, 2, 15) * 1 days - 8 hours;
+        for (uint256 month = 1970 * 12 + 1; month <= 2199 * 12 + 11; ++month) {
+            uint256 next = start + _monthDays(month / 12, (month % 12) + 1) * 1 days;
+            assertEq(SmartDCAMath.latestStartedMonth(start - 1), month - 1, "second before the start");
+            for (uint256 day = start; day < next; day += 1 days) {
+                assertEq(SmartDCAMath.latestStartedMonth(day), month, "first second of a day");
+                assertEq(SmartDCAMath.latestStartedMonth(day + 1 days - 1), month, "last second of a day");
+            }
+            start = next;
+        }
     }
 
-    /// @dev Any second between two starts maps to the earlier start's month
-    function testFuzz_latestStartedMonth_everySecondOfAMonth(uint32 month, uint256 offset) public pure {
-        month = uint32(bound(month, 1970 * 12 + 1, 2199 * 12 + 10));
-        uint256 start = SmartDCAMath.roundStart(0, month);
-        uint256 next = SmartDCAMath.roundStart(0, month + 1);
-        offset = bound(offset, 0, next - start - 1);
-        assertEq(SmartDCAMath.latestStartedMonth(start + offset), month);
-    }
-
-    function test_latestStartedMonth_aroundNewYear() public pure {
-        uint32 dec2026 = 2026 * 12 + 11;
-        uint256 newYear = _refDays(2027, 1, 1) * 1 days;
-        assertEq(SmartDCAMath.latestStartedMonth(newYear - 1), dec2026, "Dec 31 23:59:59 UTC");
-        assertEq(SmartDCAMath.latestStartedMonth(newYear), dec2026, "Jan 1 is before the Jan 15 start");
+    function _monthDays(uint256 y, uint256 m) internal pure returns (uint256) {
+        if (m == 2) return _leap(y) ? 29 : 28;
+        return m == 4 || m == 6 || m == 9 || m == 11 ? 30 : 31;
     }
 
     // ----- fee -----
@@ -178,8 +123,8 @@ contract SmartDCA_MathTest is Test {
         uint256 principal;
     }
 
-    /// @dev Three plans with different entry prices: each plan's share from the indexes is within 2 units of the
-    ///      exact `bought * P / net`, and the shares never add up to more than was bought. Covers 24 and 8 decimal
+    /// @dev Three plans with different entry prices: each plan's share from the indexes is at most the exact
+    ///      `bought * P / net` and less than 2 units below it, and the shares never add up to more than was bought. Covers 24 and 8 decimal
     ///      units on both sides.
     function testFuzz_indexSteps_eachPlanWithinTwoUnitsOfExact(
         uint256[3] memory slices,
@@ -217,7 +162,8 @@ contract SmartDCA_MathTest is Test {
             // bought * P / net with P = slice * redeemed / units * (1 - r) + principal * r, as one fraction
             uint256 num = p[i].slice * redeemed * (10_000 - rate) + p[i].principal * rate * units;
             uint256 exact = Math.mulDiv(bought, num, units * 10_000 * net);
-            assertApproxEqAbs(got, exact, 2, "plan share");
+            assertLe(got, exact, "plan over its share");
+            assertLt(exact - got, 2, "plan short of its share");
             total += got;
         }
         assertLe(total, bought, "over allocated");
@@ -230,9 +176,41 @@ contract SmartDCA_MathTest is Test {
         assertEq(SmartDCAMath.assetUnitsBought(100e24, 100e18, su, sp), 1e8);
     }
 
-    /// @dev A round of 1e12 tokens at 24 decimal units does not overflow the index products
-    function test_indexSteps_noOverflowAtATrillionTokens() public pure {
+    /// @dev The largest rounds do not overflow the index products or a plan's reading: 1e12 tokens at 24 decimal
+    ///      units, a 100% fee on a round that doubled its principal, and a 1 unit plan beside a 1e30 unit one
+    function test_indexSteps_noOverflowAtTheLargestRounds() public pure {
         SmartDCAMath.roundIndexSteps(1e30, 1e30, 1e30, 1e36, 2_000);
+
+        (uint256 fee, uint16 rate) = SmartDCAMath.roundFee(2e30, 1e30, 10_000);
+        (uint256 su, uint256 sp) = SmartDCAMath.roundIndexSteps(1e30, 2e30, 2e30 - fee, 2e30, rate);
+        assertLe(SmartDCAMath.assetUnitsBought(2e30, 1e30, su, sp), 1e30, "100% fee");
+
+        (su, sp) = SmartDCAMath.roundIndexSteps(1e30, 2e30, 2e30, 1e30 + 1, 0);
+        uint256 small = SmartDCAMath.assetUnitsBought(1, 1, su, sp);
+        uint256 large = SmartDCAMath.assetUnitsBought(1e30, 1e30, su, sp);
+        assertLe(small + large, 1e30, "1 unit beside 1e30");
+    }
+
+    /// @dev Reading a plan in two pieces, as a top up carries the first piece, never pays more than one reading
+    ///      over both, and loses at most 2 units, one for each of its two terms
+    function testFuzz_assetUnitsBought_splitReadingNeverPaysMore(
+        uint256 stableUnitsPerBuy,
+        uint256 principalPerBuy,
+        uint256[4] memory growth
+    ) public pure {
+        stableUnitsPerBuy = bound(stableUnitsPerBuy, 1, 1e30);
+        principalPerBuy = bound(principalPerBuy, 1, 1e30);
+        for (uint256 i; i < 4; ++i) growth[i] = bound(growth[i], 0, 1e72);
+        uint256 split = SmartDCAMath.assetUnitsBought(stableUnitsPerBuy, principalPerBuy, growth[0], growth[2]) +
+            SmartDCAMath.assetUnitsBought(stableUnitsPerBuy, principalPerBuy, growth[1], growth[3]);
+        uint256 whole = SmartDCAMath.assetUnitsBought(
+            stableUnitsPerBuy,
+            principalPerBuy,
+            growth[0] + growth[1],
+            growth[2] + growth[3]
+        );
+        assertLe(split, whole, "split over whole");
+        assertLe(whole - split, 2, "split loses too much");
     }
 
     // ----- schedule helpers -----

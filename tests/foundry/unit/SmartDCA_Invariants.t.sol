@@ -257,6 +257,8 @@ contract SmartDCA_InvariantsTest is SmartDCABase {
     mapping(uint32 => uint32) internal lastSettled;
     mapping(uint32 => uint256) internal lastAssetPerUnitIndex;
     mapping(uint32 => uint256) internal lastCumBaseIndex;
+    mapping(uint256 => ISmartDCA.PlanStatus) internal lastStatus;
+    mapping(uint256 => bool) internal statusSeen;
 
     function setUp() public override {
         super.setUp();
@@ -380,6 +382,32 @@ contract SmartDCA_InvariantsTest is SmartDCABase {
         _checkForward(ethPairId);
     }
 
+    /// @notice An open round never runs more parts than it was split into, holds nothing before it starts, and has
+    ///         no stable left after its last part
+    function invariant_partsStayWithinTheSplit() public view {
+        _checkParts(pairId);
+        _checkParts(ethPairId);
+    }
+
+    /// @notice A plan only leaves Active, to Cancelled or Claimed, and a closed plan never changes status again
+    function invariant_closedPlansStayClosed() public {
+        for (uint256 i; i < handler.planCount(); ++i) {
+            uint256 id = handler.planId(i);
+            ISmartDCA.PlanStatus status = _plan(id).status;
+            if (statusSeen[id] && lastStatus[id] != ISmartDCA.PlanStatus.Active) {
+                assertEq(uint8(status), uint8(lastStatus[id]), "closed plan changed status");
+            }
+            statusSeen[id] = true;
+            lastStatus[id] = status;
+        }
+    }
+
+    /// @notice What leaves a pair's totals when its next round closes is part of what is in them
+    function invariant_endingSumsFitInTheRound() public view {
+        _checkEnding(pairId);
+        _checkEnding(ethPairId);
+    }
+
     /// @notice Logs how often each path was reached. Shown with `-vv`
     function afterInvariant() public view {
         console.log("plans", handler.creates(), "top ups", handler.topUps());
@@ -432,6 +460,32 @@ contract SmartDCA_InvariantsTest is SmartDCABase {
         lastSettled[pid] = pair.lastSettledRound;
         lastAssetPerUnitIndex[pid] = pair.assetPerUnitIndex;
         lastCumBaseIndex[pid] = pair.assetPerPrincipalIndex;
+    }
+
+    function _checkParts(uint32 pid) internal view {
+        uint32 open = _pairOf(pid).lastSettledRound + 1;
+        (uint8 partsTotal, uint8 partsDone, , , , , uint256 stableToSwap, uint256 assetBought, , , , , , ) = dca.rounds(
+            pid,
+            open
+        );
+        assertLe(partsDone, partsTotal, "parts done over total");
+        if (partsTotal == 0) {
+            assertEq(partsDone, 0, "parts done before start");
+            assertEq(stableToSwap, 0, "stable before start");
+            assertEq(assetBought, 0, "asset before start");
+        } else if (partsDone == partsTotal) {
+            assertEq(stableToSwap, 0, "stable left after the last part");
+        }
+    }
+
+    function _checkEnding(uint32 pid) internal view {
+        ISmartDCA.Pair memory pair = _pairOf(pid);
+        (, , , , , , , , , , uint256 unitsEnding, uint256 principalEnding, , ) = dca.rounds(
+            pid,
+            pair.lastSettledRound + 1
+        );
+        assertLe(unitsEnding, pair.roundStableUnits, "ending units");
+        assertLe(principalEnding, pair.roundPrincipal, "ending principal");
     }
 
     // ----- reads -----
