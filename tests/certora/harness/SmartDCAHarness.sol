@@ -237,7 +237,11 @@ contract SmartDCAHarness is SmartDCA {
         return SmartDCAMath.assetUnitsBought(units, principal, perUnitStep, perPrincipalStep);
     }
 
-    function roundFeeOf(uint256 stableRedeemed, uint256 roundPrincipal_, uint16 rateBps) external pure returns (uint256) {
+    function roundFeeOf(
+        uint256 stableRedeemed,
+        uint256 roundPrincipal_,
+        uint16 rateBps
+    ) external pure returns (uint256) {
         (uint256 fee, ) = SmartDCAMath.roundFee(stableRedeemed, roundPrincipal_, rateBps);
         return fee;
     }
