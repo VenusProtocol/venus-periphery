@@ -445,7 +445,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         _checkAccessAllowed("forceBuy(uint32,uint8)");
         Pair storage pair = _pair(pairId);
         if (fallbackRoutes[pairId].router == address(0)) revert NoFallbackRoute(pairId);
-        uint256 forceBuyFrom = roundStart(pair.lastSettledRound + 1) + FALLBACK_DELAY;
+        uint256 forceBuyFrom = roundStart(pair.lastSettledRound + 1) + _fallbackDelay();
         if (block.timestamp < forceBuyFrom) revert RoundNotStarted(forceBuyFrom);
 
         if (rounds[pairId][pair.lastSettledRound + 1].partsTotal == 0) _startRound(pairId, pair, parts);
@@ -598,7 +598,7 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
         pairId = ++pairCount;
         pairIdByTokens[stable][asset] = pairId;
         // The pair's first round is the next to start
-        pairs[pairId].lastSettledRound = uint32(SmartDCAMath.latestStartedMonth(block.timestamp) - anchorMonth);
+        pairs[pairId].lastSettledRound = _latestStartedRound();
         SmartDCAAdminLib.addPair(
             pairs[pairId],
             yieldSources[pairId],
@@ -682,8 +682,18 @@ contract SmartDCA is ISmartDCA, AccessControlledV8, PausableUpgradeable, Reentra
     }
 
     /// @inheritdoc ISmartDCA
-    function roundStart(uint32 round) public view returns (uint256) {
+    function roundStart(uint32 round) public view virtual returns (uint256) {
         return SmartDCAMath.roundStart(anchorMonth, round);
+    }
+
+    /// @dev The latest round whose start time has passed; a new pair's first round is the one after it
+    function _latestStartedRound() internal view virtual returns (uint32) {
+        return uint32(SmartDCAMath.latestStartedMonth(block.timestamp) - anchorMonth);
+    }
+
+    /// @dev Time after a round's start before `forceBuy` can run it
+    function _fallbackDelay() internal view virtual returns (uint256) {
+        return FALLBACK_DELAY;
     }
 
     /// @dev Body of `startRound`, after the caller check
