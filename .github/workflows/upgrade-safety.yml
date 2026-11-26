@@ -5,6 +5,9 @@ name: Upgrade safety
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   upgrade-safety:
     name: Storage layout and upgrade safety
