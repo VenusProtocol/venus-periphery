@@ -146,7 +146,7 @@ async function grantPermissions({ deployments, deployer }: Ctx, dca: string): Pr
   const { execute, read } = deployments;
   for (const account of [OPERATOR, deployer]) {
     for (const sig of SMART_DCA_PERMISSIONS) {
-      if (await read(ACM, "isAllowedToCall", account, sig)) continue;
+      if (await read(ACM, "hasPermission", account, dca, sig)) continue;
       await execute(ACM, { from: deployer, log: true }, "giveCallPermission", dca, sig, account);
     }
   }
