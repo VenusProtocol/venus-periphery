@@ -1,3 +1,22 @@
+## 1.5.0 (2026-11-26)
+
+* Merge pull request #111 from VenusProtocol/main ([125ae86](https://github.com/VenusProtocol/venus-periphery/commit/125ae86)), closes [#111](https://github.com/VenusProtocol/venus-periphery/issues/111)
+* Merge pull request #112 from VenusProtocol/ci/skip-republished-slim ([bfa350f](https://github.com/VenusProtocol/venus-periphery/commit/bfa350f)), closes [#112](https://github.com/VenusProtocol/venus-periphery/issues/112)
+* Merge pull request #113 from VenusProtocol/ci/skip-republished-slim ([6e47882](https://github.com/VenusProtocol/venus-periphery/commit/6e47882)), closes [#113](https://github.com/VenusProtocol/venus-periphery/issues/113)
+* Merge pull request #115 from VenusProtocol/fix/format-ebrake-deployments ([3d074df](https://github.com/VenusProtocol/venus-periphery/commit/3d074df)), closes [#115](https://github.com/VenusProtocol/venus-periphery/issues/115)
+* Merge pull request #117 from VenusProtocol/ci/workflow-token-permissions ([cab6d56](https://github.com/VenusProtocol/venus-periphery/commit/cab6d56)), closes [#117](https://github.com/VenusProtocol/venus-periphery/issues/117)
+* Merge pull request #118 from VenusProtocol/develop ([ee03260](https://github.com/VenusProtocol/venus-periphery/commit/ee03260)), closes [#118](https://github.com/VenusProtocol/venus-periphery/issues/118)
+* Merge pull request #95 from VenusProtocol/fix/apex-audit ([e711033](https://github.com/VenusProtocol/venus-periphery/commit/e711033)), closes [#95](https://github.com/VenusProtocol/venus-periphery/issues/95)
+* ci: restrict GITHUB_TOKEN permissions in CI workflows ([0304c86](https://github.com/VenusProtocol/venus-periphery/commit/0304c86))
+* ci: skip the slim publish when the version is already on npm ([8760a99](https://github.com/VenusProtocol/venus-periphery/commit/8760a99))
+* chore: deploy EBrake impl on Ethereum, Arbitrum and Base ([9841170](https://github.com/VenusProtocol/venus-periphery/commit/9841170))
+* chore: deploy EBrake impl with per-pool CF snapshot reset on BSC ([8fe8189](https://github.com/VenusProtocol/venus-periphery/commit/8fe8189))
+* chore(release): 1.4.2-dev.1 [skip ci] ([b6bfe29](https://github.com/VenusProtocol/venus-periphery/commit/b6bfe29))
+* chore(release): 1.5.0-dev.1 [skip ci] ([347adce](https://github.com/VenusProtocol/venus-periphery/commit/347adce))
+* feat: updating deployment files ([6d8ee2d](https://github.com/VenusProtocol/venus-periphery/commit/6d8ee2d))
+* style: format EBrake deployment files ([76fd575](https://github.com/VenusProtocol/venus-periphery/commit/76fd575))
+* fix(ebrake): add per-pool CF snapshot reset ([b684ce4](https://github.com/VenusProtocol/venus-periphery/commit/b684ce4))
+
 ## 1.5.0-dev.1 (2026-11-20)
 
 * Merge pull request #115 from VenusProtocol/fix/format-ebrake-deployments ([3d074df](https://github.com/VenusProtocol/venus-periphery/commit/3d074df)), closes [#115](https://github.com/VenusProtocol/venus-periphery/issues/115)
