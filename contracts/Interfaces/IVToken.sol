@@ -6,6 +6,8 @@ import { IComptroller } from "./IComptroller.sol";
 interface IVToken is IERC20Upgradeable {
     function accrueInterest() external returns (uint256);
 
+    function mint(uint256 mintAmount) external returns (uint256);
+
     function redeem(uint256 redeemTokens) external returns (uint256);
 
     function redeemUnderlying(uint256 redeemAmount) external returns (uint256);

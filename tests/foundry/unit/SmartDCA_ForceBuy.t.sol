@@ -1,0 +1,208 @@
+// SPDX-License-Identifier: BSD-3-Clause
+pragma solidity 0.8.28;
+
+// solhint-disable func-name-mixedcase, ordering, import-path-check
+
+import { AccessControlledV8 } from "@venusprotocol/governance-contracts/contracts/Governance/AccessControlledV8.sol";
+import { ISmartDCA } from "../../../contracts/SmartDCA/ISmartDCA.sol";
+import { MockPancakeV3Router } from "./mocks/SmartDCAMocks.sol";
+import { SmartDCABase } from "./SmartDCABase.t.sol";
+
+/// @dev Alice's plan puts 100 USDT in each round; the router pays exactly the oracle price, 100,000 USDT per BTCB
+contract SmartDCA_ForceBuyTest is SmartDCABase {
+    /// @dev `forceBuy` opens 24 h after the November round's start
+    uint256 internal constant FORCE_BUY_AT = NOV_LOCK + 24 hours;
+
+    MockPancakeV3Router internal router;
+    address internal stranger = makeAddr("stranger");
+    uint256 internal planId;
+
+    function setUp() public override {
+        super.setUp();
+        router = new MockPancakeV3Router();
+        router.setRate(1e18 / 100_000);
+        dca.setFallbackRoute(pairId, address(router), abi.encodePacked(address(usdt), uint24(500), address(btcb)));
+        planId = _create(alice, 1200e18, 12);
+    }
+
+    function test_forceBuy_oneCallRunsTheWholeRound() public {
+        vm.warp(FORCE_BUY_AT);
+        dca.forceBuy(pairId, 1);
+
+        assertEq(_pair().lastSettledRound, NOV);
+        assertEq(usdt.allowance(address(dca), address(router)), 0, "approved only the part");
+        assertApproxEqAbs(_withdrawAll(alice, planId), 1e15, 2e8, "100 USDT at 100,000");
+    }
+
+    function test_forceBuy_revertsUntil24HoursAfterTheStart() public {
+        vm.warp(NOV_LOCK);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RoundNotStarted.selector, FORCE_BUY_AT));
+        dca.forceBuy(pairId, 1);
+
+        vm.warp(FORCE_BUY_AT - 1);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.RoundNotStarted.selector, FORCE_BUY_AT));
+        dca.forceBuy(pairId, 1);
+
+        vm.warp(FORCE_BUY_AT);
+        dca.forceBuy(pairId, 1);
+        assertEq(_pair().lastSettledRound, NOV);
+    }
+
+    function test_forceBuy_onePartPerCall() public {
+        vm.warp(FORCE_BUY_AT);
+        dca.forceBuy(pairId, 3);
+        dca.forceBuy(pairId, 3);
+        assertEq(_round(NOV).partsDone, 2);
+        assertEq(_pair().lastSettledRound, NOV - 1, "not settled before the last part");
+
+        dca.forceBuy(pairId, 3);
+        assertEq(_pair().lastSettledRound, NOV);
+    }
+
+    /// @dev Floor is the oracle value less 0.5%: 0.4% under passes, 0.6% under reverts
+    function test_forceBuy_revertsBelowTheOracleFloor() public {
+        vm.warp(FORCE_BUY_AT);
+        router.setRate(((1e18 / 100_000) * 994) / 1000);
+        vm.expectPartialRevert(ISmartDCA.SlippageExceeded.selector);
+        dca.forceBuy(pairId, 1);
+
+        router.setRate(((1e18 / 100_000) * 996) / 1000);
+        dca.forceBuy(pairId, 1);
+        assertEq(_pair().lastSettledRound, NOV);
+    }
+
+    /// @dev Keeper split the round in 2 and swapped one part; forceBuy finishes it and ignores its own `parts`
+    function test_forceBuy_finishesARoundTheKeeperStarted() public {
+        vm.warp(NOV_LOCK);
+        vm.startPrank(keeper);
+        dca.startRound(pairId, 2);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        vm.stopPrank();
+
+        vm.warp(FORCE_BUY_AT);
+        dca.forceBuy(pairId, 7);
+        assertEq(_round(NOV).partsTotal, 2);
+        assertEq(_pair().lastSettledRound, NOV);
+    }
+
+    function test_forceBuy_onlySettlesWhenEveryPartIsSwapped() public {
+        vm.warp(NOV_LOCK);
+        vm.startPrank(keeper);
+        dca.startRound(pairId, 1);
+        dca.swapRoundPart(pairId, ANY_QUOTE, _swapData(pairId));
+        vm.stopPrank();
+
+        vm.warp(FORCE_BUY_AT);
+        router.setRate(0); // a swap here would miss the floor and revert
+        dca.forceBuy(pairId, 1);
+        assertEq(_pair().lastSettledRound, NOV);
+    }
+
+    function test_forceBuy_revertsWithoutARouteOrPermission() public {
+        vm.warp(FORCE_BUY_AT);
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AccessControlledV8.Unauthorized.selector,
+                stranger,
+                address(dca),
+                "forceBuy(uint32,uint8)"
+            )
+        );
+        dca.forceBuy(pairId, 1);
+
+        dca.setFallbackRoute(pairId, address(0), "");
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.NoFallbackRoute.selector, pairId));
+        dca.forceBuy(pairId, 1);
+    }
+
+    function test_forceBuy_revertsWhilePaused() public {
+        vm.warp(FORCE_BUY_AT);
+        dca.pause();
+        vm.expectRevert("Pausable: paused");
+        dca.forceBuy(pairId, 1);
+    }
+
+    function test_setFallbackSlippage() public {
+        assertEq(dca.fallbackSlippageBps(), 50);
+
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.FallbackSlippageUpdated(50, 100);
+        dca.setFallbackSlippage(100);
+        assertEq(dca.fallbackSlippageBps(), 100);
+
+        vm.expectRevert(ISmartDCA.AboveHardCap.selector);
+        dca.setFallbackSlippage(101);
+
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AccessControlledV8.Unauthorized.selector,
+                stranger,
+                address(dca),
+                "setFallbackSlippage(uint16)"
+            )
+        );
+        dca.setFallbackSlippage(1);
+    }
+
+    function test_setFallbackRoute() public {
+        bytes memory path = abi.encodePacked(address(usdt), uint24(100), address(btcb));
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.FallbackRouteUpdated(pairId, address(router), path);
+        dca.setFallbackRoute(pairId, address(router), path);
+        (address storedRouter, bytes memory storedPath) = dca.fallbackRoutes(pairId);
+        assertEq(storedRouter, address(router));
+        assertEq(storedPath, path);
+
+        vm.expectPartialRevert(ISmartDCA.UnknownPair.selector);
+        dca.setFallbackRoute(99, address(router), path);
+
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AccessControlledV8.Unauthorized.selector,
+                stranger,
+                address(dca),
+                "setFallbackRoute(uint32,address,bytes)"
+            )
+        );
+        dca.setFallbackRoute(pairId, address(router), path);
+    }
+
+    /// @dev A router that fills only part of the part reverts, so no stable is left behind unowed
+    function test_forceBuy_revertsOnAPartialFill() public {
+        router.setFillBps(9_960); // 99.6% would clear the 0.5% floor
+        vm.warp(FORCE_BUY_AT);
+        vm.expectRevert(abi.encodeWithSelector(ISmartDCA.PartNotFullySwapped.selector, 100e18, 99.6e18));
+        dca.forceBuy(pairId, 1);
+    }
+
+    /// @dev On a round the keeper started in 50 parts, `parts = 1` cuts the parts left to 1 and finishes it
+    function test_forceBuy_cutsTheKeepersPartsLeft() public {
+        dca.setMaxParts(50);
+        vm.warp(NOV_LOCK);
+        vm.prank(keeper);
+        dca.startRound(pairId, 50);
+        vm.warp(FORCE_BUY_AT);
+        vm.expectEmit(address(dca));
+        emit ISmartDCA.RoundResplit(pairId, NOV, 0, 1);
+        dca.forceBuy(pairId, 1);
+        assertEq(_pair().lastSettledRound, NOV);
+    }
+
+    /// @dev A `parts` at or above the parts left, or 0, keeps the split
+    function test_forceBuy_higherOrZeroPartsKeepTheSplit() public {
+        vm.warp(NOV_LOCK);
+        vm.prank(keeper);
+        dca.startRound(pairId, 4);
+        vm.warp(FORCE_BUY_AT);
+        dca.forceBuy(pairId, 9);
+        assertEq(_round(NOV).partsTotal, 4, "9 is above the 4 left");
+        dca.forceBuy(pairId, 0);
+        assertEq(_round(NOV).partsTotal, 4, "0 keeps it");
+        dca.forceBuy(pairId, 2);
+        assertEq(_round(NOV).partsTotal, 4, "2 equals the 2 left");
+        assertEq(_round(NOV).partsDone, 3);
+    }
+}
